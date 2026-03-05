@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+from app.core.config import config
+
+
+def setup_logging() -> None:
+    level_name = str(config.get("system.log_level", "DEBUG")).upper()
+    level = getattr(logging, level_name, logging.DEBUG)
+
+    workspace = Path(config.get("system.workspace_dir", "./SenseAssistant/workspace")).expanduser()
+    root_dir = workspace.parent
+    log_dir = root_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+
+    file_handler = RotatingFileHandler(log_dir / "system.log", maxBytes=10 * 1024 * 1024, backupCount=3, encoding="utf-8")
+    file_handler.setLevel(level)
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(level)
+    stream_handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(level)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(stream_handler)

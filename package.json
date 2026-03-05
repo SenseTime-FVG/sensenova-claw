@@ -1,0 +1,15 @@
+{
+  "name": "agentos",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "bash ./scripts/dev.sh",
+    "dev:backend": "cd backend && python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:frontend": "cd frontend && npm run dev",
+    "test:backend:e2e": "cd backend && python3 -m pytest tests/e2e -q",
+    "test:frontend:e2e": "cd frontend && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
