@@ -10,6 +10,8 @@ interface SessionContextValue {
   isTyping: boolean;
   createSession: () => void;
   sendUserInput: (content: string) => void;
+  switchSession: (sessionId: string) => void;
+  startNewChat: () => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -30,6 +32,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [toolCallMap, setToolCallMap] = useState<Map<string, string>>(new Map()); // tool_call_id -> message_id
+  const [pendingUserInput, setPendingUserInput] = useState<string | null>(null);
 
   useEffect(() => {
     if (!lastMessage) return;
@@ -38,6 +41,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       case 'session_created': {
         if (lastMessage.session_id) {
           setSessionId(lastMessage.session_id);
+
+          // 如果有待发送的用户输入，现在发送
+          if (pendingUserInput) {
+            send({
+              type: 'user_input',
+              session_id: lastMessage.session_id,
+              payload: { content: pendingUserInput, attachments: [], context_files: [] },
+              timestamp: Date.now() / 1000,
+            });
+            setPendingUserInput(null);
+          }
         }
         break;
       }
@@ -91,6 +105,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
                 : msg
             )
           );
+        } else {
+          console.warn(`Tool call ID not found in map: ${toolCallId}`, toolCallMap);
         }
         break;
       }
@@ -127,12 +143,93 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       },
       sendUserInput: (content: string) => {
         setMessages((prev) => [...prev, toMessage('user', content)]);
+
+        // 如果没有 sessionId，先创建会话
+        if (!sessionId) {
+          setPendingUserInput(content);
+          send({
+            type: 'create_session',
+            payload: { meta: { title: content.slice(0, 20) || '新对话' } },
+            timestamp: Date.now() / 1000,
+          });
+          return;
+        }
+
         send({
           type: 'user_input',
           session_id: sessionId,
           payload: { content, attachments: [], context_files: [] },
           timestamp: Date.now() / 1000,
         });
+      },
+      switchSession: (newSessionId: string) => {
+        setSessionId(newSessionId);
+        setMessages([]);
+        setToolCallMap(new Map());
+        setIsTyping(false);
+        setPendingUserInput(null);
+
+        // 从 events 重建完整历史
+        fetch(`http://localhost:8000/api/sessions/${newSessionId}/events`)
+          .then((res) => res.json())
+          .then((data) => {
+            const events = data.events || [];
+            const historyMessages: Message[] = [];
+            const toolMap = new Map<string, string>();
+
+            events.forEach((event: any) => {
+              const payload = JSON.parse(event.payload_json);
+
+              if (event.event_type === 'ui.user_input') {
+                historyMessages.push(toMessage('user', payload.content || ''));
+              } else if (event.event_type === 'tool.call_requested') {
+                const toolInfo: ToolInfo = {
+                  name: payload.tool_name || '',
+                  arguments: payload.arguments || {},
+                  status: 'running',
+                };
+                const msg = toMessage('tool', `工具执行中: ${payload.tool_name}`, toolInfo);
+                historyMessages.push(msg);
+                toolMap.set(payload.tool_call_id, msg.id);
+              } else if (event.event_type === 'tool.call_completed') {
+                const msgId = toolMap.get(payload.tool_call_id);
+                if (msgId) {
+                  const msgIndex = historyMessages.findIndex((m) => m.id === msgId);
+                  if (msgIndex !== -1) {
+                    historyMessages[msgIndex] = {
+                      ...historyMessages[msgIndex],
+                      content: `工具完成: ${payload.tool_name}`,
+                      toolInfo: {
+                        name: payload.tool_name || '',
+                        arguments: historyMessages[msgIndex].toolInfo?.arguments || {},
+                        result: payload.result,
+                        success: payload.success !== false,
+                        error: payload.error,
+                        status: 'completed',
+                      },
+                    };
+                  }
+                }
+              } else if (event.event_type === 'agent.step_completed') {
+                const finalResponse = payload.result?.content || payload.final_response;
+                if (finalResponse) {
+                  historyMessages.push(toMessage('assistant', finalResponse));
+                }
+              }
+            });
+
+            setMessages(historyMessages);
+          })
+          .catch((error) => {
+            console.error('Failed to load session history:', error);
+          });
+      },
+      startNewChat: () => {
+        setSessionId(null);
+        setMessages([]);
+        setToolCallMap(new Map());
+        setIsTyping(false);
+        setPendingUserInput(null);
       },
     }),
     [messages, send, sessionId, isTyping],

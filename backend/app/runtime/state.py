@@ -19,6 +19,7 @@ class SessionStateStore:
         self._turns: dict[tuple[str, str], TurnState] = {}
         self._latest_turn: dict[str, str] = {}
         self._session_history: dict[str, list[dict[str, Any]]] = {}
+        self._session_first_turn: dict[str, bool] = {}  # 记录是否是会话的第一轮对话
 
     def set_turn(self, session_id: str, state: TurnState) -> None:
         self._turns[(session_id, state.turn_id)] = state
@@ -40,3 +41,11 @@ class SessionStateStore:
         if session_id not in self._session_history:
             self._session_history[session_id] = []
         self._session_history[session_id].extend(messages)
+
+    def is_first_turn(self, session_id: str) -> bool:
+        """检查是否是会话的第一轮对话"""
+        return session_id not in self._session_first_turn
+
+    def mark_first_turn_done(self, session_id: str) -> None:
+        """标记第一轮对话已完成"""
+        self._session_first_turn[session_id] = True

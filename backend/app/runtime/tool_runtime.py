@@ -74,6 +74,10 @@ class ToolRuntime:
         tool_name = event.payload.get("tool_name")
         arguments = event.payload.get("arguments", {})
 
+        if not tool_call_id:
+            logger.error(f"Missing tool_call_id in event: {event}")
+            return
+
         await self.publisher.publish(
             EventEnvelope(
                 type=TOOL_CALL_STARTED,
@@ -130,6 +134,7 @@ class ToolRuntime:
         except Exception as exc:  # noqa: BLE001
             success = False
             error = str(exc)
+            result = f"工具执行失败: {error}"
             logger.exception("tool execution failed")
             await self.publisher.publish(
                 EventEnvelope(

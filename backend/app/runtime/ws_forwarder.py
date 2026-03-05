@@ -12,6 +12,8 @@ from app.events.envelope import EventEnvelope
 from app.events.types import AGENT_STEP_COMPLETED, AGENT_STEP_STARTED, ERROR_RAISED, LLM_CALL_COMPLETED, LLM_CALL_REQUESTED, TOOL_CALL_COMPLETED, TOOL_CALL_REQUESTED
 from app.runtime.publisher import EventPublisher
 
+AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
+
 logger = logging.getLogger(__name__)
 
 
@@ -125,6 +127,16 @@ class WebSocketForwarder:
                     "error_type": event.payload.get("error_type"),
                     "message": event.payload.get("error_message"),
                     "details": event.payload.get("context", {}),
+                },
+                "timestamp": event.ts,
+            }
+        if event.type == AGENT_UPDATE_TITLE_COMPLETED:
+            return {
+                "type": "title_updated",
+                "session_id": event.session_id,
+                "payload": {
+                    "title": event.payload.get("title"),
+                    "success": event.payload.get("success"),
                 },
                 "timestamp": event.ts,
             }

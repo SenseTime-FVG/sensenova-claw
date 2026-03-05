@@ -9,13 +9,7 @@ import { useSession } from '@/hooks/useSession';
 
 export function ChatContainer() {
   const { messages, isTyping, sendUserInput } = useChat();
-  const { sessionId, createSession } = useSession();
-
-  useEffect(() => {
-    if (!sessionId) {
-      createSession();
-    }
-  }, [createSession, sessionId]);
+  const { sessionId } = useSession();
 
   return (
     <main className="chat-container">

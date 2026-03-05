@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import config
 from app.core.logging import setup_logging
@@ -21,6 +22,7 @@ from app.runtime.context_builder import ContextBuilder
 from app.runtime.llm_runtime import LLMRuntime
 from app.runtime.publisher import EventPublisher
 from app.runtime.state import SessionStateStore
+from app.runtime.title_runtime import TitleRuntime
 from app.runtime.tool_runtime import ToolRuntime
 from app.runtime.ws_forwarder import ConnectionManager, WebSocketForwarder
 from app.tools.registry import ToolRegistry
@@ -36,6 +38,7 @@ class Services:
     agent_runtime: AgentRuntime
     llm_runtime: LLMRuntime
     tool_runtime: ToolRuntime
+    title_runtime: TitleRuntime
     ws_forwarder: WebSocketForwarder
     manager: ConnectionManager
 
@@ -63,6 +66,7 @@ async def lifespan(app: FastAPI):
     )
     llm_runtime = LLMRuntime(publisher=publisher, factory=LLMFactory())
     tool_runtime = ToolRuntime(publisher=publisher, registry=tool_registry)
+    title_runtime = TitleRuntime(publisher=publisher, repo=repo)
 
     manager = ConnectionManager()
     ws_forwarder = WebSocketForwarder(publisher=publisher, manager=manager)
@@ -70,6 +74,7 @@ async def lifespan(app: FastAPI):
     await agent_runtime.start()
     await llm_runtime.start()
     await tool_runtime.start()
+    await title_runtime.start()
     await ws_forwarder.start()
 
     app.state.services = Services(
@@ -79,6 +84,7 @@ async def lifespan(app: FastAPI):
         agent_runtime=agent_runtime,
         llm_runtime=llm_runtime,
         tool_runtime=tool_runtime,
+        title_runtime=title_runtime,
         ws_forwarder=ws_forwarder,
         manager=manager,
     )
@@ -90,6 +96,7 @@ async def lifespan(app: FastAPI):
         await agent_runtime.stop()
         await llm_runtime.stop()
         await tool_runtime.stop()
+        await title_runtime.stop()
         await ws_forwarder.stop()
         logger.info("AgentOS backend stopped")
 
@@ -107,6 +114,30 @@ app.add_middleware(
 @app.get("/health")
 async def health_check() -> dict:
     return {"status": "healthy", "timestamp": time.time(), "version": "0.1.0"}
+
+
+@app.get("/api/sessions")
+async def list_sessions():
+    """获取会话列表"""
+    services: Services = app.state.services
+    sessions = await services.repo.list_sessions(limit=50)
+    return JSONResponse(content={"sessions": sessions})
+
+
+@app.get("/api/sessions/{session_id}/turns")
+async def get_session_turns(session_id: str):
+    """获取会话的所有轮次"""
+    services: Services = app.state.services
+    turns = await services.repo.get_session_turns(session_id)
+    return JSONResponse(content={"turns": turns})
+
+
+@app.get("/api/sessions/{session_id}/events")
+async def get_session_events(session_id: str):
+    """获取会话的所有事件"""
+    services: Services = app.state.services
+    events = await services.repo.get_session_events(session_id)
+    return JSONResponse(content={"events": events})
 
 
 @app.websocket("/ws")

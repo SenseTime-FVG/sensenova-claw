@@ -85,6 +85,17 @@ class Repository:
         conn.commit()
         conn.close()
 
+    async def update_session_title(self, session_id: str, title: str) -> None:
+        conn = self._conn()
+        # 获取当前 meta
+        row = conn.execute("SELECT meta FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+        if row:
+            meta = json.loads(row[0]) if row[0] else {}
+            meta["title"] = title
+            conn.execute("UPDATE sessions SET meta = ? WHERE session_id = ?", (json.dumps(meta, ensure_ascii=False), session_id))
+            conn.commit()
+        conn.close()
+
     async def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute("SELECT * FROM sessions ORDER BY last_active DESC LIMIT ?", (limit,)).fetchall()
@@ -131,5 +142,14 @@ class Repository:
     async def get_session_events(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp", (session_id,)).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    async def get_session_turns(self, session_id: str) -> list[dict[str, Any]]:
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT * FROM turns WHERE session_id = ? ORDER BY started_at",
+            (session_id,),
+        ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
