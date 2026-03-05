@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, KeyboardEvent, useState } from 'react';
 
 export function InputArea({
   onSubmit,
@@ -17,13 +17,25 @@ export function InputArea({
     setValue('');
   };
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      const content = value.trim();
+      if (content) {
+        onSubmit(content);
+        setValue('');
+      }
+    }
+  };
+
   return (
     <form className="input-area" onSubmit={submit}>
       <textarea
         data-testid="chat-input"
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        placeholder="输入你的问题..."
+        onKeyDown={handleKeyDown}
+        placeholder="输入你的问题... (Enter 发送, Shift+Enter 换行)"
         rows={3}
       />
       <button data-testid="send-button" type="submit">

@@ -70,6 +70,8 @@ e2e测试需要使用真实api_key进行真实测试，如果缺少api_key，像
 
 使用uv工具来安装和配置python package，python的运行也是用uv run python xxx.py
 
+如果用户需求是根据指定文档更新代码，你需要全面考虑需要更新哪些代码/文档/测试
+
 
 # 自动生成的Notes
 

@@ -80,19 +80,14 @@ class WebSocketForwarder:
                 "timestamp": event.ts,
             }
         if event.type == LLM_CALL_COMPLETED:
-            content = event.payload.get("response", {}).get("content", "")
-            finish_reason = event.payload.get("finish_reason", "stop")
-            return {
-                "type": "agent_response",
-                "session_id": event.session_id,
-                "payload": {"content": content, "is_final": finish_reason == "stop"},
-                "timestamp": event.ts,
-            }
+            # LLM 调用完成，不发送内容，只在 AGENT_STEP_COMPLETED 时发送最终回复
+            return None
         if event.type == TOOL_CALL_REQUESTED:
             return {
                 "type": "tool_execution",
                 "session_id": event.session_id,
                 "payload": {
+                    "tool_call_id": event.payload.get("tool_call_id"),
                     "tool_name": event.payload.get("tool_name"),
                     "status": "running",
                     "arguments": event.payload.get("arguments", {}),
@@ -104,6 +99,7 @@ class WebSocketForwarder:
                 "type": "tool_result",
                 "session_id": event.session_id,
                 "payload": {
+                    "tool_call_id": event.payload.get("tool_call_id"),
                     "tool_name": event.payload.get("tool_name"),
                     "result": event.payload.get("result"),
                     "success": event.payload.get("success", False),

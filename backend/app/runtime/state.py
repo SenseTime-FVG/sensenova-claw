@@ -18,6 +18,7 @@ class SessionStateStore:
     def __init__(self):
         self._turns: dict[tuple[str, str], TurnState] = {}
         self._latest_turn: dict[str, str] = {}
+        self._session_history: dict[str, list[dict[str, Any]]] = {}
 
     def set_turn(self, session_id: str, state: TurnState) -> None:
         self._turns[(session_id, state.turn_id)] = state
@@ -31,3 +32,11 @@ class SessionStateStore:
         if not turn_id:
             return None
         return self._turns.get((session_id, turn_id))
+
+    def get_session_history(self, session_id: str) -> list[dict[str, Any]]:
+        return self._session_history.get(session_id, [])
+
+    def append_to_history(self, session_id: str, messages: list[dict[str, Any]]) -> None:
+        if session_id not in self._session_history:
+            self._session_history[session_id] = []
+        self._session_history[session_id].extend(messages)

@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
-import type { Message } from '@/types/message';
+import type { Message, ToolInfo } from '@/types/message';
 
 interface SessionContextValue {
   sessionId: string | null;
@@ -14,12 +14,13 @@ interface SessionContextValue {
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
-function toMessage(role: Message['role'], content: string): Message {
+function toMessage(role: Message['role'], content: string, toolInfo?: ToolInfo): Message {
   return {
     id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
     role,
     content,
     timestamp: Date.now(),
+    toolInfo,
   };
 }
 
@@ -28,6 +29,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  const [toolCallMap, setToolCallMap] = useState<Map<string, string>>(new Map()); // tool_call_id -> message_id
 
   useEffect(() => {
     if (!lastMessage) return;
@@ -43,31 +45,60 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setIsTyping(true);
         break;
       }
-      case 'agent_response': {
-        const content = String(lastMessage.payload.content || '');
-        if (content) {
-          setMessages((prev) => [...prev, toMessage('assistant', content)]);
-        }
-        if (lastMessage.payload.is_final === true) {
-          setIsTyping(false);
-        }
-        break;
-      }
       case 'tool_execution': {
         const toolName = String(lastMessage.payload.tool_name || '');
-        setMessages((prev) => [...prev, toMessage('tool', `工具执行中: ${toolName}`)]);
+        const toolCallId = String(lastMessage.payload.tool_call_id || '');
+        const args = lastMessage.payload.arguments || {};
+
+        const toolInfo: ToolInfo = {
+          name: toolName,
+          arguments: args,
+          status: 'running',
+        };
+
+        const newMessage = toMessage('tool', `工具执行中: ${toolName}`, toolInfo);
+        setMessages((prev) => [...prev, newMessage]);
+
+        // 记录 tool_call_id 到 message_id 的映射
+        setToolCallMap((prev) => new Map(prev).set(toolCallId, newMessage.id));
         break;
       }
       case 'tool_result': {
         const toolName = String(lastMessage.payload.tool_name || '');
+        const toolCallId = String(lastMessage.payload.tool_call_id || '');
+        const result = lastMessage.payload.result;
         const success = Boolean(lastMessage.payload.success);
-        setMessages((prev) => [
-          ...prev,
-          toMessage('tool', `工具完成: ${toolName} (${success ? 'success' : 'failed'})`),
-        ]);
+        const error = String(lastMessage.payload.error || '');
+
+        // 查找对应的 running 消息并替换
+        const messageId = toolCallMap.get(toolCallId);
+        if (messageId) {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === messageId
+                ? {
+                    ...msg,
+                    content: `工具完成: ${toolName}`,
+                    toolInfo: {
+                      name: toolName,
+                      arguments: msg.toolInfo?.arguments || {},
+                      result,
+                      success,
+                      error,
+                      status: 'completed',
+                    },
+                  }
+                : msg
+            )
+          );
+        }
         break;
       }
       case 'turn_completed': {
+        const finalResponse = String(lastMessage.payload.final_response || '');
+        if (finalResponse) {
+          setMessages((prev) => [...prev, toMessage('assistant', finalResponse)]);
+        }
         setIsTyping(false);
         break;
       }

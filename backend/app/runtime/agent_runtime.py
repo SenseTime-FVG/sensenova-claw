@@ -68,7 +68,9 @@ class AgentRuntime:
         await self.repo.update_session_activity(session_id)
         await self.repo.create_turn(turn_id=turn_id, session_id=session_id, user_input=content)
 
-        messages = self.context_builder.build_messages(content)
+        # 获取历史消息
+        history = self.state_store.get_session_history(session_id)
+        messages = self.context_builder.build_messages(content, history)
         state = TurnState(turn_id=turn_id, user_input=content, messages=messages)
         self.state_store.set_turn(session_id, state)
 
@@ -141,6 +143,10 @@ class AgentRuntime:
 
         state.final_response = content
         await self.repo.complete_turn(event.turn_id, agent_response=content)
+
+        # 保存本轮对话到历史
+        self.state_store.append_to_history(event.session_id, state.messages)
+
         await self.publisher.publish(
             EventEnvelope(
                 type=AGENT_STEP_COMPLETED,

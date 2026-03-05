@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+import uuid
+from pathlib import Path
 
 from app.core.config import config
 from app.events.envelope import EventEnvelope
@@ -25,6 +28,31 @@ class ToolRuntime:
         self.publisher = publisher
         self.registry = registry
         self._task: asyncio.Task | None = None
+
+    def _truncate_result(self, result: any, session_id: str, tool_call_id: str) -> any:
+        """截断超长工具结果，保存完整内容到文件"""
+        result_str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+
+        # 粗略估算：1 token ≈ 4 字符（中文）或 1 字符（英文），取平均 2.5
+        max_chars = 16000 * 3
+
+        if len(result_str) <= max_chars:
+            return result
+
+        # 保存完整内容到文件
+        workspace_dir = Path(config.get("system.workspace_dir", "./SenseAssistant/workspace"))
+        session_dir = workspace_dir / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        file_name = f"tool_result_{tool_call_id[:8]}_{uuid.uuid4().hex[:6]}.txt"
+        file_path = session_dir / file_name
+        file_path.write_text(result_str, encoding="utf-8")
+
+        # 截断内容
+        truncated = result_str[:max_chars]
+        truncated += f"\n\n工具内容超长，以上是截断内容，全文内容保存在 {file_path}"
+
+        return truncated
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._loop())
@@ -97,6 +125,8 @@ class ToolRuntime:
         result = None
         try:
             result = await asyncio.wait_for(tool.execute(**arguments), timeout=timeout)
+            # 截断超长结果
+            result = self._truncate_result(result, event.session_id, tool_call_id)
         except Exception as exc:  # noqa: BLE001
             success = False
             error = str(exc)
