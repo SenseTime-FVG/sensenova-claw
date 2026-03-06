@@ -116,18 +116,42 @@ LLM 开始处理请求。
 }
 ```
 
-#### llm.call_completed
-LLM 调用完成。
+#### llm.call_result
+LLM 返回结果（支持流式调用）。
 
 **Payload 结构**:
 ```python
 {
     "llm_call_id": str,
-    "response": dict,         # LLM 响应内容
+    "response": {
+        "content": str,       # LLM 响应内容
+        "tool_calls": list    # 工具调用列表 (如果有)
+    },
     "usage": dict,            # Token 使用情况
     "finish_reason": str      # 结束原因 (stop/tool_calls/length)
 }
 ```
+
+**说明**:
+- 此事件包含 LLM 的实际返回内容
+- 支持流式调用场景，可以多次发送此事件
+- `response.content` 包含文本响应
+- `response.tool_calls` 包含工具调用信息（如果 LLM 决定调用工具）
+
+#### llm.call_completed
+LLM 调用完成（不包含结果内容）。
+
+**Payload 结构**:
+```python
+{
+    "llm_call_id": str
+}
+```
+
+**说明**:
+- 此事件仅表示 LLM 调用流程结束
+- 不包含响应内容，内容在 `llm.call_result` 中
+- 用于触发后续流程（如工具调用或结束对话）
 
 ### 4. Tool 事件
 
@@ -202,7 +226,9 @@ llm.call_requested
     ↓
 llm.call_started
     ↓
-llm.call_completed (finish_reason: stop)
+llm.call_result (包含响应内容)
+    ↓
+llm.call_completed
     ↓
 agent.step_completed
 ```
@@ -218,7 +244,9 @@ llm.call_requested
     ↓
 llm.call_started
     ↓
-llm.call_completed (finish_reason: tool_calls)
+llm.call_result (包含 tool_calls)
+    ↓
+llm.call_completed
     ↓
 tool.call_requested (可能多个)
     ↓
@@ -232,7 +260,11 @@ tool.call_completed
     ↓
 llm.call_requested (带工具结果)
     ↓
-llm.call_completed (finish_reason: stop)
+llm.call_started
+    ↓
+llm.call_result (包含最终响应)
+    ↓
+llm.call_completed
     ↓
 agent.step_completed
 ```

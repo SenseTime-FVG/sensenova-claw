@@ -462,12 +462,52 @@ body {
   border-top: 1px solid var(--border-color);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 12px;
-  gap: 16px;
   color: var(--text-secondary);
   background: #007acc;
   font-size: 10px;
   flex-shrink: 0;
+}
+
+.statusbar-left,
+.statusbar-center,
+.statusbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.statusbar-center {
+  flex: 1;
+  justify-content: center;
+}
+
+.status-connected {
+  color: #4ade80;
+}
+
+.status-disconnected {
+  color: #f87171;
+}
+
+.session-info {
+  color: #e4e4e7;
+  font-weight: 500;
+}
+
+.typing-status {
+  color: #fbbf24;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 @media (max-width: 900px) {

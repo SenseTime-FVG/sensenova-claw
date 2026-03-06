@@ -13,6 +13,7 @@ from app.events.types import (
     AGENT_STEP_STARTED,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
+    LLM_CALL_RESULT,
     TOOL_CALL_COMPLETED,
     TOOL_CALL_REQUESTED,
     UI_USER_INPUT,
@@ -54,6 +55,8 @@ class AgentRuntime:
         async for event in self.publisher.bus.subscribe():
             if event.type == UI_USER_INPUT:
                 await self._handle_user_input(event)
+            elif event.type == LLM_CALL_RESULT:
+                await self._handle_llm_result(event)
             elif event.type == LLM_CALL_COMPLETED:
                 await self._handle_llm_completed(event)
             elif event.type == TOOL_CALL_COMPLETED:
@@ -103,7 +106,8 @@ class AgentRuntime:
             )
         )
 
-    async def _handle_llm_completed(self, event: EventEnvelope) -> None:
+    async def _handle_llm_result(self, event: EventEnvelope) -> None:
+        """处理LLM返回的结果"""
         if not event.turn_id:
             return
         state = self.state_store.get_turn(event.session_id, event.turn_id)
@@ -111,18 +115,39 @@ class AgentRuntime:
             return
 
         response = event.payload.get("response", {})
-        finish_reason = event.payload.get("finish_reason", "stop")
         content = response.get("content", "")
         tool_calls = response.get("tool_calls", [])
 
-        state.messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+        # 将LLM响应添加到消息历史
+        assistant_msg = {"role": "assistant", "content": content}
+        if tool_calls:  # 只有在有tool_calls时才添加该字段
+            assistant_msg["tool_calls"] = tool_calls
+        state.messages.append(assistant_msg)
 
-        if finish_reason == "tool_calls":
-            if not tool_calls:
-                logger.warning("finish_reason is tool_calls but tool_calls is empty, treating as stop")
-                finish_reason = "stop"
+    async def _handle_llm_completed(self, event: EventEnvelope) -> None:
+        """处理LLM调用完成，决定下一步动作"""
+        if not event.turn_id:
+            return
+        state = self.state_store.get_turn(event.session_id, event.turn_id)
+        if not state:
+            return
 
-        if finish_reason == "tool_calls" and tool_calls:
+        # 从最后一条assistant消息中获取信息
+        last_msg = None
+        for msg in reversed(state.messages):
+            if msg.get("role") == "assistant":
+                last_msg = msg
+                break
+
+        if not last_msg:
+            logger.warning("No assistant message found after LLM_CALL_COMPLETED")
+            return
+
+        content = last_msg.get("content", "")
+        tool_calls = last_msg.get("tool_calls", [])
+
+        # 如果有工具调用，触发工具执行
+        if tool_calls:
             state.pending_tool_calls = {call["id"] for call in tool_calls}
             for call in tool_calls:
                 await self.publisher.publish(
@@ -141,6 +166,7 @@ class AgentRuntime:
                 )
             return
 
+        # 没有工具调用，结束本轮对话
         state.final_response = content
         await self.repo.complete_turn(event.turn_id, agent_response=content)
 

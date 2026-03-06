@@ -59,6 +59,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setIsTyping(true);
         break;
       }
+      case 'llm_result': {
+        const content = String(lastMessage.payload.content || '');
+        if (content) {
+          setMessages((prev) => [...prev, toMessage('assistant', content)]);
+        }
+        break;
+      }
       case 'tool_execution': {
         const toolName = String(lastMessage.payload.tool_name || '');
         const toolCallId = String(lastMessage.payload.tool_call_id || '');

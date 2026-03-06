@@ -1,78 +1,124 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime
 
+import websockets
 from textual.app import App, ComposeResult
 from textual.containers import Container, Vertical
 from textual.widgets import Footer, Header, Input, RichLog
 
-from app.events.envelope import EventEnvelope
-from app.events.types import AGENT_STEP_COMPLETED, TOOL_CALL_COMPLETED, TOOL_CALL_REQUESTED, UI_USER_INPUT
-from app.gateway.base import Channel
-from app.gateway.gateway import Gateway
-
 logger = logging.getLogger(__name__)
 
 
-class TUIChannel(Channel):
-    """TUI Channel 使用 Textual 实现命令行界面"""
+class TUIChannel:
+    """TUI Channel 作为 WebSocket 客户端连接到 Gateway"""
 
-    def __init__(self, gateway: Gateway, channel_id: str = "tui"):
-        self._channel_id = channel_id
-        self._gateway = gateway
+    def __init__(self, ws_url: str):
+        self._ws_url = ws_url
+        self._ws = None
         self._session_id: str | None = None
         self._app: TUIApp | None = None
-        self._event_queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
-
-    def get_channel_id(self) -> str:
-        return self._channel_id
+        self._running = False
 
     async def start(self) -> None:
-        """启动 TUI"""
-        self._session_id = f"sess_{uuid.uuid4().hex[:12]}"
-        self._gateway.bind_session(self._session_id, self._channel_id)
-
+        """启动 TUI 并连接到 Gateway"""
+        self._running = True
         self._app = TUIApp(self)
-        asyncio.create_task(self._process_events())
-        await self._app.run_async()
-        logger.info(f"TUIChannel {self._channel_id} started")
+
+        # 先启动TUI应用（在后台），然后启动WebSocket连接
+        async def run_both():
+            # 启动WebSocket连接
+            ws_task = asyncio.create_task(self._connect_websocket())
+            # 启动TUI应用（这会阻塞直到退出）
+            await self._app.run_async()
+            # TUI退出后，停止WebSocket
+            self._running = False
+            ws_task.cancel()
+
+        await run_both()
+        logger.info("TUIChannel started")
 
     async def stop(self) -> None:
         """停止 TUI"""
+        self._running = False
+        if self._ws:
+            await self._ws.close()
         if self._app:
             self._app.exit()
-        if self._session_id:
-            self._gateway.unbind_session(self._session_id)
-        logger.info(f"TUIChannel {self._channel_id} stopped")
+        logger.info("TUIChannel stopped")
 
-    async def send_event(self, event: EventEnvelope) -> None:
-        """接收来自 Gateway 的事件"""
-        await self._event_queue.put(event)
+    async def _connect_websocket(self) -> None:
+        """连接到 Gateway WebSocket"""
+        while self._running:
+            try:
+                if self._app and self._app.chat_log:
+                    self._app.call_from_thread(self._app.chat_log.write, f"正在连接到 {self._ws_url}...")
 
-    async def _process_events(self) -> None:
-        """处理事件队列"""
-        while True:
-            event = await self._event_queue.get()
+                async with websockets.connect(self._ws_url) as websocket:
+                    self._ws = websocket
+                    logger.info(f"Connected to Gateway at {self._ws_url}")
+
+                    if self._app and self._app.chat_log:
+                        self._app.call_from_thread(self._app.chat_log.write, "[green]✓ 已连接到 Gateway[/green]")
+
+                    # 创建会话
+                    await self._create_session()
+
+                    # 接收消息
+                    async for message in websocket:
+                        data = json.loads(message)
+                        await self._handle_message(data)
+
+            except Exception as e:
+                logger.error(f"WebSocket connection error: {e}")
+                if self._app and self._app.chat_log:
+                    self._app.call_from_thread(self._app.chat_log.write, f"[red]✗ 连接失败: {e}[/red]")
+                await asyncio.sleep(2)  # 重连延迟
+
+    async def _create_session(self) -> None:
+        """创建新会话"""
+        if not self._ws:
+            return
+
+        await self._ws.send(json.dumps({
+            "type": "create_session",
+            "payload": {},
+            "timestamp": asyncio.get_event_loop().time()
+        }))
+
+    async def _handle_message(self, data: dict) -> None:
+        """处理来自 Gateway 的消息"""
+        msg_type = data.get("type")
+
+        if msg_type == "session_created":
+            self._session_id = data.get("session_id")
             if self._app:
-                self._app.handle_event(event)
+                self._app.call_from_thread(self._app.set_session_id, self._session_id)
+            logger.info(f"Session created: {self._session_id}")
+        else:
+            # 将所有其他消息传递给TUI应用处理
+            if self._app:
+                self._app.call_from_thread(self._app.handle_event, data)
 
     async def send_user_input(self, content: str) -> None:
         """发送用户输入"""
-        if not self._session_id:
+        if not self._ws or not self._session_id:
             return
 
-        turn_id = f"turn_{uuid.uuid4().hex[:12]}"
-        event = EventEnvelope(
-            type=UI_USER_INPUT,
-            session_id=self._session_id,
-            turn_id=turn_id,
-            source="tui",
-            payload={"content": content, "attachments": [], "context_files": []},
-        )
-        await self._gateway.publish_from_channel(event)
+        await self._ws.send(json.dumps({
+            "type": "user_input",
+            "session_id": self._session_id,
+            "payload": {
+                "content": content,
+                "attachments": [],
+                "context_files": []
+            },
+            "timestamp": asyncio.get_event_loop().time()
+        }))
 
 
 class TUIApp(App):
@@ -103,6 +149,7 @@ class TUIApp(App):
         super().__init__()
         self.channel = channel
         self.chat_log: RichLog | None = None
+        self.session_id: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -118,7 +165,14 @@ class TUIApp(App):
     def on_mount(self) -> None:
         self.chat_log = self.query_one("#chat-log", RichLog)
         self.chat_log.write("[bold cyan]AgentOS TUI[/bold cyan]")
-        self.chat_log.write("输入你的问题开始对话...")
+        self.chat_log.write("正在连接到 Gateway...")
+
+    def set_session_id(self, session_id: str) -> None:
+        """设置会话ID"""
+        self.session_id = session_id
+        if self.chat_log:
+            self.chat_log.write(f"[green]已连接，会话ID: {session_id}[/green]")
+            self.chat_log.write("输入你的问题开始对话...")
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """处理用户输入"""
@@ -134,30 +188,57 @@ class TUIApp(App):
 
         await self.channel.send_user_input(content)
 
-    def handle_event(self, event: EventEnvelope) -> None:
+    def handle_event(self, data: dict) -> None:
         """处理来自 Gateway 的事件"""
         if not self.chat_log:
             return
 
         timestamp = datetime.now().strftime("%H:%M:%S")
+        msg_type = data.get("type", "")
+        payload = data.get("payload", {})
 
-        if event.type == TOOL_CALL_REQUESTED:
-            tool_name = event.payload.get("tool_name", "")
+        if msg_type == "tool_execution":
+            tool_name = payload.get("tool_name", "")
             self.chat_log.write(f"[yellow][{timestamp}] Tool:[/yellow] {tool_name} 执行中...")
 
-        elif event.type == TOOL_CALL_COMPLETED:
-            tool_name = event.payload.get("tool_name", "")
-            success = event.payload.get("success", False)
+        elif msg_type == "tool_result":
+            tool_name = payload.get("tool_name", "")
+            success = payload.get("success", True)
             status = "完成" if success else "失败"
             self.chat_log.write(f"[yellow][{timestamp}] Tool:[/yellow] {tool_name} {status}")
 
-        elif event.type == AGENT_STEP_COMPLETED:
-            response = event.payload.get("result", {}).get("content", "")
+        elif msg_type == "turn_completed":
+            response = payload.get("content", "") or payload.get("final_response", "")
             if response:
                 self.chat_log.write(f"[bold blue][{timestamp}] Assistant:[/bold blue] {response}")
 
-        else:
-            # 处理其他事件类型
-            if event.payload.get("error"):
-                error_msg = event.payload.get("error", "Unknown error")
-                self.chat_log.write(f"[bold red][{timestamp}] Error:[/bold red] {error_msg}")
+        elif msg_type == "error":
+            error_msg = payload.get("message", "Unknown error")
+            self.chat_log.write(f"[bold red][{timestamp}] Error:[/bold red] {error_msg}")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="AgentOS TUI Client")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Gateway WebSocket port (default: 8000)"
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="localhost",
+        help="Gateway host (default: localhost)"
+    )
+    args = parser.parse_args()
+
+    ws_url = f"ws://{args.host}:{args.port}/ws"
+
+    async def main():
+        channel = TUIChannel(ws_url)
+        await channel.start()
+
+    asyncio.run(main())

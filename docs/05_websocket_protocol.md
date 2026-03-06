@@ -202,15 +202,48 @@ Agent 响应内容（可能分块发送）。
     "type": "tool_result",
     "session_id": "sess_123",
     "payload": {
+        "tool_call_id": "tool_call_789",
         "tool_name": "bash_command",
         "result": "file1.txt\nfile2.py",
-        "success": true
+        "success": true,
+        "error": ""
     },
     "timestamp": 1709640513.123
 }
 ```
 
-### 6. turn_completed
+### 6. llm_result
+LLM 返回结果（支持流式）。
+
+```json
+{
+    "type": "llm_result",
+    "session_id": "sess_123",
+    "payload": {
+        "llm_call_id": "llm_abc123",
+        "content": "这是LLM的响应内容",
+        "tool_calls": [],
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150
+        },
+        "finish_reason": "stop"
+    },
+    "timestamp": 1709640513.123
+}
+```
+
+**说明**:
+- `content`: LLM 生成的文本内容
+- `tool_calls`: 如果 LLM 决定调用工具，此字段包含工具调用信息
+- `finish_reason`: 结束原因，可能的值：
+  - `stop`: 正常结束
+  - `tool_calls`: 需要调用工具
+  - `length`: 达到最大长度限制
+  - `error`: 发生错误
+
+### 7. turn_completed
 对话轮次完成。
 
 ```json
@@ -225,7 +258,7 @@ Agent 响应内容（可能分块发送）。
 }
 ```
 
-### 7. error
+### 8. error
 错误消息。
 
 ```json
@@ -235,13 +268,13 @@ Agent 响应内容（可能分块发送）。
     "payload": {
         "error_type": "LLMError",
         "message": "API调用失败",
-        "details": "Rate limit exceeded"
+        "details": {"context": "Rate limit exceeded"}
     },
     "timestamp": 1709640513.123
 }
 ```
 
-### 8. sessions_list
+### 9. sessions_list
 会话列表响应。
 
 ```json
@@ -267,16 +300,17 @@ Agent 响应内容（可能分块发送）。
 
 并非所有事件都需要发送到前端，只转发用户关心的事件：
 
-| 事件类型 | WebSocket 消息类型 | 是否转发 |
-|---------|-------------------|---------|
-| ui.user_input | - | 否 |
-| agent.step_started | agent_thinking | 是 |
-| agent.step_completed | turn_completed | 是 |
-| llm.call_requested | agent_thinking | 是 |
-| llm.call_completed | agent_response | 是 |
-| tool.call_requested | tool_execution | 是 |
-| tool.call_completed | tool_result | 是 |
-| error.raised | error | 是 |
+| 事件类型 | WebSocket 消息类型 | 是否转发 | 说明 |
+|---------|-------------------|---------|------|
+| ui.user_input | - | 否 | 客户端已知 |
+| agent.step_started | agent_thinking | 是 | Agent 开始思考 |
+| agent.step_completed | turn_completed | 是 | 对话轮次完成 |
+| llm.call_requested | agent_thinking | 是 | 开始调用 LLM |
+| llm.call_result | llm_result | 是 | LLM 返回结果 |
+| llm.call_completed | - | 否 | 内部流程控制 |
+| tool.call_requested | tool_execution | 是 | 工具开始执行 |
+| tool.call_completed | tool_result | 是 | 工具执行完成 |
+| error.raised | error | 是 | 错误信息 |
 
 ### 转发逻辑
 
@@ -292,13 +326,31 @@ async def forward_event_to_websocket(event: EventEnvelope, websocket: WebSocket)
             "timestamp": event.ts
         })
 
-    elif event.type == "llm.call_completed":
+    elif event.type == "llm.call_result":
+        response = event.payload.get("response", {})
         await websocket.send_json({
-            "type": "agent_response",
+            "type": "llm_result",
             "session_id": event.session_id,
             "payload": {
-                "content": event.payload["response"]["content"],
-                "is_final": event.payload["finish_reason"] == "stop"
+                "llm_call_id": event.payload.get("llm_call_id"),
+                "content": response.get("content", ""),
+                "tool_calls": response.get("tool_calls", []),
+                "usage": event.payload.get("usage", {}),
+                "finish_reason": event.payload.get("finish_reason", "stop")
+            },
+            "timestamp": event.ts
+        })
+
+    elif event.type == "tool.call_completed":
+        await websocket.send_json({
+            "type": "tool_result",
+            "session_id": event.session_id,
+            "payload": {
+                "tool_call_id": event.payload.get("tool_call_id"),
+                "tool_name": event.payload.get("tool_name"),
+                "result": event.payload.get("result"),
+                "success": event.payload.get("success", False),
+                "error": event.payload.get("error", "")
             },
             "timestamp": event.ts
         })

@@ -11,3 +11,5 @@ todolist:
 channel就是不同用户的消息来源，例如现在的网页前端，或者是TUI
 
 新增TUI功能，用户能够从命令行访问agent，使用Textual python库来实现
+
+gateway会暴露一个websocket端口，TUI启动的时候需要指定url和端口，连接到这个ws端口

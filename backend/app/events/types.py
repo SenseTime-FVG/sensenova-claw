@@ -8,6 +8,7 @@ USER_INPUT = "user.input"
 
 LLM_CALL_REQUESTED = "llm.call_requested"
 LLM_CALL_STARTED = "llm.call_started"
+LLM_CALL_RESULT = "llm.call_result"
 LLM_CALL_COMPLETED = "llm.call_completed"
 
 TOOL_CALL_REQUESTED = "tool.call_requested"

@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from app.events.envelope import EventEnvelope
-from app.events.types import AGENT_STEP_COMPLETED, AGENT_STEP_STARTED, ERROR_RAISED, LLM_CALL_COMPLETED, LLM_CALL_REQUESTED, TOOL_CALL_COMPLETED, TOOL_CALL_REQUESTED
+from app.events.types import AGENT_STEP_COMPLETED, AGENT_STEP_STARTED, ERROR_RAISED, LLM_CALL_COMPLETED, LLM_CALL_REQUESTED, LLM_CALL_RESULT, TOOL_CALL_COMPLETED, TOOL_CALL_REQUESTED
 from app.runtime.publisher import EventPublisher
 
 AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
@@ -81,8 +81,23 @@ class WebSocketForwarder:
                 "payload": {"step_type": "llm_call", "description": "正在调用模型..."},
                 "timestamp": event.ts,
             }
+        if event.type == LLM_CALL_RESULT:
+            # 发送LLM结果给前端
+            response = event.payload.get("response", {})
+            return {
+                "type": "llm_result",
+                "session_id": event.session_id,
+                "payload": {
+                    "llm_call_id": event.payload.get("llm_call_id"),
+                    "content": response.get("content", ""),
+                    "tool_calls": response.get("tool_calls", []),
+                    "usage": event.payload.get("usage", {}),
+                    "finish_reason": event.payload.get("finish_reason", "stop"),
+                },
+                "timestamp": event.ts,
+            }
         if event.type == LLM_CALL_COMPLETED:
-            # LLM 调用完成，不发送内容，只在 AGENT_STEP_COMPLETED 时发送最终回复
+            # LLM 调用完成，不发送内容
             return None
         if event.type == TOOL_CALL_REQUESTED:
             return {

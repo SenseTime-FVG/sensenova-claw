@@ -46,6 +46,30 @@ npm run dev
 - 前端: http://localhost:3000
 - 后端: http://localhost:8000
 
+4. 启动 TUI（终端界面）
+
+TUI 作为客户端连接到已运行的后端 Gateway。
+
+首先确保后端已启动（步骤3），然后在新终端中运行：
+
+```bash
+cd backend
+uv run python run_tui.py --port 8000
+```
+
+或使用模块方式：
+
+```bash
+cd backend
+uv run python -m app.gateway.channels.tui_channel --port 8000
+```
+
+参数说明：
+- `--port`: Gateway WebSocket 端口（默认: 8000）
+- `--host`: Gateway 主机地址（默认: localhost）
+
+TUI 提供了终端下的交互式界面，可以直接在命令行中与 Agent 对话。
+
 ## 测试
 
 后端 e2e：

@@ -6,7 +6,7 @@ import logging
 
 from app.core.config import config
 from app.events.envelope import EventEnvelope
-from app.events.types import ERROR_RAISED, LLM_CALL_COMPLETED, LLM_CALL_REQUESTED, LLM_CALL_STARTED
+from app.events.types import ERROR_RAISED, LLM_CALL_COMPLETED, LLM_CALL_REQUESTED, LLM_CALL_RESULT, LLM_CALL_STARTED
 from app.llm.factory import LLMFactory
 from app.runtime.publisher import EventPublisher
 
@@ -65,9 +65,10 @@ class LLMRuntime:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            # 先发送结果事件
             await self.publisher.publish(
                 EventEnvelope(
-                    type=LLM_CALL_COMPLETED,
+                    type=LLM_CALL_RESULT,
                     session_id=event.session_id,
                     turn_id=event.turn_id,
                     trace_id=llm_call_id,
@@ -77,6 +78,19 @@ class LLMRuntime:
                         "response": {"content": resp.get("content", ""), "tool_calls": resp.get("tool_calls", [])},
                         "usage": resp.get("usage", {}),
                         "finish_reason": resp.get("finish_reason", "stop"),
+                    },
+                )
+            )
+            # 再发送完成事件
+            await self.publisher.publish(
+                EventEnvelope(
+                    type=LLM_CALL_COMPLETED,
+                    session_id=event.session_id,
+                    turn_id=event.turn_id,
+                    trace_id=llm_call_id,
+                    source="llm",
+                    payload={
+                        "llm_call_id": llm_call_id,
                     },
                 )
             )
@@ -96,9 +110,10 @@ class LLMRuntime:
                     },
                 )
             )
+            # 错误时也发送结果事件
             await self.publisher.publish(
                 EventEnvelope(
-                    type=LLM_CALL_COMPLETED,
+                    type=LLM_CALL_RESULT,
                     session_id=event.session_id,
                     turn_id=event.turn_id,
                     trace_id=llm_call_id,
@@ -108,6 +123,18 @@ class LLMRuntime:
                         "response": {"content": f"LLM调用失败: {str(exc)}", "tool_calls": []},
                         "usage": {},
                         "finish_reason": "error",
+                    },
+                )
+            )
+            await self.publisher.publish(
+                EventEnvelope(
+                    type=LLM_CALL_COMPLETED,
+                    session_id=event.session_id,
+                    turn_id=event.turn_id,
+                    trace_id=llm_call_id,
+                    source="llm",
+                    payload={
+                        "llm_call_id": llm_call_id,
                     },
                 )
             )
