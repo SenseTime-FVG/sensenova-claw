@@ -16,6 +16,8 @@ from app.db.repository import Repository
 from app.events.bus import PublicEventBus
 from app.events.envelope import EventEnvelope
 from app.events.types import UI_TURN_CANCEL_REQUESTED, UI_USER_INPUT
+from app.gateway.channels.websocket_channel import WebSocketChannel
+from app.gateway.gateway import Gateway
 from app.llm.factory import LLMFactory
 from app.runtime.agent_runtime import AgentRuntime
 from app.runtime.context_builder import ContextBuilder
@@ -24,7 +26,6 @@ from app.runtime.publisher import EventPublisher
 from app.runtime.state import SessionStateStore
 from app.runtime.title_runtime import TitleRuntime
 from app.runtime.tool_runtime import ToolRuntime
-from app.runtime.ws_forwarder import ConnectionManager, WebSocketForwarder
 from app.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -39,8 +40,8 @@ class Services:
     llm_runtime: LLMRuntime
     tool_runtime: ToolRuntime
     title_runtime: TitleRuntime
-    ws_forwarder: WebSocketForwarder
-    manager: ConnectionManager
+    gateway: Gateway
+    ws_channel: WebSocketChannel
 
 
 @asynccontextmanager
@@ -68,14 +69,15 @@ async def lifespan(app: FastAPI):
     tool_runtime = ToolRuntime(publisher=publisher, registry=tool_registry)
     title_runtime = TitleRuntime(publisher=publisher, repo=repo)
 
-    manager = ConnectionManager()
-    ws_forwarder = WebSocketForwarder(publisher=publisher, manager=manager)
+    gateway = Gateway(publisher=publisher)
+    ws_channel = WebSocketChannel("websocket")
+    gateway.register_channel(ws_channel)
 
     await agent_runtime.start()
     await llm_runtime.start()
     await tool_runtime.start()
     await title_runtime.start()
-    await ws_forwarder.start()
+    await gateway.start()
 
     app.state.services = Services(
         repo=repo,
@@ -85,8 +87,8 @@ async def lifespan(app: FastAPI):
         llm_runtime=llm_runtime,
         tool_runtime=tool_runtime,
         title_runtime=title_runtime,
-        ws_forwarder=ws_forwarder,
-        manager=manager,
+        gateway=gateway,
+        ws_channel=ws_channel,
     )
     logger.info("AgentOS backend started")
 
@@ -97,7 +99,7 @@ async def lifespan(app: FastAPI):
         await llm_runtime.stop()
         await tool_runtime.stop()
         await title_runtime.stop()
-        await ws_forwarder.stop()
+        await gateway.stop()
         logger.info("AgentOS backend stopped")
 
 
@@ -143,11 +145,12 @@ async def get_session_events(session_id: str):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     services: Services = app.state.services
-    manager = services.manager
+    ws_channel = services.ws_channel
+    gateway = services.gateway
     repo = services.repo
     publisher = services.publisher
 
-    await manager.connect(websocket)
+    await ws_channel.connect(websocket)
 
     try:
         while True:
@@ -159,8 +162,9 @@ async def websocket_endpoint(websocket: WebSocket):
             if msg_type == "create_session":
                 session_id = f"sess_{uuid.uuid4().hex[:12]}"
                 await repo.create_session(session_id=session_id, meta=payload.get("meta", {}))
-                manager.bind_session(session_id, websocket)
-                await manager.send_json(
+                ws_channel.bind_session(session_id, websocket)
+                gateway.bind_session(session_id, "websocket")
+                await ws_channel.send_json(
                     websocket,
                     {
                         "type": "session_created",
@@ -173,7 +177,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if msg_type == "list_sessions":
                 sessions = await repo.list_sessions(limit=int(payload.get("limit", 50)))
-                await manager.send_json(
+                await ws_channel.send_json(
                     websocket,
                     {
                         "type": "sessions_list",
@@ -186,9 +190,10 @@ async def websocket_endpoint(websocket: WebSocket):
             if msg_type == "load_session":
                 sid = payload.get("session_id")
                 if sid:
-                    manager.bind_session(sid, websocket)
+                    ws_channel.bind_session(sid, websocket)
+                    gateway.bind_session(sid, "websocket")
                     events = await repo.get_session_events(sid)
-                    await manager.send_json(
+                    await ws_channel.send_json(
                         websocket,
                         {
                             "type": "session_loaded",
@@ -201,11 +206,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if msg_type == "cancel_turn":
                 if session_id:
-                    await publisher.publish(
+                    await gateway.publish_from_channel(
                         EventEnvelope(
                             type=UI_TURN_CANCEL_REQUESTED,
                             session_id=session_id,
-                            source="ui",
+                            source="websocket",
                             payload={"reason": payload.get("reason", "user_cancel")},
                         )
                     )
@@ -215,7 +220,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not session_id:
                     session_id = f"sess_{uuid.uuid4().hex[:12]}"
                     await repo.create_session(session_id=session_id, meta={"title": "自动创建会话"})
-                    await manager.send_json(
+                    ws_channel.bind_session(session_id, websocket)
+                    gateway.bind_session(session_id, "websocket")
+                    await ws_channel.send_json(
                         websocket,
                         {
                             "type": "session_created",
@@ -225,14 +232,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         },
                     )
 
-                manager.bind_session(session_id, websocket)
                 turn_id = f"turn_{uuid.uuid4().hex[:12]}"
-                await publisher.publish(
+                await gateway.publish_from_channel(
                     EventEnvelope(
                         type=UI_USER_INPUT,
                         session_id=session_id,
                         turn_id=turn_id,
-                        source="ui",
+                        source="websocket",
                         payload={
                             "content": payload.get("content", ""),
                             "attachments": payload.get("attachments", []),
@@ -242,7 +248,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 continue
 
-            await manager.send_json(
+            await ws_channel.send_json(
                 websocket,
                 {
                     "type": "error",
@@ -256,12 +262,12 @@ async def websocket_endpoint(websocket: WebSocket):
             )
 
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        ws_channel.disconnect(websocket)
     except Exception as exc:  # noqa: BLE001
         logger.exception("websocket endpoint error")
-        manager.disconnect(websocket)
+        ws_channel.disconnect(websocket)
         try:
-            await manager.send_json(
+            await ws_channel.send_json(
                 websocket,
                 {
                     "type": "error",
