@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import type { Message, ToolInfo } from '@/types/message';
 
@@ -26,12 +26,30 @@ function toMessage(role: Message['role'], content: string, toolInfo?: ToolInfo):
   };
 }
 
+function truncateToolResult(result: any, maxLength = 50000): any {
+  if (!result) return result;
+
+  const resultStr = JSON.stringify(result);
+  if (resultStr.length <= maxLength) return result;
+
+  // 如果是对象且有 content 字段（如 fetch_url），截断 content
+  if (typeof result === 'object' && result.content) {
+    return {
+      ...result,
+      content: result.content.slice(0, maxLength) + `\n\n... (截断，原始长度: ${result.content.length} 字符)`,
+    };
+  }
+
+  // 其他情况直接截断字符串
+  return resultStr.slice(0, maxLength) + '... (截断)';
+}
+
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { send, lastMessage } = useWebSocketContext();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
-  const [toolCallMap, setToolCallMap] = useState<Map<string, string>>(new Map()); // tool_call_id -> message_id
+  const toolCallMapRef = useRef<Map<string, string>>(new Map()); // tool_call_id -> message_id
   const [pendingUserInput, setPendingUserInput] = useState<string | null>(null);
 
   useEffect(() => {
@@ -81,18 +99,20 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setMessages((prev) => [...prev, newMessage]);
 
         // 记录 tool_call_id 到 message_id 的映射
-        setToolCallMap((prev) => new Map(prev).set(toolCallId, newMessage.id));
+        toolCallMapRef.current.set(toolCallId, newMessage.id);
         break;
       }
       case 'tool_result': {
         const toolName = String(lastMessage.payload.tool_name || '');
         const toolCallId = String(lastMessage.payload.tool_call_id || '');
-        const result = lastMessage.payload.result;
+        const result = truncateToolResult(lastMessage.payload.result);
         const success = Boolean(lastMessage.payload.success);
         const error = String(lastMessage.payload.error || '');
 
+        console.log('[tool_result]', { toolCallId, toolName, success, messageId: toolCallMapRef.current.get(toolCallId) });
+
         // 查找对应的 running 消息并替换
-        const messageId = toolCallMap.get(toolCallId);
+        const messageId = toolCallMapRef.current.get(toolCallId);
         if (messageId) {
           setMessages((prev) =>
             prev.map((msg) =>
@@ -113,7 +133,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             )
           );
         } else {
-          console.warn(`Tool call ID not found in map: ${toolCallId}`, toolCallMap);
+          console.warn(`Tool call ID not found in map: ${toolCallId}`, toolCallMapRef.current);
         }
         break;
       }
@@ -172,7 +192,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       switchSession: (newSessionId: string) => {
         setSessionId(newSessionId);
         setMessages([]);
-        setToolCallMap(new Map());
+        toolCallMapRef.current.clear();
         setIsTyping(false);
         setPendingUserInput(null);
 
@@ -234,7 +254,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       startNewChat: () => {
         setSessionId(null);
         setMessages([]);
-        setToolCallMap(new Map());
+        toolCallMapRef.current.clear();
         setIsTyping(false);
         setPendingUserInput(null);
       },
