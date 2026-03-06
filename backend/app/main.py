@@ -151,11 +151,13 @@ async def websocket_endpoint(websocket: WebSocket):
     publisher = services.publisher
 
     await ws_channel.connect(websocket)
+    logger.info("WebSocket client connected")
 
     try:
         while True:
             message = await websocket.receive_json()
             msg_type = message.get("type")
+            logger.info(f"Received message type: {msg_type}")
             payload = message.get("payload", {})
             session_id = message.get("session_id")
 
@@ -173,6 +175,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "timestamp": time.time(),
                     },
                 )
+                logger.info(f"Session created: {session_id}")
                 continue
 
             if msg_type == "list_sessions":

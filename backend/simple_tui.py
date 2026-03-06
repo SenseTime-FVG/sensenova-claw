@@ -12,7 +12,14 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Vertical
 from textual.widgets import Footer, Header, Input, RichLog
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+    handlers=[
+        logging.FileHandler('/tmp/tui_debug.log'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 
@@ -51,28 +58,71 @@ class SimpleTUIApp(App):
         asyncio.create_task(self.connect_websocket())
 
     async def connect_websocket(self) -> None:
-        """连接到Gateway"""
-        try:
-            self.ws = await websockets.connect(self.ws_url)
-            self.chat_log.write("[green]✓ 已连接到 Gateway[/green]")
+        """连接到Gateway，支持自动重连"""
+        retry_count = 0
+        max_retries = 3
 
-            # 创建会话
-            await self.ws.send(json.dumps({"type": "create_session", "payload": {}, "timestamp": asyncio.get_event_loop().time()}))
+        while retry_count < max_retries:
+            try:
+                logger.info(f"Attempting to connect to {self.ws_url} (attempt {retry_count + 1}/{max_retries})")
+                self.ws = await asyncio.wait_for(
+                    websockets.connect(self.ws_url, ping_interval=None),
+                    timeout=5.0
+                )
+                logger.info("WebSocket connected successfully")
+                self.chat_log.write("[green]✓ 已连接到 Gateway[/green]")
 
-            # 接收消息（在当前任务中持续运行）
-            await self.receive_messages()
+                # 创建会话
+                msg = {"type": "create_session", "payload": {}, "timestamp": asyncio.get_event_loop().time()}
+                logger.info(f"Sending create_session: {msg}")
+                await self.ws.send(json.dumps(msg))
+                logger.info("create_session sent, waiting for messages...")
 
-        except Exception as e:
-            self.chat_log.write(f"[red]✗ 连接失败: {e}[/red]")
-            logger.error(f"Connection error: {e}", exc_info=True)
+                # 接收消息（在当前任务中持续运行）
+                await self.receive_messages()
+
+                # 如果连接正常关闭，尝试重连
+                logger.info("Connection closed, attempting to reconnect...")
+                self.chat_log.write("[yellow]连接断开，正在重连...[/yellow]")
+                retry_count += 1
+                await asyncio.sleep(2)
+
+            except asyncio.TimeoutError:
+                logger.error(f"Connection timeout to {self.ws_url}")
+                self.chat_log.write(f"[red]✗ 连接超时 (尝试 {retry_count + 1}/{max_retries})[/red]")
+                retry_count += 1
+                if retry_count < max_retries:
+                    await asyncio.sleep(2)
+            except websockets.exceptions.ConnectionClosedError as e:
+                logger.warning(f"Connection closed: {e}")
+                self.chat_log.write(f"[yellow]连接关闭 (可能是服务重启)，正在重连...[/yellow]")
+                retry_count += 1
+                if retry_count < max_retries:
+                    await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f"Connection error: {e}", exc_info=True)
+                self.chat_log.write(f"[red]✗ 连接失败: {e}[/red]")
+                retry_count += 1
+                if retry_count < max_retries:
+                    await asyncio.sleep(2)
+
+        self.chat_log.write("[red]✗ 无法连接到 Gateway，请检查后端服务[/red]")
+        self.chat_log.write("[yellow]提示: 确保后端在运行 (uvicorn app.main:app)[/yellow]")
 
     async def receive_messages(self) -> None:
         """接收WebSocket消息"""
         try:
             async for message in self.ws:
-                data = json.loads(message)
-                logger.info(f"Received message: {data.get('type')}")
-                self.handle_message(data)
+                try:
+                    data = json.loads(message)
+                    logger.info(f"Received message: {data.get('type')}")
+                    self.handle_message(data)
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON decode error: {e}, message: {message}")
+                    self.chat_log.write(f"[red]✗ 消息解析失败: {e}[/red]")
+        except websockets.exceptions.ConnectionClosed:
+            logger.info("WebSocket connection closed")
+            self.chat_log.write("[yellow]连接已关闭[/yellow]")
         except Exception as e:
             logger.error(f"Receive error: {e}", exc_info=True)
             if self.chat_log:
