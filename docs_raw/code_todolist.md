@@ -69,6 +69,13 @@ result事件带有调用结果内容，completed事件仅表示流程结束
 ui.user_input -> user.input
 ui.turn_cancel_requested -> ui.turn_cancel_requested
 
+### 工具
+
+目前没有工具权限管理，例如高风险工具需要像用户请求之后再执行
+
+统一改成，tool返回结果超过8000个token的话，就进行截断，并把完整结果保存到workspace下对于session目录的文件中，参考现在fetch_url的操作
+
+原来fetch_url截断保存的操作可以用全局工具截断替代了
 
 ### write_file工具
 
@@ -78,7 +85,3 @@ ui.turn_cancel_requested -> ui.turn_cancel_requested
 
 skill_search和skill_load工具还未实现
 
-
-### 工具
-
-目前没有工具权限管理，例如高风险工具需要像用户请求之后再执行

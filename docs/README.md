@@ -73,13 +73,13 @@ cd frontend && npm run dev
 - 前端：http://localhost:3000
 - 后端：http://localhost:8000
 
-### 4. TUI 模式
+### 4. CLI 客户端
 
-除了 Web 界面，还可以使用命令行 TUI 模式：
+除了 Web 界面，还可以使用命令行客户端：
 
 ```bash
 cd backend
-uv run python3 -m app.gateway.channels.tui_channel --host localhost --port 8000
+python3 cli_client.py --host localhost --port 8000
 ```
 
 ## 核心概念
@@ -89,7 +89,7 @@ AgentOS 采用事件驱动架构，所有模块通过事件总线通信。这种
 
 ### Gateway 与 Channel
 - **Gateway**: 消息网关，管理多个 Channel
-- **Channel**: 用户接入方式的抽象（WebSocket、TUI、未来可扩展 Slack 等）
+- **Channel**: 用户接入方式的抽象（WebSocket、未来可扩展 CLI、Slack 等）
 - **事件路由**: Gateway 负责在 Channel 和 PublicEventBus 之间路由消息
 
 ### 核心 Runtime 模块
@@ -123,7 +123,7 @@ AgentOS 采用事件驱动架构，所有模块通过事件总线通信。这种
 - asyncio 事件驱动
 - SQLite 数据存储
 - OpenAI / Anthropic SDK
-- Textual (TUI 界面)
+
 
 ## 架构特点
 
@@ -133,7 +133,7 @@ AgentOS 采用事件驱动架构，所有模块通过事件总线通信。这种
 ### 2. 多 Channel 支持
 通过 Gateway 架构支持多种接入方式：
 - WebSocket Channel（Web 前端）
-- TUI Channel（命令行界面）
+- CLI 客户端（命令行工具）
 - 未来可扩展：Slack、Discord、HTTP API 等
 
 ### 3. 状态管理
@@ -152,7 +152,7 @@ OpenAI Provider 自动归一化消息格式，避免 API 调用失败。
 
 v0.2 新增特性：
 - ✅ Gateway 架构
-- ✅ TUI Channel 支持
+- ✅ CLI 客户端支持
 - ✅ 自动标题生成
 - ✅ 工具结果截断
 - ✅ 消息归一化

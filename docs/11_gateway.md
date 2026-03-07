@@ -26,10 +26,10 @@ Channel 是用户消息来源的抽象，代表不同的访问方式。每个 Ch
 
 ```
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  WebSocket      │  │  TUI Channel    │  │  Future         │
-│  Channel        │  │  (Textual)      │  │  Channels       │
-│  - Web 前端     │  │  - 命令行界面   │  │  - Slack        │
-│  - HTTP/WS      │  │  - 本地终端     │  │  - Discord      │
+│  WebSocket      │  │  CLI Client     │  │  Future         │
+│  Channel        │  │  (cli_client)   │  │  Channels       │
+│  - Web 前端     │  │  - 命令行工具   │  │  - Slack        │
+│  - HTTP/WS      │  │  - WebSocket    │  │  - Discord      │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
          ↕                    ↕                    ↕
 ┌─────────────────────────────────────────────────────────────┐
@@ -79,7 +79,7 @@ class Channel(ABC):
 
 ### 用户输入流程
 
-1. 用户通过 Channel 发送消息（如 Web 前端输入、TUI 命令行输入）
+1. 用户通过 Channel 发送消息（如 Web 前端输入、CLI 客户端输入）
 2. Channel 将消息转换为 `UI_USER_INPUT` 事件
 3. Channel 调用 Gateway 的 `publish_from_channel()` 方法
 4. Gateway 将事件发布到 PublicEventBus
@@ -123,45 +123,27 @@ Gateway不处理事件过滤，channel模块来决定自己需要哪些事件
 - Channel 发送失败时，应该记录日志但不影响其他 Channel
 - Gateway 应该能够优雅地处理 Channel 的启动和停止
 
-## TUI Channel 实现
+## CLI 客户端实现
 
-使用 Textual 库实现命令行界面的 Channel：
+使用 Python 实现的命令行客户端，通过 WebSocket 连接到 Gateway：
 
 ### 功能特性
 
 - 实时显示对话消息
 - 支持用户输入
 - 显示工具调用状态
-- 支持会话切换
-- 优雅的终端 UI
+- 简洁的命令行界面
 
-### 技术选型
+### 使用方法
 
-- **Textual**: Python TUI 框架，提供丰富的组件和布局
-- **Rich**: 终端文本渲染，支持 Markdown、代码高亮等
-
-### 界面布局
-
+```bash
+cd backend
+python3 cli_client.py --host localhost --port 8000
 ```
-┌─────────────────────────────────────────────────────────┐
-│ AgentOS TUI                                    [会话列表]│
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  User: 帮我搜索最新的 AI 新闻                           │
-│                                                          │
-│  Assistant: 好的，我来帮你搜索...                        │
-│                                                          │
-│  [Tool] web_search                                       │
-│  Status: completed                                       │
-│  Result: 找到 10 条相关新闻...                           │
-│                                                          │
-│  Assistant: 以下是最新的 AI 新闻：                       │
-│  1. ...                                                  │
-│                                                          │
-├─────────────────────────────────────────────────────────┤
-│ > 输入你的问题...                                        │
-└─────────────────────────────────────────────────────────┘
-```
+
+### 实现说明
+
+CLI 客户端作为独立进程运行，通过 WebSocket 协议连接到 Gateway，不需要在 Gateway 中注册为 Channel。
 
 ## 实现步骤
 
@@ -171,17 +153,17 @@ Gateway不处理事件过滤，channel模块来决定自己需要哪些事件
 2. 创建 `app/gateway/gateway.py` - 实现 Gateway 核心逻辑
 3. 重构现有的 WebSocketForwarder 为 WebSocketChannel
 
-### Phase 2: TUI Channel
+### Phase 2: CLI 客户端
 
-1. 创建 `app/gateway/channels/tui_channel.py` - 实现 TUI Channel
-2. 使用 Textual 构建终端界面
+1. 创建 `cli_client.py` - 实现 CLI 客户端
+2. 通过 WebSocket 连接到 Gateway
 3. 实现消息显示和用户输入
 
 ### Phase 3: 集成
 
 1. 在 `main.py` 中集成 Gateway
-2. 同时启动 WebSocket Channel 和 TUI Channel
-3. 测试多 Channel 并发访问
+2. 启动 WebSocket Channel
+3. CLI 客户端独立运行，连接到 Gateway
 
 ## 配置示例
 
@@ -191,17 +173,14 @@ gateway:
     - type: websocket
       enabled: true
       port: 8000
-    - type: tui
-      enabled: true
-      auto_start: false  # 通过命令行参数启动
 ```
 
 ## 未来扩展
 
 ### 支持更多 Channel
 
-- **Feishu Channel**: 通过 Slack Bot API 接入
-- **HTTP API Channel**: RESTful API 接口
+- **Feishu Channel**
+- **HTTP API Channel**
 
 ### 高级特性
 

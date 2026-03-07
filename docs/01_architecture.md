@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-AgentOS 是一个基于事件驱动架构的 AI Agent 开发平台，提供 Web 和 TUI 两种交互界面。本文档描述当前版本的架构设计和核心特性。
+AgentOS 是一个基于事件驱动架构的 AI Agent 开发平台，提供 Web 界面和 CLI 客户端。本文档描述当前版本的架构设计和核心特性。
 
 ## 核心设计理念
 
@@ -12,7 +12,7 @@ AgentOS 是一个基于事件驱动架构的 AI Agent 开发平台，提供 Web 
 ### Gateway 架构
 通过 Gateway 和 Channel 抽象，支持多种用户接入方式：
 - **Gateway**: 消息网关，管理多个 Channel 并路由事件
-- **Channel**: 用户接入方式的抽象（WebSocket、TUI 等）
+- **Channel**: 用户接入方式的抽象（WebSocket 等）
 - **事件路由**: Gateway 在 Channel 和 PublicEventBus 之间双向路由消息
 
 ## 技术栈选型
@@ -31,7 +31,6 @@ AgentOS 是一个基于事件驱动架构的 AI Agent 开发平台，提供 Web 
 - **事件总线**: 内存队列实现
 - **数据存储**: SQLite
 - **配置管理**: YAML 格式
-- **TUI 框架**: Textual + Rich
 
 ### LLM 集成
 - **支持的提供商**: OpenAI、OpenAI 兼容服务
@@ -53,8 +52,8 @@ AgentOS 是一个基于事件驱动架构的 AI Agent 开发平台，提供 Web 
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │                      Gateway                          │  │
 │  │  ┌────────────────┐         ┌────────────────┐      │  │
-│  │  │ WebSocket      │         │  TUI Channel   │      │  │
-│  │  │ Channel        │         │  (Textual)     │      │  │
+│  │  │ WebSocket      │         │  CLI 客户端    │      │  │
+│  │  │ Channel        │         │  (cli_client)  │      │  │
 │  │  └────────────────┘         └────────────────┘      │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                            │                                 │
@@ -84,7 +83,7 @@ AgentOS 是一个基于事件驱动架构的 AI Agent 开发平台，提供 Web 
 
 用户发送消息的完整流程：
 
-1. 用户在前端/TUI 输入消息
+1. 用户在前端/CLI 输入消息
 2. Channel 将消息转换为 `ui.user_input` 事件
 3. Channel 调用 Gateway.publish_from_channel()
 4. Gateway 将事件发布到 Public Bus
@@ -144,7 +143,7 @@ AgentOS 是一个基于事件驱动架构的 AI Agent 开发平台，提供 Web 
 ### 支撑模块（已实现）
 6. Gateway（消息网关）
 7. WebSocket Channel
-8. TUI Channel
+8. CLI 客户端
 9. ContextBuilder（上下文构建）
 10. SessionStateStore（状态管理）
 11. Database Layer（数据层）
@@ -162,7 +161,7 @@ AgentOS 是一个基于事件驱动架构的 AI Agent 开发平台，提供 Web 
 通过 Gateway 架构，系统可以同时支持多种接入方式：
 
 - **WebSocket Channel**: 为 Web 前端提供实时通信
-- **TUI Channel**: 命令行界面，使用 Textual 框架
+- **CLI 客户端**: 命令行工具
 - **未来扩展**: Slack、Discord、HTTP API 等
 
 每个 Channel 独立管理连接，Gateway 负责事件路由。
@@ -219,7 +218,7 @@ TitleRuntime 为新会话自动生成简短标题：
 
 ### v0.2（当前）
 - ✅ Gateway 架构
-- ✅ TUI Channel 支持
+- ✅ CLI 客户端支持
 - ✅ 自动标题生成
 - ✅ 工具结果截断
 - ✅ 消息归一化
