@@ -1,17 +1,21 @@
 # AgentOS 文档索引
 
-欢迎使用 AgentOS 技术文档。本文档详细描述了 AgentOS v0.1 版本的架构设计、技术选型和实现细节。
+欢迎使用 AgentOS 技术文档。本文档详细描述了 AgentOS 的架构设计、技术选型和实现细节。
 
 ## 文档结构
 
 ### 核心架构
 - [01_architecture.md](./01_architecture.md) - 系统架构总览
 - [02_event_system.md](./02_event_system.md) - 事件系统设计
-- [03_core_modules.md](./03_core_modules.md) - 核心模块详解
+- [03_core_modules.md](./03_core_modules.md) - 核心模块详解（AgentRuntime、LLMRuntime、ToolRuntime等）
 
 ### 数据与通信
 - [04_database.md](./04_database.md) - 数据库设计
 - [05_websocket_protocol.md](./05_websocket_protocol.md) - WebSocket 通信协议
+- [11_gateway.md](./11_gateway.md) - Gateway 架构设计（多 Channel 支持）
+
+### 工具系统
+- [12_builtin_tools.md](./12_builtin_tools.md) - 内置工具文档（bash_command、serper_search等）
 
 ### 前端与配置
 - [06_frontend_architecture.md](./06_frontend_architecture.md) - 前端架构设计
@@ -36,37 +40,75 @@ cd frontend && npm install
 
 ### 2. 配置
 
-在项目根目录创建 `config.yaml`，填入必要的 API Keys。
+在项目根目录创建 `config.yaml`，填入必要的 API Keys：
+
+```yaml
+agent:
+  provider: openai
+  default_model: gpt-5.2
+  default_temperature: 0.6
+  system_prompt: "你是一个有用的AI助手"
+
+tools:
+  serper_search:
+    api_key: "your_serper_api_key"
+
+llm:
+  openai:
+    api_key: "your_openai_api_key"
+```
 
 ### 3. 启动服务
 
 ```bash
-./scripts/dev.sh
+# 一键启动前后端
+npm run dev
+
+# 或分别启动
+cd backend && uv run python3 main.py
+cd frontend && npm run dev
 ```
 
-脚本会自动检查端口占用、配置一致性等问题，并同时启动前端和后端：
+服务地址：
 - 前端：http://localhost:3000
 - 后端：http://localhost:8000
+
+### 4. TUI 模式
+
+除了 Web 界面，还可以使用命令行 TUI 模式：
+
+```bash
+cd backend
+uv run python3 -m app.gateway.channels.tui_channel --host localhost --port 8000
+```
 
 ## 核心概念
 
 ### 事件驱动架构
 AgentOS 采用事件驱动架构，所有模块通过事件总线通信。这种设计提供了良好的解耦性和可扩展性。
 
-### 双总线机制
-- **Public Bus**: 全局事件总线
-- **Private Bus**: 每个 Agent 的私有总线
+### Gateway 与 Channel
+- **Gateway**: 消息网关，管理多个 Channel
+- **Channel**: 用户接入方式的抽象（WebSocket、TUI、未来可扩展 Slack 等）
+- **事件路由**: Gateway 负责在 Channel 和 PublicEventBus 之间路由消息
 
-Bus Router 负责根据 session_id 路由事件。
+### 核心 Runtime 模块
+- **AgentRuntime**: 对话流程编排
+- **LLMRuntime**: LLM 调用管理
+- **ToolRuntime**: 工具执行管理
+- **TitleRuntime**: 会话标题生成
 
 ### 工具系统
-内置 6 种基础工具：
-- bash_command: 执行命令
-- serper_search: 网络搜索
-- fetch_url: 获取网页
-- read_file: 读取文件
-- write_file: 写入文件
-- load_skill: 加载技能
+内置 7 种基础工具：
+- `bash_command`: 执行命令
+- `serper_search`: 网络搜索
+- `fetch_url`: 获取网页
+- `read_file`: 读取文件
+- `write_file`: 写入文件
+- `search_skill`: 搜索技能
+- `load_skill`: 加载技能（v0.1 占位实现）
+
+详见 [12_builtin_tools.md](./12_builtin_tools.md)
 
 ## 技术栈
 
@@ -78,15 +120,44 @@ Bus Router 负责根据 session_id 路由事件。
 
 **后端**:
 - FastAPI + Python 3.12
-- asyncio
-- SQLite
+- asyncio 事件驱动
+- SQLite 数据存储
 - OpenAI / Anthropic SDK
+- Textual (TUI 界面)
+
+## 架构特点
+
+### 1. 事件驱动
+所有模块通过事件总线解耦，易于扩展和测试。
+
+### 2. 多 Channel 支持
+通过 Gateway 架构支持多种接入方式：
+- WebSocket Channel（Web 前端）
+- TUI Channel（命令行界面）
+- 未来可扩展：Slack、Discord、HTTP API 等
+
+### 3. 状态管理
+- 内存状态：SessionStateStore 管理运行时状态
+- 持久化：SQLite 存储会话、消息、事件
+
+### 4. 工具结果截断
+自动处理超长工具结果，避免 token 超限。
+
+### 5. 消息归一化
+OpenAI Provider 自动归一化消息格式，避免 API 调用失败。
 
 ## 版本说明
 
-当前版本: **v0.1**
+当前版本: **v0.2**
 
-v0.1 是最小可用版本，专注于核心功能：
+v0.2 新增特性：
+- ✅ Gateway 架构
+- ✅ TUI Channel 支持
+- ✅ 自动标题生成
+- ✅ 工具结果截断
+- ✅ 消息归一化
+
+v0.1 核心功能：
 - ✅ 基础对话功能
 - ✅ 工具调用
 - ✅ 会话管理
@@ -97,6 +168,32 @@ v0.1 是最小可用版本，专注于核心功能：
 - ❌ Token 管理
 - ❌ 用户认证
 - ❌ 沙箱执行
+- ❌ Skill 真实执行
+
+## 开发指南
+
+### 运行测试
+
+```bash
+# 后端测试
+cd backend
+uv run python3 -m pytest
+
+# 前端测试
+cd frontend
+npm run test:e2e
+```
+
+### 日志查看
+
+开发模式下，后端会输出 DEBUG 级别日志，包括：
+- 每次 LLM 调用的完整输入
+- 工具执行详情
+- 事件流转追踪
+
+### 添加自定义工具
+
+参考 [12_builtin_tools.md](./12_builtin_tools.md) 中的"扩展自定义工具"章节。
 
 ## 贡献指南
 
@@ -106,6 +203,11 @@ v0.1 是最小可用版本，专注于核心功能：
 2. 创建特性分支
 3. 提交变更
 4. 发起 Pull Request
+
+## 文档维护
+
+- `docs_raw/`: 用户手动维护的原始文档，不要修改
+- `docs/`: 模型生成的技术文档，可以修改和更新
 
 ## 许可证
 

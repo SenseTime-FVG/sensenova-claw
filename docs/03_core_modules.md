@@ -1,5 +1,7 @@
 # 核心模块设计
 
+本文档描述 AgentOS 的核心运行时模块。
+
 ## AgentRuntime 模块
 
 AgentRuntime 是系统的核心执行引擎，负责协调整个对话流程。
@@ -29,7 +31,17 @@ AgentOS 采用事件驱动方式，通过监听和发布事件来推进流程，
 3. **上下文构建**: 调用 ContextBuilder 准备 LLM 输入
 4. **事件发布**: 发布各阶段的状态事件
 
-### 状态机设计
+### 状态管理
+
+AgentRuntime 通过 SessionStateStore 管理会话状态，每个 turn 包含：
+- `turn_id`: 对话轮次ID
+- `user_input`: 用户输入
+- `messages`: 消息历史
+- `pending_tool_calls`: 待完成的工具调用集合
+- `tool_results`: 工具执行结果列表
+- `final_response`: 最终响应
+
+### 事件流转
 
 ```
 IDLE → PROCESSING_INPUT → WAITING_LLM → WAITING_TOOL → COMPLETED
@@ -39,36 +51,44 @@ IDLE → PROCESSING_INPUT → WAITING_LLM → WAITING_TOOL → COMPLETED
 
 ### 事件处理逻辑
 
-#### 接收 user.input 事件
+#### 接收 ui.user_input 事件
 ```python
-1. 生成 session_id (如果是新会话)
+1. 创建或更新 session（如果是新会话）
 2. 生成 turn_id
-3. 初始化会话状态
-4. 发布 agent.step_started
-5. 调用 ContextBuilder.build_messages()
-6. 发布 llm.call_requested
-7. 状态转换: IDLE → WAITING_LLM
+3. 从 SessionStateStore 获取历史消息
+4. 调用 ContextBuilder.build_messages() 构建消息列表
+5. 初始化 TurnState 并存储
+6. 发布 agent.step_started
+7. 发布 llm.call_requested
+```
+
+#### 接收 llm.call_result 事件
+```python
+1. 从 payload 中提取 response（包含 content 和 tool_calls）
+2. 构建 assistant 消息
+3. 如果有 tool_calls，添加到消息中
+4. 将 assistant 消息添加到 TurnState.messages
 ```
 
 #### 接收 llm.call_completed 事件
 ```python
-1. 检查 finish_reason
-2. 如果是 "tool_calls":
-   - 解析工具调用列表
+1. 从最后一条 assistant 消息中获取 tool_calls
+2. 如果有 tool_calls:
+   - 记录到 pending_tool_calls 集合
    - 为每个工具调用发布 tool.call_requested
-   - 状态转换: WAITING_LLM → WAITING_TOOL
-3. 如果是 "stop":
+3. 如果没有 tool_calls:
+   - 保存最终响应到数据库
+   - 将本轮消息添加到会话历史
    - 发布 agent.step_completed
-   - 状态转换: WAITING_LLM → COMPLETED
 ```
 
 #### 接收 tool.call_completed 事件
 ```python
-1. 收集所有工具调用结果
-2. 如果所有工具都已完成:
-   - 调用 ContextBuilder 添加工具结果
-   - 发布新的 llm.call_requested
-   - 状态转换: WAITING_TOOL → WAITING_LLM
+1. 从 pending_tool_calls 中移除已完成的工具
+2. 将工具结果添加到 tool_results
+3. 调用 ContextBuilder.append_tool_result() 添加到消息历史
+4. 如果所有工具都已完成:
+   - 发布新的 llm.call_requested（带工具结果）
 ```
 
 ### 并发工具调用
@@ -76,205 +96,107 @@ IDLE → PROCESSING_INPUT → WAITING_LLM → WAITING_TOOL → COMPLETED
 当 LLM 返回多个工具调用时，AgentRuntime 会并发执行所有工具，提升效率。
 
 ```python
-# 伪代码
-tool_calls = response.tool_calls
-pending_tools = set(tool_call.id for tool_call in tool_calls)
+# 实际实现
+tool_calls = last_assistant_message.get("tool_calls", [])
+state.pending_tool_calls = {call["id"] for call in tool_calls}
 
-for tool_call in tool_calls:
-    publish_event("tool.call_requested", tool_call)
-
-# 等待所有工具完成
-while pending_tools:
-    event = await private_bus.get()
-    if event.type == "tool.call_completed":
-        pending_tools.remove(event.payload["tool_call_id"])
+for call in tool_calls:
+    await publisher.publish(EventEnvelope(
+        type=TOOL_CALL_REQUESTED,
+        payload={
+            "tool_call_id": call["id"],
+            "tool_name": call["name"],
+            "arguments": call.get("arguments", {})
+        }
+    ))
 ```
 
-## LLM 模块
+## TitleRuntime 模块
 
-LLM 模块提供统一的大语言模型调用接口，屏蔽不同提供商的差异。
+TitleRuntime 负责为新会话自动生成标题。
+
+### 核心功能
+
+1. 监听 `ui.user_input` 事件
+2. 对于每个会话的第一条消息，异步生成标题
+3. 使用 LLM 根据用户输入生成简短标题（不超过10字）
+4. 更新数据库中的会话标题
+
+### 实现要点
+
+- 使用独立的 LLM 调用，不影响主对话流程
+- 异步执行，不阻塞用户交互
+- 失败时记录日志但不影响系统运行
+- 每个会话只生成一次标题（通过 `_processed_sessions` 集合跟踪）
+
+### 标题生成 Prompt
+
+```python
+system_prompt = "你是一个会话标题生成助手。根据用户的第一个问题，生成一个简短的会话标题（不超过10个字）。只返回标题文本，不要有其他内容。"
+user_prompt = f"用户问题：{user_input}\n\n请生成会话标题："
+```
+
+## LLMRuntime 模块
+
+LLMRuntime 负责处理 LLM 调用请求。
+
+### 核心功能
+
+1. 监听 `llm.call_requested` 事件
+2. 根据配置选择 LLM Provider
+3. 调用 LLM API
+4. 发布 `llm.call_result` 和 `llm.call_completed` 事件
 
 ### 支持的提供商
 
-- **OpenAI**: GPT-4, GPT-3.5 等
-- **Anthropic**: Claude 3.5 Sonnet, Claude 3 Opus 等
+- **OpenAI**: gpt-5.2 等
+- **OpenAI 兼容**: 任何兼容 OpenAI API 的服务（通过配置 base_url）
+- **Mock**: 测试用的模拟 Provider
 
-### 接口设计
+### 事件处理流程
 
 ```python
-class LLMProvider:
-    async def call(
-        self,
-        model: str,
-        messages: list,
-        tools: list = None,
-        temperature: float = 0.7,
-        max_tokens: int = None
-    ) -> dict:
-        """调用 LLM API"""
-        pass
-```
-
-### 事件处理
-
-#### 接收 llm.call_requested 事件
-```python
-1. 提取 payload 中的参数
-2. 发布 llm.call_started
-3. 根据 model 选择对应的 Provider
+1. 接收 llm.call_requested 事件
+2. 记录 DEBUG 日志（包含完整的 messages 和 tools）
+3. 发布 llm.call_started
 4. 调用 Provider.call()
-5. 发布 llm.call_completed (包含响应和 usage)
+5. 发布 llm.call_result（包含响应内容）
+6. 发布 llm.call_completed
 ```
 
 ### 错误处理
 
-- API 调用失败: 发布 error.raised 事件
-- 重试策略: 指数退避，最多重试 3 次
-- 超时处理: 默认 60 秒超时
+- API 调用失败时发布 `error.raised` 事件
+- 错误时也发布 `llm.call_result` 事件（content 包含错误信息）
+- 最后发布 `llm.call_completed` 确保流程继续
 
-### 响应格式标准化
+### 消息归一化
 
-不同提供商的响应格式会被标准化为统一结构：
+OpenAI Provider 会对消息进行归一化处理：
 
-```python
-{
-    "content": str,              # 文本内容
-    "tool_calls": [              # 工具调用列表
-        {
-            "id": str,
-            "name": str,
-            "arguments": dict
-        }
-    ],
-    "finish_reason": str         # stop/tool_calls/length
-}
-```
+1. 为 `tool_calls` 添加 `type: "function"` 字段
+2. 确保 `tool` 消息包含 `tool_call_id` 字段
+3. 将 `arguments` 从 dict 转换为 JSON 字符串
+
+这样可以避免因格式问题导致的 API 调用失败（如 400 invalid_value 错误）。
 
 ## ToolRuntime 模块
 
+详细的工具文档请参考 [12_builtin_tools.md](./12_builtin_tools.md)。
+
 ToolRuntime 负责工具的注册、管理和执行。
 
-### 工具注册机制
+### 核心功能
+
+1. 监听 `tool.call_requested` 事件
+2. 查找并执行对应的工具
+3. 处理超时和错误
+4. 发布工具执行结果
+
+### 事件处理流程
 
 ```python
-class Tool:
-    name: str
-    description: str
-    parameters: dict  # JSON Schema
-
-    async def execute(self, **kwargs) -> any:
-        """执行工具逻辑"""
-        pass
-```
-
-### 内置工具列表
-
-#### 1. bash_command
-执行 Bash/Shell 命令。
-
-**参数**:
-- `command`: str - 要执行的命令
-- `working_dir`: str - 工作目录 (可选)
-
-**返回**: 命令输出或错误信息
-
-**超时**: 15 秒
-
-#### 2. serper_search
-使用 Serper.dev API 进行网络搜索。
-
-**LLM 需提供的参数**:
-- `q`: str - 搜索关键词
-- `tbs`: str (可选) - 时间范围过滤，不传表示任意时间；`h`=最近1小时，`d`=最近1天，`m`=最近1个月，`y`=最近1年
-- `page`: int (可选) - 页码，默认 1
-
-**固定参数**（由系统注入，LLM 无需关心）:
-- `gl`: `"cn"` - 地区
-- `hl`: `"zh-cn"` - 语言
-
-**示例调用**:
-```python
-import requests
-
-url = "https://google.serper.dev/search"
-payload = {
-    "q": "apple inc",
-    "gl": "cn",
-    "hl": "zh-cn",
-    "tbs": "qdr:h",  # 不传该参数表示任意时间，h/d/m/y 分别表示最近小时/日/月/年
-    "page": 1,
-}
-headers = {
-    "X-API-KEY": "<SERPER_API_KEY>",
-    "Content-Type": "application/json",
-}
-response = requests.post(url, headers=headers, json=payload)
-print(response.text)
-```
-
-**返回**: 搜索结果列表
-
-**超时**: 15 秒
-
-#### 3. fetch_url
-获取指定 URL 的内容。
-
-**参数**:
-- `url`: str - 目标 URL
-- `method`: str - HTTP 方法 (默认 GET)
-
-**返回**: 网页内容
-
-**超时**: 15 秒
-
-#### 4. read_file
-读取文件内容。
-
-**参数**:
-- `file_path`: str - 文件路径（绝对或相对）
-- `encoding`: str - 编码格式（默认 utf-8）
-- `start_line`: int (可选) - 起始行号，从 1 开始，默认从第 1 行开始
-- `num_lines`: int (可选) - 读取的行数，不传则读取到文件末尾
-
-**返回**: 文件内容
-
-**限制**: 仅支持文本文件
-
-#### 5. write_file
-写入文件内容。
-
-**参数**:
-- `file_path`: str - 文件路径
-- `content`: str - 要写入的内容
-- `mode`: str - 写入模式 (write/append)
-- `start_line`: int (可选) - 写入起始行号，从 1 开始，仅在 `mode=insert` 时生效
-
-**返回**: 成功或失败信息
-
-#### 6. search_skill
-搜索可用的 Agent Skill 列表。
-
-**参数**:
-- `keyword`: str (可选) - 按关键词过滤 Skill 名称或描述，不传则返回全部
-
-**返回**: 匹配的 Skill 列表，每项包含 `skill_name`、`description` 等字段
-
----
-
-#### 7. load_skill
-加载并执行 Agent Skill。
-
-**参数**:
-- `skill_name`: str - Skill 名称
-- `skill_args`: dict - Skill 参数
-
-**返回**: Skill 执行结果
-
-### 事件处理
-
-#### 接收 tool.call_requested 事件
-```python
-1. 提取 tool_name 和 arguments
+1. 接收 tool.call_requested 事件
 2. 发布 tool.call_started
 3. 查找对应的 Tool 实例
 4. 发布 tool.execution_start
@@ -283,26 +205,27 @@ print(response.text)
 7. 发布 tool.call_completed (包含结果或错误)
 ```
 
+### 结果截断机制
+
+当工具返回结果过长时（超过约16000 tokens），ToolRuntime 会：
+
+1. 保存完整结果到文件：`<workspace>/<session_id>/tool_result_<id>.txt`
+2. 截断结果并附加文件路径提示
+3. 将截断后的结果返回给 LLM
+
+这样既避免了 token 超限，又保留了完整数据供后续使用。
+
 ### 超时控制
 
-所有工具执行都使用 asyncio.wait_for() 进行超时控制：
+所有工具执行都使用 `asyncio.wait_for()` 进行超时控制，默认15秒。可通过配置修改：
 
-```python
-try:
-    result = await asyncio.wait_for(
-        tool.execute(**arguments),
-        timeout=15.0
-    )
-except asyncio.TimeoutError:
-    result = {"error": "Tool execution timeout"}
+```yaml
+tools:
+  bash_command:
+    timeout: 30
+  serper_search:
+    timeout: 20
 ```
-
-### 安全考虑
-
-v0.1 版本暂不实现安全限制，但预留扩展点：
-- 命令白名单/黑名单
-- 文件访问权限检查
-- 资源使用限制
 
 ## ContextBuilder 模块
 
@@ -311,9 +234,18 @@ ContextBuilder 负责构建发送给 LLM 的消息列表。
 ### 核心功能
 
 1. **初始化系统提示**: 加载 Agent 的系统提示词
-2. **添加历史消息**: 从数据库加载历史对话
-3. **添加工具结果**: 将工具执行结果格式化为消息
-4. **上下文压缩**: 当消息过长时进行智能压缩 (v0.1 暂不实现)
+2. **注入系统信息**: 添加系统类型和当前时间
+3. **添加历史消息**: 从 SessionStateStore 获取历史对话
+4. **添加用户输入**: 为用户消息添加时间戳
+5. **添加工具结果**: 将工具执行结果格式化为消息
+
+### 系统信息注入
+
+ContextBuilder 会自动在系统提示中注入：
+- 系统类型（Linux/Windows/macOS）
+- 当前时间（YYYY-MM-DD HH:MM:SS）
+
+用户消息也会自动添加时间戳前缀：`[2024-03-07 10:30:00] 用户输入内容`
 
 ### 消息格式
 
@@ -322,43 +254,103 @@ ContextBuilder 负责构建发送给 LLM 的消息列表。
 ```python
 [
     {"role": "system", "content": "..."},
-    {"role": "user", "content": "..."},
+    {"role": "user", "content": "[时间戳] ..."},
     {"role": "assistant", "content": "...", "tool_calls": [...]},
-    {"role": "tool", "tool_call_id": "...", "content": "..."}
+    {"role": "tool", "tool_call_id": "...", "name": "...", "content": "..."}
 ]
-```
-
-### 构建流程
-
-```python
-def build_messages(session_id: str, turn_id: str) -> list:
-    messages = []
-
-    # 1. 添加系统提示
-    messages.append(get_system_prompt())
-
-    # 2. 加载历史消息
-    history = load_history_from_db(session_id)
-    messages.extend(history)
-
-    # 3. 添加当前用户输入
-    current_input = get_current_input(turn_id)
-    messages.append(current_input)
-
-    return messages
 ```
 
 ### 工具结果处理
 
-当接收到工具执行结果时，需要将其转换为 LLM 可理解的格式：
-
 ```python
-def add_tool_results(messages: list, tool_results: list) -> list:
-    for result in tool_results:
-        messages.append({
-            "role": "tool",
-            "tool_call_id": result["tool_call_id"],
-            "content": json.dumps(result["result"])
-        })
+def append_tool_result(messages, tool_name, result, tool_call_id):
+    content = result if isinstance(result, str) else json.dumps(result)
+    tool_message = {
+        "role": "tool",
+        "name": tool_name,
+        "content": content
+    }
+    if tool_call_id:
+        tool_message["tool_call_id"] = tool_call_id
+    messages.append(tool_message)
     return messages
 ```
+
+## SessionStateStore 模块
+
+SessionStateStore 管理会话和对话轮次的内存状态。
+
+### 核心功能
+
+1. **Turn 状态管理**: 存储每个 turn 的状态（消息、工具调用等）
+2. **会话历史**: 维护每个会话的消息历史
+3. **首轮标记**: 跟踪每个会话是否已处理第一轮对话
+
+### 数据结构
+
+```python
+@dataclass
+class TurnState:
+    turn_id: str
+    user_input: str
+    messages: list[dict]                # 本轮的消息列表
+    pending_tool_calls: set[str]        # 待完成的工具调用ID
+    tool_results: list[dict]            # 工具执行结果
+    final_response: str                 # 最终响应
+```
+
+### 存储说明
+
+- 状态存储在内存中，重启后会丢失
+- 持久化数据（会话、消息）存储在 SQLite 数据库中
+- SessionStateStore 主要用于运行时状态管理，不负责持久化
+
+### 主要方法
+
+- `set_turn()`: 存储 turn 状态
+- `get_turn()`: 获取 turn 状态
+- `get_session_history()`: 获取会话历史消息
+- `append_to_history()`: 添加消息到会话历史
+- `is_first_turn()`: 检查是否是会话的第一轮对话
+
+## 模块协作流程
+
+完整的对话流程涉及多个模块的协作：
+
+```
+用户输入
+  ↓
+Gateway → PublicEventBus (ui.user_input)
+  ↓
+AgentRuntime:
+  - 创建 session 和 turn
+  - 构建消息（ContextBuilder）
+  - 发布 llm.call_requested
+  ↓
+LLMRuntime:
+  - 调用 LLM API
+  - 发布 llm.call_result
+  - 发布 llm.call_completed
+  ↓
+AgentRuntime:
+  - 处理 LLM 响应
+  - 如有工具调用，发布 tool.call_requested
+  ↓
+ToolRuntime:
+  - 执行工具
+  - 发布 tool.call_completed
+  ↓
+AgentRuntime:
+  - 收集工具结果
+  - 发布新的 llm.call_requested
+  ↓
+（循环直到没有工具调用）
+  ↓
+AgentRuntime:
+  - 保存最终响应
+  - 发布 agent.step_completed
+  ↓
+Gateway → 返回给用户
+```
+
+同时，TitleRuntime 在后台异步为新会话生成标题，不影响主流程。
