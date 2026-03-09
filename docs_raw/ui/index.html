@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI Agent IDE - 2026 Edition</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://code.iconify.design/3/3.1.1/iconify.min.js"></script>
+<style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+        
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #09090b;
+            color: #e4e4e7;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        .vscode-cursor {
+            border-left: 2px solid #3b82f6;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #27272a;
+            border: 2px solid #09090b;
+            border-radius: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #3f3f46;
+        }
+
+        .msg-bubble-ai {
+            background: rgba(39, 39, 42, 0.5);
+            border: 1px solid rgba(63, 63, 70, 0.4);
+        }
+
+        .sidebar-item:hover {
+            background: #27272a;
+        }
+        .sidebar-item.active {
+            background: #2d2d30;
+            border-left: 2px solid #3b82f6;
+        }
+
+        /* 模拟VS Code菜单阴影 */
+        .menu-shadow {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body class="flex flex-col select-none">
+<!-- 1. 标题栏 (Title Bar) -->
+<header class="h-10 bg-[#18181b] border-b border-[#27272a] flex items-center justify-between px-4 shrink-0 drag">
+<div class="flex items-center gap-4">
+<!-- macOS 风格按钮 -->
+<div class="flex gap-2 mr-2">
+<div class="w-3 h-3 rounded-full bg-[#ff5f57]"></div>
+<div class="w-3 h-3 rounded-full bg-[#febc2e]"></div>
+<div class="w-3 h-3 rounded-full bg-[#28c840]"></div>
+</div>
+<!-- 菜单 -->
+<nav class="hidden md:flex text-xs space-x-3 text-zinc-400">
+<span class="hover:text-white cursor-pointer px-1">文件</span>
+<span class="hover:text-white cursor-pointer px-1">编辑</span>
+<span class="hover:text-white cursor-pointer px-1">选择</span>
+<span class="hover:text-white cursor-pointer px-1">视图</span>
+<span class="hover:text-white cursor-pointer px-1">转到</span>
+<span class="hover:text-white cursor-pointer px-1">终端</span>
+<span class="hover:text-white cursor-pointer px-1">帮助</span>
+</nav>
+</div>
+<!-- 全局搜索框 (Command Center) -->
+<div class="flex-1 max-w-xl px-4">
+<div class="bg-[#27272a] h-7 rounded-md border border-[#3f3f46] flex items-center px-3 gap-2 group cursor-pointer hover:bg-[#323235] transition-colors">
+<span class="iconify text-zinc-500" data-icon="lucide:search"></span>
+<span class="text-[11px] text-zinc-400 flex-1">Agent 工作台 - 搜索项目、文件或指令 (Ctrl + P)</span>
+<span class="text-[10px] text-zinc-500 border border-zinc-700 px-1 rounded">2026.03.02</span>
+</div>
+</div>
+<div class="flex items-center gap-3 text-zinc-400">
+<span class="iconify hover:text-white cursor-pointer" data-icon="lucide:layout-sidebar"></span>
+<span class="iconify hover:text-white cursor-pointer" data-icon="lucide:split"></span>
+<span class="iconify hover:text-white cursor-pointer text-blue-400" data-icon="lucide:zap"></span>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+<!-- 2. 活动栏 (Activity Bar) -->
+<aside class="w-12 bg-[#18181b] border-r border-[#27272a] flex flex-col items-center py-4 gap-4 shrink-0">
+<div class="p-2 cursor-pointer text-zinc-500 hover:text-white transition-colors border-l-2 border-blue-500 text-white active-tab" id="btn-explorer" onclick="switchSidebar('explorer')">
+<span class="iconify w-6 h-6" data-icon="lucide:files"></span>
+</div>
+<div class="p-2 cursor-pointer text-zinc-500 hover:text-white transition-colors border-l-2 border-transparent" id="btn-history" onclick="switchSidebar('history')">
+<span class="iconify w-6 h-6" data-icon="lucide:history"></span>
+</div>
+<div class="p-2 cursor-pointer text-zinc-500 hover:text-white transition-colors border-l-2 border-transparent">
+<span class="iconify w-6 h-6" data-icon="lucide:search"></span>
+</div>
+<div class="p-2 cursor-pointer text-zinc-500 hover:text-white transition-colors border-l-2 border-transparent">
+<span class="iconify w-6 h-6" data-icon="lucide:git-branch"></span>
+</div>
+<div class="p-2 cursor-pointer text-zinc-500 hover:text-white transition-colors border-l-2 border-transparent">
+<span class="iconify w-6 h-6" data-icon="lucide:blocks"></span>
+</div>
+<div class="mt-auto flex flex-col gap-4 items-center">
+<div class="p-2 cursor-pointer text-zinc-500 hover:text-white transition-colors relative">
+<span class="iconify w-6 h-6" data-icon="lucide:bell"></span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full border-2 border-[#18181b]"></span>
+</div>
+<div class="p-2 cursor-pointer text-zinc-500 hover:text-white transition-colors">
+<span class="iconify w-6 h-6" data-icon="lucide:user-circle"></span>
+</div>
+<div class="p-2 cursor-pointer text-zinc-500 hover:text-white transition-colors">
+<span class="iconify w-6 h-6" data-icon="lucide:settings"></span>
+</div>
+</div>
+</aside>
+<!-- 3. 主侧边栏 (Primary Side Bar) -->
+<aside class="w-64 bg-[#111113] border-r border-[#27272a] flex flex-col shrink-0 overflow-hidden" id="sidebar-content">
+<!-- 资源管理器面板 -->
+<div class="flex flex-col h-full" id="panel-explorer">
+<div class="h-9 px-4 flex items-center justify-between text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
+<span>资源管理器</span>
+<span class="iconify cursor-pointer" data-icon="lucide:more-horizontal"></span>
+</div>
+<!-- 树状结构 -->
+<div class="flex-1 overflow-y-auto custom-scrollbar">
+<!-- Project Section -->
+<div class="mb-2">
+<div class="flex items-center gap-1 px-4 py-1 hover:bg-[#27272a] cursor-pointer group">
+<span class="iconify text-zinc-500 group-hover:text-zinc-300 transform rotate-90" data-icon="lucide:chevron-right"></span>
+<span class="text-xs font-bold text-zinc-300">AGENT-WORKSPACE</span>
+</div>
+<div class="pl-6">
+<div class="flex items-center gap-2 px-4 py-1 hover:bg-[#27272a] cursor-pointer group">
+<span class="iconify text-zinc-500 group-hover:text-zinc-300" data-icon="lucide:chevron-right"></span>
+<span class="iconify text-blue-400" data-icon="lucide:folder"></span>
+<span class="text-[13px] text-zinc-400">src</span>
+</div>
+<div class="flex items-center gap-2 px-4 py-1 hover:bg-[#27272a] cursor-pointer group bg-[#2d2d30]">
+<span class="w-4"></span>
+<span class="iconify text-orange-400" data-icon="vscode-icons:file-type-html"></span>
+<span class="text-[13px] text-zinc-200">index.html</span>
+</div>
+<div class="flex items-center gap-2 px-4 py-1 hover:bg-[#27272a] cursor-pointer group">
+<span class="w-4"></span>
+<span class="iconify text-blue-400" data-icon="vscode-icons:file-type-typescript"></span>
+<span class="text-[13px] text-zinc-400">agent.ts</span>
+</div>
+<div class="flex items-center gap-2 px-4 py-1 hover:bg-[#27272a] cursor-pointer group">
+<span class="w-4"></span>
+<span class="iconify text-yellow-400" data-icon="vscode-icons:file-type-config"></span>
+<span class="text-[13px] text-zinc-400">package.json</span>
+</div>
+</div>
+</div>
+<!-- 大纲视图 -->
+<div class="border-t border-[#27272a] mt-2 pt-2">
+<div class="flex items-center gap-1 px-4 py-1 hover:bg-[#27272a] cursor-pointer group">
+<span class="iconify text-zinc-500 group-hover:text-zinc-300" data-icon="lucide:chevron-right"></span>
+<span class="text-xs font-bold text-zinc-300">OUTLINE</span>
+</div>
+</div>
+</div>
+</div>
+<!-- 聊天历史面板 (默认隐藏) -->
+<div class="hidden flex flex-col h-full" id="panel-history">
+<div class="h-9 px-4 flex items-center justify-between text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
+<span>对话历史</span>
+<span class="iconify cursor-pointer text-zinc-500" data-icon="lucide:filter"></span>
+</div>
+<div class="p-2">
+<input class="w-full bg-[#1e1e20] border border-[#27272a] rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500" placeholder="搜索对话..." type="text"/>
+</div>
+<div class="flex-1 overflow-y-auto custom-scrollbar px-2 space-y-1 mt-2">
+<div class="text-[10px] text-zinc-500 px-2 py-1 uppercase font-bold">今天</div>
+<div class="sidebar-item active rounded p-2 cursor-pointer group relative">
+<div class="text-[13px] text-zinc-200 truncate pr-4">重构 Electron 渲染进程</div>
+<div class="text-[10px] text-zinc-500 mt-1 flex justify-between">
+<span>2 小时前</span>
+<span>GPT-4o</span>
+</div>
+<span class="iconify absolute right-2 top-3 opacity-0 group-hover:opacity-100 text-zinc-500" data-icon="lucide:x"></span>
+</div>
+<div class="sidebar-item rounded p-2 cursor-pointer group relative">
+<div class="text-[13px] text-zinc-400 truncate pr-4">修复 Tailwind 样式冲突问题</div>
+<div class="text-[10px] text-zinc-500 mt-1 flex justify-between">
+<span>5 小时前</span>
+<span>Claude 3.5</span>
+</div>
+</div>
+<div class="text-[10px] text-zinc-500 px-2 py-1 uppercase font-bold mt-4">昨天</div>
+<div class="sidebar-item rounded p-2 cursor-pointer">
+<div class="text-[13px] text-zinc-400 truncate pr-4">分析本地 SQLite 存储方案</div>
+<div class="text-[10px] text-zinc-500 mt-1">昨日 14:20</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- 4. 中央交互区 (Main Stage) -->
+<main class="flex-1 flex flex-col bg-[#09090b] relative">
+<!-- 标签栏 -->
+<div class="h-9 bg-[#18181b] flex items-center border-b border-[#27272a]">
+<div class="h-full bg-[#09090b] px-4 flex items-center gap-2 border-r border-[#27272a] border-t border-t-blue-500">
+<span class="iconify text-blue-400" data-icon="lucide:message-square"></span>
+<span class="text-xs text-zinc-200">AI Chat Session</span>
+<span class="iconify text-zinc-500 w-3 h-3 hover:bg-zinc-800 rounded cursor-pointer" data-icon="lucide:x"></span>
+</div>
+<div class="h-full px-4 flex items-center gap-2 bg-[#18181b] hover:bg-[#1e1e21] border-r border-[#27272a] text-zinc-500 transition-colors cursor-pointer group">
+<span class="iconify text-orange-400" data-icon="vscode-icons:file-type-html"></span>
+<span class="text-xs group-hover:text-zinc-300">index.html</span>
+<span class="iconify w-3 h-3 opacity-0 group-hover:opacity-100" data-icon="lucide:x"></span>
+</div>
+</div>
+<!-- 消息列表 -->
+<div class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8" id="chat-container">
+<!-- 系统提示 -->
+<div class="flex justify-center">
+<span class="text-[10px] bg-zinc-900 text-zinc-500 px-3 py-1 rounded-full border border-zinc-800 uppercase tracking-widest">会话开启：2026年3月2日 10:45</span>
+</div>
+<!-- AI 欢迎消息 -->
+<div class="flex gap-4 max-w-4xl mx-auto">
+<div class="w-8 h-8 rounded bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0">
+<span class="iconify text-white w-5 h-5" data-icon="lucide:bot"></span>
+</div>
+<div class="flex-1 space-y-4">
+<div class="text-[14px] leading-relaxed text-zinc-300 msg-bubble-ai p-4 rounded-lg shadow-sm">
+<p class="mb-2">你好！我是你的 AI 协作专家。我已经加载了当前项目的上下文 <code class="bg-[#1e1e20] px-1 rounded text-blue-400 font-mono text-xs">./src/index.html</code>。</p>
+<p>你可以通过输入 <kbd class="px-1 py-0.5 rounded bg-zinc-700 text-[10px] text-white">@文件名</kbd> 来让我阅读特定代码，或者使用 <kbd class="px-1 py-0.5 rounded bg-zinc-700 text-[10px] text-white">/</kbd> 调用内置命令。今天有什么我可以帮你的？</p>
+</div>
+</div>
+</div>
+<!-- 用户消息示例 -->
+<div class="flex gap-4 max-w-4xl mx-auto flex-row-reverse">
+<div class="w-8 h-8 rounded bg-zinc-700 flex items-center justify-center shrink-0">
+<span class="iconify text-white w-5 h-5" data-icon="lucide:user"></span>
+</div>
+<div class="flex-1 flex flex-col items-end">
+<div class="bg-blue-600 text-white text-[14px] p-3 rounded-lg shadow-md max-w-[80%]">
+                            帮我编写一个基于 Electron 的窗口控制函数，需要支持沉浸式边框和圆角。
+                        </div>
+<div class="text-[10px] text-zinc-500 mt-1">10:48 已读</div>
+</div>
+</div>
+<!-- AI 回复消息示例 - 带代码块 -->
+<div class="flex gap-4 max-w-4xl mx-auto">
+<div class="w-8 h-8 rounded bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0">
+<span class="iconify text-white w-5 h-5" data-icon="lucide:bot"></span>
+</div>
+<div class="flex-1 space-y-4">
+<div class="text-[14px] text-zinc-300 msg-bubble-ai p-4 rounded-lg">
+<p class="mb-3">没问题。在 Electron 2026 版本中，你可以使用以下代码来初始化主窗口：</p>
+<!-- 代码块组件 -->
+<div class="bg-[#1e1e20] rounded-md border border-[#333] overflow-hidden font-mono shadow-xl">
+<div class="bg-[#2d2d30] px-4 py-2 flex items-center justify-between text-xs text-zinc-400 border-b border-[#333]">
+<span class="flex items-center gap-2 font-sans"><span class="iconify text-blue-400" data-icon="vscode-icons:file-type-typescript"></span> main.ts</span>
+<button class="flex items-center gap-1 hover:text-white"><span class="iconify" data-icon="lucide:copy"></span> 复制</button>
+</div>
+<div class="p-4 text-[13px] leading-6 overflow-x-auto text-zinc-300">
+<span class="text-purple-400">const</span> { BrowserWindow } = <span class="text-blue-400">require</span>(<span class="text-orange-400">'electron'</span>);<br/>
+<br/>
+<span class="text-purple-400">function</span> <span class="text-yellow-400">createWindow</span>() {<br/>
+                                      <span class="text-purple-400">const</span> win = <span class="text-purple-400">new</span> <span class="text-blue-400">BrowserWindow</span>({<br/>
+                                        width: <span class="text-emerald-400">1200</span>,<br/>
+                                        height: <span class="text-emerald-400">800</span>,<br/>
+                                        titleBarStyle: <span class="text-orange-400">'hiddenInset'</span>,<br/>
+                                        vibrancy: <span class="text-orange-400">'under-window'</span>, <span class="text-zinc-500">// macOS 特性</span><br/>
+                                        roundedCorners: <span class="text-purple-400">true</span><br/>
+                                      });<br/>
+                                    }
+                                </div>
+</div>
+<div class="mt-4 flex gap-2">
+<button class="text-[12px] bg-blue-600/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded hover:bg-blue-600/30 transition-all flex items-center gap-2">
+<span class="iconify" data-icon="lucide:file-plus"></span> 应用到项目
+                                </button>
+<button class="text-[12px] bg-zinc-800 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded hover:bg-zinc-700 transition-all flex items-center gap-2">
+<span class="iconify" data-icon="lucide:terminal"></span> 在终端运行
+                                </button>
+</div>
+</div>
+</div>
+</div>
+<!-- 正在输入提示 (呼吸效果) -->
+<div class="hidden flex gap-4 max-w-4xl mx-auto opacity-70" id="typing-indicator">
+<div class="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center shrink-0">
+<span class="iconify text-zinc-400 animate-pulse" data-icon="lucide:bot"></span>
+</div>
+<div class="bg-[#18181b] p-3 rounded-lg flex items-center gap-1">
+<div class="w-1.5 h-1.5 bg-zinc-600 rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
+<div class="w-1.5 h-1.5 bg-zinc-600 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+<div class="w-1.5 h-1.5 bg-zinc-600 rounded-full animate-bounce" style="animation-delay: 0.3s"></div>
+</div>
+</div>
+</div>
+<!-- 输入区域 -->
+<div class="p-6 border-t border-[#27272a] bg-[#09090b]">
+<div class="max-w-4xl mx-auto relative">
+<!-- 快捷标签 -->
+<div class="flex gap-2 mb-3">
+<span class="flex items-center gap-1.5 text-[10px] bg-zinc-900 border border-zinc-800 text-zinc-400 px-2 py-1 rounded cursor-pointer hover:border-zinc-600">
+<span class="iconify text-blue-500" data-icon="lucide:file-code"></span> index.html
+                        </span>
+<span class="flex items-center gap-1.5 text-[10px] bg-zinc-900 border border-zinc-800 text-zinc-400 px-2 py-1 rounded cursor-pointer hover:border-zinc-600">
+<span class="iconify text-purple-500" data-icon="lucide:git-commit"></span> 最新提交
+                        </span>
+<span class="flex items-center gap-1.5 text-[10px] bg-zinc-900 border border-zinc-800 text-zinc-400 px-2 py-1 rounded cursor-pointer hover:border-zinc-600">
+<span class="iconify text-green-500" data-icon="lucide:image"></span> 截图预览
+                        </span>
+</div>
+<div class="relative bg-[#18181b] border border-[#3f3f46] rounded-xl focus-within:border-blue-600 transition-all p-2 shadow-2xl">
+<textarea class="w-full bg-transparent border-none focus:ring-0 text-zinc-200 text-sm resize-none custom-scrollbar pl-2 pr-12 pt-2" id="chat-input" placeholder="输入消息、'@' 提及文件、'/' 执行命令..." rows="3"></textarea>
+<div class="flex items-center justify-between mt-2 pt-2 border-t border-zinc-800/50 px-2">
+<div class="flex items-center gap-3 text-zinc-500">
+<span class="iconify hover:text-white cursor-pointer" data-icon="lucide:paperclip" title="添加附件"></span>
+<span class="iconify hover:text-white cursor-pointer" data-icon="lucide:at-sign" title="提及上下文"></span>
+<span class="iconify hover:text-white cursor-pointer" data-icon="lucide:terminal" title="插入命令"></span>
+<div class="h-4 w-[1px] bg-zinc-800 mx-1"></div>
+<div class="flex items-center gap-1 text-[11px] hover:text-white cursor-pointer select-none">
+<span class="iconify" data-icon="lucide:globe"></span>
+<span>联网搜索</span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="text-[10px] text-zinc-600 flex items-center gap-1">
+<span class="iconify" data-icon="lucide:command"></span>
+<span>Enter 发送</span>
+</div>
+<button class="w-8 h-8 bg-blue-600 hover:bg-blue-500 text-white rounded-lg flex items-center justify-center transition-transform hover:scale-105 active:scale-95 shadow-lg shadow-blue-900/20" onclick="sendMessage()">
+<span class="iconify w-5 h-5" data-icon="lucide:send"></span>
+</button>
+</div>
+</div>
+<!-- 模拟提示面板 -->
+<div class="hidden absolute bottom-full left-0 w-full mb-3 bg-[#1c1c1f] border border-[#333] rounded-lg menu-shadow overflow-hidden z-20" id="command-palette">
+<div class="py-1">
+<div class="px-3 py-2 text-[11px] text-zinc-500 bg-[#252529] font-bold">常用命令 (/)</div>
+<div class="px-4 py-2 flex items-center justify-between hover:bg-blue-600 group cursor-pointer">
+<div class="flex items-center gap-3">
+<span class="iconify text-zinc-400 group-hover:text-white text-lg" data-icon="lucide:code"></span>
+<span class="text-sm text-zinc-200 group-hover:text-white">/refactor</span>
+<span class="text-xs text-zinc-500 group-hover:text-blue-100 italic">- 重构所选代码</span>
+</div>
+</div>
+<div class="px-4 py-2 flex items-center justify-between hover:bg-blue-600 group cursor-pointer">
+<div class="flex items-center gap-3">
+<span class="iconify text-zinc-400 group-hover:text-white text-lg" data-icon="lucide:bug"></span>
+<span class="text-sm text-zinc-200 group-hover:text-white">/debug</span>
+<span class="text-xs text-zinc-500 group-hover:text-blue-100 italic">- 寻找逻辑漏洞</span>
+</div>
+</div>
+<div class="px-4 py-2 flex items-center justify-between hover:bg-blue-600 group cursor-pointer">
+<div class="flex items-center gap-3">
+<span class="iconify text-zinc-400 group-hover:text-white text-lg" data-icon="lucide:test-tube"></span>
+<span class="text-sm text-zinc-200 group-hover:text-white">/test</span>
+<span class="text-xs text-zinc-500 group-hover:text-blue-100 italic">- 生成单元测试</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="text-[10px] text-center text-zinc-600 mt-4">
+                    AI 可能会产生偏见或错误。建议在大规模部署前进行人工审查代码。
+                </div>
+</div>
+</main>
+</div>
+<!-- 5. 状态栏 (Status Bar) -->
+<footer class="h-6 bg-[#007acc] text-white flex items-center justify-between px-3 text-[11px] shrink-0">
+<div class="flex items-center h-full gap-4">
+<div class="flex items-center gap-1.5 hover:bg-[#1f8ad2] px-2 h-full cursor-pointer">
+<span class="iconify w-3.5 h-3.5" data-icon="lucide:git-branch"></span>
+<span>main*</span>
+</div>
+<div class="flex items-center gap-1.5 hover:bg-[#1f8ad2] px-2 h-full cursor-pointer">
+<span class="iconify w-3.5 h-3.5" data-icon="lucide:refresh-cw"></span>
+<span>同步中...</span>
+</div>
+<div class="flex items-center gap-1.5 hover:bg-[#1f8ad2] px-2 h-full cursor-pointer">
+<span class="iconify w-3.5 h-3.5" data-icon="lucide:circle-alert"></span>
+<span>0</span>
+<span class="iconify w-3.5 h-3.5 ml-1" data-icon="lucide:info"></span>
+<span>0</span>
+</div>
+</div>
+<div class="flex items-center h-full gap-4">
+<div class="hover:bg-[#1f8ad2] px-2 h-full flex items-center gap-1 cursor-pointer">
+<span>Model: GPT-4o (Smart)</span>
+</div>
+<div class="hover:bg-[#1f8ad2] px-2 h-full flex items-center gap-1 cursor-pointer opacity-80">
+<span class="iconify text-xs" data-icon="lucide:database"></span>
+<span>Tokens: 1,248 / 128k</span>
+</div>
+<div class="hover:bg-[#1f8ad2] px-2 h-full flex items-center gap-1 cursor-pointer">
+<span>UTF-8</span>
+</div>
+<div class="hover:bg-[#1f8ad2] px-2 h-full flex items-center gap-1 cursor-pointer">
+<span class="iconify" data-icon="lucide:check-circle-2"></span>
+<span>Prettier</span>
+</div>
+<div class="hover:bg-[#1f8ad2] px-2 h-full flex items-center cursor-pointer">
+<span class="iconify text-sm" data-icon="lucide:bell"></span>
+</div>
+</div>
+</footer>
+<script>
+        // 侧边栏切换逻辑
+        function switchSidebar(type) {
+            // 重置按钮样式
+            const btnExplorer = document.getElementById('btn-explorer');
+            const btnHistory = document.getElementById('btn-history');
+            
+            btnExplorer.classList.remove('text-white', 'border-blue-500');
+            btnExplorer.classList.add('text-zinc-500', 'border-transparent');
+            
+            btnHistory.classList.remove('text-white', 'border-blue-500');
+            btnHistory.classList.add('text-zinc-500', 'border-transparent');
+
+            // 隐藏所有面板
+            document.getElementById('panel-explorer').classList.add('hidden');
+            document.getElementById('panel-history').classList.add('hidden');
+
+            // 显示选中面板
+            if (type === 'explorer') {
+                btnExplorer.classList.replace('text-zinc-500', 'text-white');
+                btnExplorer.classList.replace('border-transparent', 'border-blue-500');
+                document.getElementById('panel-explorer').classList.remove('hidden');
+            } else {
+                btnHistory.classList.replace('text-zinc-500', 'text-white');
+                btnHistory.classList.replace('border-transparent', 'border-blue-500');
+                document.getElementById('panel-history').classList.remove('hidden');
+            }
+        }
+
+        // 发送消息模拟
+        const chatInput = document.getElementById('chat-input');
+        const chatContainer = document.getElementById('chat-container');
+        const typingIndicator = document.getElementById('typing-indicator');
+
+        function sendMessage() {
+            const text = chatInput.value.trim();
+            if (!text) return;
+
+            // 创建用户消息
+            const userMsg = `
+                <div class="flex gap-4 max-w-4xl mx-auto flex-row-reverse">
+                    <div class="w-8 h-8 rounded bg-zinc-700 flex items-center justify-center shrink-0">
+                        <span class="iconify text-white w-5 h-5" data-icon="lucide:user"></span>
+                    </div>
+                    <div class="flex-1 flex flex-col items-end">
+                        <div class="bg-blue-600 text-white text-[14px] p-3 rounded-lg shadow-md max-w-[80%]">
+                            ${text}
+                        </div>
+                        <div class="text-[10px] text-zinc-500 mt-1">11:05 已发送</div>
+                    </div>
+                </div>
+            `;
+            chatContainer.insertAdjacentHTML('beforeend', userMsg);
+            chatInput.value = '';
+            
+            // 自动滚动
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            // 模拟回复
+            typingIndicator.classList.remove('hidden');
+            setTimeout(() => {
+                typingIndicator.classList.add('hidden');
+                const aiMsg = `
+                    <div class="flex gap-4 max-w-4xl mx-auto">
+                        <div class="w-8 h-8 rounded bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0">
+                            <span class="iconify text-white w-5 h-5" data-icon="lucide:bot"></span>
+                        </div>
+                        <div class="flex-1 space-y-4">
+                            <div class="text-[14px] text-zinc-300 msg-bubble-ai p-4 rounded-lg">
+                                <p>正在为此任务规划方案... 我将基于你刚才提到的功能进行 Electron 集成。</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                chatContainer.insertAdjacentHTML('beforeend', aiMsg);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }, 1500);
+        }
+
+        // 监听输入
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+            
+            // 弹出指令板模拟
+            const palette = document.getElementById('command-palette');
+            if (chatInput.value.endsWith('/')) {
+                palette.classList.remove('hidden');
+            } else {
+                palette.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
