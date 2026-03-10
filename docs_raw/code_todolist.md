@@ -81,7 +81,3 @@ ui.turn_cancel_requested -> ui.turn_cancel_requested
 
 需要增加一个从第几行开始写入的参数
 
-### skill工具
-
-skill_search和skill_load工具还未实现
-

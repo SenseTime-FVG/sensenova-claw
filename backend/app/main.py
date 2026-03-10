@@ -5,6 +5,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +16,9 @@ from app.core.logging import setup_logging
 from app.db.repository import Repository
 from app.events.bus import PublicEventBus
 from app.events.envelope import EventEnvelope
-from app.events.types import UI_TURN_CANCEL_REQUESTED, UI_USER_INPUT
+from app.events.persister import EventPersister
+from app.events.router import BusRouter
+from app.events.types import USER_INPUT, USER_TURN_CANCEL_REQUESTED
 from app.gateway.channels.websocket_channel import WebSocketChannel
 from app.gateway.gateway import Gateway
 from app.llm.factory import LLMFactory
@@ -23,10 +26,13 @@ from app.runtime.agent_runtime import AgentRuntime
 from app.runtime.context_builder import ContextBuilder
 from app.runtime.llm_runtime import LLMRuntime
 from app.runtime.publisher import EventPublisher
+from app.runtime.session_maintenance import SessionMaintenance
 from app.runtime.state import SessionStateStore
 from app.runtime.title_runtime import TitleRuntime
 from app.runtime.tool_runtime import ToolRuntime
+from app.skills.registry import SkillRegistry
 from app.tools.registry import ToolRegistry
+from app.workspace.manager import ensure_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +42,8 @@ class Services:
     repo: Repository
     bus: PublicEventBus
     publisher: EventPublisher
+    bus_router: BusRouter
+    persister: EventPersister
     agent_runtime: AgentRuntime
     llm_runtime: LLMRuntime
     tool_runtime: ToolRuntime
@@ -51,28 +59,83 @@ async def lifespan(app: FastAPI):
     repo = Repository()
     await repo.init()
 
+    # 确保 workspace 目录和引导文件存在
+    workspace_dir = config.get("system.workspace_dir", "./SenseAssistant/workspace")
+    await ensure_workspace(workspace_dir)
+
+    # 会话维护：清理过期会话
+    maintenance = SessionMaintenance(repo=repo)
+    await maintenance.run_maintenance()
+
     bus = PublicEventBus()
-    publisher = EventPublisher(bus=bus, repo=repo)
+    publisher = EventPublisher(bus=bus)
+
+    # 事件持久化：独立订阅 PublicEventBus
+    persister = EventPersister(bus=bus, repo=repo)
+
+    # 双总线路由器
+    bus_router = BusRouter(
+        public_bus=bus,
+        ttl_seconds=int(config.get("bus.private_bus_ttl", 3600)),
+        gc_interval=int(config.get("bus.gc_interval", 60)),
+    )
 
     tool_registry = ToolRegistry()
     state_store = SessionStateStore()
-    context_builder = ContextBuilder()
 
+    # 初始化 SkillRegistry
+    skills_dir = Path(config.get("system.workspace_dir", ".")) / "skills"
+    skill_registry = SkillRegistry(workspace_dir=skills_dir)
+    skill_registry.load_skills(config.data)
+
+    context_builder = ContextBuilder(skill_registry=skill_registry, tool_registry=tool_registry)
+
+    # v0.6: 初始化记忆系统
+    memory_manager = None
+    memory_enabled = config.get("memory.enabled", False)
+
+    if memory_enabled:
+        from app.memory.config import MemoryConfig
+        from app.memory.manager import MemoryManager
+        from app.memory.tools import MemorySearchTool
+
+        mem_config = MemoryConfig.from_dict(config.data)
+        db_path = repo.db_path.parent / "memory_index.db"
+        memory_manager = MemoryManager(
+            workspace_dir=str(workspace_dir),
+            config=mem_config,
+            db_path=db_path,
+        )
+        await memory_manager.sync_index()
+
+        # 为已有的 chunks 生成嵌入向量
+        await memory_manager.embed_pending_chunks()
+
+        if mem_config.search.enabled:
+            tool_registry.register(MemorySearchTool(memory_manager))
+
+        logger.info("Memory system enabled (workspace=%s)", workspace_dir)
+
+    # Runtime 使用 BusRouter（管理者模式）
     agent_runtime = AgentRuntime(
-        publisher=publisher,
+        bus_router=bus_router,
         repo=repo,
         context_builder=context_builder,
         tool_registry=tool_registry,
         state_store=state_store,
+        memory_manager=memory_manager,
     )
-    llm_runtime = LLMRuntime(publisher=publisher, factory=LLMFactory())
-    tool_runtime = ToolRuntime(publisher=publisher, registry=tool_registry)
-    title_runtime = TitleRuntime(publisher=publisher, repo=repo)
+    llm_runtime = LLMRuntime(bus_router=bus_router, factory=LLMFactory())
+    tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry)
+    title_runtime = TitleRuntime(bus=bus, repo=repo)
 
     gateway = Gateway(publisher=publisher)
     ws_channel = WebSocketChannel("websocket")
     gateway.register_channel(ws_channel)
 
+    # 启动顺序：persister → bus_router → runtimes → gateway
+    await persister.start()
+    await bus_router.start()
     await agent_runtime.start()
     await llm_runtime.start()
     await tool_runtime.start()
@@ -83,6 +146,8 @@ async def lifespan(app: FastAPI):
         repo=repo,
         bus=bus,
         publisher=publisher,
+        bus_router=bus_router,
+        persister=persister,
         agent_runtime=agent_runtime,
         llm_runtime=llm_runtime,
         tool_runtime=tool_runtime,
@@ -90,16 +155,19 @@ async def lifespan(app: FastAPI):
         gateway=gateway,
         ws_channel=ws_channel,
     )
-    logger.info("AgentOS backend started")
+    logger.info("AgentOS backend started (dual-bus architecture)")
 
     try:
         yield
     finally:
+        # 关闭顺序：runtimes → gateway → bus_router → persister
         await agent_runtime.stop()
         await llm_runtime.stop()
         await tool_runtime.stop()
         await title_runtime.stop()
         await gateway.stop()
+        await bus_router.stop()
+        await persister.stop()
         logger.info("AgentOS backend stopped")
 
 
@@ -211,7 +279,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if session_id:
                     await gateway.publish_from_channel(
                         EventEnvelope(
-                            type=UI_TURN_CANCEL_REQUESTED,
+                            type=USER_TURN_CANCEL_REQUESTED,
                             session_id=session_id,
                             source="websocket",
                             payload={"reason": payload.get("reason", "user_cancel")},
@@ -238,7 +306,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 turn_id = f"turn_{uuid.uuid4().hex[:12]}"
                 await gateway.publish_from_channel(
                     EventEnvelope(
-                        type=UI_USER_INPUT,
+                        type=USER_INPUT,
                         session_id=session_id,
                         turn_id=turn_id,
                         source="websocket",

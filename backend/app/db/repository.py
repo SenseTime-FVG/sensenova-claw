@@ -50,6 +50,22 @@ CREATE INDEX IF NOT EXISTS idx_events_turn ON events(turn_id);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_trace ON events(trace_id);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT,
+    tool_calls TEXT,
+    tool_call_id TEXT,
+    tool_name TEXT,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id),
+    FOREIGN KEY (turn_id) REFERENCES turns(turn_id)
+);
+CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_messages_turn ON messages(turn_id);
 """
 
 
@@ -67,6 +83,7 @@ class Repository:
         conn = self._conn()
         conn.executescript(SCHEMA_SQL)
         conn.commit()
+        self._migrate_sessions_table(conn)
         conn.close()
 
     async def create_session(self, session_id: str, meta: dict[str, Any] | None = None) -> None:
@@ -153,3 +170,130 @@ class Repository:
         ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    # ---------- Sessions 表迁移 ----------
+
+    def _migrate_sessions_table(self, conn: sqlite3.Connection) -> None:
+        """为 sessions 表添加新列（如不存在）"""
+        cursor = conn.execute("PRAGMA table_info(sessions)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        migrations = [
+            ("channel", "ALTER TABLE sessions ADD COLUMN channel TEXT"),
+            ("model", "ALTER TABLE sessions ADD COLUMN model TEXT"),
+            ("message_count", "ALTER TABLE sessions ADD COLUMN message_count INTEGER DEFAULT 0"),
+        ]
+        for col, sql in migrations:
+            if col not in existing_cols:
+                conn.execute(sql)
+        conn.commit()
+
+    # ---------- Messages 表操作 ----------
+
+    async def save_message(
+        self,
+        session_id: str,
+        turn_id: str,
+        role: str,
+        content: str | None = None,
+        tool_calls: str | None = None,
+        tool_call_id: str | None = None,
+        tool_name: str | None = None,
+    ) -> None:
+        """保存单条消息到 messages 表"""
+        conn = self._conn()
+        conn.execute(
+            """INSERT INTO messages (session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name, time.time()),
+        )
+        conn.commit()
+        conn.close()
+
+    async def get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
+        """获取会话的所有消息（按时间排序），返回 LLM 消息格式"""
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT role, content, tool_calls, tool_call_id, tool_name FROM messages WHERE session_id = ? ORDER BY created_at",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+        messages: list[dict[str, Any]] = []
+        for row in rows:
+            msg: dict[str, Any] = {"role": row[0]}
+            if row[1] is not None:
+                msg["content"] = row[1]
+            if row[2] is not None:
+                msg["tool_calls"] = json.loads(row[2])
+            if row[3] is not None:
+                msg["tool_call_id"] = row[3]
+            if row[4] is not None:
+                msg["name"] = row[4]
+            messages.append(msg)
+        return messages
+
+    async def update_session_info(
+        self,
+        session_id: str,
+        channel: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        """更新会话的 channel 和 model 信息"""
+        conn = self._conn()
+        if channel is not None:
+            conn.execute("UPDATE sessions SET channel = ? WHERE session_id = ?", (channel, session_id))
+        if model is not None:
+            conn.execute("UPDATE sessions SET model = ? WHERE session_id = ?", (model, session_id))
+        conn.commit()
+        conn.close()
+
+    async def increment_message_count(self, session_id: str) -> None:
+        """递增会话消息计数"""
+        conn = self._conn()
+        conn.execute(
+            "UPDATE sessions SET message_count = COALESCE(message_count, 0) + 1 WHERE session_id = ?",
+            (session_id,),
+        )
+        conn.commit()
+        conn.close()
+
+    async def delete_session_cascade(self, session_id: str) -> None:
+        """级联删除会话及关联的 turns, messages, events"""
+        conn = self._conn()
+        conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM events WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM turns WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        conn.commit()
+        conn.close()
+
+    async def prune_sessions(self, max_age_days: int = 30) -> int:
+        """删除超期未活跃的会话及关联数据，返回删除数量"""
+        cutoff = time.time() - max_age_days * 86400
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT session_id FROM sessions WHERE last_active < ?", (cutoff,)
+        ).fetchall()
+        conn.close()
+        count = 0
+        for row in rows:
+            await self.delete_session_cascade(row[0])
+            count += 1
+        return count
+
+    async def cap_sessions(self, max_count: int = 500) -> int:
+        """限制会话总数，淘汰最旧的，返回删除数量"""
+        conn = self._conn()
+        total = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        if total <= max_count:
+            conn.close()
+            return 0
+        overflow = total - max_count
+        rows = conn.execute(
+            "SELECT session_id FROM sessions ORDER BY last_active ASC LIMIT ?", (overflow,)
+        ).fetchall()
+        conn.close()
+        count = 0
+        for row in rows:
+            await self.delete_session_cascade(row[0])
+            count += 1
+        return count

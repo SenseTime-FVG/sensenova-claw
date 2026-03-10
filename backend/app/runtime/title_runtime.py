@@ -5,10 +5,10 @@ import contextlib
 import logging
 
 from app.db.repository import Repository
+from app.events.bus import PublicEventBus
 from app.events.envelope import EventEnvelope
-from app.events.types import UI_USER_INPUT
+from app.events.types import USER_INPUT
 from app.llm.factory import LLMFactory
-from app.runtime.publisher import EventPublisher
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +17,13 @@ AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
 
 
 class TitleRuntime:
-    def __init__(self, publisher: EventPublisher, repo: Repository):
-        self.publisher = publisher
+    """TitleRuntime 直接订阅 PublicEventBus，不使用 Worker 模式
+
+    标题生成是一次性操作，不需要 per-session Worker。
+    """
+
+    def __init__(self, bus: PublicEventBus, repo: Repository):
+        self.bus = bus
         self.repo = repo
         self.llm_factory = LLMFactory()
         self._task: asyncio.Task | None = None
@@ -34,8 +39,8 @@ class TitleRuntime:
                 await self._task
 
     async def _loop(self) -> None:
-        async for event in self.publisher.bus.subscribe():
-            if event.type == UI_USER_INPUT:
+        async for event in self.bus.subscribe():
+            if event.type == USER_INPUT:
                 await self._handle_user_input(event)
 
     async def _handle_user_input(self, event: EventEnvelope) -> None:
@@ -46,7 +51,7 @@ class TitleRuntime:
         self._processed_sessions.add(session_id)
         content = str(event.payload.get("content", ""))
 
-        await self.publisher.publish(
+        await self.bus.publish(
             EventEnvelope(
                 type=AGENT_UPDATE_TITLE_STARTED,
                 session_id=session_id,
@@ -76,9 +81,9 @@ class TitleRuntime:
 
             if title:
                 await self.repo.update_session_title(session_id, title)
-                logger.info(f"Generated title for session {session_id}: {title}")
+                logger.info("Generated title for session %s: %s", session_id, title)
 
-                await self.publisher.publish(
+                await self.bus.publish(
                     EventEnvelope(
                         type=AGENT_UPDATE_TITLE_COMPLETED,
                         session_id=session_id,
@@ -87,8 +92,8 @@ class TitleRuntime:
                     )
                 )
         except Exception as exc:
-            logger.warning(f"Failed to generate session title: {exc}")
-            await self.publisher.publish(
+            logger.warning("Failed to generate session title: %s", exc)
+            await self.bus.publish(
                 EventEnvelope(
                     type=AGENT_UPDATE_TITLE_COMPLETED,
                     session_id=session_id,

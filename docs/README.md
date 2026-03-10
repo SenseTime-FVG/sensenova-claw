@@ -14,8 +14,16 @@
 - [05_websocket_protocol.md](./05_websocket_protocol.md) - WebSocket 通信协议
 - [11_gateway.md](./11_gateway.md) - Gateway 架构设计（多 Channel 支持）
 
-### 工具系统
+### 工具与技能系统
 - [12_builtin_tools.md](./12_builtin_tools.md) - 内置工具文档（bash_command、serper_search等）
+- [13_skills_system.md](./13_skills_system.md) - Skills 系统设计（声明式任务编排）
+
+### 演进规划（PRD）
+- [14_dual_bus_architecture.md](./14_dual_bus_architecture.md) - 双总线架构（Public + Private Bus + 轻量 Worker）
+- [15_event_standardization.md](./15_event_standardization.md) - 事件系统标准化（生命周期对称 + 命名规范）
+- [16_tool_system_enhancement.md](./16_tool_system_enhancement.md) - 工具系统增强（权限管理 + 截断统一 + write_file 增强）
+- [17_system_prompt_workspace_session.md](./17_system_prompt_workspace_session.md) - System Prompt 模块化 + Workspace 文件体系 + Session 持久化增强
+- [18_memory_system.md](./18_memory_system.md) - 长期记忆系统（文件记忆 + 语义搜索 + MEMORY.md 注入）
 
 ### 前端与配置
 - [06_frontend_architecture.md](./06_frontend_architecture.md) - 前端架构设计
@@ -99,16 +107,22 @@ AgentOS 采用事件驱动架构，所有模块通过事件总线通信。这种
 - **TitleRuntime**: 会话标题生成
 
 ### 工具系统
-内置 7 种基础工具：
+内置 5 种基础工具：
 - `bash_command`: 执行命令
 - `serper_search`: 网络搜索
 - `fetch_url`: 获取网页
 - `read_file`: 读取文件
 - `write_file`: 写入文件
-- `search_skill`: 搜索技能
-- `load_skill`: 加载技能（v0.1 占位实现）
 
 详见 [12_builtin_tools.md](./12_builtin_tools.md)
+
+### Skills 系统
+16 个内置 skills 提供声明式任务编排能力，包括：
+- PDF/DOCX/XLSX 文档处理
+- 前端设计与测试
+- Skill 创建工具
+
+详见 [13_skills_system.md](./13_skills_system.md)
 
 ## 技术栈
 
@@ -148,7 +162,13 @@ OpenAI Provider 自动归一化消息格式，避免 API 调用失败。
 
 ## 版本说明
 
-当前版本: **v0.2**
+当前版本: **v0.4**
+
+v0.4 新增特性：
+- ✅ Skills 系统（声明式任务编排）
+- ✅ 16 个内置 skills（PDF、DOCX、前端设计等）
+- ✅ Skills 配置管理
+- ✅ 移除占位 Tools（search_skill、load_skill）
 
 v0.2 新增特性：
 - ✅ Gateway 架构
@@ -168,7 +188,6 @@ v0.1 核心功能：
 - ❌ Token 管理
 - ❌ 用户认证
 - ❌ 沙箱执行
-- ❌ Skill 真实执行
 
 ## 开发指南
 

@@ -13,8 +13,8 @@ from app.events.types import (
     ERROR_RAISED,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
-    TOOL_CALL_COMPLETED,
     TOOL_CALL_REQUESTED,
+    TOOL_CALL_RESULT,
 )
 from app.gateway.base import Channel
 
@@ -104,7 +104,7 @@ class WebSocketChannel(Channel):
                 },
                 "timestamp": event.ts,
             }
-        if event.type == TOOL_CALL_COMPLETED:
+        if event.type == TOOL_CALL_RESULT:
             return {
                 "type": "tool_result",
                 "session_id": event.session_id,

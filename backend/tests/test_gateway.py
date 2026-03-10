@@ -5,10 +5,9 @@ import uuid
 
 import pytest
 
-from app.db.repository import Repository
 from app.events.bus import PublicEventBus
 from app.events.envelope import EventEnvelope
-from app.events.types import AGENT_STEP_COMPLETED, UI_USER_INPUT
+from app.events.types import AGENT_STEP_COMPLETED, USER_INPUT
 from app.gateway.base import Channel
 from app.gateway.gateway import Gateway
 from app.runtime.publisher import EventPublisher
@@ -40,8 +39,7 @@ class MockChannel(Channel):
 async def test_gateway_register_channel():
     """测试注册 Channel"""
     bus = PublicEventBus()
-    repo = Repository()
-    publisher = EventPublisher(bus=bus, repo=repo)
+    publisher = EventPublisher(bus=bus)
     gateway = Gateway(publisher=publisher)
 
     channel = MockChannel("test-channel")
@@ -54,8 +52,7 @@ async def test_gateway_register_channel():
 async def test_gateway_bind_session():
     """测试绑定 session"""
     bus = PublicEventBus()
-    repo = Repository()
-    publisher = EventPublisher(bus=bus, repo=repo)
+    publisher = EventPublisher(bus=bus)
     gateway = Gateway(publisher=publisher)
 
     session_id = "sess_123"
@@ -72,8 +69,7 @@ async def test_gateway_bind_session():
 async def test_gateway_dispatch_event():
     """测试事件分发"""
     bus = PublicEventBus()
-    repo = Repository()
-    publisher = EventPublisher(bus=bus, repo=repo)
+    publisher = EventPublisher(bus=bus)
     gateway = Gateway(publisher=publisher)
 
     channel = MockChannel("test-channel")
@@ -105,8 +101,7 @@ async def test_gateway_dispatch_event():
 async def test_gateway_publish_from_channel():
     """测试从 Channel 发布事件"""
     bus = PublicEventBus()
-    repo = Repository()
-    publisher = EventPublisher(bus=bus, repo=repo)
+    publisher = EventPublisher(bus=bus)
     gateway = Gateway(publisher=publisher)
 
     collected: list[EventEnvelope] = []
@@ -121,7 +116,7 @@ async def test_gateway_publish_from_channel():
     await asyncio.sleep(0.1)
 
     event = EventEnvelope(
-        type=UI_USER_INPUT,
+        type=USER_INPUT,
         session_id="sess_123",
         source="channel",
         payload={"content": "test"},
@@ -131,5 +126,4 @@ async def test_gateway_publish_from_channel():
     await asyncio.wait_for(collect_task, timeout=1)
 
     assert len(collected) == 1
-    assert collected[0].type == UI_USER_INPUT
-
+    assert collected[0].type == USER_INPUT

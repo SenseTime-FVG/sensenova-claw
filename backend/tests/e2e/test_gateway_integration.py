@@ -11,7 +11,9 @@ from app.core.logging import setup_logging
 from app.db.repository import Repository
 from app.events.bus import PublicEventBus
 from app.events.envelope import EventEnvelope
-from app.events.types import AGENT_STEP_COMPLETED, UI_USER_INPUT
+from app.events.persister import EventPersister
+from app.events.router import BusRouter
+from app.events.types import AGENT_STEP_COMPLETED, USER_INPUT
 from app.gateway.channels.websocket_channel import WebSocketChannel
 from app.gateway.gateway import Gateway
 from app.llm.factory import LLMFactory
@@ -26,7 +28,7 @@ from app.tools.registry import ToolRegistry
 
 @pytest.mark.asyncio
 async def test_gateway_with_websocket_channel(tmp_path: Path):
-    """测试 Gateway 与 WebSocketChannel 集成"""
+    """测试 Gateway 与 WebSocketChannel 集成（双总线架构）"""
     db_path = tmp_path / "agentos.db"
     workspace = tmp_path / "workspace"
 
@@ -41,26 +43,30 @@ async def test_gateway_with_websocket_channel(tmp_path: Path):
     await repo.init()
 
     bus = PublicEventBus()
-    publisher = EventPublisher(bus=bus, repo=repo)
+    publisher = EventPublisher(bus=bus)
+    persister = EventPersister(bus=bus, repo=repo)
+    bus_router = BusRouter(public_bus=bus, ttl_seconds=3600, gc_interval=60)
 
     tool_registry = ToolRegistry()
     state_store = SessionStateStore()
-    context_builder = ContextBuilder()
+    context_builder = ContextBuilder(tool_registry=tool_registry)
 
     agent_runtime = AgentRuntime(
-        publisher=publisher,
+        bus_router=bus_router,
         repo=repo,
         context_builder=context_builder,
         tool_registry=tool_registry,
         state_store=state_store,
     )
-    llm_runtime = LLMRuntime(publisher=publisher, factory=LLMFactory())
-    tool_runtime = ToolRuntime(publisher=publisher, registry=tool_registry)
+    llm_runtime = LLMRuntime(bus_router=bus_router, factory=LLMFactory())
+    tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry)
 
     gateway = Gateway(publisher=publisher)
     ws_channel = WebSocketChannel("websocket")
     gateway.register_channel(ws_channel)
 
+    await persister.start()
+    await bus_router.start()
     await agent_runtime.start()
     await llm_runtime.start()
     await tool_runtime.start()
@@ -90,7 +96,7 @@ async def test_gateway_with_websocket_channel(tmp_path: Path):
 
     try:
         event = EventEnvelope(
-            type=UI_USER_INPUT,
+            type=USER_INPUT,
             session_id=session_id,
             turn_id=turn_id,
             source="websocket",
@@ -105,6 +111,8 @@ async def test_gateway_with_websocket_channel(tmp_path: Path):
         await agent_runtime.stop()
         await llm_runtime.stop()
         await tool_runtime.stop()
+        await bus_router.stop()
+        await persister.stop()
 
     event_types = [event.type for event in collected]
     assert "agent.step_started" in event_types

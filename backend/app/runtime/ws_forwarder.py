@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from app.events.envelope import EventEnvelope
-from app.events.types import AGENT_STEP_COMPLETED, AGENT_STEP_STARTED, ERROR_RAISED, LLM_CALL_COMPLETED, LLM_CALL_REQUESTED, LLM_CALL_RESULT, TOOL_CALL_COMPLETED, TOOL_CALL_REQUESTED
+from app.events.types import AGENT_STEP_COMPLETED, AGENT_STEP_STARTED, ERROR_RAISED, LLM_CALL_COMPLETED, LLM_CALL_REQUESTED, LLM_CALL_RESULT, TOOL_CALL_REQUESTED, TOOL_CALL_RESULT
 from app.runtime.publisher import EventPublisher
 
 AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
@@ -111,7 +111,7 @@ class WebSocketForwarder:
                 },
                 "timestamp": event.ts,
             }
-        if event.type == TOOL_CALL_COMPLETED:
+        if event.type == TOOL_CALL_RESULT:
             return {
                 "type": "tool_result",
                 "session_id": event.session_id,

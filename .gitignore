@@ -6,6 +6,7 @@ Thumbs.db
 .claude/
 *.swp
 *.swo
+.claude/
 
 # Node.js
 node_modules/

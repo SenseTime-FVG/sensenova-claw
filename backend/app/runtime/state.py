@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.db.repository import Repository
 
 
 @dataclass
@@ -49,3 +52,11 @@ class SessionStateStore:
     def mark_first_turn_done(self, session_id: str) -> None:
         """标记第一轮对话已完成"""
         self._session_first_turn[session_id] = True
+
+    async def load_session_history(self, session_id: str, repo: Repository) -> list[dict[str, Any]]:
+        """从 SQLite 加载会话历史到内存（惰性加载）"""
+        if session_id in self._session_history:
+            return self._session_history[session_id]
+        messages = await repo.get_session_messages(session_id)
+        self._session_history[session_id] = messages
+        return messages

@@ -8,12 +8,13 @@ from typing import Any
 import httpx
 
 from app.core.config import config
-from app.tools.base import Tool
+from app.tools.base import Tool, ToolRiskLevel
 
 
 class BashCommandTool(Tool):
     name = "bash_command"
     description = "执行 shell 命令"
+    risk_level = ToolRiskLevel.HIGH
     parameters = {
         "type": "object",
         "properties": {
@@ -105,9 +106,11 @@ class FetchUrlTool(Tool):
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             resp = await client.request(method, url)
         text = resp.text
-        max_chars = int(config.get("tools.fetch_url.max_size_mb", 5) * 1024 * 1024)
-        if len(text) > max_chars:
-            text = text[:max_chars]
+        # 内存保护截断：限制 HTTP 响应体大小，防止 OOM
+        max_size = int(config.get("tools.fetch_url.max_response_mb", 10) * 1024 * 1024)
+        if len(text) > max_size:
+            text = text[:max_size]
+        # 返回原始内容，由 ToolRuntime 层做 token 截断
         return {"url": str(resp.url), "status_code": resp.status_code, "content": text}
 
 
@@ -139,13 +142,29 @@ class ReadFileTool(Tool):
 
 class WriteFileTool(Tool):
     name = "write_file"
-    description = "写入文本文件"
+    description = "写入文本文件，支持全量覆盖、追加、插入、或替换指定行范围"
+    risk_level = ToolRiskLevel.MEDIUM
     parameters = {
         "type": "object",
         "properties": {
-            "file_path": {"type": "string"},
-            "content": {"type": "string"},
-            "mode": {"type": "string", "enum": ["write", "append"], "default": "write"},
+            "file_path": {"type": "string", "description": "文件路径"},
+            "content": {"type": "string", "description": "要写入的内容"},
+            "mode": {
+                "type": "string",
+                "enum": ["write", "append", "insert"],
+                "default": "write",
+                "description": "write=覆盖全文, append=追加到末尾, insert=在start_line处插入或替换",
+            },
+            "start_line": {
+                "type": "integer",
+                "description": "起始行号（从1开始），仅 mode=insert 时有效",
+            },
+            "end_line": {
+                "type": "integer",
+                "description": "结束行号（包含），仅 mode=insert 时有效。"
+                "省略时为纯插入（原内容下移）；"
+                "指定时替换 start_line 到 end_line 的内容",
+            },
         },
         "required": ["file_path", "content"],
     }
@@ -155,50 +174,42 @@ class WriteFileTool(Tool):
         file_path.parent.mkdir(parents=True, exist_ok=True)
         content = str(kwargs.get("content", ""))
         mode = str(kwargs.get("mode", "write"))
+        start_line = kwargs.get("start_line")
+        end_line = kwargs.get("end_line")
+
         if mode == "append":
-            file_path.open("a", encoding="utf-8").write(content)
+            # 追加到文件末尾
+            with file_path.open("a", encoding="utf-8") as f:
+                f.write(content)
+
+        elif mode == "insert" and start_line is not None:
+            if not file_path.exists():
+                # 文件不存在时等同于 write
+                file_path.write_text(content, encoding="utf-8")
+            else:
+                lines = file_path.read_text(encoding="utf-8").splitlines(keepends=True)
+                idx = max(int(start_line) - 1, 0)
+                new_lines = content.splitlines(keepends=True)
+                # 确保 content 末尾换行符被保留
+                if content and not content.endswith("\n") and new_lines:
+                    pass  # splitlines(keepends=True) 已处理
+                elif content.endswith("\n") and (not new_lines or not new_lines[-1].endswith("\n")):
+                    new_lines.append("")
+
+                if end_line is not None:
+                    # 替换模式：删除 [start_line, end_line] 范围的行，插入新内容
+                    end_idx = min(int(end_line), len(lines))
+                    lines[idx:end_idx] = new_lines
+                else:
+                    # 纯插入模式：在 start_line 之前插入，原内容下移
+                    lines[idx:idx] = new_lines
+
+                file_path.write_text("".join(lines), encoding="utf-8")
+
         else:
+            # 默认全量覆盖
             file_path.write_text(content, encoding="utf-8")
-        return {"success": True, "file_path": str(file_path), "size": len(content)}
+
+        return {"success": True, "file_path": str(file_path), "size": len(content), "mode": mode}
 
 
-class SearchSkillTool(Tool):
-    name = "search_skill"
-    description = "搜索可用 skill"
-    parameters = {
-        "type": "object",
-        "properties": {
-            "keyword": {"type": "string"},
-        },
-    }
-
-    async def execute(self, **kwargs: Any) -> Any:
-        keyword = str(kwargs.get("keyword", "")).lower()
-        skills = [
-            {"skill_name": "skill-creator", "description": "创建技能"},
-            {"skill_name": "skill-installer", "description": "安装技能"},
-        ]
-        if not keyword:
-            return skills
-        return [s for s in skills if keyword in s["skill_name"].lower() or keyword in s["description"].lower()]
-
-
-class LoadSkillTool(Tool):
-    name = "load_skill"
-    description = "加载并执行 skill（v0.1 先返回占位结果）"
-    parameters = {
-        "type": "object",
-        "properties": {
-            "skill_name": {"type": "string"},
-            "skill_args": {"type": "object"},
-        },
-        "required": ["skill_name"],
-    }
-
-    async def execute(self, **kwargs: Any) -> Any:
-        return {
-            "success": True,
-            "message": "v0.1 未接入真实技能执行引擎",
-            "skill_name": kwargs.get("skill_name"),
-            "skill_args": kwargs.get("skill_args", {}),
-        }
