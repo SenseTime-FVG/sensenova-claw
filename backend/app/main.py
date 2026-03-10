@@ -5,6 +5,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +16,9 @@ from app.core.logging import setup_logging
 from app.db.repository import Repository
 from app.events.bus import PublicEventBus
 from app.events.envelope import EventEnvelope
-from app.events.types import UI_TURN_CANCEL_REQUESTED, UI_USER_INPUT
+from app.events.persister import EventPersister
+from app.events.router import BusRouter
+from app.events.types import USER_INPUT, USER_TURN_CANCEL_REQUESTED
 from app.gateway.channels.websocket_channel import WebSocketChannel
 from app.gateway.gateway import Gateway
 from app.llm.factory import LLMFactory
@@ -26,6 +29,7 @@ from app.runtime.publisher import EventPublisher
 from app.runtime.state import SessionStateStore
 from app.runtime.title_runtime import TitleRuntime
 from app.runtime.tool_runtime import ToolRuntime
+from app.skills.registry import SkillRegistry
 from app.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -36,6 +40,8 @@ class Services:
     repo: Repository
     bus: PublicEventBus
     publisher: EventPublisher
+    bus_router: BusRouter
+    persister: EventPersister
     agent_runtime: AgentRuntime
     llm_runtime: LLMRuntime
     tool_runtime: ToolRuntime
@@ -52,27 +58,47 @@ async def lifespan(app: FastAPI):
     await repo.init()
 
     bus = PublicEventBus()
-    publisher = EventPublisher(bus=bus, repo=repo)
+    publisher = EventPublisher(bus=bus)
+
+    # 事件持久化：独立订阅 PublicEventBus
+    persister = EventPersister(bus=bus, repo=repo)
+
+    # 双总线路由器
+    bus_router = BusRouter(
+        public_bus=bus,
+        ttl_seconds=int(config.get("bus.private_bus_ttl", 3600)),
+        gc_interval=int(config.get("bus.gc_interval", 60)),
+    )
 
     tool_registry = ToolRegistry()
     state_store = SessionStateStore()
-    context_builder = ContextBuilder()
 
+    # 初始化 SkillRegistry
+    workspace_dir = Path(config.get("system.workspace_dir", ".")) / "skills"
+    skill_registry = SkillRegistry(workspace_dir=workspace_dir)
+    skill_registry.load_skills(config.data)
+
+    context_builder = ContextBuilder(skill_registry=skill_registry)
+
+    # Runtime 使用 BusRouter（管理者模式）
     agent_runtime = AgentRuntime(
-        publisher=publisher,
+        bus_router=bus_router,
         repo=repo,
         context_builder=context_builder,
         tool_registry=tool_registry,
         state_store=state_store,
     )
-    llm_runtime = LLMRuntime(publisher=publisher, factory=LLMFactory())
-    tool_runtime = ToolRuntime(publisher=publisher, registry=tool_registry)
-    title_runtime = TitleRuntime(publisher=publisher, repo=repo)
+    llm_runtime = LLMRuntime(bus_router=bus_router, factory=LLMFactory())
+    tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry)
+    title_runtime = TitleRuntime(bus=bus, repo=repo)
 
     gateway = Gateway(publisher=publisher)
     ws_channel = WebSocketChannel("websocket")
     gateway.register_channel(ws_channel)
 
+    # 启动顺序：persister → bus_router → runtimes → gateway
+    await persister.start()
+    await bus_router.start()
     await agent_runtime.start()
     await llm_runtime.start()
     await tool_runtime.start()
@@ -83,6 +109,8 @@ async def lifespan(app: FastAPI):
         repo=repo,
         bus=bus,
         publisher=publisher,
+        bus_router=bus_router,
+        persister=persister,
         agent_runtime=agent_runtime,
         llm_runtime=llm_runtime,
         tool_runtime=tool_runtime,
@@ -90,16 +118,19 @@ async def lifespan(app: FastAPI):
         gateway=gateway,
         ws_channel=ws_channel,
     )
-    logger.info("AgentOS backend started")
+    logger.info("AgentOS backend started (dual-bus architecture)")
 
     try:
         yield
     finally:
+        # 关闭顺序：runtimes → gateway → bus_router → persister
         await agent_runtime.stop()
         await llm_runtime.stop()
         await tool_runtime.stop()
         await title_runtime.stop()
         await gateway.stop()
+        await bus_router.stop()
+        await persister.stop()
         logger.info("AgentOS backend stopped")
 
 
@@ -211,7 +242,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if session_id:
                     await gateway.publish_from_channel(
                         EventEnvelope(
-                            type=UI_TURN_CANCEL_REQUESTED,
+                            type=USER_TURN_CANCEL_REQUESTED,
                             session_id=session_id,
                             source="websocket",
                             payload={"reason": payload.get("reason", "user_cancel")},
@@ -238,7 +269,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 turn_id = f"turn_{uuid.uuid4().hex[:12]}"
                 await gateway.publish_from_channel(
                     EventEnvelope(
-                        type=UI_USER_INPUT,
+                        type=USER_INPUT,
                         session_id=session_id,
                         turn_id=turn_id,
                         source="websocket",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from copy import deepcopy
@@ -7,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -36,6 +39,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "timeout": 60,
             "max_retries": 3,
         },
+        "anthropic": {
+            "api_key": "${ANTHROPIC_API_KEY}",
+            "base_url": "${ANTHROPIC_BASE_URL}",
+            "default_model": "claude-opus-4-20250514",
+            "timeout": 60,
+            "max_retries": 3,
+        },
     },
     "agent": {
         "provider": "mock",
@@ -53,6 +63,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "timeout": 15,
             "allowed_extensions": [".txt", ".md", ".py", ".json", ".yaml", ".yml", ".ts", ".tsx", ".js", ".jsx"],
         },
+    },
+    "skills": {
+        "entries": {},
+    },
+    "bus": {
+        "private_bus_ttl": 3600,    # 私有总线存活时间（秒），超时未活跃则回收
+        "gc_interval": 60,          # GC 扫描间隔（秒）
     },
     "frontend": {
         "backend_ws_url": "ws://localhost:8000/ws",
@@ -82,6 +99,8 @@ class Config:
 
         user_config = Path.home() / ".SenseAssistant" / "config.yaml"
         user_override = self._load_yaml_if_exists(user_config)
+        if user_override:
+            logger.info(f"Loaded user config from {user_config}")
         provider_configured = provider_configured or self._has_path(user_override, ("agent", "provider"))
         default_model_configured = default_model_configured or self._has_path(user_override, ("agent", "default_model"))
 
@@ -91,6 +110,8 @@ class Config:
         for project_dir in reversed(self._project_dirs()):
             project_config = project_dir / ".agentos" / "config.yaml"
             project_override = self._load_yaml_if_exists(project_config)
+            if project_override:
+                logger.info(f"Loaded project config from {project_config}")
             provider_configured = provider_configured or self._has_path(project_override, ("agent", "provider"))
             default_model_configured = default_model_configured or self._has_path(
                 project_override, ("agent", "default_model")
@@ -103,6 +124,7 @@ class Config:
         for project_dir in reversed(self._project_dirs()):
             legacy_path = project_dir / "config.yml"
             if legacy_path.exists():
+                logger.info(f"Loaded legacy config from {legacy_path}")
                 with legacy_path.open("r", encoding="utf-8") as f:
                     legacy = yaml.safe_load(f) or {}
                 if isinstance(legacy, dict):
@@ -203,3 +225,4 @@ class Config:
 
 
 config = Config()
+logger.info(f"Config loaded: {config}")

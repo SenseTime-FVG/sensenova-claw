@@ -12,7 +12,7 @@ from app.core.logging import setup_logging
 from app.db.repository import Repository
 from app.events.bus import PublicEventBus
 from app.events.envelope import EventEnvelope
-from app.events.types import AGENT_STEP_COMPLETED, UI_USER_INPUT
+from app.events.types import AGENT_STEP_COMPLETED, USER_INPUT
 from app.llm.factory import LLMFactory
 from app.runtime.agent_runtime import AgentRuntime
 from app.runtime.context_builder import ContextBuilder
@@ -85,7 +85,7 @@ async def test_backend_e2e_event_flow(tmp_path: Path):
     try:
         await publisher.publish(
             EventEnvelope(
-                type=UI_USER_INPUT,
+                type=USER_INPUT,
                 session_id=session_id,
                 turn_id=turn_id,
                 source="ui",

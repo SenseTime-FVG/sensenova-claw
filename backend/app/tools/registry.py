@@ -4,9 +4,7 @@ from app.tools.base import Tool
 from app.tools.builtin import (
     BashCommandTool,
     FetchUrlTool,
-    LoadSkillTool,
     ReadFileTool,
-    SearchSkillTool,
     SerperSearchTool,
     WriteFileTool,
 )
@@ -24,8 +22,6 @@ class ToolRegistry:
             FetchUrlTool(),
             ReadFileTool(),
             WriteFileTool(),
-            SearchSkillTool(),
-            LoadSkillTool(),
         ]:
             self.register(tool)
 

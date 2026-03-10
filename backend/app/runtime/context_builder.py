@@ -3,12 +3,18 @@ from __future__ import annotations
 import json
 import platform
 from datetime import datetime
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from app.core.config import config
 
+if TYPE_CHECKING:
+    from app.skills.registry import SkillRegistry
+
 
 class ContextBuilder:
+    def __init__(self, skill_registry: SkillRegistry | None = None):
+        self.skill_registry = skill_registry
+
     def build_messages(self, user_input: str, history: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         # 获取系统信息和当前时间
         system_type = platform.system()
@@ -16,6 +22,16 @@ class ContextBuilder:
 
         base_prompt = config.get("agent.system_prompt", "")
         system_prompt = f"{base_prompt}\n\n系统类型: {system_type}\n当前时间: {current_time}"
+
+        # 注入 skills
+        if self.skill_registry:
+            skills = self.skill_registry.get_all()
+            if skills:
+                skills_section = "\n\n<available_skills>\n"
+                for skill in skills:
+                    skills_section += f"- {skill.name}: {skill.description}\n"
+                skills_section += "</available_skills>"
+                system_prompt += skills_section
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},

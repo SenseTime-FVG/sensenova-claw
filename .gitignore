@@ -5,6 +5,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+.claude/
 
 # Node.js
 node_modules/
