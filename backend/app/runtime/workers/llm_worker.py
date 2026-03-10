@@ -75,7 +75,12 @@ class LLMSessionWorker(SessionWorker):
                     source="llm",
                     payload={
                         "llm_call_id": llm_call_id,
-                        "response": {"content": resp.get("content", ""), "tool_calls": resp.get("tool_calls", [])},
+                        "response": {
+                            "content": resp.get("content", ""),
+                            "tool_calls": resp.get("tool_calls", []),
+                            **({"reasoning_details": resp["reasoning_details"]} if resp.get("reasoning_details") else {}),
+                            **({"provider_specific_fields": resp["provider_specific_fields"]} if resp.get("provider_specific_fields") else {}),
+                        },
                         "usage": resp.get("usage", {}),
                         "finish_reason": resp.get("finish_reason", "stop"),
                     },

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -27,18 +28,22 @@ class BashCommandTool(Tool):
     async def execute(self, **kwargs: Any) -> Any:
         command = str(kwargs.get("command", ""))
         cwd = kwargs.get("working_dir") or "."
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, err = await proc.communicate()
-        return {
-            "return_code": proc.returncode,
-            "stdout": out.decode("utf-8", errors="replace"),
-            "stderr": err.decode("utf-8", errors="replace"),
-        }
+
+        def _run() -> dict[str, Any]:
+            proc = subprocess.run(
+                command,
+                cwd=cwd,
+                shell=True,
+                capture_output=True,
+                timeout=300,
+            )
+            return {
+                "return_code": proc.returncode,
+                "stdout": proc.stdout.decode("utf-8", errors="replace"),
+                "stderr": proc.stderr.decode("utf-8", errors="replace"),
+            }
+
+        return await asyncio.to_thread(_run)
 
 
 class SerperSearchTool(Tool):

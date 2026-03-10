@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import AsyncIterator
 
 from app.events.envelope import EventEnvelope
@@ -31,9 +32,15 @@ class PublicEventBus:
 class PrivateEventBus:
     """会话私有总线，物理隔离单个 session 的事件流"""
 
-    def __init__(self, session_id: str, public_bus: PublicEventBus):
+    def __init__(
+        self,
+        session_id: str,
+        public_bus: PublicEventBus,
+        on_forward: Callable[[str], None] | None = None,
+    ):
         self.session_id = session_id
         self._public_bus = public_bus
+        self._on_forward = on_forward
         self._subscribers: set[asyncio.Queue[EventEnvelope]] = set()
         self._closed = False
 
@@ -42,7 +49,10 @@ class PrivateEventBus:
         # 1. 分发给本总线的所有私有订阅者
         for q in list(self._subscribers):
             await q.put(event)
-        # 2. 回流到 PublicEventBus（供 Gateway、持久化、监控消费）
+        # 2. 标记此事件已经投递过私有订阅者，防止 BusRouter 重复路由
+        if self._on_forward:
+            self._on_forward(event.event_id)
+        # 3. 回流到 PublicEventBus（供 Gateway、持久化、监控消费）
         await self._public_bus.publish(event)
 
     async def deliver(self, event: EventEnvelope) -> None:

@@ -37,6 +37,9 @@ class BusRouter:
         self._gc_task: asyncio.Task | None = None
         self._worker_factories: list[Callable[[str, PrivateEventBus], Awaitable[None]]] = []
         self._on_destroy_callbacks: list[Callable[[str], Awaitable[None]]] = []
+        # PrivateEventBus 回流到 PublicEventBus 时标记 event_id，
+        # BusRouter 路由时跳过这些事件，防止 Worker 重复收到。
+        self._forwarded_ids: set[str] = set()
 
     @property
     def public_bus(self) -> PublicEventBus:
@@ -48,10 +51,15 @@ class BusRouter:
             self._private_buses[session_id] = PrivateEventBus(
                 session_id=session_id,
                 public_bus=self._public_bus,
+                on_forward=self._mark_forwarded,
             )
             logger.info("Created PrivateEventBus for session %s", session_id)
         self._last_active[session_id] = time.time()
         return self._private_buses[session_id]
+
+    def _mark_forwarded(self, event_id: str) -> None:
+        """PrivateEventBus 回流事件时调用，标记 event_id 避免重复路由"""
+        self._forwarded_ids.add(event_id)
 
     def get(self, session_id: str) -> PrivateEventBus | None:
         """获取已存在的私有总线"""
@@ -112,6 +120,13 @@ class BusRouter:
                 continue
             # system.* 事件不路由到私有总线
             if event.type.startswith("system."):
+                continue
+
+            # 跳过从 PrivateEventBus 回流的事件：
+            # 这些事件已经在 PrivateEventBus.publish() 中投递给了私有订阅者，
+            # 不需要再通过 deliver() 重复投递。
+            if event.event_id in self._forwarded_ids:
+                self._forwarded_ids.discard(event.event_id)
                 continue
 
             bus = self._private_buses.get(event.session_id)

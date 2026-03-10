@@ -21,7 +21,7 @@ class SkillRegistry:
         self._user_dir = user_dir or Path.home() / ".agentos" / "skills"
 
     def load_skills(self, config: dict[str, Any]) -> None:
-        """从用户目录和工作区目录加载 skills"""
+        """从用户目录、工作区目录和额外目录加载 skills"""
         # 先加载用户级 skills
         if self._user_dir.exists():
             self._load_from_dir(self._user_dir, config)
@@ -29,6 +29,13 @@ class SkillRegistry:
         # 再加载工作区 skills（覆盖同名）
         if self._workspace_dir and self._workspace_dir.exists():
             self._load_from_dir(self._workspace_dir, config)
+
+        # 加载 extra_dirs 中配置的额外 skill 目录
+        extra_dirs = config.get("skills", {}).get("extra_dirs", [])
+        for dir_path in extra_dirs:
+            p = Path(dir_path)
+            if p.exists():
+                self._load_from_dir(p, config)
 
     def _load_from_dir(self, base_dir: Path, config: dict[str, Any]) -> None:
         """从目录加载所有 SKILL.md"""

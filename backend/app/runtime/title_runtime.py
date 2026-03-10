@@ -73,7 +73,9 @@ class TitleRuntime:
                 {"role": "user", "content": f"用户问题：{user_input}\n\n请生成会话标题："},
             ]
 
-            response = await provider.chat(messages=messages, tools=[], temperature=0.7)
+            from app.core.config import config
+            model = config.get("agent.default_model", "")
+            response = await provider.call(model=model, messages=messages, tools=None, temperature=0.7)
             title = response.get("content", "").strip()
 
             if len(title) > 10:

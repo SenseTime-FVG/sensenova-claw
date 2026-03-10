@@ -324,6 +324,60 @@ async def test_session_isolation():
     await router.stop()
 
 
+# ---------- 去重 ----------
+
+
+@pytest.mark.asyncio
+async def test_no_duplicate_delivery_to_workers():
+    """Worker 从 PrivateEventBus 发布事件后，不应再被 BusRouter 重复投递"""
+    public = PublicEventBus()
+    router = BusRouter(public_bus=public, ttl_seconds=3600, gc_interval=9999)
+
+    worker_events: list[EventEnvelope] = []
+
+    async def factory(session_id: str, private_bus: PrivateEventBus):
+        async def worker_loop():
+            async for event in private_bus.subscribe():
+                worker_events.append(event)
+        asyncio.create_task(worker_loop())
+
+    router.register_worker_factory(factory)
+    await router.start()
+    await asyncio.sleep(0.05)
+
+    # 1. 外部发布 USER_INPUT → BusRouter 创建 PrivateEventBus + Worker → deliver
+    await public.publish(EventEnvelope(
+        type=USER_INPUT,
+        session_id="sess_dedup",
+        source="websocket",
+        payload={"content": "hello"},
+    ))
+    await asyncio.sleep(0.1)
+
+    assert len([e for e in worker_events if e.type == USER_INPUT]) == 1
+
+    # 2. 模拟 Worker 在 PrivateEventBus 上 publish 事件
+    private_bus = router.get("sess_dedup")
+    assert private_bus is not None
+
+    await private_bus.publish(EventEnvelope(
+        type=AGENT_STEP_STARTED,
+        session_id="sess_dedup",
+        source="agent",
+        payload={"step": 1},
+    ))
+    await asyncio.sleep(0.1)
+
+    # Worker 应该只收到 1 次 AGENT_STEP_STARTED（来自 PrivateEventBus.publish 的直接投递）
+    step_events = [e for e in worker_events if e.type == AGENT_STEP_STARTED]
+    assert len(step_events) == 1, f"期望 1 次，实际 {len(step_events)} 次"
+
+    await router.stop()
+
+
+# ---------- GC ----------
+
+
 @pytest.mark.asyncio
 async def test_gc_cleans_expired_sessions():
     """GC 应清理超时的 session"""

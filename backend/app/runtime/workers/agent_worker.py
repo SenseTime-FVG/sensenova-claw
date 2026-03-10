@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 import uuid
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from app.core.config import config
 from app.events.envelope import EventEnvelope
@@ -59,8 +60,10 @@ class AgentSessionWorker(SessionWorker):
             context_files = await load_workspace_files(workspace_dir)
             self.rt.state_store.mark_first_turn_done(self.session_id)
 
-        # 获取历史消息
-        history = self.rt.state_store.get_session_history(self.session_id)
+        # 从内存或 SQLite 惰性加载历史消息
+        history = await self.rt.state_store.load_session_history(
+            self.session_id, self.rt.repo,
+        )
 
         # v0.6: 加载 MEMORY.md 注入 system prompt
         memory_context = None
@@ -73,6 +76,8 @@ class AgentSessionWorker(SessionWorker):
             context_files=context_files,
         )
         state = TurnState(turn_id=turn_id, user_input=content, messages=messages)
+        # 记录新消息的起始位置：跳过 system prompt(1条) + 旧历史
+        state.history_offset = 1 + len(history)
         self.rt.state_store.set_turn(self.session_id, state)
 
         await self.bus.publish(
@@ -117,9 +122,13 @@ class AgentSessionWorker(SessionWorker):
         tool_calls = response.get("tool_calls", [])
 
         # 将 LLM 响应添加到消息历史
-        assistant_msg = {"role": "assistant", "content": content}
+        assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
         if tool_calls:
             assistant_msg["tool_calls"] = tool_calls
+        # 透传 Gemini thought signature 相关字段
+        for extra_key in ("reasoning_details", "provider_specific_fields"):
+            if response.get(extra_key):
+                assistant_msg[extra_key] = response[extra_key]
         state.messages.append(assistant_msg)
 
     async def _handle_llm_completed(self, event: EventEnvelope) -> None:
@@ -168,8 +177,27 @@ class AgentSessionWorker(SessionWorker):
         state.final_response = content
         await self.rt.repo.complete_turn(event.turn_id, agent_response=content)
 
-        # 保存本轮对话到历史
-        self.rt.state_store.append_to_history(event.session_id, state.messages)
+        # 只保存本轮新消息到历史（跳过 system prompt + 旧历史）
+        new_messages = state.messages[state.history_offset:]
+        self.rt.state_store.append_to_history(event.session_id, new_messages)
+
+        # 持久化新消息到 SQLite
+        for msg in new_messages:
+            role = msg.get("role", "")
+            if role == "system":
+                continue
+            tool_calls_json = None
+            if msg.get("tool_calls"):
+                tool_calls_json = json.dumps(msg["tool_calls"], ensure_ascii=False)
+            await self.rt.repo.save_message(
+                session_id=event.session_id,
+                turn_id=event.turn_id,
+                role=role,
+                content=msg.get("content"),
+                tool_calls=tool_calls_json,
+                tool_call_id=msg.get("tool_call_id"),
+                tool_name=msg.get("name"),
+            )
 
         await self.bus.publish(
             EventEnvelope(

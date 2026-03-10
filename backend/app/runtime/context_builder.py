@@ -96,7 +96,8 @@ class ContextBuilder:
             return None
         lines = ["<available_skills>"]
         for skill in skills:
-            lines.append(f"- {skill.name}: {skill.description}")
+            skill_md = skill.path / "SKILL.md"
+            lines.append(f"- {skill.name}: {skill.description} <location>{skill_md}</location>")
         lines.append("</available_skills>")
         return "\n".join(lines)
 

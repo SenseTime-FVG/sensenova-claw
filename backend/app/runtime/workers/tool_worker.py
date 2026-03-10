@@ -234,7 +234,7 @@ class ToolSessionWorker(SessionWorker):
             result = self._truncate_result(result, tool_call_id)
         except Exception as exc:  # noqa: BLE001
             success = False
-            error = str(exc)
+            error = str(exc) or f"{type(exc).__name__}"
             result = f"工具执行失败: {error}"
             logger.exception("tool execution failed")
             await self.bus.publish(
