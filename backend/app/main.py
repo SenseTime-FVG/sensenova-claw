@@ -26,11 +26,13 @@ from app.runtime.agent_runtime import AgentRuntime
 from app.runtime.context_builder import ContextBuilder
 from app.runtime.llm_runtime import LLMRuntime
 from app.runtime.publisher import EventPublisher
+from app.runtime.session_maintenance import SessionMaintenance
 from app.runtime.state import SessionStateStore
 from app.runtime.title_runtime import TitleRuntime
 from app.runtime.tool_runtime import ToolRuntime
 from app.skills.registry import SkillRegistry
 from app.tools.registry import ToolRegistry
+from app.workspace.manager import ensure_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,14 @@ async def lifespan(app: FastAPI):
     repo = Repository()
     await repo.init()
 
+    # 确保 workspace 目录和引导文件存在
+    workspace_dir = config.get("system.workspace_dir", "./SenseAssistant/workspace")
+    await ensure_workspace(workspace_dir)
+
+    # 会话维护：清理过期会话
+    maintenance = SessionMaintenance(repo=repo)
+    await maintenance.run_maintenance()
+
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
 
@@ -74,11 +84,37 @@ async def lifespan(app: FastAPI):
     state_store = SessionStateStore()
 
     # 初始化 SkillRegistry
-    workspace_dir = Path(config.get("system.workspace_dir", ".")) / "skills"
-    skill_registry = SkillRegistry(workspace_dir=workspace_dir)
+    skills_dir = Path(config.get("system.workspace_dir", ".")) / "skills"
+    skill_registry = SkillRegistry(workspace_dir=skills_dir)
     skill_registry.load_skills(config.data)
 
-    context_builder = ContextBuilder(skill_registry=skill_registry)
+    context_builder = ContextBuilder(skill_registry=skill_registry, tool_registry=tool_registry)
+
+    # v0.6: 初始化记忆系统
+    memory_manager = None
+    memory_enabled = config.get("memory.enabled", False)
+
+    if memory_enabled:
+        from app.memory.config import MemoryConfig
+        from app.memory.manager import MemoryManager
+        from app.memory.tools import MemorySearchTool
+
+        mem_config = MemoryConfig.from_dict(config.data)
+        db_path = repo.db_path.parent / "memory_index.db"
+        memory_manager = MemoryManager(
+            workspace_dir=str(workspace_dir),
+            config=mem_config,
+            db_path=db_path,
+        )
+        await memory_manager.sync_index()
+
+        # 为已有的 chunks 生成嵌入向量
+        await memory_manager.embed_pending_chunks()
+
+        if mem_config.search.enabled:
+            tool_registry.register(MemorySearchTool(memory_manager))
+
+        logger.info("Memory system enabled (workspace=%s)", workspace_dir)
 
     # Runtime 使用 BusRouter（管理者模式）
     agent_runtime = AgentRuntime(
@@ -87,6 +123,7 @@ async def lifespan(app: FastAPI):
         context_builder=context_builder,
         tool_registry=tool_registry,
         state_store=state_store,
+        memory_manager=memory_manager,
     )
     llm_runtime = LLMRuntime(bus_router=bus_router, factory=LLMFactory())
     tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry)

@@ -20,5 +20,9 @@ TOOL_CALL_STARTED = "tool.call_started"
 TOOL_CALL_RESULT = "tool.call_result"
 TOOL_CALL_COMPLETED = "tool.call_completed"
 
+# Tool 权限确认事件
+TOOL_CONFIRMATION_REQUESTED = "tool.confirmation_requested"
+TOOL_CONFIRMATION_RESPONSE = "tool.confirmation_response"
+
 # 错误事件
 ERROR_RAISED = "error.raised"

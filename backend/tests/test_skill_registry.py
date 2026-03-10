@@ -10,13 +10,7 @@ def test_parse_skill():
         skill_dir = Path(tmpdir) / "test-skill"
         skill_dir.mkdir()
         skill_md = skill_dir / "SKILL.md"
-        skill_md.write_text("""---
-name: test-skill
-description: 测试技能
----
-
-这是技能内容
-""")
+        skill_md.write_text("---\nname: test-skill\ndescription: 测试技能\n---\n\n这是技能内容\n", encoding="utf-8")
 
         registry = SkillRegistry()
         skill = registry._parse_skill(skill_md)
@@ -32,12 +26,7 @@ def test_load_skills():
     with tempfile.TemporaryDirectory() as tmpdir:
         skill_dir = Path(tmpdir) / "skill1"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("""---
-name: skill1
-description: 技能1
----
-内容1
-""")
+        (skill_dir / "SKILL.md").write_text("---\nname: skill1\ndescription: 技能1\n---\n内容1\n", encoding="utf-8")
 
         registry = SkillRegistry(workspace_dir=Path(tmpdir))
         registry.load_skills({})
@@ -52,12 +41,7 @@ def test_skill_disabled():
     with tempfile.TemporaryDirectory() as tmpdir:
         skill_dir = Path(tmpdir) / "skill1"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("""---
-name: skill1
-description: 技能1
----
-内容
-""")
+        (skill_dir / "SKILL.md").write_text("---\nname: skill1\ndescription: 技能1\n---\n内容\n", encoding="utf-8")
 
         config = {"skills": {"entries": {"skill1": {"enabled": False}}}}
         registry = SkillRegistry(workspace_dir=Path(tmpdir))
@@ -72,22 +56,12 @@ def test_workspace_overrides_user():
         # 用户级 skill
         user_skill = Path(user_dir) / "skill1"
         user_skill.mkdir()
-        (user_skill / "SKILL.md").write_text("""---
-name: skill1
-description: 用户级技能
----
-用户内容
-""")
+        (user_skill / "SKILL.md").write_text("---\nname: skill1\ndescription: 用户级技能\n---\n用户内容\n", encoding="utf-8")
 
         # 工作区 skill
         ws_skill = Path(workspace_dir) / "skill1"
         ws_skill.mkdir()
-        (ws_skill / "SKILL.md").write_text("""---
-name: skill1
-description: 工作区技能
----
-工作区内容
-""")
+        (ws_skill / "SKILL.md").write_text("---\nname: skill1\ndescription: 工作区技能\n---\n工作区内容\n", encoding="utf-8")
 
         registry = SkillRegistry(workspace_dir=Path(workspace_dir), user_dir=Path(user_dir))
         registry.load_skills({})

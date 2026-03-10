@@ -57,19 +57,49 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "tools": {
         "bash_command": {"enabled": True, "timeout": 15},
         "serper_search": {"enabled": True, "api_key": "${SERPER_API_KEY}", "timeout": 15, "max_results": 10},
-        "fetch_url": {"enabled": True, "timeout": 15, "max_size_mb": 5},
+        "fetch_url": {"enabled": True, "timeout": 15, "max_response_mb": 10},
         "file_operations": {
             "enabled": True,
             "timeout": 15,
             "allowed_extensions": [".txt", ".md", ".py", ".json", ".yaml", ".yml", ".ts", ".tsx", ".js", ".jsx"],
         },
+        "result_truncation": {
+            "max_tokens": 8000,             # Token 截断阈值（ToolRuntime 层）
+            "save_dir": "workspace",        # 完整结果保存目录
+        },
+        "permission": {
+            "enabled": False,               # 是否启用权限管理
+            "auto_approve_levels": ["low"], # 自动批准的风险等级
+            "confirmation_timeout": 60,     # 确认超时时间（秒）
+        },
     },
     "skills": {
         "entries": {},
     },
+    "session": {
+        "maintenance": {
+            "prune_after_days": 30,
+            "max_sessions": 500,
+        },
+    },
     "bus": {
         "private_bus_ttl": 3600,    # 私有总线存活时间（秒），超时未活跃则回收
         "gc_interval": 60,          # GC 扫描间隔（秒）
+    },
+    "memory": {
+        "enabled": False,
+        "bootstrap_max_chars": 8000,
+        "search": {
+            "enabled": True,
+            "embedding_model": "text-embedding-3-small",
+            "chunk_size": 400,
+            "chunk_overlap": 80,
+            "hybrid": {
+                "vector_weight": 0.7,
+                "text_weight": 0.3,
+                "candidate_multiplier": 4,
+            },
+        },
     },
     "frontend": {
         "backend_ws_url": "ws://localhost:8000/ws",
@@ -79,8 +109,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 class Config:
-    def __init__(self, project_root: Path | None = None):
+    def __init__(self, project_root: Path | None = None, user_config_dir: Path | None = None):
         self.project_root = project_root or Path.cwd()
+        self._user_config_dir = user_config_dir if user_config_dir is not None else Path.home() / ".SenseAssistant"
         self.data = self._load_config()
 
     def _load_yaml_if_exists(self, path: Path) -> dict[str, Any]:
@@ -97,7 +128,7 @@ class Config:
         provider_configured = False
         default_model_configured = False
 
-        user_config = Path.home() / ".SenseAssistant" / "config.yaml"
+        user_config = self._user_config_dir / "config.yaml"
         user_override = self._load_yaml_if_exists(user_config)
         if user_override:
             logger.info(f"Loaded user config from {user_config}")

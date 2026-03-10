@@ -49,7 +49,7 @@ async def test_gateway_with_websocket_channel(tmp_path: Path):
 
     tool_registry = ToolRegistry()
     state_store = SessionStateStore()
-    context_builder = ContextBuilder()
+    context_builder = ContextBuilder(tool_registry=tool_registry)
 
     agent_runtime = AgentRuntime(
         bus_router=bus_router,

@@ -23,7 +23,8 @@ def test_load_parent_project_and_legacy_config(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    cfg = Config(project_root=backend_dir)
+    # user_config_dir 指向空目录，避免加载真实用户配置
+    cfg = Config(project_root=backend_dir, user_config_dir=tmp_path / "no_user_config")
 
     assert cfg.get("agent.provider") == "openai"
     assert cfg.get("agent.default_model") == "gpt-4o-mini"
@@ -49,7 +50,7 @@ def test_nearer_project_config_overrides_parent(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    cfg = Config(project_root=backend_dir)
+    cfg = Config(project_root=backend_dir, user_config_dir=tmp_path / "no_user_config")
     assert cfg.get("agent.provider") == "mock"
     assert cfg.get("agent.default_model") == "mock-agent-v1"
 
@@ -64,7 +65,7 @@ def test_legacy_openai_key_enables_openai_provider_without_project_config(tmp_pa
         encoding="utf-8",
     )
 
-    cfg = Config(project_root=backend_dir)
+    cfg = Config(project_root=backend_dir, user_config_dir=tmp_path / "no_user_config")
 
     assert cfg.get("agent.provider") == "openai"
     assert cfg.get("agent.default_model") == "gpt-4o-mini"
@@ -86,7 +87,7 @@ def test_legacy_openai_key_does_not_override_explicit_provider(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    cfg = Config(project_root=backend_dir)
+    cfg = Config(project_root=backend_dir, user_config_dir=tmp_path / "no_user_config")
 
     assert cfg.get("agent.provider") == "mock"
     assert cfg.get("agent.default_model") == "mock-agent-v1"
@@ -103,7 +104,7 @@ def test_legacy_model_is_applied_to_openai_and_agent_model(tmp_path: Path) -> No
         encoding="utf-8",
     )
 
-    cfg = Config(project_root=backend_dir)
+    cfg = Config(project_root=backend_dir, user_config_dir=tmp_path / "no_user_config")
 
     assert cfg.get("agent.provider") == "openai"
     assert cfg.get("agent.default_model") == "gpt-5.2"

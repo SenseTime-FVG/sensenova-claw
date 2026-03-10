@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from app.db.repository import Repository
 from app.events.bus import PrivateEventBus
@@ -23,12 +24,14 @@ class AgentRuntime:
         context_builder: ContextBuilder,
         tool_registry: ToolRegistry,
         state_store: SessionStateStore,
+        memory_manager: Any = None,
     ):
         self.bus_router = bus_router
         self.repo = repo
         self.context_builder = context_builder
         self.tool_registry = tool_registry
         self.state_store = state_store
+        self.memory_manager = memory_manager  # 可能为 None（记忆系统未启用）
         self._workers: dict[str, AgentSessionWorker] = {}
 
     async def start(self) -> None:

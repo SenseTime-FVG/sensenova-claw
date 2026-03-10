@@ -51,9 +51,27 @@ class AgentSessionWorker(SessionWorker):
         await self.rt.repo.update_session_activity(self.session_id)
         await self.rt.repo.create_turn(turn_id=turn_id, session_id=self.session_id, user_input=content)
 
+        # v0.5: 首轮加载 workspace 文件
+        context_files = None
+        if self.rt.state_store.is_first_turn(self.session_id):
+            from app.workspace.manager import load_workspace_files
+            workspace_dir = config.get("system.workspace_dir", "./SenseAssistant/workspace")
+            context_files = await load_workspace_files(workspace_dir)
+            self.rt.state_store.mark_first_turn_done(self.session_id)
+
         # 获取历史消息
         history = self.rt.state_store.get_session_history(self.session_id)
-        messages = self.rt.context_builder.build_messages(content, history)
+
+        # v0.6: 加载 MEMORY.md 注入 system prompt
+        memory_context = None
+        if self.rt.memory_manager:
+            memory_context = await self.rt.memory_manager.load_memory_md()
+
+        messages = self.rt.context_builder.build_messages(
+            content, history,
+            memory_context=memory_context,
+            context_files=context_files,
+        )
         state = TurnState(turn_id=turn_id, user_input=content, messages=messages)
         self.rt.state_store.set_turn(self.session_id, state)
 
