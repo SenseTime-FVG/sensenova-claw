@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.skills import router
-from app.skills.models import SearchResult, SkillSearchItem
+from app.api.skills import router, invoke_router
+from app.skills.models import SearchResult, SkillSearchItem, SkillDetail
 from app.skills.registry import Skill, SkillRegistry
 
 
@@ -14,6 +14,7 @@ from app.skills.registry import Skill, SkillRegistry
 def app():
     app = FastAPI()
     app.include_router(router)
+    app.include_router(invoke_router)
 
     # mock skill_registry
     mock_skill = MagicMock(spec=Skill)
@@ -43,8 +44,18 @@ def app():
     market_service.uninstall.return_value = {"ok": True}
     market_service.check_updates.return_value = []
     market_service.update.return_value = {"ok": True, "old_version": "1.0", "new_version": "1.1"}
+    market_service.get_detail.return_value = SkillDetail(
+        id="x", name="x", description="X", version="1.0",
+        skill_md_preview="body", files=["SKILL.md"], installed=False,
+    )
 
     app.state.market_service = market_service
+
+    # mock services (for invoke_skill)
+    services = MagicMock()
+    services.publisher = AsyncMock()
+    app.state.services = services
+
     return app
 
 
@@ -95,3 +106,34 @@ def test_check_updates(client):
 def test_update_skill(client):
     resp = client.post("/api/skills/test-skill/update")
     assert resp.status_code == 200
+
+
+def test_market_detail(client):
+    resp = client.get("/api/skills/market/detail?source=clawhub&id=x")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "x"
+
+
+def test_invoke_skill(client, app):
+    # mock skill with body
+    skill = app.state.skill_registry.get.return_value
+    skill.body = "Do $ARGUMENTS"
+    resp = client.post(
+        "/api/sessions/sess_123/skill-invoke",
+        json={"skill_name": "test-skill", "arguments": "hello"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["skill_name"] == "test-skill"
+    # 验证 publisher.publish 被调用
+    app.state.services.publisher.publish.assert_called_once()
+
+
+def test_invoke_skill_not_found(client, app):
+    app.state.skill_registry.get.return_value = None
+    resp = client.post(
+        "/api/sessions/sess_123/skill-invoke",
+        json={"skill_name": "nonexistent", "arguments": ""},
+    )
+    assert resp.status_code == 404
