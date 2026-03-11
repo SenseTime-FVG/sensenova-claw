@@ -80,6 +80,9 @@ class GitAdapter(MarketAdapter):
         return None
 
     async def _clone(self, repo_url: str, dest: Path) -> None:
+        # 仅允许远程协议，防止 file:// 等本地访问
+        if not (repo_url.startswith("https://") or repo_url.startswith("git@") or repo_url.startswith("ssh://")):
+            raise ValueError(f"不支持的 repo_url 协议: {repo_url}")
         proc = await asyncio.create_subprocess_exec(
             "git", "clone", "--depth", "1", repo_url, str(dest / "repo"),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,

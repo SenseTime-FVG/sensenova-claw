@@ -363,6 +363,8 @@ export default function ChatPage() {
     // 斜杠命令拦截
     if (handleSlashSubmit(content)) {
       addMsg('user', content);
+      setInputValue('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
     addMsg('user', content);

@@ -78,6 +78,12 @@ class AnthropicAdapter(MarketAdapter):
 
         try:
             with zipfile.ZipFile(tmp_path, "r") as zf:
+                # Zip Slip 防护
+                resolved_target = target_dir.resolve()
+                for member in zf.infolist():
+                    dest = (target_dir / member.filename).resolve()
+                    if not str(dest).startswith(str(resolved_target) + "/"):
+                        raise ValueError(f"Zip Slip detected: {member.filename}")
                 names = zf.namelist()
                 skill_dirs = [n for n in names if n.endswith("/SKILL.md")]
                 if skill_dirs:

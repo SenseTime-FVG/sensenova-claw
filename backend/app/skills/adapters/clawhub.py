@@ -78,6 +78,12 @@ class ClawHubAdapter(MarketAdapter):
 
         try:
             with zipfile.ZipFile(tmp_path, "r") as zf:
+                # Zip Slip 防护
+                resolved_target = target_dir.resolve()
+                for member in zf.infolist():
+                    dest = (target_dir / member.filename).resolve()
+                    if not str(dest).startswith(str(resolved_target) + "/"):
+                        raise ValueError(f"Zip Slip detected: {member.filename}")
                 top_dirs = {n.split("/")[0] for n in zf.namelist() if "/" in n}
                 if len(top_dirs) == 1:
                     skill_name = top_dirs.pop()
