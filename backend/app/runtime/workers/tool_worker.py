@@ -230,7 +230,10 @@ class ToolSessionWorker(SessionWorker):
         error = ""
         result = None
         try:
-            result = await asyncio.wait_for(tool.execute(**arguments), timeout=timeout)
+            result = await asyncio.wait_for(
+                tool.execute(**arguments, _session_id=event.session_id),
+                timeout=timeout,
+            )
             result = self._truncate_result(result, tool_call_id)
         except Exception as exc:  # noqa: BLE001
             success = False

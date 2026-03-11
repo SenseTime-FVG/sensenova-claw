@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import config
 from app.core.logging import setup_logging
+from app.cron.runtime import CronRuntime
+from app.cron.tool import CronTool
 from app.db.repository import Repository
 from app.events.bus import PublicEventBus
 from app.events.envelope import EventEnvelope
@@ -21,6 +23,7 @@ from app.events.router import BusRouter
 from app.events.types import USER_INPUT, USER_TURN_CANCEL_REQUESTED
 from app.gateway.channels.websocket_channel import WebSocketChannel
 from app.gateway.gateway import Gateway
+from app.heartbeat.runtime import HeartbeatRuntime
 from app.llm.factory import LLMFactory
 from app.runtime.agent_runtime import AgentRuntime
 from app.runtime.context_builder import ContextBuilder
@@ -32,6 +35,7 @@ from app.runtime.title_runtime import TitleRuntime
 from app.runtime.tool_runtime import ToolRuntime
 from app.skills.registry import SkillRegistry
 from app.tools.registry import ToolRegistry
+from app.plugins import PluginRegistry
 from app.workspace.manager import ensure_workspace
 
 logger = logging.getLogger(__name__)
@@ -50,6 +54,8 @@ class Services:
     title_runtime: TitleRuntime
     gateway: Gateway
     ws_channel: WebSocketChannel
+    cron_runtime: CronRuntime
+    heartbeat_runtime: HeartbeatRuntime
 
 
 @asynccontextmanager
@@ -133,6 +139,15 @@ async def lifespan(app: FastAPI):
     ws_channel = WebSocketChannel("websocket")
     gateway.register_channel(ws_channel)
 
+    # v0.9: 加载插件（飞书 Channel + MessageTool + FeishuApiTool 等）
+    plugin_registry = PluginRegistry()
+    await plugin_registry.load_plugins(
+        config.data, gateway=gateway, publisher=publisher,
+    )
+    await plugin_registry.apply(
+        gateway=gateway, tool_registry=tool_registry, publisher=publisher,
+    )
+
     # 启动顺序：persister → bus_router → runtimes → gateway
     await persister.start()
     await bus_router.start()
@@ -141,6 +156,14 @@ async def lifespan(app: FastAPI):
     await tool_runtime.start()
     await title_runtime.start()
     await gateway.start()
+
+    # v0.8: Cron 定时任务 + Heartbeat 心跳巡检
+    cron_runtime = CronRuntime(bus=bus, repo=repo, gateway=gateway)
+    heartbeat_runtime = HeartbeatRuntime(bus=bus, repo=repo)
+    if config.get("cron.enabled", True):
+        tool_registry.register(CronTool(cron_runtime))
+    await cron_runtime.start()
+    await heartbeat_runtime.start()
 
     app.state.services = Services(
         repo=repo,
@@ -154,13 +177,17 @@ async def lifespan(app: FastAPI):
         title_runtime=title_runtime,
         gateway=gateway,
         ws_channel=ws_channel,
+        cron_runtime=cron_runtime,
+        heartbeat_runtime=heartbeat_runtime,
     )
     logger.info("AgentOS backend started (dual-bus architecture)")
 
     try:
         yield
     finally:
-        # 关闭顺序：runtimes → gateway → bus_router → persister
+        # 关闭顺序：cron/heartbeat → runtimes → gateway → bus_router → persister
+        await cron_runtime.stop()
+        await heartbeat_runtime.stop()
         await agent_runtime.stop()
         await llm_runtime.stop()
         await tool_runtime.stop()

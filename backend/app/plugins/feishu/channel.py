@@ -14,8 +14,9 @@ import lark_oapi as lark
 from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
 from app.events.envelope import EventEnvelope
-from app.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, USER_INPUT
+from app.events.types import AGENT_STEP_COMPLETED, CRON_DELIVERY_REQUESTED, ERROR_RAISED, TOOL_CALL_STARTED, USER_INPUT
 from app.gateway.base import Channel
+from app.plugins.feishu.text import chunk_text
 
 if TYPE_CHECKING:
     from app.plugins.base import PluginApi
@@ -60,6 +61,13 @@ class FeishuChannel(Channel):
     def get_channel_id(self) -> str:
         return "feishu"
 
+    def event_filter(self) -> set[str] | None:
+        """此 Channel 关心的事件类型集合"""
+        types = {AGENT_STEP_COMPLETED, ERROR_RAISED, CRON_DELIVERY_REQUESTED}
+        if self._config.show_tool_progress:
+            types.add(TOOL_CALL_STARTED)
+        return types
+
     async def start(self) -> None:
         self._loop = asyncio.get_event_loop()
 
@@ -101,26 +109,61 @@ class FeishuChannel(Channel):
         logger.info("FeishuChannel started (WebSocket mode)")
 
     def _run_ws_in_thread(self) -> None:
-        """在独立线程中为 lark SDK 创建专用 event loop 并启动 WebSocket"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        """在独立线程中为 lark SDK 创建专用 event loop 并启动 WebSocket。
+
+        lark_oapi SDK 在模块导入时将 asyncio event loop 缓存到模块级变量 `loop`，
+        在 uvicorn 环境下该变量指向已在运行的主循环，导致 run_until_complete() 抛
+        RuntimeError。这里需要将 SDK 的模块级 loop 替换为线程本地新建的循环。
+        """
+        thread_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(thread_loop)
+
+        import lark_oapi.ws.client as _ws_mod
+        _ws_mod.loop = thread_loop
+
         try:
             self._ws_client.start()
         except Exception:
             logger.exception("Feishu WebSocket thread crashed")
         finally:
-            loop.close()
+            thread_loop.close()
 
     async def stop(self) -> None:
         logger.info("FeishuChannel stopped")
 
+    # ---- 消息构建 ----
+
+    def _build_content(self, text: str) -> tuple[str, str]:
+        """根据 render_mode 构建消息内容，返回 (content_json, msg_type)"""
+        if self._config.render_mode == "card":
+            from app.plugins.feishu.card import build_markdown_card
+            return build_markdown_card(text), "interactive"
+        return json.dumps({"text": text}), "text"
+
+    def _build_message_request(
+        self, receive_id: str, receive_id_type: str, content: str, msg_type: str,
+    ) -> CreateMessageRequest:
+        """构建飞书消息发送请求"""
+        return (
+            CreateMessageRequest.builder()
+            .receive_id_type(receive_id_type)
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(receive_id)
+                .msg_type(msg_type)
+                .content(content)
+                .build()
+            )
+            .build()
+        )
+
     # ---- 入站: 飞书 → AgentOS ----
 
-    def _handle_message_event(self, ctx, conf, event) -> None:
-        """SDK 线程回调，跨线程调度到 asyncio"""
+    def _handle_message_event(self, data) -> None:
+        """SDK 线程回调（P2ImMessageReceiveV1），跨线程调度到 asyncio"""
         try:
-            msg = event.event.message
-            sender = event.event.sender
+            msg = data.event.message
+            sender = data.event.sender
             chat_id = msg.chat_id
             chat_type = msg.chat_type
             message_id = msg.message_id
@@ -231,12 +274,34 @@ class FeishuChannel(Channel):
             ) or event.payload.get("final_response", "")
             if text:
                 await self._send_reply(event.session_id, text)
+        elif event.type == CRON_DELIVERY_REQUESTED:
+            text = event.payload.get("text", "")
+            if text:
+                to = event.payload.get("to")
+                await self._deliver_cron_text(text, to)
         elif event.type == ERROR_RAISED:
             error_msg = event.payload.get("error_message", "处理失败")
             await self._send_reply(event.session_id, f"⚠️ 错误: {error_msg}")
+        elif event.type == TOOL_CALL_STARTED:
+            tool_name = event.payload.get("tool_name", "")
+            if tool_name:
+                await self._send_reply(event.session_id, f"⏳ 正在执行 {tool_name}...")
+
+    async def _deliver_cron_text(self, text: str, to: str | None = None) -> None:
+        """投递 cron 文本：指定 to 则发到该目标，否则广播到所有已知 sessions"""
+        if to:
+            await self.send_outbound(target=to, text=text)
+            return
+        with self._lock:
+            session_ids = list(self._session_meta.keys())
+        if not session_ids:
+            logger.warning("Cron delivery: no active feishu sessions to deliver to")
+            return
+        for sid in session_ids:
+            await self._send_reply(sid, text)
 
     async def _send_reply(self, session_id: str, text: str) -> None:
-        """通过飞书消息 API 发送回复"""
+        """通过飞书消息 API 发送回复（支持分片）"""
         if not self._client:
             return
 
@@ -251,26 +316,47 @@ class FeishuChannel(Channel):
             text = text[:20000] + "\n\n... (内容过长，已截断)"
 
         try:
-            request = (
-                CreateMessageRequest.builder()
-                .receive_id_type("chat_id")
-                .request_body(
-                    CreateMessageRequestBody.builder()
-                    .receive_id(meta.chat_id)
-                    .msg_type("text")
-                    .content(json.dumps({"text": text}))
-                    .build()
+            for chunk in chunk_text(text, limit=4000):
+                content, msg_type = self._build_content(chunk)
+                request = self._build_message_request(
+                    meta.chat_id, "chat_id", content, msg_type,
                 )
-                .build()
-            )
-            response = await asyncio.to_thread(
-                self._client.im.v1.message.create, request
-            )
-            if not response.success():
-                logger.error(
-                    "Feishu send failed: code=%s msg=%s",
-                    response.code,
-                    response.msg,
+                response = await asyncio.to_thread(
+                    self._client.im.v1.message.create, request
                 )
+                if not response.success():
+                    logger.error(
+                        "Feishu send failed: code=%s msg=%s",
+                        response.code,
+                        response.msg,
+                    )
+                    break
         except Exception:
             logger.exception("Failed to send Feishu message")
+
+    # ---- 主动出站: send_outbound（满足 OutboundCapable 结构化类型） ----
+
+    async def send_outbound(self, target: str, text: str, msg_type: str = "card") -> dict:
+        """向指定目标发送消息。返回 {success, message_id, ...}"""
+        if not self._client:
+            return {"success": False, "error": "Client not initialized"}
+
+        if target.startswith("user:"):
+            receive_id, receive_id_type = target[5:], "open_id"
+        else:
+            receive_id, receive_id_type = target, "chat_id"
+
+        last_result: dict = {}
+        for chunk in chunk_text(text, limit=4000):
+            content, actual_msg_type = self._build_content(chunk)
+            request = self._build_message_request(
+                receive_id, receive_id_type, content, actual_msg_type,
+            )
+            response = await asyncio.to_thread(
+                self._client.im.v1.message.create, request,
+            )
+            if not response.success():
+                return {"success": False, "code": response.code, "msg": response.msg}
+            last_result = {"success": True, "message_id": response.data.message_id}
+
+        return last_result

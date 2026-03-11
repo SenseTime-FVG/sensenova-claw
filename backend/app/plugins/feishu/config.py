@@ -20,6 +20,8 @@ class FeishuConfig:
     group_policy: str = "mention"  # mention | open | disabled
     allowlist: list[str] = field(default_factory=list)
     log_level: str = "INFO"
+    render_mode: str = "card"  # text | card
+    show_tool_progress: bool = False  # 是否推送工具执行中间状态
 
     @classmethod
     def from_plugin_api(cls, api: PluginApi) -> FeishuConfig:
@@ -31,4 +33,6 @@ class FeishuConfig:
             group_policy=api.get_config("group_policy", "mention"),
             allowlist=api.get_config("allowlist", []),
             log_level=api.get_config("log_level", "INFO"),
+            render_mode=api.get_config("render_mode", "card"),
+            show_tool_progress=api.get_config("show_tool_progress", False),
         )

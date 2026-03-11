@@ -5,7 +5,7 @@ import contextlib
 import logging
 
 from app.events.envelope import EventEnvelope
-from app.gateway.base import Channel
+from app.gateway.base import Channel, OutboundCapable
 from app.runtime.publisher import EventPublisher
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ class Gateway:
             await self._dispatch_event(event)
 
     async def _dispatch_event(self, event: EventEnvelope) -> None:
-        """将事件分发到对应的 Channel"""
+        """将事件分发到对应的 Channel（支持事件过滤）"""
         if not event.session_id:
             return
 
@@ -73,7 +73,36 @@ class Gateway:
         if not channel:
             return
 
+        # 事件过滤：Channel 可声明关心的事件类型
+        event_types = channel.event_filter()
+        if event_types is not None and event.type not in event_types:
+            return
+
         try:
             await channel.send_event(event)
         except Exception as exc:
             logger.error(f"Failed to send event to channel {channel_id}: {exc}")
+
+    async def deliver_to_channel(self, event: EventEnvelope, channel_id: str) -> bool:
+        """直接投递事件到指定 Channel（不经过 session 绑定）"""
+        channel = self._channels.get(channel_id)
+        if not channel:
+            logger.warning("deliver_to_channel: channel %s not found", channel_id)
+            return False
+        try:
+            await channel.send_event(event)
+            return True
+        except Exception as exc:
+            logger.error("Delivery to %s failed: %s", channel_id, exc)
+            return False
+
+    async def send_outbound(
+        self, channel_id: str, target: str, text: str, **kwargs,
+    ) -> dict:
+        """主动投递消息到指定目标（由 MessageTool 调用）"""
+        channel = self._channels.get(channel_id)
+        if not channel:
+            return {"success": False, "error": f"Channel '{channel_id}' not found"}
+        if not isinstance(channel, OutboundCapable):
+            return {"success": False, "error": f"Channel '{channel_id}' does not support outbound"}
+        return await channel.send_outbound(target=target, text=text, **kwargs)

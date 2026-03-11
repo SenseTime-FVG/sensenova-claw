@@ -26,3 +26,20 @@ TOOL_CONFIRMATION_RESPONSE = "tool.confirmation_response"
 
 # 错误事件
 ERROR_RAISED = "error.raised"
+
+# Cron 定时任务事件
+CRON_JOB_ADDED = "cron.job_added"
+CRON_JOB_UPDATED = "cron.job_updated"
+CRON_JOB_REMOVED = "cron.job_removed"
+CRON_JOB_STARTED = "cron.job_started"
+CRON_JOB_FINISHED = "cron.job_finished"
+CRON_SYSTEM_EVENT = "cron.system_event"
+CRON_DELIVERY_REQUESTED = "cron.delivery_requested"
+
+# 主动出站消息事件
+MESSAGE_OUTBOUND_SENT = "message.outbound_sent"
+
+# Heartbeat 心跳巡检事件
+HEARTBEAT_WAKE_REQUESTED = "heartbeat.wake_requested"
+HEARTBEAT_CHECK_STARTED = "heartbeat.check_started"
+HEARTBEAT_COMPLETED = "heartbeat.completed"

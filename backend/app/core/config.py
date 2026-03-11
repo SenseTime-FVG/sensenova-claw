@@ -115,6 +115,30 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "backend_ws_url": "ws://localhost:8000/ws",
         "default_theme": "dark",
     },
+    "cron": {
+        "enabled": True,
+        "max_concurrent_runs": 1,
+        "retry": {
+            "max_attempts": 3,
+            "backoff_ms": [60000, 120000, 300000],
+        },
+        "session_retention": "24h",
+        "run_log_max_entries": 2000,
+    },
+    "heartbeat": {
+        "enabled": False,
+        "every": "30m",
+        "target": "none",
+        "to": None,
+        "prompt": "Read HEARTBEAT.md if it exists. Follow it strictly. If nothing needs attention, reply HEARTBEAT_OK.",
+        "ack_max_chars": 300,
+        "light_context": False,
+        "active_hours": {
+            "start": "08:00",
+            "end": "24:00",
+            "timezone": "local",
+        },
+    },
     "plugins": {
         "feishu": {
             "enabled": False,
@@ -124,6 +148,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "group_policy": "mention",
             "allowlist": [],
             "log_level": "INFO",
+            "render_mode": "card",
+            "show_tool_progress": False,
+            "api_tool": {
+                "enabled": False,
+                "allowed_methods": ["GET"],
+                "allowed_path_prefixes": [
+                    "/open-apis/docx/v1/documents",
+                    "/open-apis/wiki/v2/spaces",
+                    "/open-apis/drive/v1/files",
+                ],
+            },
         },
     },
 }

@@ -66,6 +66,43 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_turn ON messages(turn_id);
+
+CREATE TABLE IF NOT EXISTS cron_jobs (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    description TEXT,
+    schedule_json TEXT NOT NULL,
+    session_target TEXT NOT NULL DEFAULT 'isolated',
+    wake_mode TEXT NOT NULL DEFAULT 'now',
+    payload_json TEXT NOT NULL,
+    delivery_json TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    delete_after_run INTEGER,
+    created_at_ms INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    next_run_at_ms INTEGER,
+    running_at_ms INTEGER,
+    last_run_at_ms INTEGER,
+    last_run_status TEXT,
+    last_error TEXT,
+    last_duration_ms INTEGER,
+    consecutive_errors INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS cron_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    started_at_ms INTEGER NOT NULL,
+    ended_at_ms INTEGER,
+    status TEXT,
+    error TEXT,
+    duration_ms INTEGER,
+    session_id TEXT,
+    delivery_status TEXT,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES cron_jobs(id)
+);
+CREATE INDEX IF NOT EXISTS idx_cron_runs_job ON cron_runs(job_id);
 """
 
 
@@ -297,3 +334,119 @@ class Repository:
             await self.delete_session_cascade(row[0])
             count += 1
         return count
+
+    # ---------- Cron Jobs 表操作 ----------
+
+    async def create_cron_job(self, job_data: dict[str, Any]) -> None:
+        """插入一条 cron_jobs 记录"""
+        conn = self._conn()
+        conn.execute(
+            """INSERT INTO cron_jobs (id, name, description, schedule_json, session_target,
+               wake_mode, payload_json, delivery_json, enabled, delete_after_run,
+               created_at_ms, updated_at_ms, next_run_at_ms, running_at_ms,
+               last_run_at_ms, last_run_status, last_error, last_duration_ms, consecutive_errors)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                job_data["id"], job_data.get("name"), job_data.get("description"),
+                job_data["schedule_json"], job_data.get("session_target", "isolated"),
+                job_data.get("wake_mode", "now"), job_data["payload_json"],
+                job_data.get("delivery_json"), job_data.get("enabled", 1),
+                job_data.get("delete_after_run"), job_data["created_at_ms"],
+                job_data["updated_at_ms"], job_data.get("next_run_at_ms"),
+                job_data.get("running_at_ms"), job_data.get("last_run_at_ms"),
+                job_data.get("last_run_status"), job_data.get("last_error"),
+                job_data.get("last_duration_ms"), job_data.get("consecutive_errors", 0),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+    async def get_cron_job(self, job_id: str) -> dict[str, Any] | None:
+        """按 ID 查询单条 cron job"""
+        conn = self._conn()
+        row = conn.execute("SELECT * FROM cron_jobs WHERE id = ?", (job_id,)).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    async def list_cron_jobs(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        """返回所有 cron jobs"""
+        conn = self._conn()
+        if enabled_only:
+            rows = conn.execute("SELECT * FROM cron_jobs WHERE enabled = 1 ORDER BY created_at_ms").fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM cron_jobs ORDER BY created_at_ms").fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    async def update_cron_job(self, job_id: str, updates: dict[str, Any]) -> None:
+        """更新 cron job 的指定字段"""
+        if not updates:
+            return
+        set_parts = [f"{k} = ?" for k in updates]
+        values = list(updates.values()) + [job_id]
+        conn = self._conn()
+        conn.execute(f"UPDATE cron_jobs SET {', '.join(set_parts)} WHERE id = ?", values)
+        conn.commit()
+        conn.close()
+
+    async def delete_cron_job(self, job_id: str) -> None:
+        """删除 cron job 及其 runs 记录"""
+        conn = self._conn()
+        conn.execute("DELETE FROM cron_runs WHERE job_id = ?", (job_id,))
+        conn.execute("DELETE FROM cron_jobs WHERE id = ?", (job_id,))
+        conn.commit()
+        conn.close()
+
+    async def get_runnable_cron_jobs(self, now_ms: int) -> list[dict[str, Any]]:
+        """返回到期且未在执行中的 enabled jobs"""
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT * FROM cron_jobs WHERE enabled = 1 AND running_at_ms IS NULL AND next_run_at_ms <= ?",
+            (now_ms,),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    async def update_cron_job_state(self, job_id: str, state_updates: dict[str, Any]) -> None:
+        """更新 job 的运行状态字段"""
+        await self.update_cron_job(job_id, state_updates)
+
+    async def clear_stale_cron_running(self) -> None:
+        """启动时清除所有 running_at_ms 残留（上次异常退出）"""
+        conn = self._conn()
+        conn.execute("UPDATE cron_jobs SET running_at_ms = NULL WHERE running_at_ms IS NOT NULL")
+        conn.commit()
+        conn.close()
+
+    # ---------- Cron Runs 表操作 ----------
+
+    async def insert_cron_run(self, run_data: dict[str, Any]) -> int:
+        """插入一条 cron_runs 记录，返回自增 ID"""
+        conn = self._conn()
+        cursor = conn.execute(
+            """INSERT INTO cron_runs (job_id, started_at_ms, ended_at_ms, status, error,
+               duration_ms, session_id, delivery_status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run_data["job_id"], run_data["started_at_ms"],
+                run_data.get("ended_at_ms"), run_data.get("status"),
+                run_data.get("error"), run_data.get("duration_ms"),
+                run_data.get("session_id"), run_data.get("delivery_status"),
+                run_data["created_at"],
+            ),
+        )
+        run_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return run_id
+
+    async def update_cron_run(self, run_id: int, updates: dict[str, Any]) -> None:
+        """更新 cron_runs 记录"""
+        if not updates:
+            return
+        set_parts = [f"{k} = ?" for k in updates]
+        values = list(updates.values()) + [run_id]
+        conn = self._conn()
+        conn.execute(f"UPDATE cron_runs SET {', '.join(set_parts)} WHERE id = ?", values)
+        conn.commit()
+        conn.close()

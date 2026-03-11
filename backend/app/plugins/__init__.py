@@ -31,12 +31,23 @@ class PluginRegistry:
         self._gateway: Gateway | None = None
         self._publisher: EventPublisher | None = None
 
-    async def load_plugins(self, config: dict[str, Any]) -> None:
+    async def load_plugins(
+        self,
+        config: dict[str, Any],
+        gateway: Gateway | None = None,
+        publisher: EventPublisher | None = None,
+    ) -> None:
         """
         扫描并加载所有启用的 Plugin。
         加载顺序: 内置插件(app/plugins/*/) → 用户插件(~/.agentos/plugins/*/)
         错误处理: 缺少 definition/register 跳过+警告；register() 异常跳过+错误日志；id 冲突后者覆盖
         """
+        # 提前设置引用，使 register() 内可通过 api.get_gateway() 等获取
+        if gateway is not None:
+            self._gateway = gateway
+        if publisher is not None:
+            self._publisher = publisher
+
         from app.plugins.base import PluginApi
 
         # 扫描内置插件目录
