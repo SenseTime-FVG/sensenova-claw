@@ -297,7 +297,6 @@ class CronRuntime:
         if delivery and delivery.mode == "none":
             return
 
-        # 确定投递目标 channels
         if delivery and delivery.channel_id:
             channel_ids = [delivery.channel_id]
         else:
@@ -306,6 +305,18 @@ class CronRuntime:
         to = delivery.to if delivery else None
 
         for channel_id in channel_ids:
+            # 优先使用 send_outbound 直接调 API（飞书等 OutboundCapable channel）
+            if to:
+                result = await self._gateway.send_outbound(channel_id, to, text)
+                if result.get("success"):
+                    logger.info("Cron text sent via outbound to %s:%s", channel_id, to)
+                    continue
+                logger.debug(
+                    "send_outbound not available for %s, falling back: %s",
+                    channel_id, result,
+                )
+
+            # 回退到 deliver_to_channel（WebSocket 广播等）
             event = EventEnvelope(
                 type=CRON_DELIVERY_REQUESTED,
                 session_id="system",
@@ -319,6 +330,6 @@ class CronRuntime:
             )
             ok = await self._gateway.deliver_to_channel(event, channel_id)
             if ok:
-                logger.info("Cron text delivered to channel %s", channel_id)
+                logger.info("Cron text delivered to channel %s via event", channel_id)
             else:
                 logger.warning("Cron text delivery failed for channel %s", channel_id)

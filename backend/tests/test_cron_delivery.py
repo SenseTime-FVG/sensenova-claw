@@ -281,3 +281,92 @@ async def test_cron_tool_add_auto_populates_delivery(repo):
     assert len(jobs) == 1
     assert jobs[0].delivery is not None
     assert jobs[0].delivery.channel_id == "feishu"
+
+
+class OutboundCollectorChannel(Channel):
+    """支持 send_outbound 的 Mock Channel，记录所有出站调用"""
+
+    def __init__(self, channel_id: str):
+        self._channel_id = channel_id
+        self.outbound_calls: list[dict] = []
+        self.received_events: list[EventEnvelope] = []
+
+    def get_channel_id(self) -> str:
+        return self._channel_id
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def send_event(self, event: EventEnvelope) -> None:
+        self.received_events.append(event)
+
+    async def send_outbound(self, target: str, text: str, msg_type: str = "card") -> dict:
+        self.outbound_calls.append({"target": target, "text": text})
+        return {"success": True, "message_id": "mock_001"}
+
+
+@pytest.mark.asyncio
+async def test_deliver_text_uses_outbound_when_to_is_set(repo):
+    """当 delivery.to 有值时，优先走 send_outbound 而非 deliver_to_channel"""
+    from app.cron.models import CronDelivery, CronJob, SystemEventPayload
+    from app.cron.runtime import CronRuntime
+
+    bus = PublicEventBus()
+    publisher = EventPublisher(bus=bus)
+    gateway = Gateway(publisher=publisher)
+
+    ch = OutboundCollectorChannel("feishu")
+    gateway.register_channel(ch)
+
+    runtime = CronRuntime(bus=bus, repo=repo, gateway=gateway)
+
+    job = CronJob(
+        id="test_outbound",
+        name="飞书直发",
+        session_target="main",
+        payload=SystemEventPayload(text="直接发到飞书"),
+        delivery=CronDelivery(mode="announce", channel_id="feishu", to="oc_chat_123"),
+    )
+
+    await runtime._deliver_text(job, "直接发到飞书")
+
+    # send_outbound 应被调用
+    assert len(ch.outbound_calls) == 1
+    assert ch.outbound_calls[0]["target"] == "oc_chat_123"
+    assert ch.outbound_calls[0]["text"] == "直接发到飞书"
+    # 不应走 deliver_to_channel（send_event 不应被调用）
+    assert len(ch.received_events) == 0
+
+
+@pytest.mark.asyncio
+async def test_deliver_text_falls_back_to_event_when_no_to(repo):
+    """当 delivery.to 为空时，走 deliver_to_channel 事件路径"""
+    from app.cron.models import CronDelivery, CronJob, SystemEventPayload
+    from app.cron.runtime import CronRuntime
+
+    bus = PublicEventBus()
+    publisher = EventPublisher(bus=bus)
+    gateway = Gateway(publisher=publisher)
+
+    ch = OutboundCollectorChannel("feishu")
+    gateway.register_channel(ch)
+
+    runtime = CronRuntime(bus=bus, repo=repo, gateway=gateway)
+
+    job = CronJob(
+        id="test_fallback",
+        session_target="main",
+        payload=SystemEventPayload(text="回退投递"),
+        delivery=CronDelivery(mode="announce", channel_id="feishu"),
+    )
+
+    await runtime._deliver_text(job, "回退投递")
+
+    # 无 to → 不走 send_outbound
+    assert len(ch.outbound_calls) == 0
+    # 应走 deliver_to_channel
+    assert len(ch.received_events) == 1
+    assert ch.received_events[0].type == CRON_DELIVERY_REQUESTED

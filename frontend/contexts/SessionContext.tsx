@@ -151,6 +151,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setIsTyping(false);
         break;
       }
+      case 'notification': {
+        const text = String(lastMessage.payload.text || '');
+        if (text) {
+          setMessages((prev) => [...prev, toMessage('system', `📢 ${text}`)]);
+        }
+        break;
+      }
       default:
         break;
     }

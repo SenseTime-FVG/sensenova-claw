@@ -37,6 +37,7 @@ from app.skills.registry import SkillRegistry
 from app.tools.registry import ToolRegistry
 from app.plugins import PluginRegistry
 from app.workspace.manager import ensure_workspace
+from app.api import agents, tools, gateway, skills
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +181,10 @@ async def lifespan(app: FastAPI):
         cron_runtime=cron_runtime,
         heartbeat_runtime=heartbeat_runtime,
     )
+    # 挂载 registries 供 API 路由使用
+    app.state.tool_registry = tool_registry
+    app.state.skill_registry = skill_registry
+    app.state.config = config
     logger.info("AgentOS backend started (dual-bus architecture)")
 
     try:
@@ -206,6 +211,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 注册 API 路由
+app.include_router(agents.router)
+app.include_router(tools.router)
+app.include_router(gateway.router)
+app.include_router(skills.router)
 
 
 @app.get("/health")
@@ -235,6 +246,14 @@ async def get_session_events(session_id: str):
     services: Services = app.state.services
     events = await services.repo.get_session_events(session_id)
     return JSONResponse(content={"events": events})
+
+
+@app.get("/api/sessions/{session_id}/messages")
+async def list_session_messages(session_id: str):
+    """获取会话的所有消息（用于聊天历史展示）"""
+    services: Services = app.state.services
+    messages = await services.repo.get_session_messages(session_id)
+    return JSONResponse(content={"messages": messages})
 
 
 @app.websocket("/ws")
