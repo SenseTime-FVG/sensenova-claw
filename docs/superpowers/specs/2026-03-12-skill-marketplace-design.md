@@ -397,7 +397,7 @@ class Skill:
     2. 将 skill.body 中的 $ARGUMENTS 替换为实际参数
     3. 发布事件 user.input，payload 为:
        {
-           "text": "<渲染后的 skill 内容>",
+           "content": "<渲染后的 skill 内容>",
            "type": "skill_invoke",
            "skill_name": "pdf-to-markdown",
            "original_input": "/pdf-to-markdown convert report.pdf"
