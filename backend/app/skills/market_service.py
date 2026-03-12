@@ -33,7 +33,7 @@ class SkillMarketService:
 
         self._adapters: dict[str, MarketAdapter] = {
             "clawhub": ClawHubAdapter(
-                api_base=config.get("skills", {}).get("clawhub_api_base", "https://api.clawhub.ai/v1"),
+                api_base=config.get("skills", {}).get("clawhub_api_base", "https://clawhub.ai/api/v1"),
             ),
             "anthropic": AnthropicAdapter(
                 api_base=config.get("skills", {}).get("anthropic_market_api_base", "https://marketplace.claude.com/api/v1"),
