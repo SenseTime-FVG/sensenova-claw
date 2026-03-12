@@ -2,9 +2,13 @@
 
 API 文档: https://deepwiki.com/openclaw/clawhub/7-http-api-v1
 基础 URL: https://clawhub.ai/api/v1
+
+限流（匿名）: Read 120/min, Download 20/min
+限流响应含 Retry-After 头，本适配器自动重试。
 """
 from __future__ import annotations
 
+import asyncio
 import zipfile
 import tempfile
 import logging
@@ -18,6 +22,7 @@ from .base import MarketAdapter
 logger = logging.getLogger(__name__)
 
 CLAWHUB_API_BASE = "https://clawhub.ai/api/v1"
+MAX_RETRIES = 3
 
 
 class ClawHubAdapter(MarketAdapter):
@@ -25,21 +30,51 @@ class ClawHubAdapter(MarketAdapter):
         self._api_base = api_base.rstrip("/")
         self._timeout = timeout
 
+    async def _request(
+        self, method: str, url: str, **kwargs
+    ) -> httpx.Response:
+        """带 429 重试的请求，遵守 Retry-After 头"""
+        for attempt in range(MAX_RETRIES + 1):
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.request(method, url, **kwargs)
+
+            if resp.status_code != 429 or attempt == MAX_RETRIES:
+                resp.raise_for_status()
+                return resp
+
+            # 读取 Retry-After（秒），默认等 5 秒
+            retry_after = 5
+            raw = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
+            if raw:
+                try:
+                    retry_after = int(raw)
+                except ValueError:
+                    pass
+            # 限制最长等 30 秒
+            retry_after = min(retry_after, 30)
+            logger.info(
+                "ClawHub 429 限流，%d 秒后重试 (attempt %d/%d): %s",
+                retry_after, attempt + 1, MAX_RETRIES, url,
+            )
+            await asyncio.sleep(retry_after)
+
+        # 不应到达，保险起见
+        resp.raise_for_status()
+        return resp  # type: ignore[return-value]
+
     async def search(self, query: str, page: int = 1, page_size: int = 20) -> SearchResult:
         """搜索 skill
 
-        ClawHub 搜索端点: GET /api/v1/search?q=<query>&limit=<n>&cursor=<cursor>
+        ClawHub 搜索端点: GET /api/v1/search?q=<query>&limit=<n>
         返回格式: { "results": [ { slug, displayName, summary, score, version, updatedAt } ] }
-        使用 OpenAI embedding 向量搜索，不是简单关键词匹配。
-        ClawHub 使用 cursor 分页，这里做适配转换。
+        使用 OpenAI embedding 向量搜索。
         """
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.get(
-                f"{self._api_base}/search",
-                params={"q": query, "limit": page_size},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await self._request(
+            "GET",
+            f"{self._api_base}/search",
+            params={"q": query, "limit": page_size},
+        )
+        data = resp.json()
 
         results = data.get("results", [])
         items = [
@@ -47,9 +82,9 @@ class ClawHubAdapter(MarketAdapter):
                 id=s.get("slug", ""),
                 name=s.get("displayName", s.get("slug", "")),
                 description=s.get("summary", ""),
-                author=None,  # 搜索结果不含 author
+                author=None,
                 version=s.get("version"),
-                downloads=None,  # 搜索结果不含 downloads
+                downloads=None,
                 source="clawhub",
             )
             for s in results
@@ -66,28 +101,23 @@ class ClawHubAdapter(MarketAdapter):
         """获取 skill 详情
 
         ClawHub 详情端点: GET /api/v1/skills/{slug}
-        返回格式: { skill: { slug, displayName, summary, tags, stats }, latestVersion: {...}, owner: {...} }
         """
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.get(f"{self._api_base}/skills/{skill_id}")
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await self._request("GET", f"{self._api_base}/skills/{skill_id}")
+        data = resp.json()
 
         skill = data.get("skill", {})
         latest = data.get("latestVersion", {})
         owner = data.get("owner", {})
-        stats = skill.get("stats", {})
 
-        # 获取 SKILL.md 预览（通过 file 端点）
+        # 获取 SKILL.md 预览
         skill_md_preview = ""
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                file_resp = await client.get(
-                    f"{self._api_base}/skills/{skill_id}/file",
-                    params={"path": "SKILL.md"},
-                )
-                if file_resp.status_code == 200:
-                    skill_md_preview = file_resp.text
+            file_resp = await self._request(
+                "GET",
+                f"{self._api_base}/skills/{skill_id}/file",
+                params={"path": "SKILL.md"},
+            )
+            skill_md_preview = file_resp.text
         except Exception:
             logger.debug("获取 %s 的 SKILL.md 预览失败", skill_id)
 
@@ -98,21 +128,21 @@ class ClawHubAdapter(MarketAdapter):
             version=latest.get("version"),
             author=owner.get("handle") or owner.get("displayName"),
             skill_md_preview=skill_md_preview,
-            files=[],  # 文件列表需要额外请求，暂不获取
+            files=[],
             installed=False,
         )
 
     async def download(self, skill_id: str, target_dir: Path) -> Path:
         """下载 skill zip
 
-        ClawHub 下载端点: GET /api/v1/download?slug=<slug>&version=<v>
+        ClawHub 下载端点: GET /api/v1/download?slug=<slug>
+        匿名限流 20 req/min，遇 429 自动重试。
         """
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.get(
-                f"{self._api_base}/download",
-                params={"slug": skill_id},
-            )
-            resp.raise_for_status()
+        resp = await self._request(
+            "GET",
+            f"{self._api_base}/download",
+            params={"slug": skill_id},
+        )
 
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             tmp.write(resp.content)
@@ -139,10 +169,8 @@ class ClawHubAdapter(MarketAdapter):
     async def check_update(self, skill_id: str, current_version: str) -> UpdateInfo | None:
         """检查更新：对比 latestVersion.version 与当前版本"""
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.get(f"{self._api_base}/skills/{skill_id}")
-                resp.raise_for_status()
-                data = resp.json()
+            resp = await self._request("GET", f"{self._api_base}/skills/{skill_id}")
+            data = resp.json()
             latest = data.get("latestVersion", {}).get("version")
             if latest and latest != current_version:
                 return UpdateInfo(
