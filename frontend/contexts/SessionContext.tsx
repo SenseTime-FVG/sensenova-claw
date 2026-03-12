@@ -151,6 +151,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setIsTyping(false);
         break;
       }
+      case 'notification': {
+        const text = String(lastMessage.payload.text || '');
+        if (text) {
+          setMessages((prev) => [...prev, toMessage('system', `📢 ${text}`)]);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -207,7 +214,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
             events.forEach((event: any) => {
               const payload = JSON.parse(event.payload_json);
 
-              if (event.event_type === 'ui.user_input') {
+              if (event.event_type === 'user.input') {
                 historyMessages.push(toMessage('user', payload.content || ''));
               } else if (event.event_type === 'tool.call_requested') {
                 const toolInfo: ToolInfo = {
@@ -218,7 +225,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
                 const msg = toMessage('tool', `工具执行中: ${payload.tool_name}`, toolInfo);
                 historyMessages.push(msg);
                 toolMap.set(payload.tool_call_id, msg.id);
-              } else if (event.event_type === 'tool.call_completed') {
+              } else if (event.event_type === 'tool.call_result') {
                 const msgId = toolMap.get(payload.tool_call_id);
                 if (msgId) {
                   const msgIndex = historyMessages.findIndex((m) => m.id === msgId);

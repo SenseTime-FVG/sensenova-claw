@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('用户可以发送消息并收到响应', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/chat');
 
   await expect(page.getByText('WebSocket 已连接')).toBeVisible({ timeout: 30000 });
 
@@ -20,7 +20,7 @@ test('用户可以发送消息并收到响应', async ({ page }) => {
 });
 
 test('bash命令工具调用后应显示完整的assistant回复', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/chat');
 
   await expect(page.getByText('WebSocket 已连接')).toBeVisible({ timeout: 30000 });
 
@@ -58,7 +58,7 @@ test('bash命令工具调用后应显示完整的assistant回复', async ({ page
 });
 
 test('工具消息应显示详细信息并支持展开/收起', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/chat');
 
   await expect(page.getByText('WebSocket 已连接')).toBeVisible({ timeout: 30000 });
 

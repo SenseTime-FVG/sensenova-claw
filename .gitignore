@@ -3,8 +3,10 @@
 Thumbs.db
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
+.claude/
 
 # Node.js
 node_modules/

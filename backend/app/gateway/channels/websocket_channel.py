@@ -10,11 +10,12 @@ from app.events.envelope import EventEnvelope
 from app.events.types import (
     AGENT_STEP_COMPLETED,
     AGENT_STEP_STARTED,
+    CRON_DELIVERY_REQUESTED,
     ERROR_RAISED,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
-    TOOL_CALL_COMPLETED,
     TOOL_CALL_REQUESTED,
+    TOOL_CALL_RESULT,
 )
 from app.gateway.base import Channel
 
@@ -65,6 +66,15 @@ class WebSocketChannel(Channel):
         if not mapped:
             return
 
+        # cron 投递事件广播到所有已连接客户端（不按 session 过滤）
+        if event.type == CRON_DELIVERY_REQUESTED:
+            for ws in list(self._connections):
+                try:
+                    await ws.send_json(mapped)
+                except Exception:
+                    self.disconnect(ws)
+            return
+
         session_id = event.session_id
         websockets = self._session_bindings.get(session_id, set())
 
@@ -104,7 +114,7 @@ class WebSocketChannel(Channel):
                 },
                 "timestamp": event.ts,
             }
-        if event.type == TOOL_CALL_COMPLETED:
+        if event.type == TOOL_CALL_RESULT:
             return {
                 "type": "tool_result",
                 "session_id": event.session_id,
@@ -145,6 +155,18 @@ class WebSocketChannel(Channel):
                 "payload": {
                     "title": event.payload.get("title"),
                     "success": event.payload.get("success"),
+                },
+                "timestamp": event.ts,
+            }
+        if event.type == CRON_DELIVERY_REQUESTED:
+            return {
+                "type": "notification",
+                "session_id": event.session_id,
+                "payload": {
+                    "text": event.payload.get("text", ""),
+                    "source": "cron",
+                    "job_id": event.payload.get("job_id"),
+                    "job_name": event.payload.get("job_name"),
                 },
                 "timestamp": event.ts,
             }

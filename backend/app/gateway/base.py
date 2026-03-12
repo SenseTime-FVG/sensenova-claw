@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Protocol, runtime_checkable
 
 from app.events.envelope import EventEnvelope
 
@@ -25,3 +26,18 @@ class Channel(ABC):
     async def send_event(self, event: EventEnvelope) -> None:
         """接收来自 Gateway 的事件"""
         pass
+
+    def event_filter(self) -> set[str] | None:
+        """此 Channel 关心的事件类型集合。None = 全部（默认，向后兼容）。"""
+        return None
+
+
+@runtime_checkable
+class OutboundCapable(Protocol):
+    """支持主动发送消息的 Channel 协议"""
+
+    async def send_outbound(
+        self, target: str, text: str, msg_type: str = "card",
+    ) -> dict:
+        """向指定目标发送消息。返回 {success, message_id, ...}"""
+        ...
