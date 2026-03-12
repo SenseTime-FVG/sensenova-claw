@@ -10,6 +10,7 @@ interface SkillCardProps {
   downloads?: number | null;
   author?: string | null;
   installed?: boolean;
+  installing?: boolean;
   onToggle?: (enabled: boolean) => void;
   onUninstall?: () => void;
   onUpdate?: () => void;
@@ -27,7 +28,7 @@ const sourceColors: Record<string, string> = {
 
 export function SkillCard({
   name, description, source, version, enabled, hasUpdate,
-  downloads, author, installed,
+  downloads, author, installed, installing,
   onToggle, onUninstall, onUpdate, onInstall, onClick,
 }: SkillCardProps) {
   return (
@@ -81,7 +82,13 @@ export function SkillCard({
               卸载
             </button>
           )}
-          {onInstall && !installed && (
+          {installing && (
+            <span className="text-xs text-[#007acc] flex items-center gap-1">
+              <span className="w-3 h-3 border-2 border-[#007acc] border-t-transparent rounded-full animate-spin" />
+              安装中...
+            </span>
+          )}
+          {onInstall && !installed && !installing && (
             <button
               className="text-xs px-2 py-1 rounded bg-[#0e639c] text-white hover:bg-[#1177bb]"
               onClick={onInstall}
@@ -89,7 +96,7 @@ export function SkillCard({
               安装
             </button>
           )}
-          {installed && (
+          {installed && !installing && (
             <span className="text-xs text-green-400">已安装</span>
           )}
         </div>

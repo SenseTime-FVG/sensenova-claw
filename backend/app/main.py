@@ -200,7 +200,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        # 关闭顺序：cron/heartbeat → runtimes → gateway → bus_router → persister
+        # 关闭顺序：market_service → cron/heartbeat → runtimes → gateway → bus_router → persister
+        await market_service.shutdown()
         await cron_runtime.stop()
         await heartbeat_runtime.stop()
         await agent_runtime.stop()

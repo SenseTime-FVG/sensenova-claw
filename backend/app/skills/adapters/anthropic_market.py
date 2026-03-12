@@ -85,15 +85,25 @@ class AnthropicAdapter(MarketAdapter):
                     if not str(dest).startswith(str(resolved_target) + "/"):
                         raise ValueError(f"Zip Slip detected: {member.filename}")
                 names = zf.namelist()
+
+                # 情况1：zip 内有子目录且含 SKILL.md
                 skill_dirs = [n for n in names if n.endswith("/SKILL.md")]
                 if skill_dirs:
                     skill_root = skill_dirs[0].split("/SKILL.md")[0]
                     zf.extractall(target_dir)
                     return target_dir / skill_root
-                else:
+
+                # 情况2：有统一顶层目录
+                top_dirs = {n.split("/")[0] for n in names if "/" in n}
+                if len(top_dirs) == 1:
                     zf.extractall(target_dir)
-                    top_dirs = {n.split("/")[0] for n in names if "/" in n}
-                    return target_dir / (top_dirs.pop() if len(top_dirs) == 1 else skill_id)
+                    return target_dir / top_dirs.pop()
+
+                # 情况3：平铺文件（根目录直接含 SKILL.md 等），创建子目录
+                skill_dir = target_dir / skill_id
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                zf.extractall(skill_dir)
+                return skill_dir
         finally:
             tmp_path.unlink(missing_ok=True)
 

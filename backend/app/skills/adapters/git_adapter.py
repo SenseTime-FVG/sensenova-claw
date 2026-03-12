@@ -87,7 +87,17 @@ class GitAdapter(MarketAdapter):
             "git", "clone", "--depth", "1", repo_url, str(dest / "repo"),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await proc.communicate()
+        try:
+            _, stderr = await proc.communicate()
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            # 关闭时确保 git 子进程被杀掉，避免残留
+            logger.info("正在终止 git clone 子进程 (pid=%s)", proc.pid)
+            try:
+                proc.kill()
+                await proc.wait()
+            except ProcessLookupError:
+                pass
+            raise
         if proc.returncode != 0:
             raise RuntimeError(f"git clone 失败: {stderr.decode()}")
 

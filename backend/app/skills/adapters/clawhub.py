@@ -150,18 +150,33 @@ class ClawHubAdapter(MarketAdapter):
 
         try:
             with zipfile.ZipFile(tmp_path, "r") as zf:
+                names = zf.namelist()
+
                 # Zip Slip 防护
                 resolved_target = target_dir.resolve()
                 for member in zf.infolist():
                     dest = (target_dir / member.filename).resolve()
                     if not str(dest).startswith(str(resolved_target) + "/"):
                         raise ValueError(f"Zip Slip detected: {member.filename}")
-                top_dirs = {n.split("/")[0] for n in zf.namelist() if "/" in n}
-                if len(top_dirs) == 1:
+
+                # 判断 zip 结构：有顶层目录 vs 平铺文件
+                top_dirs = {n.split("/")[0] for n in names if "/" in n}
+                has_top_dir = len(top_dirs) == 1 and all(
+                    n.startswith(next(iter(top_dirs)) + "/") or n == next(iter(top_dirs))
+                    for n in names
+                )
+
+                if has_top_dir:
+                    # 有统一顶层目录，直接解压
                     skill_name = top_dirs.pop()
+                    zf.extractall(target_dir)
                 else:
+                    # 平铺文件（ClawHub 常见），创建子目录后解压到其中
                     skill_name = skill_id
-                zf.extractall(target_dir)
+                    skill_dir = target_dir / skill_name
+                    skill_dir.mkdir(parents=True, exist_ok=True)
+                    zf.extractall(skill_dir)
+
             return target_dir / skill_name
         finally:
             tmp_path.unlink(missing_ok=True)

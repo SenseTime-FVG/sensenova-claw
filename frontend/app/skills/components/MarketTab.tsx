@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { Search, Loader2, GitBranch } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { Search, Loader2, GitBranch, CheckCircle, XCircle, X } from 'lucide-react';
 import { SkillCard } from './SkillCard';
 import { SkillDetailModal } from './SkillDetailModal';
 
@@ -17,7 +17,15 @@ interface MarketSkill {
   source: string;
 }
 
+interface Toast {
+  id: number;
+  type: 'loading' | 'success' | 'error';
+  message: string;
+}
+
 const SOURCES = ['clawhub', 'anthropic'] as const;
+
+let toastId = 0;
 
 export function MarketTab({ onInstalled }: { onInstalled: () => void }) {
   const [activeSource, setActiveSource] = useState<string>('clawhub');
@@ -29,6 +37,30 @@ export function MarketTab({ onInstalled }: { onInstalled: () => void }) {
   const [gitUrl, setGitUrl] = useState('');
   const [gitInstalling, setGitInstalling] = useState(false);
   const [detailModal, setDetailModal] = useState<{ source: string; id: string } | null>(null);
+  const [installingIds, setInstallingIds] = useState<Set<string>>(new Set());
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  // 自动清除 success/error toast
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setToasts(prev => prev.filter(t => t.type === 'loading'));
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const addToast = (type: Toast['type'], message: string): number => {
+    const id = ++toastId;
+    setToasts(prev => [...prev, { id, type, message }]);
+    return id;
+  };
+
+  const updateToast = (id: number, type: Toast['type'], message: string) => {
+    setToasts(prev => prev.map(t => t.id === id ? { ...t, type, message } : t));
+  };
+
+  const removeToast = (id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
   const doSearch = useCallback(async (src: string, q: string, p: number) => {
     if (!q.trim()) return;
@@ -49,24 +81,41 @@ export function MarketTab({ onInstalled }: { onInstalled: () => void }) {
   }, []);
 
   const handleInstall = async (source: string, id: string) => {
-    const res = await fetch(`${API_BASE}/api/skills/install`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source, id }),
-    });
-    if (res.ok) {
-      alert('安装成功');
-      onInstalled();
-      doSearch(activeSource, query, page);
-    } else {
-      const err = await res.json();
-      alert(`安装失败: ${err?.detail?.error || '未知错误'}`);
+    if (installingIds.has(id)) return;
+    setInstallingIds(prev => new Set(prev).add(id));
+
+    const tid = addToast('loading', `正在安装 ${id}，下载中...`);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/skills/install`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source, id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        updateToast(tid, 'success', `${data.skill_name || id} 安装成功`);
+        onInstalled();
+        doSearch(activeSource, query, page);
+      } else {
+        const err = await res.json();
+        updateToast(tid, 'error', `安装失败: ${err?.detail?.error || '未知错误'}`);
+      }
+    } catch (e: any) {
+      updateToast(tid, 'error', `安装失败: ${e?.message || '网络错误'}`);
+    } finally {
+      setInstallingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
   const handleGitInstall = async () => {
     if (!gitUrl.trim()) return;
     setGitInstalling(true);
+    const tid = addToast('loading', `正在从 Git 安装，克隆中...`);
     try {
       const res = await fetch(`${API_BASE}/api/skills/install`, {
         method: 'POST',
@@ -74,13 +123,16 @@ export function MarketTab({ onInstalled }: { onInstalled: () => void }) {
         body: JSON.stringify({ source: 'git', repo_url: gitUrl }),
       });
       if (res.ok) {
-        alert('安装成功');
+        const data = await res.json();
+        updateToast(tid, 'success', `${data.skill_name || 'Skill'} 安装成功`);
         setGitUrl('');
         onInstalled();
       } else {
         const err = await res.json();
-        alert(`安装失败: ${err?.detail?.error || '未知错误'}`);
+        updateToast(tid, 'error', `安装失败: ${err?.detail?.error || '未知错误'}`);
       }
+    } catch (e: any) {
+      updateToast(tid, 'error', `安装失败: ${e?.message || '网络错误'}`);
     } finally {
       setGitInstalling(false);
     }
@@ -88,6 +140,34 @@ export function MarketTab({ onInstalled }: { onInstalled: () => void }) {
 
   return (
     <div className="space-y-4">
+      {/* Toast 通知 */}
+      {toasts.length > 0 && (
+        <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+          {toasts.map(toast => (
+            <div
+              key={toast.id}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg border text-sm ${
+                toast.type === 'loading'
+                  ? 'bg-[#252526] border-[#007acc] text-[#cccccc]'
+                  : toast.type === 'success'
+                    ? 'bg-[#252526] border-green-600 text-green-400'
+                    : 'bg-[#252526] border-red-600 text-red-400'
+              }`}
+            >
+              {toast.type === 'loading' && <Loader2 size={16} className="animate-spin text-[#007acc] shrink-0" />}
+              {toast.type === 'success' && <CheckCircle size={16} className="text-green-400 shrink-0" />}
+              {toast.type === 'error' && <XCircle size={16} className="text-red-400 shrink-0" />}
+              <span className="flex-1 min-w-0 truncate">{toast.message}</span>
+              {toast.type !== 'loading' && (
+                <button onClick={() => removeToast(toast.id)} className="text-[#858585] hover:text-[#cccccc] shrink-0">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* 来源切换 */}
       <div className="flex gap-1 bg-[#252526] rounded p-1">
         {SOURCES.map(src => (
@@ -172,7 +252,8 @@ export function MarketTab({ onInstalled }: { onInstalled: () => void }) {
                   version={skill.version}
                   downloads={skill.downloads}
                   author={skill.author}
-                  onInstall={() => handleInstall(skill.source, skill.id)}
+                  installing={installingIds.has(skill.id)}
+                  onInstall={installingIds.has(skill.id) ? undefined : () => handleInstall(skill.source, skill.id)}
                   onClick={() => setDetailModal({ source: skill.source, id: skill.id })}
                 />
               ))}
