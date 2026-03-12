@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import yaml
 from pathlib import Path
@@ -13,15 +14,127 @@ class Skill:
         self.body = body
         self.path = path
 
+    @property
+    def install_info(self) -> dict[str, Any] | None:
+        """读取 .install.json，返回安装信息字典或 None"""
+        install_file = self.path / ".install.json"
+        if not install_file.exists():
+            return None
+        try:
+            return json.loads(install_file.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    @property
+    def source(self) -> str:
+        """返回 skill 来源，默认 'local'"""
+        info = self.install_info
+        if info:
+            return info.get("source", "local")
+        return "local"
+
+    @property
+    def version(self) -> str | None:
+        """返回 skill 版本号，无安装信息时返回 None"""
+        info = self.install_info
+        if info:
+            return info.get("version")
+        return None
+
 
 class SkillRegistry:
-    def __init__(self, workspace_dir: Path | None = None, user_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace_dir: Path | None = None,
+        user_dir: Path | None = None,
+        state_file: Path | None = None,
+    ):
         self._skills: dict[str, Skill] = {}
         self._workspace_dir = workspace_dir
         self._user_dir = user_dir or Path.home() / ".agentos" / "skills"
+        self._state_file = state_file
+
+    # ---- 状态持久化 ----
+
+    def _load_state(self) -> dict[str, Any]:
+        """读取 skills_state.json"""
+        if self._state_file and self._state_file.exists():
+            try:
+                return json.loads(self._state_file.read_text(encoding="utf-8"))
+            except Exception:
+                return {}
+        return {}
+
+    def _save_state(self, state: dict[str, Any]) -> None:
+        """写入 skills_state.json"""
+        if self._state_file:
+            self._state_file.write_text(
+                json.dumps(state, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+    def set_enabled(self, name: str, enabled: bool) -> None:
+        """设置 skill 启用/禁用状态并持久化"""
+        state = self._load_state()
+        if name not in state:
+            state[name] = {}
+        state[name]["enabled"] = enabled
+        self._save_state(state)
+
+        # 如果禁用，立即从内存中移除
+        if not enabled:
+            self._skills.pop(name, None)
+
+    def is_enabled(self, name: str) -> bool:
+        """检查 skill 是否启用"""
+        state = self._load_state()
+        skill_state = state.get(name, {})
+        return skill_state.get("enabled", True)
+
+    # ---- 热重载 ----
+
+    def register(self, skill: Skill) -> None:
+        """注册一个 skill 到内存"""
+        self._skills[skill.name] = skill
+
+    def unregister(self, name: str) -> bool:
+        """从内存移除一个 skill，返回是否成功"""
+        if name in self._skills:
+            del self._skills[name]
+            return True
+        return False
+
+    def reload_skill(self, name: str, config: dict[str, Any]) -> bool:
+        """重新加载指定 skill，返回是否成功"""
+        # 查找已有 skill 的路径
+        old_skill = self._skills.get(name)
+        if old_skill is None:
+            return False
+
+        skill_md = old_skill.path / "SKILL.md"
+        if not skill_md.exists():
+            return False
+
+        new_skill = self._parse_skill(skill_md)
+        if new_skill is None:
+            return False
+
+        if self._should_load(new_skill, config):
+            self._skills[new_skill.name] = new_skill
+        else:
+            self._skills.pop(name, None)
+        return True
+
+    def parse_skill(self, skill_path: Path) -> Skill | None:
+        """公开的 skill 解析方法"""
+        return self._parse_skill(skill_path)
+
+    # ---- 加载 ----
 
     def load_skills(self, config: dict[str, Any]) -> None:
         """从用户目录、工作区目录和额外目录加载 skills"""
+        self._skills.clear()
+
         # 先加载用户级 skills
         if self._user_dir.exists():
             self._load_from_dir(self._user_dir, config)
@@ -68,21 +181,35 @@ class SkillRegistry:
             return None
 
     def _should_load(self, skill: Skill, config: dict[str, Any]) -> bool:
-        """检查 skill 是否应该加载（门控）"""
-        # 检查配置中是否禁用
+        """检查 skill 是否应该加载（门控）
+
+        优先级: skills_state.json > config.yml entries > 默认 True
+        """
+        # 1. 优先检查 skills_state.json
+        state = self._load_state()
+        if skill.name in state:
+            if not state[skill.name].get("enabled", True):
+                return False
+            # 如果 state 中存在且 enabled=True，跳过 config 检查
+            return self._check_binary_deps(skill)
+
+        # 2. 检查 config.yml 中的配置
         entries = config.get("skills", {}).get("entries", {})
         skill_config = entries.get(skill.name, {})
         if not skill_config.get("enabled", True):
             return False
 
-        # 检查依赖的二进制文件
+        # 3. 检查依赖的二进制文件
+        return self._check_binary_deps(skill)
+
+    def _check_binary_deps(self, skill: Skill) -> bool:
+        """检查 skill 所需的二进制依赖是否可用"""
         metadata = self._parse_metadata(skill)
         requires = metadata.get("agentos", {}).get("requires", {})
         bins = requires.get("bins", [])
         for bin_name in bins:
             if not shutil.which(bin_name):
                 return False
-
         return True
 
     def _parse_metadata(self, skill: Skill) -> dict[str, Any]:

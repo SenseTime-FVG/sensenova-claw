@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
@@ -181,6 +182,23 @@ export default function ChatPage() {
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
   const pendingInputRef = useRef<string | null>(null);
 
+  // ── 斜杠命令 ──
+
+  const handleSkillInvoke = async (skillName: string, args: string) => {
+    if (!sessionId) return;
+    await fetch(`${API_BASE}/api/sessions/${sessionId}/skill-invoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skill_name: skillName, arguments: args }),
+    });
+    setInputValue('');
+    setIsTyping(true);
+  };
+
+  const { showMenu, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmit } = useSlashCommand(
+    inputValue, setInputValue, handleSkillInvoke,
+  );
+
   // ── WebSocket ──
 
   useEffect(() => {
@@ -342,6 +360,13 @@ export default function ChatPage() {
   const sendMessage = () => {
     const content = inputValue.trim();
     if (!content || !wsConnected) return;
+    // 斜杠命令拦截
+    if (handleSlashSubmit(content)) {
+      addMsg('user', content);
+      setInputValue('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      return;
+    }
     addMsg('user', content);
     setInputValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -429,6 +454,11 @@ export default function ChatPage() {
           <div className="border-t border-[#2d2d30] bg-[#1e1e1e] p-4 shrink-0">
             <div className="max-w-3xl mx-auto flex gap-3 items-end">
               <div className="flex-1 relative">
+                <SlashCommandMenu
+                  inputValue={inputValue}
+                  onSelect={handleSlashSelect}
+                  visible={showMenu}
+                />
                 <textarea
                   ref={textareaRef}
                   value={inputValue}

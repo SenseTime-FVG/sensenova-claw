@@ -92,8 +92,17 @@ async def lifespan(app: FastAPI):
 
     # 初始化 SkillRegistry
     skills_dir = Path(config.get("system.workspace_dir", ".")) / "skills"
-    skill_registry = SkillRegistry(workspace_dir=skills_dir)
+    state_file = Path(config.get("system.workspace_dir", ".")) / "skills_state.json"
+    skill_registry = SkillRegistry(workspace_dir=skills_dir, state_file=state_file)
     skill_registry.load_skills(config.data)
+
+    # 初始化 SkillMarketService
+    from app.skills.market_service import SkillMarketService
+    market_service = SkillMarketService(
+        skills_dir=skills_dir,
+        skill_registry=skill_registry,
+        config=config.data,
+    )
 
     context_builder = ContextBuilder(skill_registry=skill_registry, tool_registry=tool_registry)
 
@@ -185,12 +194,14 @@ async def lifespan(app: FastAPI):
     app.state.tool_registry = tool_registry
     app.state.skill_registry = skill_registry
     app.state.config = config
+    app.state.market_service = market_service
     logger.info("AgentOS backend started (dual-bus architecture)")
 
     try:
         yield
     finally:
-        # 关闭顺序：cron/heartbeat → runtimes → gateway → bus_router → persister
+        # 关闭顺序：market_service → cron/heartbeat → runtimes → gateway → bus_router → persister
+        await market_service.shutdown()
         await cron_runtime.stop()
         await heartbeat_runtime.stop()
         await agent_runtime.stop()
@@ -217,6 +228,8 @@ app.include_router(agents.router)
 app.include_router(tools.router)
 app.include_router(gateway.router)
 app.include_router(skills.router)
+from app.api.skills import invoke_router
+app.include_router(invoke_router)
 
 
 @app.get("/health")
