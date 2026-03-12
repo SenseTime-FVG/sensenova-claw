@@ -12,7 +12,7 @@ class EventEnvelope(BaseModel):
     type: str
     ts: float = Field(default_factory=lambda: time.time())
     session_id: str
-    agent_id: str = "agent-1"
+    agent_id: str = "default"
     turn_id: str | None = None
     step_id: str | None = None
     trace_id: str | None = None

@@ -49,6 +49,7 @@ class SystemPromptParams:
     context_files: list[ContextFile] = field(default_factory=list)
     extra_system_prompt: str | None = None
     runtime_info: RuntimeInfo | None = None
+    workspace_dir: str | None = None           # v1.2: 工作目录
 
 
 # ---------- 公开接口 ----------
@@ -60,6 +61,7 @@ def build_system_prompt(params: SystemPromptParams) -> str:
 
     sections = [
         _build_identity(params.base_prompt),
+        _build_workspace(params.workspace_dir),
         _build_tooling(params.tool_names, params.tool_summaries),
         _build_skills(params.skills_prompt),
         _build_memory(params.memory_context),
@@ -83,6 +85,20 @@ def _build_identity(base_prompt: str) -> list[str]:
     if base_prompt.strip():
         return [base_prompt.strip()]
     return ["You are a helpful AI assistant running inside AgentOS."]
+
+
+def _build_workspace(workspace_dir: str | None) -> list[str]:
+    """Section 2: Workspace 路径提示（有 workspace 时）"""
+    if not workspace_dir:
+        return []
+    return [
+        "",
+        "## Workspace",
+        f"Your working directory is: {workspace_dir}",
+        "Relative paths resolve against this directory.",
+        "To access files outside workspace, use absolute paths — you may need user permission.",
+        "Do NOT maintain a 'current directory' state — each tool call is independent.",
+    ]
 
 
 def _build_tooling(tool_names: list[str], tool_summaries: dict[str, str]) -> list[str]:

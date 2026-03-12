@@ -1,0 +1,2 @@
+## skills扩展、安装和可视化
+我需要把所有本地的skills和联网的skills做成可搜索的模块在前端skills页面展示出来，其中联网的skills应该能看到他们的基本信息如名称描述star数量等、能安装以让模型使用，/agent/skills界面显示所有可用的skills（包括本地和已安装的），通过toggle实现enable disable

@@ -8,7 +8,7 @@ export function DashboardNav() {
   const pathname = usePathname();
 
   const navItems = [
-    { path: '/agents', icon: Bot, label: 'Agents' },
+    { path: '/agents', icon: Bot, label: '编排中心' },
     { path: '/sessions', icon: MessageSquare, label: 'Sessions' },
     { path: '/gateway', icon: GitBranch, label: 'Gateway' },
     { path: '/tools', icon: Wrench, label: 'Tools' },
@@ -19,7 +19,8 @@ export function DashboardNav() {
     <div className="w-12 bg-[#333333] flex flex-col items-center py-2 border-r border-[#2d2d30]">
       <div className="flex flex-col gap-4">
         {navItems.map((item) => {
-          const isActive = pathname?.startsWith(item.path);
+          const isActive = pathname?.startsWith(item.path) ||
+            (item.path === '/agents' && pathname?.startsWith('/workflows'));
           return (
             <Link
               key={item.path}

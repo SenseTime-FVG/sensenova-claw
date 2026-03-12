@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { SkillCard } from './SkillCard';
+import { SkillDetailModal } from './SkillDetailModal';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -16,12 +17,27 @@ interface InstalledSkill {
   version: string | null;
   has_update: boolean;
   update_version: string | null;
+  dependencies: Record<string, boolean> | null;
+  all_deps_met: boolean;
 }
 
-export function InstalledTab() {
+const categoryLabels: Record<string, string> = {
+  builtin: '内置',
+  workspace: '工作区',
+  installed: '已安装',
+};
+
+const categoryOrder = ['builtin', 'installed', 'workspace'];
+
+interface InstalledTabProps {
+  categoryFilter?: string;
+}
+
+export function InstalledTab({ categoryFilter }: InstalledTabProps) {
   const [skills, setSkills] = useState<InstalledSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [detailModal, setDetailModal] = useState<{ name: string } | null>(null);
 
   const fetchSkills = useCallback(async () => {
     try {
@@ -75,10 +91,14 @@ export function InstalledTab() {
     fetchSkills();
   };
 
-  const filtered = skills.filter(s =>
+  // 过滤
+  let filtered = skills.filter(s =>
     s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     s.description.toLowerCase().includes(searchTerm.toLowerCase())
   );
+  if (categoryFilter) {
+    filtered = filtered.filter(s => s.category === categoryFilter);
+  }
 
   if (loading) {
     return (
@@ -87,6 +107,15 @@ export function InstalledTab() {
       </div>
     );
   }
+
+  // 按 category 分组
+  const grouped = categoryOrder
+    .map(cat => ({
+      category: cat,
+      label: categoryLabels[cat] || cat,
+      items: filtered.filter(s => s.category === cat),
+    }))
+    .filter(g => g.items.length > 0);
 
   return (
     <div className="space-y-4">
@@ -105,26 +134,47 @@ export function InstalledTab() {
         </span>
       </div>
 
-      <div className="space-y-2">
-        {filtered.length === 0 ? (
-          <div className="text-center text-[#858585] py-8">无匹配结果</div>
-        ) : (
-          filtered.map(skill => (
-            <SkillCard
-              key={skill.id}
-              name={skill.name}
-              description={skill.description}
-              source={skill.source}
-              version={skill.version}
-              enabled={skill.enabled}
-              hasUpdate={skill.has_update}
-              onToggle={enabled => handleToggle(skill.name, enabled)}
-              onUninstall={() => handleUninstall(skill.name)}
-              onUpdate={() => handleUpdate(skill.name)}
-            />
-          ))
-        )}
-      </div>
+      {grouped.length === 0 ? (
+        <div className="text-center text-[#858585] py-8">无匹配结果</div>
+      ) : (
+        grouped.map(group => (
+          <div key={group.category}>
+            <h3 className="text-sm font-medium text-[#858585] mb-2">
+              {group.label} ({group.items.length})
+            </h3>
+            <div className="space-y-2">
+              {group.items.map(skill => (
+                <SkillCard
+                  key={skill.id}
+                  name={skill.name}
+                  description={skill.description}
+                  category={skill.category}
+                  source={skill.source}
+                  version={skill.version}
+                  enabled={skill.enabled}
+                  hasUpdate={skill.has_update}
+                  dependencies={skill.dependencies}
+                  allDepsMet={skill.all_deps_met}
+                  onToggle={enabled => handleToggle(skill.name, enabled)}
+                  onUninstall={() => handleUninstall(skill.name)}
+                  onUpdate={() => handleUpdate(skill.name)}
+                  onClick={() => setDetailModal({ name: skill.name })}
+                />
+              ))}
+            </div>
+          </div>
+        ))
+      )}
+
+      {/* 本地 skill 详情弹窗 */}
+      {detailModal && (
+        <SkillDetailModal
+          source="local"
+          skillId={detailModal.name}
+          onClose={() => setDetailModal(null)}
+          installed
+        />
+      )}
     </div>
   );
 }

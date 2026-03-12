@@ -8,6 +8,7 @@ from app.tools.builtin import (
     SerperSearchTool,
     WriteFileTool,
 )
+from app.tools.orchestration import CreateAgentTool, CreateWorkflowTool
 
 
 class ToolRegistry:
@@ -22,6 +23,8 @@ class ToolRegistry:
             FetchUrlTool(),
             ReadFileTool(),
             WriteFileTool(),
+            CreateAgentTool(),
+            CreateWorkflowTool(),
         ]:
             self.register(tool)
 

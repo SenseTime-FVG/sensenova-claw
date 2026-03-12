@@ -20,6 +20,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "workspace_dir": "./SenseAssistant/workspace",
         "database_path": "./SenseAssistant/agentos.db",
         "max_concurrent_sessions": 10,
+        "granted_paths": [],                         # v1.2: 预授权目录列表
     },
     "server": {
         "host": "0.0.0.0",
@@ -161,6 +162,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
     },
+    # v1.0: 多 Agent 配置
+    "agents": {},
+    "delegation": {
+        "max_depth": 3,
+        "default_timeout": 300,
+        "enabled": True,
+    },
+    "workflow": {
+        "enabled": True,
+        "max_concurrent_runs": 3,
+        "default_timeout": 1800,
+    },
 }
 
 
@@ -218,6 +231,16 @@ class Config:
             if value is None:
                 return default
         return value
+
+    def set(self, path: str, value: Any) -> None:
+        """设置运行时配置值（不写入文件）"""
+        keys = path.split(".")
+        target = self.data
+        for key in keys[:-1]:
+            if key not in target or not isinstance(target[key], dict):
+                target[key] = {}
+            target = target[key]
+        target[keys[-1]] = value
 
 
 config = Config()

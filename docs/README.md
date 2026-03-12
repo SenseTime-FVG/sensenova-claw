@@ -24,6 +24,13 @@
 - [16_tool_system_enhancement.md](./16_tool_system_enhancement.md) - 工具系统增强（权限管理 + 截断统一 + write_file 增强）
 - [17_system_prompt_workspace_session.md](./17_system_prompt_workspace_session.md) - System Prompt 模块化 + Workspace 文件体系 + Session 持久化增强
 - [18_memory_system.md](./18_memory_system.md) - 长期记忆系统（文件记忆 + 语义搜索 + MEMORY.md 注入）
+- [22_multi_agent_and_workflow.md](./22_multi_agent_and_workflow.md) - 多 Agent 与 Workflow 编排系统（v1.0）
+- [23_skills_marketplace_and_visualization.md](./23_skills_marketplace_and_visualization.md) - Skills 市场、安装与可视化（v1.1）
+- [24_path_security_policy.md](./24_path_security_policy.md) - 路径安全策略 PathPolicy（v1.2）
+- [25_cli_enhancement.md](./25_cli_enhancement.md) - CLI 客户端增强
+- [26_thorough_test_plan.md](./26_thorough_test_plan.md) - 全面测试计划
+- [27_tidy_and_next.md](./27_tidy_and_next.md) - 整理与下一步规划
+- [28_orchestration_ui_and_tools.md](./28_orchestration_ui_and_tools.md) - 编排中心 UI 整合 + 对话式创建工具（v1.7）
 
 ### 前端与配置
 - [06_frontend_architecture.md](./06_frontend_architecture.md) - 前端架构设计
@@ -107,14 +114,17 @@ AgentOS 采用事件驱动架构，所有模块通过事件总线通信。这种
 - **TitleRuntime**: 会话标题生成
 
 ### 工具系统
-内置 5 种基础工具：
-- `bash_command`: 执行命令
+内置工具包括：
+- `bash_command`: 执行 shell 命令
 - `serper_search`: 网络搜索
-- `fetch_url`: 获取网页
+- `fetch_url`: 获取网页内容
 - `read_file`: 读取文件
 - `write_file`: 写入文件
+- `grant_path`: 授权目录访问
+- `create_agent`: 对话中创建 Agent（v1.7 新增）
+- `create_workflow`: 对话中创建 Workflow（v1.7 新增）
 
-详见 [12_builtin_tools.md](./12_builtin_tools.md)
+详见 [12_builtin_tools.md](./12_builtin_tools.md) 和 [28_orchestration_ui_and_tools.md](./28_orchestration_ui_and_tools.md)
 
 ### Skills 系统
 16 个内置 skills 提供声明式任务编排能力，包括：
@@ -162,13 +172,24 @@ OpenAI Provider 自动归一化消息格式，避免 API 调用失败。
 
 ## 版本说明
 
-当前版本: **v0.4**
+当前版本: **v1.7**
+
+v1.7 新增特性：
+- ✅ 编排中心 UI（Agents + Workflows 合并展示）
+- ✅ 会话目标选择器（选择 Agent/Workflow 开始对话）
+- ✅ 对话式编排工具（create_agent / create_workflow）
+- ✅ Workflow 直接运行模式（Chat 页面支持 Workflow 执行）
+
+v1.0 新增特性：
+- ✅ 多 Agent 系统（AgentConfig / AgentRegistry）
+- ✅ Workflow 编排（DAG 工作流引擎）
+- ✅ Agent 委托机制（delegate_tool）
+- ✅ Workflow 运行（workflow_tool）
 
 v0.4 新增特性：
 - ✅ Skills 系统（声明式任务编排）
 - ✅ 16 个内置 skills（PDF、DOCX、前端设计等）
 - ✅ Skills 配置管理
-- ✅ 移除占位 Tools（search_skill、load_skill）
 
 v0.2 新增特性：
 - ✅ Gateway 架构

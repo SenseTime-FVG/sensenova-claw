@@ -35,17 +35,37 @@ export default function ToolsPage() {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    fetchTools();
+  }, []);
+
+  const fetchTools = () => {
     fetch(`${API_BASE}/api/tools`)
       .then(res => res.json())
       .then(data => setTools(data))
       .catch(() => setTools([]))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  const toggleEnabled = async (toolName: string, currentEnabled: boolean) => {
+    const newEnabled = !currentEnabled;
+    setTools(prev => prev.map(t => t.name === toolName ? { ...t, enabled: newEnabled } : t));
+    try {
+      await fetch(`${API_BASE}/api/tools/${toolName}/enabled`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: newEnabled }),
+      });
+    } catch {
+      setTools(prev => prev.map(t => t.name === toolName ? { ...t, enabled: currentEnabled } : t));
+    }
+  };
 
   const filteredTools = tools.filter((tool) =>
     tool.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     tool.description.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const enabledCount = tools.filter(t => t.enabled).length;
 
   return (
     <DashboardLayout>
@@ -71,7 +91,7 @@ export default function ToolsPage() {
             </div>
             <div>
               <span className="text-[#858585]">Enabled: </span>
-              <span className="text-green-400">{tools.filter(t => t.enabled).length}</span>
+              <span className="text-green-400">{enabledCount}</span>
             </div>
           </div>
         </div>
@@ -126,7 +146,15 @@ export default function ToolsPage() {
                           </div>
                         )}
                       </div>
-                      <div className={`w-2 h-2 rounded-full mt-2 ${tool.enabled ? 'bg-green-500' : 'bg-gray-500'}`} />
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={tool.enabled}
+                          onChange={() => toggleEnabled(tool.name, tool.enabled)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-[#3c3c3c] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#858585] after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0e639c] peer-checked:after:bg-white pointer-events-none" />
+                      </label>
                     </div>
                   </div>
                 );

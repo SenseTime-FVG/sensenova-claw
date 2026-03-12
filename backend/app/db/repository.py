@@ -218,11 +218,21 @@ class Repository:
             ("channel", "ALTER TABLE sessions ADD COLUMN channel TEXT"),
             ("model", "ALTER TABLE sessions ADD COLUMN model TEXT"),
             ("message_count", "ALTER TABLE sessions ADD COLUMN message_count INTEGER DEFAULT 0"),
+            ("agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT DEFAULT 'default'"),
         ]
         for col, sql in migrations:
             if col not in existing_cols:
                 conn.execute(sql)
         conn.commit()
+
+    async def get_session_meta(self, session_id: str) -> dict[str, Any] | None:
+        """获取会话的 meta 信息（含 agent_id 等）"""
+        conn = self._conn()
+        row = conn.execute("SELECT meta FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+        conn.close()
+        if not row or not row[0]:
+            return None
+        return json.loads(row[0])
 
     # ---------- Messages 表操作 ----------
 

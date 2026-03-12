@@ -10,6 +10,7 @@ from app.events.envelope import EventEnvelope
 from app.events.types import (
     AGENT_STEP_COMPLETED,
     AGENT_STEP_STARTED,
+    ERROR_RAISED,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
     LLM_CALL_RESULT,
@@ -22,27 +23,89 @@ from app.runtime.state import TurnState
 from app.runtime.workers.base import SessionWorker
 
 if TYPE_CHECKING:
+    from app.agents.config import AgentConfig
     from app.runtime.agent_runtime import AgentRuntime
 
 logger = logging.getLogger(__name__)
 
 
 class AgentSessionWorker(SessionWorker):
-    """Agent 会话级 Worker：编排对话流程"""
+    """Agent 会话级 Worker：编排对话流程
 
-    def __init__(self, session_id: str, private_bus: PrivateEventBus, runtime: AgentRuntime):
+    支持通过 agent_config 使用独立的 provider/model/tools/skills 配置。
+    当 agent_config 为 None 时，回退到全局 config（向后兼容）。
+    """
+
+    MAX_CONSECUTIVE_ERRORS = 3
+
+    def __init__(
+        self,
+        session_id: str,
+        private_bus: PrivateEventBus,
+        runtime: AgentRuntime,
+        agent_config: AgentConfig | None = None,
+    ):
         super().__init__(session_id, private_bus)
         self.rt = runtime
+        self.agent_config = agent_config
+        self._consecutive_errors = 0
+
+    # ── 配置读取辅助 ──────────────────────────────────
+
+    def _get_provider(self) -> str:
+        if self.agent_config and self.agent_config.provider:
+            return self.agent_config.provider
+        return config.get("agent.provider", "mock")
+
+    def _get_model(self) -> str:
+        if self.agent_config and self.agent_config.model:
+            return self.agent_config.model
+        return config.get("agent.default_model")
+
+    def _get_temperature(self) -> float:
+        if self.agent_config:
+            return self.agent_config.temperature
+        return config.get("agent.default_temperature", 0.2)
+
+    def _get_filtered_tools(self) -> list[dict]:
+        """根据 Agent 配置过滤可用工具"""
+        all_tools = self.rt.tool_registry.as_llm_tools()
+        if not self.agent_config or not self.agent_config.tools:
+            return all_tools  # 空列表 = 全部工具
+        allowed = set(self.agent_config.tools)
+        # 始终保留 delegate 和 run_workflow 工具
+        always_keep = {"delegate", "run_workflow"}
+        return [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
+
+    # ── 事件处理 ──────────────────────────────────────
 
     async def _handle(self, event: EventEnvelope) -> None:
-        if event.type == USER_INPUT:
-            await self._handle_user_input(event)
-        elif event.type == LLM_CALL_RESULT:
-            await self._handle_llm_result(event)
-        elif event.type == LLM_CALL_COMPLETED:
-            await self._handle_llm_completed(event)
-        elif event.type == TOOL_CALL_RESULT:
-            await self._handle_tool_result(event)
+        try:
+            if event.type == USER_INPUT:
+                await self._handle_user_input(event)
+            elif event.type == LLM_CALL_RESULT:
+                await self._handle_llm_result(event)
+            elif event.type == LLM_CALL_COMPLETED:
+                await self._handle_llm_completed(event)
+            elif event.type == TOOL_CALL_RESULT:
+                await self._handle_tool_result(event)
+            self._consecutive_errors = 0
+        except Exception as exc:
+            self._consecutive_errors += 1
+            logger.exception("Worker error in session %s", self.session_id)
+            if self._consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+                await self.bus.publish(EventEnvelope(
+                    type=ERROR_RAISED,
+                    session_id=self.session_id,
+                    source="agent",
+                    payload={
+                        "error_type": "WorkerCrash",
+                        "error_message": (
+                            f"Worker crashed after {self.MAX_CONSECUTIVE_ERRORS} "
+                            f"consecutive errors: {exc}"
+                        ),
+                    },
+                ))
 
     async def _handle_user_input(self, event: EventEnvelope) -> None:
         content = str(event.payload.get("content", ""))
@@ -74,6 +137,7 @@ class AgentSessionWorker(SessionWorker):
             content, history,
             memory_context=memory_context,
             context_files=context_files,
+            agent_config=self.agent_config,
         )
         state = TurnState(turn_id=turn_id, user_input=content, messages=messages)
         # 记录新消息的起始位置：跳过 system prompt(1条) + 旧历史
@@ -100,11 +164,11 @@ class AgentSessionWorker(SessionWorker):
                 source="agent",
                 payload={
                     "llm_call_id": llm_call_id,
-                    "provider": config.get("agent.provider", "mock"),
-                    "model": config.get("agent.default_model"),
+                    "provider": self._get_provider(),
+                    "model": self._get_model(),
                     "messages": messages,
-                    "tools": self.rt.tool_registry.as_llm_tools(),
-                    "temperature": config.get("agent.default_temperature", 0.2),
+                    "tools": self._get_filtered_tools(),
+                    "temperature": self._get_temperature(),
                 },
             )
         )
@@ -248,11 +312,11 @@ class AgentSessionWorker(SessionWorker):
                 source="agent",
                 payload={
                     "llm_call_id": llm_call_id,
-                    "provider": config.get("agent.provider", "mock"),
-                    "model": config.get("agent.default_model"),
+                    "provider": self._get_provider(),
+                    "model": self._get_model(),
                     "messages": state.messages,
-                    "tools": self.rt.tool_registry.as_llm_tools(),
-                    "temperature": config.get("agent.default_temperature", 0.2),
+                    "tools": self._get_filtered_tools(),
+                    "temperature": self._get_temperature(),
                 },
             )
         )
