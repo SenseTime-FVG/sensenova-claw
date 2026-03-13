@@ -2,8 +2,7 @@
 一键 E2E 测试脚本 - 进程内启动所有服务，无需外部依赖。
 
 用法:
-    cd backend
-    uv run python tests/e2e/run_e2e.py                          # 使用 mock provider
+    python3 tests/e2e/run_e2e.py                                 # 使用 mock provider
     uv run python tests/e2e/run_e2e.py --provider anthropic      # 使用真实 Anthropic API
     uv run python tests/e2e/run_e2e.py --provider openai          # 使用真实 OpenAI API
     uv run python tests/e2e/run_e2e.py --query "帮我搜索天气"     # 自定义查询

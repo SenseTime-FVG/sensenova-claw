@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 
-# 确保 backend 目录在 sys.path 中
+# 确保项目根目录在 sys.path 中
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
