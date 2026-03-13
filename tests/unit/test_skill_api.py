@@ -1,6 +1,7 @@
 """Skills API 端点单测（使用 TestClient + mock service）"""
 import json
 import pytest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -20,7 +21,7 @@ def app():
     mock_skill = MagicMock(spec=Skill)
     mock_skill.name = "test-skill"
     mock_skill.description = "Test skill"
-    mock_skill.path = "/fake/path"
+    mock_skill.path = Path("/fake/path")
     mock_skill.source = "local"
     mock_skill.version = None
     mock_skill.install_info = None

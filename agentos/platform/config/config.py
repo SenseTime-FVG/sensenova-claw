@@ -173,11 +173,142 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 class Config:
-    """从项目根目录的 config.yml 加载配置，与 DEFAULT_CONFIG 深度合并。"""
+    """从项目根目录的 config.yml 加载配置，与 DEFAULT_CONFIG 深度合并。
 
-    def __init__(self, config_path: Path | None = None):
-        self._config_path = config_path or PROJECT_ROOT / "config.yml"
-        self.data = self._load_config()
+    支持两种初始化方式：
+    1. 传统方式：Config(config_path=...)，直接指定单个配置文件路径
+    2. 新方式：Config(project_root=..., user_config_dir=...)，自动发现配置文件
+       - 从 project_root 向上遍历，收集所有 .agentos/config.yaml（从远到近）
+       - 同时加载沿途发现的 config.yml（遗留格式，含 OPENAI_API_KEY 等顶层 key）
+       - user_config_dir 用于测试时避免加载真实用户配置
+    """
+
+    def __init__(
+        self,
+        config_path: Path | None = None,
+        *,
+        project_root: Path | None = None,
+        user_config_dir: Path | None = None,
+    ):
+        # 新方式：通过 project_root 自动发现配置
+        if project_root is not None:
+            self._project_root = Path(project_root).resolve()
+            self._user_config_dir = Path(user_config_dir) if user_config_dir is not None else None
+            self._config_path = None  # 新方式不使用单一路径
+            self.data = self._load_config_from_project_root()
+        else:
+            # 兼容旧方式：单一 config_path
+            self._config_path = config_path or PROJECT_ROOT / "config.yml"
+            self._project_root = None
+            self._user_config_dir = None
+            self.data = self._load_config()
+
+    def _load_config_from_project_root(self) -> dict[str, Any]:
+        """新方式配置加载：从 project_root 向上遍历，收集所有配置文件后合并。"""
+        config = deepcopy(DEFAULT_CONFIG)
+
+        # 收集从 project_root 到文件系统根目录的所有路径（从远到近）
+        dirs: list[Path] = []
+        current = self._project_root
+        while True:
+            dirs.append(current)
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+        # 从远到近排列（最远的祖先先应用，近的后覆盖）
+        dirs.reverse()
+
+        # 遗留格式（config.yml 含顶层 key）按从远到近收集
+        legacy_data: dict[str, Any] = {}
+        # .agentos/config.yaml 按从远到近收集
+        agentos_configs: list[dict[str, Any]] = []
+
+        for d in dirs:
+            # 尝试加载遗留 config.yml
+            legacy_path = d / "config.yml"
+            if legacy_path.exists():
+                with legacy_path.open("r", encoding="utf-8") as f:
+                    raw = yaml.safe_load(f) or {}
+                if isinstance(raw, dict):
+                    legacy_data = self._deep_merge(legacy_data, raw)
+                    logger.info("加载遗留配置: %s", legacy_path)
+
+            # 尝试加载 .agentos/config.yaml
+            agentos_path = d / ".agentos" / "config.yaml"
+            if agentos_path.exists():
+                with agentos_path.open("r", encoding="utf-8") as f:
+                    raw = yaml.safe_load(f) or {}
+                if isinstance(raw, dict):
+                    agentos_configs.append(raw)
+                    logger.info("加载项目配置: %s", agentos_path)
+
+        # 先应用遗留配置中的 legacy key 映射
+        config = self._apply_legacy_keys(config, legacy_data)
+
+        # 再依次应用 .agentos/config.yaml（从远到近，近的覆盖远的）
+        for agentos_cfg in agentos_configs:
+            config = self._deep_merge(config, agentos_cfg)
+
+        # 如果 .agentos/config.yaml 中显式设置了 provider，
+        # 则根据最终 provider 填充 agent.default_model（若仍是默认值则更新）
+        config = self._sync_provider_defaults(config)
+
+        config = self._resolve_env(config)
+        return config
+
+    def _apply_legacy_keys(self, config: dict[str, Any], legacy: dict[str, Any]) -> dict[str, Any]:
+        """将遗留 config.yml 中的顶层 key 映射到新结构，不覆盖已由 .agentos/config.yaml 设置的 provider。"""
+        result = deepcopy(config)
+
+        # OPENAI_BASE_URL -> llm_providers.openai.base_url
+        if "OPENAI_BASE_URL" in legacy and legacy["OPENAI_BASE_URL"]:
+            result["llm_providers"]["openai"]["base_url"] = legacy["OPENAI_BASE_URL"]
+
+        # OPENAI_API_KEY -> llm_providers.openai.api_key
+        if "OPENAI_API_KEY" in legacy and legacy["OPENAI_API_KEY"]:
+            result["llm_providers"]["openai"]["api_key"] = legacy["OPENAI_API_KEY"]
+            # 只有当前 provider 未被显式覆盖时（仍为默认 mock），才自动切换到 openai
+            if result["agent"]["provider"] == DEFAULT_CONFIG["agent"]["provider"]:
+                result["agent"]["provider"] = "openai"
+                result["agent"]["default_model"] = result["llm_providers"]["openai"]["default_model"]
+
+        # SERPER_API_KEY -> tools.serper_search.api_key
+        if "SERPER_API_KEY" in legacy and legacy["SERPER_API_KEY"]:
+            result["tools"]["serper_search"]["api_key"] = legacy["SERPER_API_KEY"]
+
+        # MODEL -> agent.default_model 以及 llm_providers.openai.default_model
+        if "MODEL" in legacy and legacy["MODEL"]:
+            result["agent"]["default_model"] = legacy["MODEL"]
+            result["llm_providers"]["openai"]["default_model"] = legacy["MODEL"]
+
+        return result
+
+    def _sync_provider_defaults(self, config: dict[str, Any]) -> dict[str, Any]:
+        """根据最终确定的 provider 同步 agent.default_model。
+
+        如果 agent.default_model 的值与当前 provider 不匹配，
+        但恰好等于某个其他 provider 的默认模型，则说明它是由遗留映射或中间合并写入的，
+        应更新为当前 provider 的默认模型。
+        """
+        result = deepcopy(config)
+        provider = result["agent"]["provider"]
+        current_model = result["agent"]["default_model"]
+
+        # 收集所有 provider 的默认模型集合
+        all_provider_defaults = {
+            p_cfg.get("default_model")
+            for p_cfg in result.get("llm_providers", {}).values()
+            if isinstance(p_cfg, dict) and "default_model" in p_cfg
+        }
+
+        # 若当前 default_model 是某个 provider 的默认值（包括当前 provider），
+        # 则将其对齐到当前 provider 的默认模型
+        if current_model in all_provider_defaults:
+            provider_defaults = result.get("llm_providers", {}).get(provider, {})
+            if "default_model" in provider_defaults:
+                result["agent"]["default_model"] = provider_defaults["default_model"]
+        return result
 
     def _load_config(self) -> dict[str, Any]:
         config = deepcopy(DEFAULT_CONFIG)
