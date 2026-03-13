@@ -8,6 +8,7 @@
     "dev:frontend": "cd agentos/app/web && npm run dev",
     "test:backend": "python3 -m pytest tests/ -q",
     "test:backend:unit": "python3 -m pytest tests/unit/ -q",
+    "test:backend:core": "python3 -m pytest tests/unit/test_agent_worker.py tests/unit/test_llm_worker.py tests/unit/test_openai_provider_message_normalization.py tests/e2e/test_agent_llm_core_flow.py -q",
     "test:backend:e2e": "python3 -m pytest tests/e2e/ -q",
     "test:frontend:e2e": "cd agentos/app/web && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright test"
   },
