@@ -31,11 +31,15 @@ cd frontend && npm install && cd ..
 
 2. 配置 API Key（项目根目录 `config.yml`）
 
-```yaml
-OPENAI_BASE_URL: https://api.openai.com/v1
-OPENAI_API_KEY: sk-xxx
-SERPER_API_KEY: xxx
+将项目根目录下的 `config_example.yml` 重命名为 `config.yml`，然后根据你的实际 API Key 进行填写：
+
+```bash
+cp config_example.yml config.yml
+# 手动编辑 config.yml，填入各项 provider 与工具的 API Key
 ```
+
+**注意：**  
+- `config.yml` 仅用于本地开发环境，建议不要将包含私密信息的该文件提交到版本库。
 
 3. 一键启动前后端
 

@@ -12,6 +12,9 @@ class SkillSearchItem(BaseModel):
     version: str | None = None
     downloads: int | None = None
     source: str
+    updated_at: str | int | None = None  # ISO 8601 字符串或 Unix 时间戳
+    dependencies: list[str] | None = None
+    tags: list[str] | None = None
 
 
 class SearchResult(BaseModel):
@@ -31,6 +34,9 @@ class SkillDetail(BaseModel):
     skill_md_preview: str
     files: list[str]
     installed: bool
+    updated_at: str | int | None = None
+    dependencies: list[str] | None = None
+    readme: str | None = None
 
 
 class UpdateInfo(BaseModel):

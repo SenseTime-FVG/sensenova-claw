@@ -30,6 +30,10 @@ class ClawHubAdapter(MarketAdapter):
         self._api_base = api_base.rstrip("/")
         self._timeout = timeout
 
+    @property
+    def supports_browse(self) -> bool:
+        return True
+
     async def _request(
         self, method: str, url: str, **kwargs
     ) -> httpx.Response:
@@ -62,6 +66,40 @@ class ClawHubAdapter(MarketAdapter):
         resp.raise_for_status()
         return resp  # type: ignore[return-value]
 
+    async def browse(self, page: int = 1, page_size: int = 20) -> SearchResult:
+        """浏览热门 skills，使用 /api/v1/skills 列表端点"""
+        try:
+            resp = await self._request(
+                "GET",
+                f"{self._api_base}/skills",
+                params={"limit": page_size, "offset": (page - 1) * page_size},
+            )
+            data = resp.json()
+            skills_list = data if isinstance(data, list) else data.get("skills", data.get("results", []))
+            items = [
+                SkillSearchItem(
+                    id=s.get("slug", s.get("id", "")),
+                    name=s.get("displayName", s.get("name", s.get("slug", ""))),
+                    description=s.get("summary", s.get("description", "")),
+                    author=s.get("owner", {}).get("handle") if isinstance(s.get("owner"), dict) else s.get("author"),
+                    version=s.get("version"),
+                    downloads=s.get("downloads"),
+                    source="clawhub",
+                    updated_at=s.get("updatedAt"),
+                )
+                for s in (skills_list if isinstance(skills_list, list) else [])
+            ]
+            return SearchResult(
+                source="clawhub",
+                total=data.get("total", len(items)) if isinstance(data, dict) else len(items),
+                page=page,
+                page_size=page_size,
+                items=items,
+            )
+        except Exception as e:
+            logger.warning("ClawHub browse 失败，回退到搜索: %s", e)
+            return await self.search("tool", page, page_size)
+
     async def search(self, query: str, page: int = 1, page_size: int = 20) -> SearchResult:
         """搜索 skill
 
@@ -86,6 +124,7 @@ class ClawHubAdapter(MarketAdapter):
                 version=s.get("version"),
                 downloads=None,
                 source="clawhub",
+                updated_at=s.get("updatedAt"),
             )
             for s in results
         ]

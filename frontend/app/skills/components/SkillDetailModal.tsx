@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, FileText, Folder } from 'lucide-react';
+import { X, FileText, Folder, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -22,7 +22,17 @@ interface DetailData {
   skill_md_preview: string;
   files: string[];
   installed: boolean;
+  updated_at?: string;
+  dependencies?: string[];
+  readme?: string;
 }
+
+const categoryConfig: Record<string, { label: string; color: string }> = {
+  clawhub:   { label: 'ClawHub',  color: 'bg-violet-600' },
+  anthropic: { label: 'Anthropic', color: 'bg-orange-600' },
+  git:       { label: 'Git',      color: 'bg-gray-600' },
+  local:     { label: '本地',     color: 'bg-blue-600' },
+};
 
 export function SkillDetailModal({
   source, skillId, onClose, onInstall, onUninstall, installed,
@@ -38,6 +48,8 @@ export function SkillDetailModal({
       .finally(() => setLoading(false));
   }, [source, skillId]);
 
+  const srcConfig = categoryConfig[source] || { label: source, color: 'bg-gray-600' };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
@@ -51,7 +63,12 @@ export function SkillDetailModal({
             <div className="flex items-center gap-2 mt-1 text-xs text-[#858585]">
               {detail?.author && <span>by {detail.author}</span>}
               {detail?.version && <span>v{detail.version}</span>}
-              <span className="text-[10px] bg-purple-600 text-white px-1.5 py-0.5 rounded">{source}</span>
+              <span className={`text-[10px] text-white px-1.5 py-0.5 rounded ${srcConfig.color}`}>
+                {srcConfig.label}
+              </span>
+              {detail?.updated_at && (
+                <span>更新于 {new Date(detail.updated_at).toLocaleDateString()}</span>
+              )}
             </div>
           </div>
           <button onClick={onClose} className="text-[#858585] hover:text-[#cccccc]">
@@ -66,6 +83,22 @@ export function SkillDetailModal({
           ) : detail ? (
             <>
               <p className="text-sm text-[#cccccc]">{detail.description}</p>
+
+              {/* 依赖状态 */}
+              {detail.dependencies && detail.dependencies.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium text-[#858585] mb-2 flex items-center gap-1">
+                    <AlertTriangle size={14} /> 依赖
+                  </h3>
+                  <div className="bg-[#252526] rounded p-2 text-xs space-y-1">
+                    {detail.dependencies.map(dep => (
+                      <div key={dep} className="flex items-center gap-1.5 text-[#cccccc]">
+                        <span className="text-[#858585]">{dep}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* SKILL.md 预览 */}
               <div>
@@ -96,7 +129,7 @@ export function SkillDetailModal({
 
         {/* Footer */}
         <div className="flex justify-end gap-2 p-4 border-t border-[#2d2d30]">
-          {onInstall && !installed && (
+          {onInstall && !installed && !(detail?.installed) && (
             <button
               className="px-4 py-2 text-sm rounded bg-[#0e639c] text-white hover:bg-[#1177bb]"
               onClick={onInstall}
@@ -104,7 +137,7 @@ export function SkillDetailModal({
               安装
             </button>
           )}
-          {onUninstall && installed && (
+          {onUninstall && (installed || detail?.installed) && (
             <button
               className="px-4 py-2 text-sm rounded bg-red-800 text-white hover:bg-red-700"
               onClick={onUninstall}

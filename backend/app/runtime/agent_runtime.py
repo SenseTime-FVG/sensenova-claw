@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from app.db.repository import Repository
 from app.events.bus import PrivateEventBus
@@ -10,6 +10,9 @@ from app.runtime.context_builder import ContextBuilder
 from app.runtime.state import SessionStateStore
 from app.runtime.workers.agent_worker import AgentSessionWorker
 from app.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from app.agents.registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,7 @@ class AgentRuntime:
         context_builder: ContextBuilder,
         tool_registry: ToolRegistry,
         state_store: SessionStateStore,
+        agent_registry: AgentRegistry | None = None,
         memory_manager: Any = None,
     ):
         self.bus_router = bus_router
@@ -31,6 +35,7 @@ class AgentRuntime:
         self.context_builder = context_builder
         self.tool_registry = tool_registry
         self.state_store = state_store
+        self.agent_registry = agent_registry
         self.memory_manager = memory_manager  # 可能为 None（记忆系统未启用）
         self._workers: dict[str, AgentSessionWorker] = {}
 
@@ -44,15 +49,33 @@ class AgentRuntime:
         self._workers.clear()
 
     async def _create_worker(self, session_id: str, private_bus: PrivateEventBus) -> None:
-        """Worker 工厂：BusRouter 首次遇到 session 时调用"""
+        """Worker 工厂：BusRouter 首次遇到 session 时调用
+
+        根据 session meta 中的 agent_id 查找对应 AgentConfig，
+        使 Worker 使用该 Agent 的独立配置。
+        """
+        agent_config = None
+        if self.agent_registry:
+            session_meta = await self.repo.get_session_meta(session_id)
+            agent_id = (session_meta or {}).get("agent_id", "default")
+            agent_config = self.agent_registry.get(agent_id)
+            # 找不到则回退到 default
+            if not agent_config:
+                agent_config = self.agent_registry.get("default")
+
         worker = AgentSessionWorker(
             session_id=session_id,
             private_bus=private_bus,
             runtime=self,
+            agent_config=agent_config,
         )
         self._workers[session_id] = worker
         await worker.start()
-        logger.info("Created AgentSessionWorker for session %s", session_id)
+        logger.info(
+            "Created AgentSessionWorker for session %s (agent=%s)",
+            session_id,
+            agent_config.id if agent_config else "default",
+        )
 
     async def _on_session_destroy(self, session_id: str) -> None:
         """GC 回调：清理 Worker"""

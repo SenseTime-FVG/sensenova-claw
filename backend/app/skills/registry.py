@@ -48,11 +48,13 @@ class SkillRegistry:
         workspace_dir: Path | None = None,
         user_dir: Path | None = None,
         state_file: Path | None = None,
+        builtin_dir: Path | None = None,
     ):
         self._skills: dict[str, Skill] = {}
         self._workspace_dir = workspace_dir
         self._user_dir = user_dir or Path.home() / ".agentos" / "skills"
         self._state_file = state_file
+        self._builtin_dir = builtin_dir
 
     # ---- 状态持久化 ----
 
@@ -132,14 +134,22 @@ class SkillRegistry:
     # ---- 加载 ----
 
     def load_skills(self, config: dict[str, Any]) -> None:
-        """从用户目录、工作区目录和额外目录加载 skills"""
+        """从内置目录、用户目录、工作区目录和额外目录加载 skills
+        
+        加载优先级（后加载的覆盖先加载的同名 skill）：
+        builtin < user < workspace < extra_dirs
+        """
         self._skills.clear()
 
-        # 先加载用户级 skills
+        # 最先加载内置 skills（最低优先级）
+        if self._builtin_dir and self._builtin_dir.exists():
+            self._load_from_dir(self._builtin_dir, config)
+
+        # 加载用户级 skills
         if self._user_dir.exists():
             self._load_from_dir(self._user_dir, config)
 
-        # 再加载工作区 skills（覆盖同名）
+        # 加载工作区 skills（覆盖同名）
         if self._workspace_dir and self._workspace_dir.exists():
             self._load_from_dir(self._workspace_dir, config)
 

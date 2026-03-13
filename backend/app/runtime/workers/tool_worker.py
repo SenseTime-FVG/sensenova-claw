@@ -230,6 +230,14 @@ class ToolSessionWorker(SessionWorker):
         error = ""
         result = None
         try:
+            # 注入上下文对象供工具使用
+            if self.rt.path_policy:
+                arguments["_path_policy"] = self.rt.path_policy
+            if self.rt.agent_registry:
+                arguments["_agent_registry"] = self.rt.agent_registry
+            if self.rt.workflow_registry:
+                arguments["_workflow_registry"] = self.rt.workflow_registry
+
             result = await asyncio.wait_for(
                 tool.execute(**arguments, _session_id=event.session_id),
                 timeout=timeout,

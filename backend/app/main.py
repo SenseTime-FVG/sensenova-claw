@@ -20,11 +20,12 @@ from app.events.bus import PublicEventBus
 from app.events.envelope import EventEnvelope
 from app.events.persister import EventPersister
 from app.events.router import BusRouter
-from app.events.types import USER_INPUT, USER_TURN_CANCEL_REQUESTED
+from app.events.types import USER_INPUT, USER_TURN_CANCEL_REQUESTED, TOOL_CONFIRMATION_RESPONSE
 from app.gateway.channels.websocket_channel import WebSocketChannel
 from app.gateway.gateway import Gateway
 from app.heartbeat.runtime import HeartbeatRuntime
 from app.llm.factory import LLMFactory
+from app.agents.registry import AgentRegistry
 from app.runtime.agent_runtime import AgentRuntime
 from app.runtime.context_builder import ContextBuilder
 from app.runtime.llm_runtime import LLMRuntime
@@ -36,8 +37,9 @@ from app.runtime.tool_runtime import ToolRuntime
 from app.skills.registry import SkillRegistry
 from app.tools.registry import ToolRegistry
 from app.plugins import PluginRegistry
+from app.security.path_policy import PathPolicy
 from app.workspace.manager import ensure_workspace
-from app.api import agents, tools, gateway, skills
+from app.api import agents, tools, gateway, skills, workspace, config_api, workflows as workflows_api
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,7 @@ class Services:
     ws_channel: WebSocketChannel
     cron_runtime: CronRuntime
     heartbeat_runtime: HeartbeatRuntime
+    workflow_runtime: object | None = None  # WorkflowRuntime, optional
 
 
 @asynccontextmanager
@@ -69,6 +72,12 @@ async def lifespan(app: FastAPI):
     # 确保 workspace 目录和引导文件存在
     workspace_dir = config.get("system.workspace_dir", "./SenseAssistant/workspace")
     await ensure_workspace(workspace_dir)
+
+    # v1.2: 初始化路径安全策略
+    workspace_path = Path(workspace_dir).expanduser().resolve()
+    granted_paths = config.get("system.granted_paths", [])
+    path_policy = PathPolicy(workspace=workspace_path, granted_paths=granted_paths)
+    app.state.path_policy = path_policy
 
     # 会话维护：清理过期会话
     maintenance = SessionMaintenance(repo=repo)
@@ -93,7 +102,12 @@ async def lifespan(app: FastAPI):
     # 初始化 SkillRegistry
     skills_dir = Path(config.get("system.workspace_dir", ".")) / "skills"
     state_file = Path(config.get("system.workspace_dir", ".")) / "skills_state.json"
-    skill_registry = SkillRegistry(workspace_dir=skills_dir, state_file=state_file)
+    builtin_skills_dir = Path(__file__).resolve().parent / "skills"
+    skill_registry = SkillRegistry(
+        workspace_dir=skills_dir,
+        state_file=state_file,
+        builtin_dir=builtin_skills_dir,
+    )
     skill_registry.load_skills(config.data)
 
     # 初始化 SkillMarketService
@@ -104,7 +118,20 @@ async def lifespan(app: FastAPI):
         config=config.data,
     )
 
-    context_builder = ContextBuilder(skill_registry=skill_registry, tool_registry=tool_registry)
+    context_builder = ContextBuilder(
+        skill_registry=skill_registry,
+        tool_registry=tool_registry,
+        workspace_dir=str(workspace_path),
+    )
+
+    # v1.0: 初始化 AgentRegistry
+    agent_config_dir = Path(config.get("system.workspace_dir", ".")) / "agents"
+    agent_registry = AgentRegistry(config_dir=agent_config_dir)
+    agent_registry.load_from_config(config.data)
+    agent_registry.load_from_dir()
+
+    # 将 agent_registry 注入 ContextBuilder（供委托 prompt 使用）
+    context_builder.agent_registry = agent_registry
 
     # v0.6: 初始化记忆系统
     memory_manager = None
@@ -139,15 +166,60 @@ async def lifespan(app: FastAPI):
         context_builder=context_builder,
         tool_registry=tool_registry,
         state_store=state_store,
+        agent_registry=agent_registry,
         memory_manager=memory_manager,
     )
     llm_runtime = LLMRuntime(bus_router=bus_router, factory=LLMFactory())
-    tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry)
+    tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry,
+                               path_policy=path_policy,
+                               agent_registry=agent_registry)
     title_runtime = TitleRuntime(bus=bus, repo=repo)
 
     gateway = Gateway(publisher=publisher)
     ws_channel = WebSocketChannel("websocket")
     gateway.register_channel(ws_channel)
+
+    # v1.0: 注册委托工具
+    if config.get("delegation.enabled", True):
+        from app.tools.delegate_tool import DelegateTool
+        delegate_tool = DelegateTool(
+            agent_registry=agent_registry,
+            bus_router=bus_router,
+            repo=repo,
+            timeout=float(config.get("delegation.default_timeout", 300)),
+        )
+        tool_registry.register(delegate_tool)
+
+    # v1.0: 初始化 Workflow 引擎
+    workflow_runtime = None
+    if config.get("workflow.enabled", True):
+        from app.workflows.registry import WorkflowRegistry
+        from app.workflows.runtime import WorkflowRuntime
+        from app.tools.workflow_tool import WorkflowTool
+
+        workflow_config_dir = Path(config.get("system.workspace_dir", ".")) / "workflows"
+        workflow_registry = WorkflowRegistry(config_dir=workflow_config_dir)
+        # 加载用户自定义工作流
+        workflow_registry.load_from_dir()
+        # 加载内置模板
+        templates_dir = Path(__file__).parent / "workflows" / "templates"
+        workflow_registry.load_from_dir(templates_dir)
+
+        workflow_runtime = WorkflowRuntime(
+            agent_registry=agent_registry,
+            workflow_registry=workflow_registry,
+            bus_router=bus_router,
+            repo=repo,
+            publisher=publisher,
+        )
+
+        tool_registry.register(WorkflowTool(workflow_runtime))
+
+        tool_runtime.workflow_registry = workflow_registry
+
+        app.state.workflow_registry = workflow_registry
+        app.state.workflow_runtime = workflow_runtime
+        logger.info("Workflow engine enabled (%d workflows loaded)", len(workflow_registry.list_all()))
 
     # v0.9: 加载插件（飞书 Channel + MessageTool + FeishuApiTool 等）
     plugin_registry = PluginRegistry()
@@ -189,13 +261,15 @@ async def lifespan(app: FastAPI):
         ws_channel=ws_channel,
         cron_runtime=cron_runtime,
         heartbeat_runtime=heartbeat_runtime,
+        workflow_runtime=workflow_runtime,
     )
     # 挂载 registries 供 API 路由使用
     app.state.tool_registry = tool_registry
     app.state.skill_registry = skill_registry
+    app.state.agent_registry = agent_registry
     app.state.config = config
     app.state.market_service = market_service
-    logger.info("AgentOS backend started (dual-bus architecture)")
+    logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled)")
 
     try:
         yield
@@ -230,6 +304,9 @@ app.include_router(gateway.router)
 app.include_router(skills.router)
 from app.api.skills import invoke_router
 app.include_router(invoke_router)
+app.include_router(workspace.router)
+app.include_router(config_api.router)
+app.include_router(workflows_api.router)
 
 
 @app.get("/health")
@@ -290,7 +367,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if msg_type == "create_session":
                 session_id = f"sess_{uuid.uuid4().hex[:12]}"
-                await repo.create_session(session_id=session_id, meta=payload.get("meta", {}))
+                agent_id = payload.get("agent_id", "default")
+                meta = payload.get("meta", {})
+                meta["agent_id"] = agent_id
+                await repo.create_session(session_id=session_id, meta=meta)
                 ws_channel.bind_session(session_id, websocket)
                 gateway.bind_session(session_id, "websocket")
                 await ws_channel.send_json(
@@ -376,6 +456,92 @@ async def websocket_endpoint(websocket: WebSocket):
                         },
                     )
                 )
+                continue
+
+            if msg_type == "run_workflow":
+                # v1.0: 通过 WebSocket 触发 Workflow 执行
+                wf_runtime = getattr(app.state, "workflow_runtime", None)
+                if not wf_runtime:
+                    await ws_channel.send_json(
+                        websocket,
+                        {
+                            "type": "error",
+                            "payload": {
+                                "error_type": "WorkflowDisabled",
+                                "message": "Workflow engine is not enabled",
+                            },
+                            "timestamp": time.time(),
+                        },
+                    )
+                    continue
+
+                workflow_id = payload.get("workflow_id", "")
+                input_text = payload.get("input", "")
+                wf_session_id = session_id or f"wf_sess_{uuid.uuid4().hex[:12]}"
+                try:
+                    run = await wf_runtime.execute(workflow_id, input_text, wf_session_id)
+                    await ws_channel.send_json(
+                        websocket,
+                        {
+                            "type": "workflow_run_completed",
+                            "session_id": wf_session_id,
+                            "payload": run.to_dict(),
+                            "timestamp": time.time(),
+                        },
+                    )
+                except Exception as wf_exc:
+                    await ws_channel.send_json(
+                        websocket,
+                        {
+                            "type": "error",
+                            "payload": {
+                                "error_type": "WorkflowError",
+                                "message": str(wf_exc),
+                            },
+                            "timestamp": time.time(),
+                        },
+                    )
+                continue
+
+            # v1.4: 列出可用 Agent
+            if msg_type == "list_agents":
+                agent_registry = app.state.agent_registry
+                agents_data = [
+                    {"id": a.id, "name": a.name, "description": a.description,
+                     "model": a.model, "provider": a.provider}
+                    for a in agent_registry.list_all()
+                ]
+                await ws_channel.send_json(websocket, {
+                    "type": "agents_list",
+                    "payload": {"agents": agents_data},
+                    "timestamp": time.time(),
+                })
+                continue
+
+            # v1.4: 工具确认响应
+            if msg_type == "tool_confirmation_response":
+                await gateway.publish_from_channel(
+                    EventEnvelope(
+                        type=TOOL_CONFIRMATION_RESPONSE,
+                        session_id=session_id,
+                        source="websocket",
+                        payload={
+                            "tool_call_id": payload.get("tool_call_id"),
+                            "approved": payload.get("approved", False),
+                        },
+                    )
+                )
+                continue
+
+            # v1.4: 获取会话消息历史
+            if msg_type == "get_messages":
+                sid = payload.get("session_id") or session_id
+                messages = await repo.get_session_messages(sid) if sid else []
+                await ws_channel.send_json(websocket, {
+                    "type": "messages_list",
+                    "payload": {"messages": messages},
+                    "timestamp": time.time(),
+                })
                 continue
 
             await ws_channel.send_json(

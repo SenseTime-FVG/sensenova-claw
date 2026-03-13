@@ -1,0 +1,67 @@
+# AgentOS 配置文件
+
+system:
+  workspace_dir: ~/.SenseAssistant/workspace
+  database_path: ~/.SenseAssistant/agentos.db
+  max_concurrent_sessions: 10
+
+# LLM 提供商配置
+llm_providers:
+  anthropic:
+    api_key: 
+    base_url: https://api-claude.codecmd.com
+    default_model: claude-opus-4-6
+    timeout: 60
+    max_retries: 3
+  openai:
+    api_key: 
+    base_url: https://api.openai.com/v1
+    default_model: gpt-4o
+    timeout: 60
+    max_retries: 3
+  gemini:
+    api_key: 
+    base_url: https://genaiapi.cloudsway.net/v1/ai/vEHkTgVnLcrvHENf
+    default_model: MaaS_Ge_3.1_pro_preview_20260219
+    timeout: 120
+    max_retries: 3
+
+# Agent 配置
+agent:
+  provider: gemini
+  default_model: MaaS_Ge_3.1_pro_preview_20260219
+  default_temperature: 0.2
+  max_turns_per_session: 50
+  system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
+
+# 工具配置
+tools:
+  serper_search:
+    enabled: true
+    api_key: 
+    timeout: 15
+    max_results: 10
+
+# Skills 配置
+skills:
+  extra_dirs:
+    - ./backend/app/skills/feishu
+  entries:
+    feishu-doc:
+      enabled: true
+    feishu-wiki:
+      enabled: true
+    feishu-drive:
+      enabled: true
+    feishu-perm:
+      enabled: true
+
+# 插件配置
+plugins:
+  feishu:
+    enabled: true
+    app_id: ""
+    app_secret: ""
+    dm_policy: "open"
+    group_policy: "mention"
+    log_level: "INFO"

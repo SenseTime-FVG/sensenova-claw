@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from app.events.bus import PrivateEventBus
 from app.events.router import BusRouter
 from app.runtime.workers.tool_worker import ToolSessionWorker
+from app.security.path_policy import PathPolicy
 from app.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -13,9 +15,15 @@ logger = logging.getLogger(__name__)
 class ToolRuntime:
     """全局单例管理者：持有 ToolRegistry，管理 ToolSessionWorker 生命周期"""
 
-    def __init__(self, bus_router: BusRouter, registry: ToolRegistry):
+    def __init__(self, bus_router: BusRouter, registry: ToolRegistry,
+                 path_policy: PathPolicy | None = None,
+                 agent_registry: Any = None,
+                 workflow_registry: Any = None):
         self.bus_router = bus_router
         self.registry = registry
+        self.path_policy = path_policy
+        self.agent_registry = agent_registry
+        self.workflow_registry = workflow_registry
         self._workers: dict[str, ToolSessionWorker] = {}
 
     async def start(self) -> None:

@@ -1,0 +1,44 @@
+"""T04: ToolRegistry 注册/发现"""
+from app.tools.registry import ToolRegistry
+from app.tools.base import Tool, ToolRiskLevel
+
+
+class MockTool(Tool):
+    name = "mock_tool"
+    description = "A mock tool"
+    parameters = {"type": "object", "properties": {}, "required": []}
+    risk_level = ToolRiskLevel.LOW
+
+    async def execute(self, **kwargs):
+        return {"ok": True}
+
+
+class TestToolRegistry:
+    def test_builtin_registered(self):
+        r = ToolRegistry()
+        assert r.get("bash_command") is not None
+        assert r.get("serper_search") is not None
+        assert r.get("fetch_url") is not None
+        assert r.get("read_file") is not None
+        assert r.get("write_file") is not None
+
+    def test_register_custom(self):
+        r = ToolRegistry()
+        r.register(MockTool())
+        assert r.get("mock_tool") is not None
+        assert r.get("mock_tool").description == "A mock tool"
+
+    def test_get_nonexist(self):
+        r = ToolRegistry()
+        assert r.get("nope") is None
+
+    def test_as_llm_tools(self):
+        r = ToolRegistry()
+        tools = r.as_llm_tools()
+        assert len(tools) >= 5
+        names = [t["name"] for t in tools]
+        assert "bash_command" in names
+        for t in tools:
+            assert "name" in t
+            assert "description" in t
+            assert "parameters" in t

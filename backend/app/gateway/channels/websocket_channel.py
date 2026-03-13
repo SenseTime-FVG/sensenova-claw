@@ -16,6 +16,9 @@ from app.events.types import (
     LLM_CALL_REQUESTED,
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
+    TOOL_CONFIRMATION_REQUESTED,
+    WORKFLOW_NODE_STARTED,
+    WORKFLOW_NODE_COMPLETED,
 )
 from app.gateway.base import Channel
 
@@ -168,6 +171,34 @@ class WebSocketChannel(Channel):
                     "job_id": event.payload.get("job_id"),
                     "job_name": event.payload.get("job_name"),
                 },
+                "timestamp": event.ts,
+            }
+        # v1.4: 工具确认请求
+        if event.type == TOOL_CONFIRMATION_REQUESTED:
+            return {
+                "type": "tool_confirmation_requested",
+                "session_id": event.session_id,
+                "payload": {
+                    "tool_call_id": event.payload.get("tool_call_id"),
+                    "tool_name": event.payload.get("tool_name"),
+                    "arguments": event.payload.get("arguments", {}),
+                    "risk_level": event.payload.get("risk_level", "high"),
+                },
+                "timestamp": event.ts,
+            }
+        # v1.4: Workflow 节点事件
+        if event.type == WORKFLOW_NODE_STARTED:
+            return {
+                "type": "workflow.node_started",
+                "session_id": event.session_id,
+                "payload": event.payload,
+                "timestamp": event.ts,
+            }
+        if event.type == WORKFLOW_NODE_COMPLETED:
+            return {
+                "type": "workflow.node_completed",
+                "session_id": event.session_id,
+                "payload": event.payload,
                 "timestamp": event.ts,
             }
         return None

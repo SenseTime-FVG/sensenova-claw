@@ -21,6 +21,45 @@ class AnthropicAdapter(MarketAdapter):
         self._api_base = api_base.rstrip("/")
         self._timeout = timeout
 
+    @property
+    def supports_browse(self) -> bool:
+        return True
+
+    async def browse(self, page: int = 1, page_size: int = 20) -> SearchResult:
+        """浏览 Anthropic 市场中的 featured/popular plugins"""
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.get(
+                    f"{self._api_base}/plugins",
+                    params={"page": page, "per_page": page_size, "sort": "popular"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            items = [
+                SkillSearchItem(
+                    id=p.get("id", ""),
+                    name=p.get("name", ""),
+                    description=p.get("description", ""),
+                    author=p.get("author", {}).get("name") if isinstance(p.get("author"), dict) else p.get("author"),
+                    version=p.get("version"),
+                    downloads=p.get("installs"),
+                    source="anthropic",
+                    updated_at=p.get("updatedAt") or p.get("updated_at"),
+                )
+                for p in data.get("plugins", data if isinstance(data, list) else [])
+            ]
+            return SearchResult(
+                source="anthropic",
+                total=data.get("total", len(items)) if isinstance(data, dict) else len(items),
+                page=page,
+                page_size=page_size,
+                items=items,
+            )
+        except Exception as e:
+            logger.warning("Anthropic browse 失败，回退到搜索: %s", e)
+            return await self.search("assistant", page, page_size)
+
     async def search(self, query: str, page: int = 1, page_size: int = 20) -> SearchResult:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.get(
@@ -39,6 +78,7 @@ class AnthropicAdapter(MarketAdapter):
                 version=p.get("version"),
                 downloads=p.get("installs"),
                 source="anthropic",
+                updated_at=p.get("updatedAt") or p.get("updated_at"),
             )
             for p in data.get("plugins", [])
         ]

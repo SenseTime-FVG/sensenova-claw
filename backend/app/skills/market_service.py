@@ -71,6 +71,11 @@ class SkillMarketService:
             self._running_tasks.clear()
         logger.info("SkillMarketService 已关闭")
 
+    async def browse(self, source: str, page: int = 1, page_size: int = 20) -> SearchResult:
+        """浏览市场 skills（无需搜索关键词）"""
+        adapter = self._get_adapter(source)
+        return await adapter.browse(page, page_size)
+
     async def search(self, source: str, query: str, page: int = 1, page_size: int = 20) -> SearchResult:
         adapter = self._get_adapter(source)
         return await adapter.search(query, page, page_size)
