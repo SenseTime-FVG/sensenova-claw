@@ -25,19 +25,38 @@ from agentos.kernel.runtime.publisher import EventPublisher
 from agentos.kernel.runtime.state import SessionStateStore
 from agentos.kernel.runtime.tool_runtime import ToolRuntime
 from agentos.capabilities.tools.registry import ToolRegistry
+from tests.conftest import load_gemini_config, skip_if_gemini_unavailable
+
+
+def _apply_provider_config(provider_name: str) -> None:
+    """根据 provider_name 配置全局 config。"""
+    if provider_name == "mock":
+        config.data["agent"]["provider"] = "mock"
+        config.data["agent"]["default_model"] = "mock-agent-v1"
+    else:
+        gemini_cfg = load_gemini_config()
+        config.data["agent"]["provider"] = "gemini"
+        config.data["agent"]["default_model"] = gemini_cfg["default_model"]
+        # 将 gemini provider 配置写入 llm_providers
+        config.data["llm_providers"]["gemini"] = {
+            **config.data["llm_providers"].get("gemini", {}),
+            **gemini_cfg,
+        }
 
 
 @pytest.mark.asyncio
-async def test_gateway_with_websocket_channel(tmp_path: Path):
+@pytest.mark.parametrize("provider_name", ["mock", "gemini"])
+async def test_gateway_with_websocket_channel(tmp_path: Path, provider_name: str):
     """测试 Gateway 与 WebSocketChannel 集成（双总线架构）"""
+    skip_if_gemini_unavailable(provider_name)
+
     db_path = tmp_path / "agentos.db"
     workspace = tmp_path / "workspace"
 
     # 保存原始配置，防止污染其他测试
     _original_config = copy.deepcopy(config.data)
 
-    config.data["agent"]["provider"] = "mock"
-    config.data["agent"]["default_model"] = "mock-agent-v1"
+    _apply_provider_config(provider_name)
     config.data["system"]["database_path"] = str(db_path)
     config.data["system"]["workspace_dir"] = str(workspace)
 
@@ -81,6 +100,9 @@ async def test_gateway_with_websocket_channel(tmp_path: Path):
     turn_id = f"turn_{uuid.uuid4().hex[:12]}"
     query = "测试查询"
 
+    # gemini 超时放长
+    timeout = 60 if provider_name == "gemini" else 10
+
     gateway.bind_session(session_id, "websocket")
 
     collected: list[EventEnvelope] = []
@@ -108,7 +130,7 @@ async def test_gateway_with_websocket_channel(tmp_path: Path):
         )
         await gateway.publish_from_channel(event)
 
-        await asyncio.wait_for(done_event.wait(), timeout=10)
+        await asyncio.wait_for(done_event.wait(), timeout=timeout)
     finally:
         collect_task.cancel()
         await gateway.stop()

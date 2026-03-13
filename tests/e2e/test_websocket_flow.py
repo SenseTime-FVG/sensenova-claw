@@ -24,23 +24,42 @@ from agentos.kernel.runtime.publisher import EventPublisher
 from agentos.kernel.runtime.state import SessionStateStore
 from agentos.kernel.runtime.tool_runtime import ToolRuntime
 from agentos.capabilities.tools.registry import ToolRegistry
+from tests.conftest import load_gemini_config, skip_if_gemini_unavailable
+
+
+def _apply_provider_config(provider_name: str) -> None:
+    """根据 provider_name 配置全局 config。"""
+    if provider_name == "mock":
+        config.data["agent"]["provider"] = "mock"
+        config.data["agent"]["default_model"] = "mock-agent-v1"
+        config.data["agent"]["default_temperature"] = 0.2
+        config.data["tools"]["serper_search"]["api_key"] = ""
+    else:
+        gemini_cfg = load_gemini_config()
+        config.data["agent"]["provider"] = "gemini"
+        config.data["agent"]["default_model"] = gemini_cfg["default_model"]
+        config.data["agent"]["default_temperature"] = 0.2
+        config.data["llm_providers"]["gemini"] = {
+            **config.data["llm_providers"].get("gemini", {}),
+            **gemini_cfg,
+        }
 
 
 @pytest.mark.asyncio
-async def test_backend_e2e_event_flow(tmp_path: Path):
+@pytest.mark.parametrize("provider_name", ["mock", "gemini"])
+async def test_backend_e2e_event_flow(tmp_path: Path, provider_name: str):
+    skip_if_gemini_unavailable(provider_name)
+
     db_path = tmp_path / "agentos.db"
     workspace = tmp_path / "workspace"
 
     # 保存原始配置，防止污染其他测试
     _original_config = copy.deepcopy(config.data)
 
-    config.data["agent"]["provider"] = "mock"
-    config.data["agent"]["default_model"] = "mock-agent-v1"
-    config.data["agent"]["default_temperature"] = 0.2
+    _apply_provider_config(provider_name)
     config.data["system"]["database_path"] = str(db_path)
     config.data["system"]["workspace_dir"] = str(workspace)
     config.data["system"]["log_level"] = "DEBUG"
-    config.data["tools"]["serper_search"]["api_key"] = ""
 
     setup_logging()
 
@@ -77,6 +96,9 @@ async def test_backend_e2e_event_flow(tmp_path: Path):
     turn_id = f"turn_{uuid.uuid4().hex[:12]}"
     query = "你好"
 
+    # gemini 超时放长
+    timeout = 60 if provider_name == "gemini" else 10
+
     collected: list[EventEnvelope] = []
     done_event = asyncio.Event()
 
@@ -103,7 +125,7 @@ async def test_backend_e2e_event_flow(tmp_path: Path):
             )
         )
 
-        await asyncio.wait_for(done_event.wait(), timeout=10)
+        await asyncio.wait_for(done_event.wait(), timeout=timeout)
     finally:
         collect_task.cancel()
         await agent_runtime.stop()

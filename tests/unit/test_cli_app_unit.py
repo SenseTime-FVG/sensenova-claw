@@ -13,6 +13,7 @@ import pytest_asyncio
 import uvicorn
 
 from agentos.app.cli.app import CLIApp
+from tests.conftest import load_gemini_config, skip_if_gemini_unavailable
 
 
 def _find_free_port() -> int:
@@ -24,9 +25,8 @@ def _find_free_port() -> int:
     return port
 
 
-@pytest_asyncio.fixture
-async def ws_server(tmp_path):
-    """启动进程内 FastAPI WebSocket 服务（使用 mock provider）"""
+async def _create_ws_server(tmp_path, provider_name: str = "mock"):
+    """启动进程内 FastAPI WebSocket 服务，支持 mock 和 gemini provider。"""
     from pathlib import Path
     from dataclasses import dataclass as dc
 
@@ -59,11 +59,22 @@ async def ws_server(tmp_path):
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir()
 
-    # 使用 mock provider 的配置
+    # 基础配置
     config_path = tmp_path / "config.yml"
     config_path.write_text("", encoding="utf-8")
     cfg = Config(config_path=config_path)
     cfg.set("system.workspace_dir", str(workspace_dir))
+
+    # 配置 provider
+    if provider_name == "gemini":
+        gemini_cfg = load_gemini_config()
+        cfg.set("agent.provider", "gemini")
+        cfg.set("agent.default_model", gemini_cfg["default_model"])
+        cfg.data["llm_providers"]["gemini"] = {
+            **cfg.data["llm_providers"].get("gemini", {}),
+            **gemini_cfg,
+        }
+    # mock 使用默认配置即可（Config 默认就是 mock）
 
     await ensure_workspace(str(workspace_dir))
 
@@ -191,28 +202,63 @@ async def ws_server(tmp_path):
         if server.started:
             break
 
-    yield {"host": "127.0.0.1", "port": port}
+    # 返回清理所需的所有对象
+    return {
+        "host": "127.0.0.1",
+        "port": port,
+        "server": server,
+        "serve_task": serve_task,
+        "market_service": market_service,
+        "cron_runtime": cron_runtime,
+        "heartbeat_runtime": heartbeat_runtime,
+        "agent_runtime": agent_runtime,
+        "llm_runtime": llm_runtime,
+        "tool_runtime": tool_runtime,
+        "title_runtime": title_runtime,
+        "gw": gw,
+        "bus_router": bus_router,
+        "persister": persister,
+        "app": app,
+    }
 
-    # 关闭
-    server.should_exit = True
-    await serve_task
 
-    await market_service.shutdown()
-    await cron_runtime.stop()
-    await heartbeat_runtime.stop()
-    await agent_runtime.stop()
-    await llm_runtime.stop()
-    await tool_runtime.stop()
-    await title_runtime.stop()
-    await gw.stop()
-    await bus_router.stop()
-    await persister.stop()
+async def _teardown_ws_server(ctx: dict):
+    """关闭 ws_server 并清理 app.state。"""
+    ctx["server"].should_exit = True
+    await ctx["serve_task"]
 
-    # 清理 app.state
+    await ctx["market_service"].shutdown()
+    await ctx["cron_runtime"].stop()
+    await ctx["heartbeat_runtime"].stop()
+    await ctx["agent_runtime"].stop()
+    await ctx["llm_runtime"].stop()
+    await ctx["tool_runtime"].stop()
+    await ctx["title_runtime"].stop()
+    await ctx["gw"].stop()
+    await ctx["bus_router"].stop()
+    await ctx["persister"].stop()
+
+    app = ctx["app"]
     for attr in ("services", "agent_registry", "tool_registry", "skill_registry",
                  "config", "market_service", "path_policy"):
         if hasattr(app.state, attr):
             delattr(app.state, attr)
+
+
+@pytest_asyncio.fixture
+async def ws_server(tmp_path):
+    """启动进程内 FastAPI WebSocket 服务（使用 mock provider）"""
+    ctx = await _create_ws_server(tmp_path, provider_name="mock")
+    yield {"host": ctx["host"], "port": ctx["port"]}
+    await _teardown_ws_server(ctx)
+
+
+@pytest_asyncio.fixture
+async def ws_server_gemini(tmp_path):
+    """启动进程内 FastAPI WebSocket 服务（使用 gemini provider）"""
+    ctx = await _create_ws_server(tmp_path, provider_name="gemini")
+    yield {"host": ctx["host"], "port": ctx["port"]}
+    await _teardown_ws_server(ctx)
 
 
 class TestCLIAppInit:
@@ -452,23 +498,67 @@ class TestSendAndSessionMethods:
             except asyncio.CancelledError:
                 pass
 
-    async def test_execute_mode(self, ws_server):
+    @pytest.mark.parametrize("provider_name", ["mock", "gemini"])
+    async def test_execute_mode(self, provider_name, tmp_path):
         """_run_execute_mode 脚本模式执行后返回 0"""
-        import websockets
+        skip_if_gemini_unavailable(provider_name)
 
-        host, port = ws_server["host"], ws_server["port"]
-        async with websockets.connect(f"ws://{host}:{port}/ws") as ws:
-            app = CLIApp(host=host, port=port, execute="你好 mock")
-            app.ws = ws
-            await app._create_session()
+        # 根据 provider 创建对应的 ws_server
+        ctx = await _create_ws_server(tmp_path, provider_name=provider_name)
+        timeout = 60 if provider_name == "gemini" else 15
 
-            recv_task = asyncio.create_task(app._receive_loop())
-            ret = await asyncio.wait_for(app._run_execute_mode(), timeout=15)
-            assert ret == 0
-            assert "mock" in app._last_response.lower() or len(app._last_response) > 0
+        try:
+            import websockets
 
-            recv_task.cancel()
-            try:
-                await recv_task
-            except asyncio.CancelledError:
-                pass
+            host, port = ctx["host"], ctx["port"]
+            async with websockets.connect(f"ws://{host}:{port}/ws") as ws:
+                app = CLIApp(host=host, port=port, execute="你好")
+                app.ws = ws
+                await app._create_session()
+
+                recv_task = asyncio.create_task(app._receive_loop())
+                ret = await asyncio.wait_for(app._run_execute_mode(), timeout=timeout)
+                assert ret == 0
+                assert len(app._last_response) > 0, "应返回非空响应"
+
+                recv_task.cancel()
+                try:
+                    await recv_task
+                except asyncio.CancelledError:
+                    pass
+        finally:
+            await _teardown_ws_server(ctx)
+
+
+class TestMainFunction:
+    """通过进程内 WebSocket 服务测试主函数相关逻辑"""
+
+    @pytest.mark.parametrize("provider_name", ["mock", "gemini"])
+    async def test_execute_mode_main(self, provider_name, tmp_path):
+        """执行模式完整流程测试"""
+        skip_if_gemini_unavailable(provider_name)
+
+        ctx = await _create_ws_server(tmp_path, provider_name=provider_name)
+        timeout = 60 if provider_name == "gemini" else 15
+
+        try:
+            import websockets
+
+            host, port = ctx["host"], ctx["port"]
+            async with websockets.connect(f"ws://{host}:{port}/ws") as ws:
+                app = CLIApp(host=host, port=port, execute="hello")
+                app.ws = ws
+                await app._create_session()
+
+                recv_task = asyncio.create_task(app._receive_loop())
+                ret = await asyncio.wait_for(app._run_execute_mode(), timeout=timeout)
+                assert ret == 0
+                assert len(app._last_response) > 0
+
+                recv_task.cancel()
+                try:
+                    await recv_task
+                except asyncio.CancelledError:
+                    pass
+        finally:
+            await _teardown_ws_server(ctx)

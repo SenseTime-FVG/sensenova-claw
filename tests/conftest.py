@@ -7,9 +7,38 @@ from dataclasses import dataclass
 
 import pytest
 import pytest_asyncio
+import yaml
 
 # 确保项目根目录在 sys.path 中
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+# 项目根目录
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def load_gemini_config() -> dict | None:
+    """从项目根目录 config.yml 读取 gemini provider 配置。
+
+    返回 dict 包含 api_key / base_url / default_model，若无配置则返回 None。
+    """
+    config_path = _PROJECT_ROOT / "config.yml"
+    if not config_path.exists():
+        return None
+    with config_path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    gemini_cfg = data.get("llm_providers", {}).get("gemini", {})
+    if not gemini_cfg.get("api_key"):
+        return None
+    return gemini_cfg
+
+
+def skip_if_gemini_unavailable(provider_name: str):
+    """若 provider_name 为 gemini 但 API key 不可用，则 skip。"""
+    if provider_name != "gemini":
+        return
+    cfg = load_gemini_config()
+    if cfg is None:
+        pytest.skip("gemini API key 未配置，跳过真实 provider 测试")
 
 
 @pytest.fixture(scope="session")

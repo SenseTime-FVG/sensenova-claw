@@ -19,6 +19,7 @@ from agentos.kernel.events.types import (
     LLM_CALL_STARTED,
 )
 from agentos.kernel.runtime.workers.llm_worker import LLMSessionWorker
+from tests.conftest import load_gemini_config, skip_if_gemini_unavailable
 
 
 # ── 辅助组件 ──────────────────────────────────────────────
@@ -61,6 +62,33 @@ def runtime(factory):
     return _SimpleLLMRuntime(factory)
 
 
+def _make_llm_event(provider: str, model: str, messages: list[dict],
+                     llm_call_id: str = "llm_1", tools: list | None = None) -> EventEnvelope:
+    """构造 LLM_CALL_REQUESTED 事件的辅助函数。"""
+    payload = {
+        "llm_call_id": llm_call_id,
+        "provider": provider,
+        "model": model,
+        "messages": messages,
+    }
+    if tools is not None:
+        payload["tools"] = tools
+    return EventEnvelope(
+        type=LLM_CALL_REQUESTED,
+        session_id="s1",
+        turn_id="t1",
+        payload=payload,
+    )
+
+
+def _provider_model(provider_name: str) -> tuple[str, str]:
+    """根据 provider_name 返回 (provider, model)。"""
+    if provider_name == "mock":
+        return "mock", "mock-agent-v1"
+    cfg = load_gemini_config()
+    return "gemini", cfg["default_model"] if cfg else ""
+
+
 async def _collect_from_bus(public_bus, count, timeout=5.0):
     """从公共总线收集指定数量的事件"""
     collected = []
@@ -90,23 +118,18 @@ class TestLLMWorkerHandle:
         await worker._handle(event)
         # 不抛异常即可
 
-    async def test_routes_llm_requested(self, private_bus, public_bus, runtime):
+    @pytest.mark.parametrize("provider_name", ["mock", "gemini"])
+    async def test_routes_llm_requested(self, private_bus, public_bus, runtime, provider_name):
+        skip_if_gemini_unavailable(provider_name)
+        provider, model = _provider_model(provider_name)
+        timeout = 30 if provider_name == "gemini" else 5
+
         worker = LLMSessionWorker("s1", private_bus, runtime)
         collected, done, task = await _collect_from_bus(public_bus, 3)
 
-        event = EventEnvelope(
-            type=LLM_CALL_REQUESTED,
-            session_id="s1",
-            turn_id="t1",
-            payload={
-                "llm_call_id": "llm_1",
-                "provider": "mock",
-                "model": "mock-agent-v1",
-                "messages": [{"role": "user", "content": "hello"}],
-            },
-        )
+        event = _make_llm_event(provider, model, [{"role": "user", "content": "hello"}])
         await worker._handle(event)
-        await asyncio.wait_for(done.wait(), timeout=5)
+        await asyncio.wait_for(done.wait(), timeout=timeout)
         task.cancel()
 
         types = [e.type for e in collected]
@@ -121,23 +144,22 @@ class TestLLMWorkerHandle:
 class TestLLMWorkerSuccess:
     """LLM 调用成功路径"""
 
-    async def test_publishes_correct_event_sequence(self, private_bus, public_bus, runtime):
+    @pytest.mark.parametrize("provider_name", ["mock", "gemini"])
+    async def test_publishes_correct_event_sequence(self, private_bus, public_bus, runtime, provider_name):
+        skip_if_gemini_unavailable(provider_name)
+        provider, model = _provider_model(provider_name)
+        timeout = 30 if provider_name == "gemini" else 5
+
         worker = LLMSessionWorker("s1", private_bus, runtime)
         collected, done, task = await _collect_from_bus(public_bus, 3)
 
-        event = EventEnvelope(
-            type=LLM_CALL_REQUESTED,
-            session_id="s1",
-            turn_id="t1",
-            payload={
-                "llm_call_id": "llm_abc",
-                "provider": "mock",
-                "model": "mock-agent-v1",
-                "messages": [{"role": "user", "content": "hello"}],
-            },
+        event = _make_llm_event(
+            provider, model,
+            [{"role": "user", "content": "hello"}],
+            llm_call_id="llm_abc",
         )
         await worker._handle(event)
-        await asyncio.wait_for(done.wait(), timeout=5)
+        await asyncio.wait_for(done.wait(), timeout=timeout)
         task.cancel()
 
         assert collected[0].type == LLM_CALL_STARTED
@@ -145,7 +167,11 @@ class TestLLMWorkerSuccess:
         result_event = collected[1]
         assert result_event.type == LLM_CALL_RESULT
         assert result_event.payload["response"]["content"]
-        assert result_event.payload["finish_reason"] == "stop"
+
+        if provider_name == "mock":
+            # mock provider 固定 finish_reason
+            assert result_event.payload["finish_reason"] == "stop"
+
         assert collected[2].type == LLM_CALL_COMPLETED
 
     async def test_passes_tool_calls_through(self, private_bus, public_bus, runtime):
@@ -153,17 +179,10 @@ class TestLLMWorkerSuccess:
         worker = LLMSessionWorker("s1", private_bus, runtime)
         collected, done, task = await _collect_from_bus(public_bus, 3)
 
-        event = EventEnvelope(
-            type=LLM_CALL_REQUESTED,
-            session_id="s1",
-            turn_id="t1",
-            payload={
-                "llm_call_id": "llm_1",
-                "provider": "mock",
-                "model": "mock-agent-v1",
-                "messages": [{"role": "user", "content": "英超冠亚军是谁"}],
-                "tools": [{"name": "serper_search"}],
-            },
+        event = _make_llm_event(
+            "mock", "mock-agent-v1",
+            [{"role": "user", "content": "英超冠亚军是谁"}],
+            tools=[{"name": "serper_search"}],
         )
         await worker._handle(event)
         await asyncio.wait_for(done.wait(), timeout=5)
@@ -175,7 +194,7 @@ class TestLLMWorkerSuccess:
         assert tc[0]["name"] == "serper_search"
 
 
-# ── LLM 调用失败路径 ─────────────────────────────────────
+# ── LLM 调用失败路径（仅 mock，测试错误处理逻辑）──────────
 
 
 class TestLLMWorkerError:
@@ -189,17 +208,7 @@ class TestLLMWorkerError:
 
         collected, done, task = await _collect_from_bus(public_bus, 4)
 
-        event = EventEnvelope(
-            type=LLM_CALL_REQUESTED,
-            session_id="s1",
-            turn_id="t1",
-            payload={
-                "llm_call_id": "llm_1",
-                "provider": "error",
-                "model": "m",
-                "messages": [{"role": "user", "content": "test"}],
-            },
-        )
+        event = _make_llm_event("error", "m", [{"role": "user", "content": "test"}])
         await worker._handle(event)
         await asyncio.wait_for(done.wait(), timeout=5)
         task.cancel()
