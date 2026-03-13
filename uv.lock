@@ -3,9 +3,9 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
-name = "agentos-backend"
-version = "0.1.0"
-source = { virtual = "." }
+name = "agentos"
+version = "0.5.0"
+source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "anthropic" },
