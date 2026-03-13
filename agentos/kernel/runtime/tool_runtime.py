@@ -17,13 +17,11 @@ class ToolRuntime:
 
     def __init__(self, bus_router: BusRouter, registry: ToolRegistry,
                  path_policy: PathPolicy | None = None,
-                 agent_registry: Any = None,
-                 workflow_registry: Any = None):
+                 agent_registry: Any = None):
         self.bus_router = bus_router
         self.registry = registry
         self.path_policy = path_policy
         self.agent_registry = agent_registry
-        self.workflow_registry = workflow_registry
         self._workers: dict[str, ToolSessionWorker] = {}
 
     async def start(self) -> None:

@@ -17,8 +17,6 @@ from agentos.kernel.events.types import (
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
     TOOL_CONFIRMATION_REQUESTED,
-    WORKFLOW_NODE_STARTED,
-    WORKFLOW_NODE_COMPLETED,
 )
 from agentos.adapters.channels.base import Channel
 
@@ -184,21 +182,6 @@ class WebSocketChannel(Channel):
                     "arguments": event.payload.get("arguments", {}),
                     "risk_level": event.payload.get("risk_level", "high"),
                 },
-                "timestamp": event.ts,
-            }
-        # v1.4: Workflow 节点事件
-        if event.type == WORKFLOW_NODE_STARTED:
-            return {
-                "type": "workflow.node_started",
-                "session_id": event.session_id,
-                "payload": event.payload,
-                "timestamp": event.ts,
-            }
-        if event.type == WORKFLOW_NODE_COMPLETED:
-            return {
-                "type": "workflow.node_completed",
-                "session_id": event.session_id,
-                "payload": event.payload,
                 "timestamp": event.ts,
             }
         return None

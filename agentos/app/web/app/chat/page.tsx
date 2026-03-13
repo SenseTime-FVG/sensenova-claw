@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, Network, ChevronDown, Check } from 'lucide-react';
+import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, ChevronDown, Check } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
 
@@ -35,7 +35,6 @@ interface SessionItem {
 }
 
 interface AgentOption { id: string; name: string; description: string; }
-interface WorkflowOption { id: string; name: string; description: string; version: string; }
 
 function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -169,30 +168,21 @@ function TypingDots() {
   );
 }
 
-// ── Target Selector (Agent/Workflow 选择器) ────────────
+// ── Target Selector (Agent 选择器) ────────────
 
 function TargetSelector({
   selectedAgent,
-  selectedWorkflow,
   onSelectAgent,
-  onSelectWorkflow,
 }: {
   selectedAgent: string;
-  selectedWorkflow: string;
   onSelectAgent: (id: string) => void;
-  onSelectWorkflow: (id: string) => void;
 }) {
   const [agents, setAgents] = useState<AgentOption[]>([]);
-  const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<'agent' | 'workflow'>(selectedWorkflow ? 'workflow' : 'agent');
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    Promise.all([
-      fetch(`${API_BASE}/api/agents`).then(r => r.json()).catch(() => []),
-      fetch(`${API_BASE}/api/workflows`).then(r => r.json()).catch(() => []),
-    ]).then(([a, w]) => { setAgents(a); setWorkflows(w); });
+    fetch(`${API_BASE}/api/agents`).then(r => r.json()).catch(() => []).then(a => setAgents(a));
   }, []);
 
   useEffect(() => {
@@ -203,15 +193,7 @@ function TargetSelector({
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const currentLabel = selectedWorkflow
-    ? (workflows.find(w => w.id === selectedWorkflow)?.name || selectedWorkflow)
-    : (agents.find(a => a.id === selectedAgent)?.name || selectedAgent || 'Default Agent');
-
-  const currentIcon = selectedWorkflow ? (
-    <Network size={13} className="text-[#4ec9b0]" />
-  ) : (
-    <Bot size={13} className="text-[#007acc]" />
-  );
+  const currentLabel = agents.find(a => a.id === selectedAgent)?.name || selectedAgent || 'Default Agent';
 
   return (
     <div className="relative" ref={ref}>
@@ -219,73 +201,38 @@ function TargetSelector({
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#3c3c3c] border border-[#5a5a5a] text-xs text-[#cccccc] hover:bg-[#4c4c4c] transition-colors"
       >
-        {currentIcon}
+        <Bot size={13} className="text-[#007acc]" />
         <span className="max-w-[140px] truncate">{currentLabel}</span>
         <ChevronDown size={12} className="text-[#858585]" />
       </button>
 
       {open && (
         <div className="absolute bottom-full left-0 mb-2 w-72 bg-[#252526] border border-[#2d2d30] rounded-lg shadow-xl z-50 overflow-hidden">
-          {/* Tab */}
           <div className="flex border-b border-[#2d2d30]">
-            <button
-              onClick={() => setTab('agent')}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] transition-colors ${
-                tab === 'agent' ? 'text-[#cccccc] border-b-2 border-[#007acc]' : 'text-[#858585] hover:text-[#cccccc]'
-              }`}
-            >
+            <div className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] text-[#cccccc] border-b-2 border-[#007acc]">
               <Bot size={12} /> Agents
-            </button>
-            <button
-              onClick={() => setTab('workflow')}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] transition-colors ${
-                tab === 'workflow' ? 'text-[#cccccc] border-b-2 border-[#4ec9b0]' : 'text-[#858585] hover:text-[#cccccc]'
-              }`}
-            >
-              <Network size={12} /> Workflows
-            </button>
+            </div>
           </div>
 
           <div className="max-h-52 overflow-auto p-1.5">
-            {tab === 'agent' ? (
-              agents.length === 0 ? (
-                <div className="text-center text-[#858585] text-[11px] py-4">暂无 Agent</div>
-              ) : agents.map(a => (
-                <button
-                  key={a.id}
-                  onClick={() => { onSelectAgent(a.id); setOpen(false); }}
-                  className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-[#2d2d30] transition-colors flex items-center gap-2 ${
-                    !selectedWorkflow && selectedAgent === a.id ? 'bg-[#2d2d30]' : ''
-                  }`}
-                >
-                  <Bot size={12} className="text-[#007acc] shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[#cccccc] truncate">{a.name}</div>
-                    {a.description && <div className="text-[10px] text-[#585858] truncate">{a.description}</div>}
-                  </div>
-                  {!selectedWorkflow && selectedAgent === a.id && <Check size={12} className="text-[#007acc] shrink-0" />}
-                </button>
-              ))
-            ) : (
-              workflows.length === 0 ? (
-                <div className="text-center text-[#858585] text-[11px] py-4">暂无 Workflow</div>
-              ) : workflows.map(w => (
-                <button
-                  key={w.id}
-                  onClick={() => { onSelectWorkflow(w.id); setOpen(false); }}
-                  className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-[#2d2d30] transition-colors flex items-center gap-2 ${
-                    selectedWorkflow === w.id ? 'bg-[#2d2d30]' : ''
-                  }`}
-                >
-                  <Network size={12} className="text-[#4ec9b0] shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[#cccccc] truncate">{w.name}</div>
-                    {w.description && <div className="text-[10px] text-[#585858] truncate">{w.description}</div>}
-                  </div>
-                  {selectedWorkflow === w.id && <Check size={12} className="text-[#4ec9b0] shrink-0" />}
-                </button>
-              ))
-            )}
+            {agents.length === 0 ? (
+              <div className="text-center text-[#858585] text-[11px] py-4">暂无 Agent</div>
+            ) : agents.map(a => (
+              <button
+                key={a.id}
+                onClick={() => { onSelectAgent(a.id); setOpen(false); }}
+                className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-[#2d2d30] transition-colors flex items-center gap-2 ${
+                  selectedAgent === a.id ? 'bg-[#2d2d30]' : ''
+                }`}
+              >
+                <Bot size={12} className="text-[#007acc] shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[#cccccc] truncate">{a.name}</div>
+                  {a.description && <div className="text-[10px] text-[#585858] truncate">{a.description}</div>}
+                </div>
+                {selectedAgent === a.id && <Check size={12} className="text-[#007acc] shrink-0" />}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -298,7 +245,6 @@ function TargetSelector({
 function ChatPageInner() {
   const searchParams = useSearchParams();
   const initialAgent = searchParams.get('agent') || 'default';
-  const initialWorkflow = searchParams.get('workflow') || '';
 
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -309,7 +255,6 @@ function ChatPageInner() {
   const [loadingSessions, setLoadingSessions] = useState(false);
 
   const [selectedAgent, setSelectedAgent] = useState(initialAgent);
-  const [selectedWorkflow, setSelectedWorkflow] = useState(initialWorkflow);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -319,12 +264,6 @@ function ChatPageInner() {
 
   const handleSelectAgent = (id: string) => {
     setSelectedAgent(id);
-    setSelectedWorkflow('');
-  };
-
-  const handleSelectWorkflow = (id: string) => {
-    setSelectedWorkflow(id);
-    setSelectedAgent('');
   };
 
   // ── 斜杠命令 ──
@@ -500,84 +439,17 @@ function ChatPageInner() {
     pendingInputRef.current = null;
   };
 
-  // ── Workflow 运行 ──
-
-  const runWorkflow = async (content: string) => {
-    addMsg('user', content);
-    setInputValue('');
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    setIsTyping(true);
-
-    addMsg('system', `正在运行 Workflow: ${selectedWorkflow}`);
-
-    try {
-      const res = await fetch(`${API_BASE}/api/workflows/${selectedWorkflow}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: content }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        addMsg('system', `Workflow 运行失败: ${err.detail || res.statusText}`);
-        setIsTyping(false);
-        return;
-      }
-
-      const run = await res.json();
-
-      // 展示节点结果
-      if (run.node_results) {
-        for (const [nodeId, nr] of Object.entries(run.node_results)) {
-          const nodeResult = nr as { agent_id: string; status: string; output: string; error: string };
-          const ti: ToolInfo = {
-            name: `${nodeId} (${nodeResult.agent_id})`,
-            arguments: {},
-            result: nodeResult.output,
-            success: nodeResult.status === 'completed',
-            error: nodeResult.error || '',
-            status: 'completed',
-          };
-          setMessages(prev => [...prev, {
-            id: makeId(),
-            role: 'tool',
-            content: `节点完成: ${nodeId}`,
-            timestamp: Date.now(),
-            toolInfo: ti,
-          }]);
-        }
-      }
-
-      // 最终输出
-      if (run.output) {
-        addMsg('assistant', run.output);
-      } else {
-        addMsg('system', `Workflow 执行完成 (状态: ${run.status})`);
-      }
-    } catch (e) {
-      addMsg('system', `Workflow 运行出错: ${e}`);
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
   // ── Send ──
 
   const sendMessage = () => {
     const content = inputValue.trim();
-    if (!content || (!wsConnected && !selectedWorkflow)) return;
+    if (!content || !wsConnected) return;
 
     // 斜杠命令拦截
-    if (!selectedWorkflow && handleSlashSubmit(content)) {
+    if (handleSlashSubmit(content)) {
       addMsg('user', content);
       setInputValue('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
-      return;
-    }
-
-    // Workflow 模式
-    if (selectedWorkflow) {
-      runWorkflow(content);
       return;
     }
 
@@ -615,11 +487,9 @@ function ChatPageInner() {
   // scroll
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isTyping]);
 
-  const targetLabel = selectedWorkflow
-    ? `Workflow: ${selectedWorkflow}`
-    : selectedAgent !== 'default'
-      ? `Agent: ${selectedAgent}`
-      : null;
+  const targetLabel = selectedAgent !== 'default'
+    ? `Agent: ${selectedAgent}`
+    : null;
 
   return (
     <DashboardLayout>
@@ -664,26 +534,14 @@ function ChatPageInner() {
           <div className="flex-1 overflow-auto p-6">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-4 text-[#858585]">
-                {selectedWorkflow ? (
-                  <Network size={40} className="text-[#4ec9b0]/40" />
-                ) : (
-                  <Bot size={40} className="text-[#3c3c3c]" />
-                )}
+                <Bot size={40} className="text-[#3c3c3c]" />
                 <p className="text-sm">开始一段新对话</p>
                 {targetLabel && (
-                  <span className={`text-xs px-3 py-1 rounded-full border ${
-                    selectedWorkflow
-                      ? 'border-[#4ec9b0]/30 text-[#4ec9b0] bg-[#4ec9b0]/5'
-                      : 'border-[#007acc]/30 text-[#007acc] bg-[#007acc]/5'
-                  }`}>
+                  <span className="text-xs px-3 py-1 rounded-full border border-[#007acc]/30 text-[#007acc] bg-[#007acc]/5">
                     {targetLabel}
                   </span>
                 )}
-                <p className="text-[11px]">
-                  {selectedWorkflow
-                    ? '输入内容将作为 Workflow 的输入执行'
-                    : '在下方输入你的问题'}
-                </p>
+                <p className="text-[11px]">在下方输入你的问题</p>
               </div>
             ) : (
               <>
@@ -698,26 +556,22 @@ function ChatPageInner() {
           <div className="border-t border-[#2d2d30] bg-[#1e1e1e] p-4 shrink-0">
             <div className="max-w-3xl mx-auto flex gap-3 items-end">
               <div className="flex-1 relative">
-                {!selectedWorkflow && (
-                  <SlashCommandMenu
-                    inputValue={inputValue}
-                    onSelect={handleSlashSelect}
-                    visible={showMenu}
-                  />
-                )}
+                <SlashCommandMenu
+                  inputValue={inputValue}
+                  onSelect={handleSlashSelect}
+                  visible={showMenu}
+                />
                 <textarea
                   ref={textareaRef}
                   value={inputValue}
                   onChange={handleInput}
                   onKeyDown={handleKeyDown}
                   placeholder={
-                    selectedWorkflow
-                      ? '输入 Workflow 执行内容... (Enter 发送)'
-                      : wsConnected
-                        ? '输入消息... (Enter 发送, Shift+Enter 换行)'
-                        : '等待连接...'
+                    wsConnected
+                      ? '输入消息... (Enter 发送, Shift+Enter 换行)'
+                      : '等待连接...'
                   }
-                  disabled={(!wsConnected && !selectedWorkflow) || isTyping}
+                  disabled={!wsConnected || isTyping}
                   rows={1}
                   className="w-full bg-[#3c3c3c] border border-[#5a5a5a] rounded-lg px-4 py-2.5 text-sm text-[#cccccc] placeholder-[#858585] focus:outline-none focus:border-[#007acc] resize-none disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ minHeight: '40px', maxHeight: '120px' }}
@@ -725,7 +579,7 @@ function ChatPageInner() {
               </div>
               <button
                 onClick={sendMessage}
-                disabled={!inputValue.trim() || ((!wsConnected && !selectedWorkflow) || isTyping)}
+                disabled={!inputValue.trim() || !wsConnected || isTyping}
                 className="px-4 py-2.5 bg-[#0e639c] text-white rounded-lg hover:bg-[#1177bb] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 shrink-0"
               >
                 <Send size={16} />
@@ -734,9 +588,7 @@ function ChatPageInner() {
             <div className="max-w-3xl mx-auto mt-2 flex items-center gap-3 text-[10px] text-[#585858]">
               <TargetSelector
                 selectedAgent={selectedAgent}
-                selectedWorkflow={selectedWorkflow}
                 onSelectAgent={handleSelectAgent}
-                onSelectWorkflow={handleSelectWorkflow}
               />
               <span className="flex items-center gap-1">
                 <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />

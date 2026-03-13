@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Filter, MessageSquare, Loader2, Plus, X, Bot, Network, ChevronDown } from 'lucide-react';
+import { Search, Filter, MessageSquare, Loader2, Plus, X, Bot } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -18,7 +18,6 @@ interface Session {
 }
 
 interface AgentOption { id: string; name: string; description: string; }
-interface WorkflowOption { id: string; name: string; description: string; }
 
 function formatTime(ts: number): string {
   if (!ts) return '-';
@@ -73,7 +72,6 @@ export default function SessionsPage() {
 
   const getTargetLabel = (meta: string) => {
     const m = parseMeta(meta);
-    if (m.workflow_id) return { type: 'workflow', id: m.workflow_id as string };
     if (m.agent_id && m.agent_id !== 'default') return { type: 'agent', id: m.agent_id as string };
     return null;
   };
@@ -164,10 +162,8 @@ export default function SessionsPage() {
                       <td className="p-4 text-[#cccccc]">{parseTitle(session.meta)}</td>
                       <td className="p-4">
                         {target ? (
-                          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded ${
-                            target.type === 'workflow' ? 'bg-[#4ec9b0]/15 text-[#4ec9b0]' : 'bg-[#007acc]/15 text-[#007acc]'
-                          }`}>
-                            {target.type === 'workflow' ? <Network size={10} /> : <Bot size={10} />}
+                          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-[#007acc]/15 text-[#007acc]">
+                            <Bot size={10} />
                             {target.id}
                           </span>
                         ) : (
@@ -197,18 +193,12 @@ export default function SessionsPage() {
 function NewChatModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [agents, setAgents] = useState<AgentOption[]>([]);
-  const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'agent' | 'workflow'>('agent');
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    Promise.all([
-      fetch(`${API_BASE}/api/agents`).then(r => r.json()).catch(() => []),
-      fetch(`${API_BASE}/api/workflows`).then(r => r.json()).catch(() => []),
-    ]).then(([a, w]) => {
+    fetch(`${API_BASE}/api/agents`).then(r => r.json()).catch(() => []).then(a => {
       setAgents(a);
-      setWorkflows(w);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -217,17 +207,8 @@ function NewChatModal({ onClose }: { onClose: () => void }) {
     a.id.toLowerCase().includes(search.toLowerCase())
   );
 
-  const filteredWorkflows = workflows.filter(w =>
-    w.name.toLowerCase().includes(search.toLowerCase()) ||
-    w.id.toLowerCase().includes(search.toLowerCase())
-  );
-
   const selectAgent = (agentId: string) => {
     router.push(`/chat?agent=${encodeURIComponent(agentId)}`);
-  };
-
-  const selectWorkflow = (workflowId: string) => {
-    router.push(`/chat?workflow=${encodeURIComponent(workflowId)}`);
   };
 
   return (
@@ -240,26 +221,12 @@ function NewChatModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {/* Tab 切换 */}
+        {/* 标题 */}
         <div className="flex border-b border-[#2d2d30]">
-          <button
-            onClick={() => setTab('agent')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-xs transition-colors ${
-              tab === 'agent' ? 'text-[#cccccc] border-b-2 border-[#007acc]' : 'text-[#858585] hover:text-[#cccccc]'
-            }`}
-          >
+          <div className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-xs text-[#cccccc] border-b-2 border-[#007acc]">
             <Bot size={14} />
             选择 Agent
-          </button>
-          <button
-            onClick={() => setTab('workflow')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-xs transition-colors ${
-              tab === 'workflow' ? 'text-[#cccccc] border-b-2 border-[#4ec9b0]' : 'text-[#858585] hover:text-[#cccccc]'
-            }`}
-          >
-            <Network size={14} />
-            选择 Workflow
-          </button>
+          </div>
         </div>
 
         {/* 搜索 */}
@@ -268,7 +235,7 @@ function NewChatModal({ onClose }: { onClose: () => void }) {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#858585]" size={13} />
             <input
               type="text"
-              placeholder={`搜索 ${tab === 'agent' ? 'Agent' : 'Workflow'}...`}
+              placeholder="搜索 Agent..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full bg-[#3c3c3c] border border-[#5a5a5a] rounded px-9 py-1.5 text-xs text-[#cccccc] placeholder-[#858585] focus:outline-none focus:border-[#007acc]"
@@ -282,7 +249,7 @@ function NewChatModal({ onClose }: { onClose: () => void }) {
             <div className="flex items-center justify-center py-8">
               <Loader2 className="animate-spin text-[#858585]" size={24} />
             </div>
-          ) : tab === 'agent' ? (
+          ) : (
             filteredAgents.length === 0 ? (
               <div className="text-center text-[#858585] text-xs py-8">暂无 Agent</div>
             ) : (
@@ -299,27 +266,6 @@ function NewChatModal({ onClose }: { onClose: () => void }) {
                   </div>
                   {a.description && (
                     <p className="text-xs text-[#858585] line-clamp-1 ml-5">{a.description}</p>
-                  )}
-                </button>
-              ))
-            )
-          ) : (
-            filteredWorkflows.length === 0 ? (
-              <div className="text-center text-[#858585] text-xs py-8">暂无 Workflow</div>
-            ) : (
-              filteredWorkflows.map(w => (
-                <button
-                  key={w.id}
-                  onClick={() => selectWorkflow(w.id)}
-                  className="w-full text-left bg-[#1e1e1e] border border-[#2d2d30] rounded-lg p-3 hover:border-[#4ec9b0] transition-colors group"
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Network size={14} className="text-[#4ec9b0]" />
-                    <span className="text-sm font-medium text-[#cccccc]">{w.name}</span>
-                    <span className="text-[10px] text-[#585858] font-mono">{w.id}</span>
-                  </div>
-                  {w.description && (
-                    <p className="text-xs text-[#858585] line-clamp-1 ml-5">{w.description}</p>
                   )}
                 </button>
               ))

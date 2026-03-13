@@ -50,7 +50,7 @@ class ContextBuilder:
             tools = self.tool_registry.as_llm_tools()
             # 根据 agent_config 过滤工具信息注入 prompt
             if agent_config and agent_config.tools:
-                allowed = set(agent_config.tools) | {"delegate", "run_workflow"}
+                allowed = set(agent_config.tools) | {"delegate"}
                 tools = [t for t in tools if t["name"] in allowed]
             for t in tools:
                 tool_names.append(t["name"])

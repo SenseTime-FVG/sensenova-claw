@@ -73,8 +73,8 @@ class AgentSessionWorker(SessionWorker):
         if not self.agent_config or not self.agent_config.tools:
             return all_tools  # 空列表 = 全部工具
         allowed = set(self.agent_config.tools)
-        # 始终保留 delegate 和 run_workflow 工具
-        always_keep = {"delegate", "run_workflow"}
+        # 始终保留 delegate 工具
+        always_keep = {"delegate"}
         return [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
 
     # ── 事件处理 ──────────────────────────────────────

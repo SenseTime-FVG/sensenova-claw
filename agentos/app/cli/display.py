@@ -161,22 +161,9 @@ class DisplayEngine:
         elif msg_type == "messages_list":
             self._render_messages(payload.get("messages", []))
 
-        elif msg_type == "workflow_run_completed":
-            status = payload.get("status", "")
-            icon = "✅" if status == "completed" else "❌"
-            self.console.print(f"\n{icon} Workflow {status}")
-            output = payload.get("output", "")
-            if output:
-                self.console.print(f"[blue]结果:[/blue] {str(output)[:1000]}")
-
         elif msg_type == "notification":
             text = payload.get("text", "")
             self.console.print(f"\n[cyan]📢 通知:[/cyan] {text}")
-
-        elif msg_type.startswith("workflow."):
-            # workflow.node_started / workflow.node_completed
-            node = payload.get("node_id", payload.get("node_type", ""))
-            self.console.print(f"[dim]   ⚙️ {msg_type}: {node}[/dim]")
 
     def show_response(self, text: str) -> None:
         if text:

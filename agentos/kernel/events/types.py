@@ -49,10 +49,3 @@ AGENT_DELEGATE_REQUESTED = "agent.delegate_requested"
 AGENT_DELEGATE_STARTED = "agent.delegate_started"
 AGENT_DELEGATE_COMPLETED = "agent.delegate_completed"
 AGENT_DELEGATE_FAILED = "agent.delegate_failed"
-
-# v1.0: Workflow 编排事件
-WORKFLOW_RUN_STARTED = "workflow.run_started"
-WORKFLOW_RUN_COMPLETED = "workflow.run_completed"
-WORKFLOW_RUN_FAILED = "workflow.run_failed"
-WORKFLOW_NODE_STARTED = "workflow.node_started"
-WORKFLOW_NODE_COMPLETED = "workflow.node_completed"

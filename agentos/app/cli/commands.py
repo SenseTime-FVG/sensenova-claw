@@ -51,18 +51,6 @@ class CommandDispatcher:
                 self.app.console.print(f"[cyan]调试模式: {'开启' if self.app.debug else '关闭'}[/cyan]")
         elif cmd == "/agents":
             await self.app._send({"type": "list_agents", "payload": {}})
-        elif cmd == "/run":
-            p = arg.split(maxsplit=1)
-            if len(p) < 2:
-                self.app.console.print("[red]用法: /run <workflow_id> <input>[/red]")
-            else:
-                await self.app._send({
-                    "type": "run_workflow",
-                    "session_id": self.app.current_session_id,
-                    "payload": {"workflow_id": p[0], "input": p[1]},
-                })
-                self.app.console.print(f"[cyan]Workflow {p[0]} 启动中...[/cyan]")
-                await self.app._wait_for_turn()
         elif cmd == "/cancel":
             await self.app._send({
                 "type": "cancel_turn",
@@ -91,9 +79,8 @@ class CommandDispatcher:
     /current           当前会话信息
     /cancel            取消当前轮次
 
-  [cyan]Agent & Workflow[/cyan]
+  [cyan]Agent[/cyan]
     /agents            列出可用 Agent
-    /run <wf> <input>  触发 Workflow
 
   [cyan]系统[/cyan]
     /debug on|off      调试模式

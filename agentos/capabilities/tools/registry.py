@@ -8,7 +8,7 @@ from agentos.capabilities.tools.builtin import (
     SerperSearchTool,
     WriteFileTool,
 )
-from agentos.capabilities.tools.orchestration import CreateAgentTool, CreateWorkflowTool
+from agentos.capabilities.tools.orchestration import CreateAgentTool
 
 
 class ToolRegistry:
@@ -24,7 +24,6 @@ class ToolRegistry:
             ReadFileTool(),
             WriteFileTool(),
             CreateAgentTool(),
-            CreateWorkflowTool(),
         ]:
             self.register(tool)
 

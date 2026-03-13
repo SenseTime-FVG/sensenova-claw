@@ -39,7 +39,7 @@ from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.adapters.plugins import PluginRegistry
 from agentos.platform.security.path_policy import PathPolicy
 from agentos.platform.config.workspace import ensure_workspace
-from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api, workflows as workflows_api
+from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,6 @@ class Services:
     ws_channel: WebSocketChannel
     cron_runtime: CronRuntime
     heartbeat_runtime: HeartbeatRuntime
-    workflow_runtime: object | None = None  # WorkflowRuntime, optional
 
 
 @asynccontextmanager
@@ -191,37 +190,6 @@ async def lifespan(app: FastAPI):
         )
         tool_registry.register(delegate_tool)
 
-    # v1.0: 初始化 Workflow 引擎
-    workflow_runtime = None
-    if config.get("workflow.enabled", True):
-        from agentos.capabilities.workflows.registry import WorkflowRegistry
-        from agentos.capabilities.workflows.runtime import WorkflowRuntime
-        from agentos.capabilities.tools.workflow_tool import WorkflowTool
-
-        workflow_config_dir = Path(config.get("system.workspace_dir", ".")) / "workflows"
-        workflow_registry = WorkflowRegistry(config_dir=workflow_config_dir)
-        # 加载用户自定义工作流
-        workflow_registry.load_from_dir()
-        # 加载内置模板
-        templates_dir = PROJECT_ROOT / "workspace" / "workflows"
-        workflow_registry.load_from_dir(templates_dir)
-
-        workflow_runtime = WorkflowRuntime(
-            agent_registry=agent_registry,
-            workflow_registry=workflow_registry,
-            bus_router=bus_router,
-            repo=repo,
-            publisher=publisher,
-        )
-
-        tool_registry.register(WorkflowTool(workflow_runtime))
-
-        tool_runtime.workflow_registry = workflow_registry
-
-        app.state.workflow_registry = workflow_registry
-        app.state.workflow_runtime = workflow_runtime
-        logger.info("Workflow engine enabled (%d workflows loaded)", len(workflow_registry.list_all()))
-
     # v0.9: 加载插件（飞书 Channel + MessageTool + FeishuApiTool 等）
     plugin_registry = PluginRegistry()
     await plugin_registry.load_plugins(
@@ -262,7 +230,6 @@ async def lifespan(app: FastAPI):
         ws_channel=ws_channel,
         cron_runtime=cron_runtime,
         heartbeat_runtime=heartbeat_runtime,
-        workflow_runtime=workflow_runtime,
     )
     # 挂载 registries 供 API 路由使用
     app.state.tool_registry = tool_registry
@@ -307,7 +274,6 @@ from agentos.interfaces.http.skills import invoke_router
 app.include_router(invoke_router)
 app.include_router(workspace.router)
 app.include_router(config_api.router)
-app.include_router(workflows_api.router)
 
 
 @app.get("/health")
@@ -459,50 +425,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 continue
 
-            if msg_type == "run_workflow":
-                # v1.0: 通过 WebSocket 触发 Workflow 执行
-                wf_runtime = getattr(app.state, "workflow_runtime", None)
-                if not wf_runtime:
-                    await ws_channel.send_json(
-                        websocket,
-                        {
-                            "type": "error",
-                            "payload": {
-                                "error_type": "WorkflowDisabled",
-                                "message": "Workflow engine is not enabled",
-                            },
-                            "timestamp": time.time(),
-                        },
-                    )
-                    continue
-
-                workflow_id = payload.get("workflow_id", "")
-                input_text = payload.get("input", "")
-                wf_session_id = session_id or f"wf_sess_{uuid.uuid4().hex[:12]}"
-                try:
-                    run = await wf_runtime.execute(workflow_id, input_text, wf_session_id)
-                    await ws_channel.send_json(
-                        websocket,
-                        {
-                            "type": "workflow_run_completed",
-                            "session_id": wf_session_id,
-                            "payload": run.to_dict(),
-                            "timestamp": time.time(),
-                        },
-                    )
-                except Exception as wf_exc:
-                    await ws_channel.send_json(
-                        websocket,
-                        {
-                            "type": "error",
-                            "payload": {
-                                "error_type": "WorkflowError",
-                                "message": str(wf_exc),
-                            },
-                            "timestamp": time.time(),
-                        },
-                    )
-                continue
 
             # v1.4: 列出可用 Agent
             if msg_type == "list_agents":

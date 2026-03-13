@@ -169,11 +169,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default_timeout": 300,
         "enabled": True,
     },
-    "workflow": {
-        "enabled": True,
-        "max_concurrent_runs": 3,
-        "default_timeout": 1800,
-    },
 }
 
 

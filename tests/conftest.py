@@ -49,7 +49,6 @@ async def test_app(tmp_path):
     from agentos.capabilities.agents.registry import AgentRegistry
     from agentos.capabilities.tools.registry import ToolRegistry
     from agentos.capabilities.skills.registry import SkillRegistry
-    from agentos.capabilities.workflows.registry import WorkflowRegistry
     from agentos.platform.security.path_policy import PathPolicy
     from agentos.adapters.storage.repository import Repository
 
@@ -88,11 +87,6 @@ async def test_app(tmp_path):
     )
     skill_registry.load_skills(cfg.data)
 
-    # 初始化 WorkflowRegistry
-    workflow_config_dir = tmp_path / "workflows"
-    workflow_config_dir.mkdir()
-    workflow_registry = WorkflowRegistry(config_dir=workflow_config_dir)
-
     # PathPolicy
     path_policy = PathPolicy(workspace=workspace_dir)
 
@@ -108,12 +102,6 @@ async def test_app(tmp_path):
     market_service.search = AsyncMock(return_value=[])
     market_service.shutdown = AsyncMock()
 
-    # 模拟 workflow_runtime
-    workflow_runtime = MagicMock()
-    workflow_runtime.execute = AsyncMock()
-    workflow_runtime.list_active_runs = MagicMock(return_value=[])
-    workflow_runtime.get_run = MagicMock(return_value=None)
-
     # 挂载到 app.state
     app.state.services = services
     app.state.agent_registry = agent_registry
@@ -121,8 +109,6 @@ async def test_app(tmp_path):
     app.state.skill_registry = skill_registry
     app.state.config = cfg
     app.state.market_service = market_service
-    app.state.workflow_registry = workflow_registry
-    app.state.workflow_runtime = workflow_runtime
     app.state.path_policy = path_policy
 
     transport = ASGITransport(app=app, raise_app_exceptions=False)
@@ -131,7 +117,6 @@ async def test_app(tmp_path):
 
     # 清理 app.state，避免污染其他测试
     for attr in ("services", "agent_registry", "tool_registry", "skill_registry",
-                 "config", "market_service", "workflow_registry", "workflow_runtime",
-                 "path_policy"):
+                 "config", "market_service", "path_policy"):
         if hasattr(app.state, attr):
             delattr(app.state, attr)

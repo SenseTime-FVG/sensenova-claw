@@ -51,17 +51,3 @@ class TestCLIApp:
         self._run(d.dispatch("/cancel"))
         assert any(m.get("type") == "cancel_turn" for m in app._sent)
 
-    def test_run_workflow(self):
-        app = MockCLIApp()
-        app.current_session_id = "wf_s"
-        d = CommandDispatcher(app)
-        self._run(d.dispatch("/run my_workflow test input"))
-        sent = [m for m in app._sent if m.get("type") == "run_workflow"]
-        assert len(sent) == 1
-        assert sent[0]["payload"]["workflow_id"] == "my_workflow"
-
-    def test_run_workflow_no_args(self):
-        app = MockCLIApp()
-        d = CommandDispatcher(app)
-        self._run(d.dispatch("/run"))
-        # 不应崩溃，应提示用法

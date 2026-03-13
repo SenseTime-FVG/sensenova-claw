@@ -19,8 +19,7 @@ export function DashboardNav() {
     <div className="w-12 bg-[#333333] flex flex-col items-center py-2 border-r border-[#2d2d30]">
       <div className="flex flex-col gap-4">
         {navItems.map((item) => {
-          const isActive = pathname?.startsWith(item.path) ||
-            (item.path === '/agents' && pathname?.startsWith('/workflows'));
+          const isActive = pathname?.startsWith(item.path);
           return (
             <Link
               key={item.path}
