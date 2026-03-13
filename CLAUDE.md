@@ -20,11 +20,11 @@ AgentOS 是基于事件驱动架构的 AI Agent 平台，支持 Web、CLI、TUI 
 npm run dev
 
 # 单独启动后端
-npm run dev:backend
+npm run dev:server
 # 或: python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8000
 
 # 单独启动前端
-npm run dev:frontend
+npm run dev:web
 
 # 启动 TUI 客户端（需后端已运行）
 python3 -m agentos.app.cli.cli_client --port 8000
@@ -34,11 +34,11 @@ python3 -m agentos.app.cli.cli_client --port 8000
 
 ```bash
 # 后端 e2e 测试（需要真实 API key）
-npm run test:backend:e2e
+npm run test:e2e
 # 或: python3 -m pytest tests/e2e -q
 
 # 前端 e2e 测试
-npm run test:frontend:e2e
+npm run test:web:e2e
 
 # 后端单元测试
 python3 -m pytest tests/unit/ -q
@@ -304,7 +304,7 @@ v0.2 新增:
 - Playwright 断言改为“WebSocket 已连接 + 用户消息已回显 + 出现非用户响应气泡”后，对真实 API 返回波动更稳健。  
 
 失败/风险经验：
-- `npm run test:backend:e2e` 已使用 `python3 -m pytest`，无需单独的 `pytest` 命令。
+- `npm run test:e2e` 已使用 `python3 -m pytest`，无需单独的 `pytest` 命令。
 
 ### 2026-03-07 CLI 交互修复补充
 
