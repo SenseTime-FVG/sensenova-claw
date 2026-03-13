@@ -1,55 +1,73 @@
-# 系统与编辑器
+# ========== 系统与编辑器 ==========
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
-.claude/
 *.swp
 *.swo
+*~
+
+# ========== Claude Code ==========
 .claude/
 
-# Node.js
-node_modules/
-frontend/node_modules/
-npm-debug.log*
-yarn-debug.log*
-pnpm-debug.log*
-
-# 前端构建与测试产物
-frontend/.next/
-frontend/test-results/
-frontend/playwright-report/
-
-# Python
+# ========== Python ==========
 __pycache__/
 *.py[cod]
 *.pyo
-.pytest_cache/
-backend/.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+*.egg-info/
+*.egg
 .venv/
 venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
 
-# 后端构建与运行产物
-backend/agentos_backend.egg-info/
-backend/*.db
-backend/*.sqlite
-backend/SenseAssistant/
+# ========== Node.js ==========
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+.npm/
 
-# 项目运行数据与日志
+# ========== 前端构建与测试产物 ==========
+agentos/app/web/.next/
+agentos/app/web/dist/
+agentos/app/web/test-results/
+agentos/app/web/playwright-report/
+
+# ========== 运行时目录 ==========
 SenseAssistant/
-*.log
+archived/
+var/
 
-# 覆盖率与构建目录
+# workspace 中忽略运行时产物和 skills
+workspace/memory/
+workspace/skills/
+workspace/*.json
+
+*.db
+*.sqlite
+*.sqlite3
+
+# ========== 日志 ==========
+*.log
+logs/
+
+# ========== 覆盖率与构建 ==========
 .coverage
+.coverage.*
 coverage/
 htmlcov/
-dist/
 build/
 
-# 本地密钥与环境变量
+# ========== 本地密钥与环境变量 ==========
 config.yml
 .env
 .env.*
 !.env.example
+
+
+# ========== 临时文件 ==========
+*.tmp
+*.bak
+*.orig

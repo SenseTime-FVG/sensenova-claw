@@ -1,5 +1,5 @@
 """R03: HeartbeatProtocol"""
-from app.heartbeat.protocol import strip_heartbeat_token, StripResult, HEARTBEAT_TOKEN
+from agentos.kernel.heartbeat.protocol import strip_heartbeat_token, StripResult, HEARTBEAT_TOKEN
 
 
 class TestHeartbeatProtocol:

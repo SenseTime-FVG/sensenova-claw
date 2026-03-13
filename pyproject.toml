@@ -1,0 +1,33 @@
+[project]
+name = "agentos"
+version = "0.5.0"
+description = "AgentOS - 基于事件驱动架构的 AI Agent 平台"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "pydantic>=2.9.0",
+  "pyyaml>=6.0.2",
+  "aiosqlite>=0.20.0",
+  "httpx>=0.27.0",
+  "openai>=1.55.0",
+  "anthropic>=0.40.0",
+  "textual>=0.47.0",
+  "lark-oapi>=1.5.3",
+  "croniter>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.backends"

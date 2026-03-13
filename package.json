@@ -1,13 +1,15 @@
 {
   "name": "agentos",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.5.0",
   "scripts": {
     "dev": "bash ./scripts/dev.sh",
-    "dev:backend": "cd backend && python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
-    "dev:frontend": "cd frontend && npm run dev",
-    "test:backend:e2e": "cd backend && python3 -m pytest tests/e2e -q",
-    "test:frontend:e2e": "cd frontend && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright test"
+    "dev:backend": "python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:frontend": "cd agentos/app/web && npm run dev",
+    "test:backend": "python3 -m pytest tests/ -q",
+    "test:backend:unit": "python3 -m pytest tests/unit/ -q",
+    "test:backend:e2e": "python3 -m pytest tests/e2e/ -q",
+    "test:frontend:e2e": "cd agentos/app/web && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2"

@@ -2,7 +2,7 @@
 import platform
 import pytest
 from pathlib import Path
-from app.security.path_policy import PathPolicy, PathVerdict, PathZone
+from agentos.platform.security.path_policy import PathPolicy, PathVerdict, PathZone
 
 
 class TestPathPolicy:

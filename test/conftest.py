@@ -34,7 +34,7 @@ def tmp_db(tmp_path):
 
 @pytest_asyncio.fixture
 async def test_repo(tmp_db):
-    from app.db.repository import Repository
+    from agentos.adapters.storage.repository import Repository
     repo = Repository(db_path=str(tmp_db))
     await repo.init()
     yield repo
@@ -44,14 +44,14 @@ async def test_repo(tmp_db):
 async def test_app(tmp_path):
     """创建带有完整 app.state 模拟的测试客户端（不启动 lifespan）"""
     from httpx import AsyncClient, ASGITransport
-    from app.main import app
-    from app.core.config import Config
-    from app.agents.registry import AgentRegistry
-    from app.tools.registry import ToolRegistry
-    from app.skills.registry import SkillRegistry
-    from app.workflows.registry import WorkflowRegistry
-    from app.security.path_policy import PathPolicy
-    from app.db.repository import Repository
+    from agentos.app.gateway.main import app
+    from agentos.platform.config.config import Config
+    from agentos.capabilities.agents.registry import AgentRegistry
+    from agentos.capabilities.tools.registry import ToolRegistry
+    from agentos.capabilities.skills.registry import SkillRegistry
+    from agentos.capabilities.workflows.registry import WorkflowRegistry
+    from agentos.platform.security.path_policy import PathPolicy
+    from agentos.adapters.storage.repository import Repository
 
     # 使用临时目录避免污染真实环境
     workspace_dir = tmp_path / "workspace"
