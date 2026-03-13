@@ -9,13 +9,14 @@
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 
 from agentos.adapters.storage.repository import Repository
 from agentos.kernel.runtime.context_builder import ContextBuilder
 from agentos.kernel.runtime.state import SessionStateStore, TurnState
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def repo(tmp_path):
     db_path = str(tmp_path / "test.db")
     r = Repository(db_path=db_path)

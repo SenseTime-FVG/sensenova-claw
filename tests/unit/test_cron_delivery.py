@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import pytest_asyncio
 
 from agentos.adapters.storage.repository import Repository
 from agentos.kernel.events.bus import PublicEventBus
@@ -18,8 +19,9 @@ from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.runtime.publisher import EventPublisher
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def repo(tmp_path):
+    # 创建临时数据库并初始化，测试结束后临时目录自动清理
     db_path = str(tmp_path / "test.db")
     r = Repository(db_path=db_path)
     await r.init()

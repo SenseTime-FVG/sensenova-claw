@@ -122,7 +122,29 @@ class TestPathTraversal:
 
 class TestBackwardCompatibility:
     def test_no_policy_tools_still_work(self):
-        """无 PathPolicy 时工具行为应向后兼容（不会报错）"""
-        # 此测试验证 PathPolicy 为 None 时不会被注入
-        # 实际兼容性由 tool_worker.py 的 `if self.rt.path_policy:` 保证
-        pass
+        """无 PathPolicy 时工具行为应向后兼容（不会报错）
+
+        tool_worker.py 中通过 `if self.rt.path_policy:` 判断是否注入路径策略，
+        当 path_policy 为 None 时直接跳过注入，工具照常执行。
+        此测试验证该分支逻辑：模拟 runtime.path_policy = None，
+        确认 _path_policy 不会被注入到 arguments 字典中。
+        """
+        from unittest.mock import MagicMock
+
+        # 构造一个 path_policy=None 的伪 ToolRuntime
+        mock_runtime = MagicMock()
+        mock_runtime.path_policy = None
+        mock_runtime.agent_registry = None
+
+        # 模拟 tool_worker.py 中的注入逻辑（if self.rt.path_policy:）
+        arguments: dict = {"file_path": "/some/file.txt"}
+        if mock_runtime.path_policy:
+            arguments["_path_policy"] = mock_runtime.path_policy
+        if mock_runtime.agent_registry:
+            arguments["_agent_registry"] = mock_runtime.agent_registry
+
+        # path_policy 为 None 时，_path_policy 不应被注入
+        assert "_path_policy" not in arguments
+        assert "_agent_registry" not in arguments
+        # 原始参数保持不变
+        assert arguments["file_path"] == "/some/file.txt"

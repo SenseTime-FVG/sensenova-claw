@@ -15,7 +15,8 @@ import yaml
 
 
 def load_config():
-    config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config.yml")
+    # 脚本移至 scripts/ 目录后，config.yml 位于上一级（项目根目录）
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config.yml")
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     feishu = cfg.get("plugins", {}).get("feishu", {})

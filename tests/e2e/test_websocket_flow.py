@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import sqlite3
 import uuid
 from pathlib import Path
@@ -29,6 +30,9 @@ from agentos.capabilities.tools.registry import ToolRegistry
 async def test_backend_e2e_event_flow(tmp_path: Path):
     db_path = tmp_path / "agentos.db"
     workspace = tmp_path / "workspace"
+
+    # 保存原始配置，防止污染其他测试
+    _original_config = copy.deepcopy(config.data)
 
     config.data["agent"]["provider"] = "mock"
     config.data["agent"]["default_model"] = "mock-agent-v1"
@@ -107,6 +111,8 @@ async def test_backend_e2e_event_flow(tmp_path: Path):
         await tool_runtime.stop()
         await bus_router.stop()
         await persister.stop()
+        # 测试结束后恢复原始配置，避免全局状态污染其他测试
+        config.data = _original_config
 
     event_types = [event.type for event in collected]
     assert "agent.step_started" in event_types

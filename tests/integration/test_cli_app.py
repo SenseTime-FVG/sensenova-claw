@@ -4,7 +4,7 @@ import sys
 import os
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "backend"))
+# 注入 tests/ 目录到 sys.path，以便 import helpers（测试辅助模块）
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from helpers import MockCLIApp
 from agentos.app.cli.commands import CommandDispatcher

@@ -37,8 +37,8 @@ import yaml
 from agentos.platform.config.config import config
 from agentos.platform.logging.setup import setup_logging
 
-# run_e2e.py -> tests/e2e/ -> tests/ -> backend/ -> 项目根目录
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+# run_e2e.py -> tests/e2e/ -> tests/ -> 项目根目录
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 from agentos.adapters.storage.repository import Repository
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope

@@ -8,11 +8,12 @@ from __future__ import annotations
 import time
 
 import pytest
+import pytest_asyncio
 
 from agentos.adapters.storage.repository import Repository
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def repo(tmp_path):
     """创建临时数据库的 Repository"""
     db_path = str(tmp_path / "test.db")
