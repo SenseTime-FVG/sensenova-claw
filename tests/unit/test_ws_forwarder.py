@@ -1,11 +1,12 @@
-"""WebSocketForwarder 和 ConnectionManager 单元测试"""
+"""WebSocketForwarder 和 ConnectionManager 单元测试 — 使用 asyncio 队列模拟 WebSocket，无 mock"""
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any
 
 import pytest
 
+from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.types import (
     AGENT_STEP_COMPLETED,
@@ -17,6 +18,7 @@ from agentos.kernel.events.types import (
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
 )
+from agentos.kernel.runtime.publisher import EventPublisher
 from agentos.kernel.runtime.ws_forwarder import (
     AGENT_UPDATE_TITLE_COMPLETED,
     ConnectionManager,
@@ -24,23 +26,46 @@ from agentos.kernel.runtime.ws_forwarder import (
 )
 
 
-# ── ConnectionManager 测试 ─────────────────────────────
+# ── 轻量 WebSocket 替身（纯 asyncio，无 mock）─────────────
+
+
+class FakeWebSocket:
+    """用 asyncio.Queue 模拟 WebSocket 连接"""
+
+    def __init__(self):
+        self.accepted = False
+        self.sent_messages: list[dict] = []
+        self._should_fail = False
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def send_json(self, data: dict[str, Any]) -> None:
+        if self._should_fail:
+            raise ConnectionError("断开")
+        self.sent_messages.append(data)
+
+    def set_fail(self) -> None:
+        """下次 send_json 时抛异常"""
+        self._should_fail = True
+
+
+# ── ConnectionManager 测试 ────────────────────────────────
 
 
 class TestConnectionManager:
     """ConnectionManager 连接管理测试"""
 
-    @pytest.mark.asyncio
     async def test_connect_accepts_and_adds(self):
         mgr = ConnectionManager()
-        ws = AsyncMock()
+        ws = FakeWebSocket()
         await mgr.connect(ws)
         assert ws in mgr.connections
-        ws.accept.assert_called_once()
+        assert ws.accepted
 
     def test_disconnect_removes_connection(self):
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = FakeWebSocket()
         mgr.connections.add(ws)
         mgr.session_bindings["s1"] = {ws}
         mgr.disconnect(ws)
@@ -49,68 +74,64 @@ class TestConnectionManager:
 
     def test_disconnect_nonexistent_noop(self):
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = FakeWebSocket()
         mgr.disconnect(ws)  # 不抛异常
 
     def test_bind_session(self):
         mgr = ConnectionManager()
-        ws = MagicMock()
+        ws = FakeWebSocket()
         mgr.bind_session("s1", ws)
         assert ws in mgr.session_bindings["s1"]
 
     def test_bind_session_multiple(self):
         """同一 session 绑定多个 ws"""
         mgr = ConnectionManager()
-        ws1, ws2 = MagicMock(), MagicMock()
+        ws1, ws2 = FakeWebSocket(), FakeWebSocket()
         mgr.bind_session("s1", ws1)
         mgr.bind_session("s1", ws2)
         assert len(mgr.session_bindings["s1"]) == 2
 
-    @pytest.mark.asyncio
     async def test_send_json(self):
         mgr = ConnectionManager()
-        ws = AsyncMock()
+        ws = FakeWebSocket()
         await mgr.send_json(ws, {"type": "test"})
-        ws.send_json.assert_called_once_with({"type": "test"})
+        assert ws.sent_messages == [{"type": "test"}]
 
-    @pytest.mark.asyncio
     async def test_send_to_session(self):
         mgr = ConnectionManager()
-        ws1, ws2 = AsyncMock(), AsyncMock()
+        ws1, ws2 = FakeWebSocket(), FakeWebSocket()
         mgr.session_bindings["s1"] = {ws1, ws2}
         await mgr.send_to_session("s1", {"type": "x"})
-        ws1.send_json.assert_called_once()
-        ws2.send_json.assert_called_once()
+        assert len(ws1.sent_messages) == 1
+        assert len(ws2.sent_messages) == 1
 
-    @pytest.mark.asyncio
     async def test_send_to_session_disconnects_on_error(self):
         """发送失败时自动断开连接"""
         mgr = ConnectionManager()
-        ws_ok = AsyncMock()
-        ws_bad = AsyncMock()
-        ws_bad.send_json.side_effect = ConnectionError("断开")
+        ws_ok = FakeWebSocket()
+        ws_bad = FakeWebSocket()
+        ws_bad.set_fail()
         mgr.connections = {ws_ok, ws_bad}
         mgr.session_bindings["s1"] = {ws_ok, ws_bad}
         await mgr.send_to_session("s1", {"type": "x"})
         assert ws_bad not in mgr.connections
 
-    @pytest.mark.asyncio
     async def test_send_to_session_no_bindings(self):
         """没有绑定的 session 不抛异常"""
         mgr = ConnectionManager()
         await mgr.send_to_session("nonexistent", {"type": "x"})
 
 
-# ── WebSocketForwarder._map 测试 ─────────────────────────────
+# ── WebSocketForwarder._map 测试 ──────────────────────────
 
 
 class TestForwarderMap:
     """事件映射测试"""
 
     def _make_forwarder(self):
-        publisher = MagicMock()
-        publisher.bus = MagicMock()
-        mgr = MagicMock()
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus)
+        mgr = ConnectionManager()
         return WebSocketForwarder(publisher, mgr)
 
     def test_map_agent_step_started(self):
@@ -209,25 +230,24 @@ class TestForwarderMap:
         assert fwd._map(event) is None
 
 
+# ── WebSocketForwarder 启动/停止测试 ──────────────────────
+
+
 class TestForwarderStartStop:
     """启动/停止测试"""
 
-    @pytest.mark.asyncio
     async def test_start_creates_task(self):
-        publisher = MagicMock()
-        async def empty_iter():
-            return
-            yield
-        publisher.bus.subscribe = empty_iter
-        mgr = MagicMock()
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus)
+        mgr = ConnectionManager()
         fwd = WebSocketForwarder(publisher, mgr)
         await fwd.start()
         assert fwd._task is not None
         await fwd.stop()
 
-    @pytest.mark.asyncio
     async def test_stop_without_start(self):
-        publisher = MagicMock()
-        mgr = MagicMock()
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus)
+        mgr = ConnectionManager()
         fwd = WebSocketForwarder(publisher, mgr)
         await fwd.stop()  # 不抛异常

@@ -1,5 +1,7 @@
-"""C01: CommandDispatcher 命令分派"""
-import asyncio
+"""C01: CommandDispatcher 命令分派
+
+使用真实 MockCLIApp（tests/helpers 中的纯 Python 实现），无 mock。
+"""
 import sys
 import os
 
@@ -10,80 +12,73 @@ from agentos.app.cli.commands import CommandDispatcher
 
 
 class TestCommandDispatcher:
-    def _run(self, coro):
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
-
-    def test_quit(self):
+    async def test_quit(self):
         d = CommandDispatcher(MockCLIApp())
-        assert self._run(d.dispatch("/quit")) == "quit"
+        assert await d.dispatch("/quit") == "quit"
 
-    def test_help(self):
+    async def test_help(self):
         d = CommandDispatcher(MockCLIApp())
-        assert self._run(d.dispatch("/help")) is None
+        assert await d.dispatch("/help") is None
 
-    def test_slash_shows_help(self):
+    async def test_slash_shows_help(self):
         d = CommandDispatcher(MockCLIApp())
-        assert self._run(d.dispatch("/")) is None
+        assert await d.dispatch("/") is None
 
-    def test_debug_toggle(self):
+    async def test_debug_toggle(self):
         app = MockCLIApp()
         d = CommandDispatcher(app)
-        self._run(d.dispatch("/debug on"))
+        await d.dispatch("/debug on")
         assert app.debug is True
-        self._run(d.dispatch("/debug off"))
+        await d.dispatch("/debug off")
         assert app.debug is False
 
-    def test_debug_status(self):
+    async def test_debug_status(self):
         app = MockCLIApp()
         d = CommandDispatcher(app)
-        assert self._run(d.dispatch("/debug")) is None
+        assert await d.dispatch("/debug") is None
 
-    def test_current(self):
+    async def test_current(self):
         app = MockCLIApp()
         app.current_session_id = "s1"
         d = CommandDispatcher(app)
-        assert self._run(d.dispatch("/current")) is None
+        assert await d.dispatch("/current") is None
 
-    def test_unknown(self):
+    async def test_unknown(self):
         d = CommandDispatcher(MockCLIApp())
-        assert self._run(d.dispatch("/xyz")) is None
+        assert await d.dispatch("/xyz") is None
 
-    def test_new_session(self):
+    async def test_new_session(self):
         app = MockCLIApp()
         d = CommandDispatcher(app)
-        self._run(d.dispatch("/new"))
+        await d.dispatch("/new")
         assert app.current_session_id == "mock_sess"
 
-    def test_new_session_with_agent(self):
+    async def test_new_session_with_agent(self):
         app = MockCLIApp()
         d = CommandDispatcher(app)
-        self._run(d.dispatch("/new helper"))
+        await d.dispatch("/new helper")
         assert app.current_agent_id == "helper"
 
-    def test_sessions_list(self):
+    async def test_sessions_list(self):
         app = MockCLIApp()
         d = CommandDispatcher(app)
-        self._run(d.dispatch("/sessions"))
+        await d.dispatch("/sessions")
         assert any(m.get("type") == "list_sessions" for m in app._sent)
 
-    def test_agents_list(self):
+    async def test_agents_list(self):
         app = MockCLIApp()
         d = CommandDispatcher(app)
-        self._run(d.dispatch("/agents"))
+        await d.dispatch("/agents")
         assert any(m.get("type") == "list_agents" for m in app._sent)
 
-    def test_switch_no_arg(self):
+    async def test_switch_no_arg(self):
         app = MockCLIApp()
         d = CommandDispatcher(app)
-        self._run(d.dispatch("/switch"))
+        await d.dispatch("/switch")
         # 不应崩溃
 
-    def test_switch_with_arg(self):
+    async def test_switch_with_arg(self):
         app = MockCLIApp()
         d = CommandDispatcher(app)
-        self._run(d.dispatch("/switch s123"))
+        await d.dispatch("/switch s123")
         assert app.current_session_id == "s123"

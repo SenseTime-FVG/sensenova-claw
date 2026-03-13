@@ -4,7 +4,6 @@ import sys
 import os
 from pathlib import Path
 from dataclasses import dataclass
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
@@ -42,13 +41,14 @@ async def test_repo(tmp_db):
 
 @pytest_asyncio.fixture
 async def test_app(tmp_path):
-    """创建带有完整 app.state 模拟的测试客户端（不启动 lifespan）"""
+    """创建带有完整 app.state 的测试客户端（不启动 lifespan）"""
     from httpx import AsyncClient, ASGITransport
     from agentos.app.gateway.main import app
     from agentos.platform.config.config import Config
     from agentos.capabilities.agents.registry import AgentRegistry
     from agentos.capabilities.tools.registry import ToolRegistry
     from agentos.capabilities.skills.registry import SkillRegistry
+    from agentos.capabilities.skills.market_service import SkillMarketService
     from agentos.platform.security.path_policy import PathPolicy
     from agentos.adapters.storage.repository import Repository
 
@@ -90,17 +90,19 @@ async def test_app(tmp_path):
     # PathPolicy
     path_policy = PathPolicy(workspace=workspace_dir)
 
-    # 模拟 Services（只需 repo）
+    # 真实 Services（只需 repo）
     @dataclass
-    class MockServices:
+    class Services:
         repo: Repository
 
-    services = MockServices(repo=repo)
+    services = Services(repo=repo)
 
-    # 模拟 market_service
-    market_service = MagicMock()
-    market_service.search = AsyncMock(return_value=[])
-    market_service.shutdown = AsyncMock()
+    # 真实 MarketService（无外部 API key，ClawHub/Anthropic 不可用但不影响测试）
+    market_service = SkillMarketService(
+        skills_dir=skills_dir,
+        skill_registry=skill_registry,
+        config=cfg.data,
+    )
 
     # 挂载到 app.state
     app.state.services = services
@@ -114,6 +116,9 @@ async def test_app(tmp_path):
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+    # 关闭 market_service
+    await market_service.shutdown()
 
     # 清理 app.state，避免污染其他测试
     for attr in ("services", "agent_registry", "tool_registry", "skill_registry",

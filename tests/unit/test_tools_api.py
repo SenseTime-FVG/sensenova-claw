@@ -1,36 +1,35 @@
-"""Tools API 端点单测（使用 TestClient + mock app.state）"""
+"""Tools API 端点单测 — 使用真实组件，无 mock"""
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentos.interfaces.http.tools import router
+from agentos.capabilities.tools.registry import ToolRegistry
+from agentos.platform.config.config import Config
 
 
 @pytest.fixture
 def app(tmp_path):
+    """构建挂载真实 ToolRegistry 和 Config 的测试应用"""
     app = FastAPI()
     app.include_router(router)
 
-    # mock tool
-    mock_tool = MagicMock()
-    mock_tool.description = "Execute bash commands"
-    mock_tool.risk_level = MagicMock(value="high")
-    mock_tool.parameters = {"command": {"type": "string"}}
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir()
 
-    tool_registry = MagicMock()
-    tool_registry._tools = {"bash_command": mock_tool}
-    tool_registry.get.side_effect = lambda name: mock_tool if name == "bash_command" else None
+    # 真实 Config
+    config_path = tmp_path / "config.yml"
+    config_path.write_text("", encoding="utf-8")
+    cfg = Config(config_path=config_path)
+    cfg.set("system.workspace_dir", str(workspace_dir))
 
-    # config (workspace_dir 指向 tmp_path，避免写到真实文件系统)
-    config = MagicMock()
-    config.get.return_value = str(tmp_path / "workspace")
+    # 真实 ToolRegistry（自动注册 builtin 工具）
+    tool_registry = ToolRegistry()
 
     app.state.tool_registry = tool_registry
-    app.state.config = config
-
+    app.state.config = cfg
     return app
 
 
@@ -47,15 +46,18 @@ def test_list_tools(client):
     resp = client.get("/api/tools")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 1
-    tool = data[0]
-    assert tool["name"] == "bash_command"
-    assert tool["id"] == "tool-bash_command"
-    assert tool["description"] == "Execute bash commands"
-    assert tool["category"] == "builtin"
-    assert tool["enabled"] is True
-    assert tool["riskLevel"] == "high"
-    assert "parameters" in tool
+    # 真实 ToolRegistry 注册了多个 builtin 工具
+    assert len(data) >= 1
+    names = [t["name"] for t in data]
+    assert "bash_command" in names
+    # 验证字段结构
+    bash_tool = [t for t in data if t["name"] == "bash_command"][0]
+    assert bash_tool["id"] == "tool-bash_command"
+    assert bash_tool["category"] == "builtin"
+    assert bash_tool["enabled"] is True
+    assert "riskLevel" in bash_tool
+    assert "parameters" in bash_tool
+    assert "description" in bash_tool
 
 
 # ── 启用/禁用工具 ──
@@ -90,4 +92,5 @@ def test_list_tools_reflects_prefs(client):
     # 再列出
     resp = client.get("/api/tools")
     data = resp.json()
-    assert data[0]["enabled"] is False
+    bash_tool = [t for t in data if t["name"] == "bash_command"][0]
+    assert bash_tool["enabled"] is False

@@ -1,17 +1,18 @@
-"""Config API 端点单测（使用 TestClient + mock app.state）"""
+"""Config API 端点单测 — 使用真实 Config，无 mock"""
 import pytest
 import yaml
 from pathlib import Path
-from unittest.mock import MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentos.interfaces.http.config_api import router
+from agentos.platform.config.config import Config
 
 
 @pytest.fixture
 def app(tmp_path):
+    """构建挂载真实 Config 的测试应用"""
     app = FastAPI()
     app.include_router(router)
 
@@ -24,12 +25,8 @@ def app(tmp_path):
     }
     config_path.write_text(yaml.dump(initial), encoding="utf-8")
 
-    config = MagicMock()
-    config.data = dict(initial)
-    config._config_path = config_path
-    config._load_config.return_value = dict(initial)
-
-    app.state.config = config
+    cfg = Config(config_path=config_path)
+    app.state.config = cfg
     return app
 
 
@@ -52,15 +49,13 @@ def test_get_sections(client):
     assert data["agent"]["provider"] == "openai"
 
 
-def test_get_sections_missing_keys(client, app):
-    """config.data 中缺少某些 section 时返回空 dict"""
-    app.state.config.data = {}
+def test_get_sections_has_defaults(client, app):
+    """config.data 中的 section 返回合并后的默认值"""
     resp = client.get("/api/config/sections")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["llm_providers"] == {}
-    assert data["agent"] == {}
-    assert data["plugins"] == {}
+    # 即使初始 config.yml 中未配 plugins，默认配置会填充
+    assert "plugins" in data
 
 
 # ── 更新 sections ──

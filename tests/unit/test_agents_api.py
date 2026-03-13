@@ -1,93 +1,79 @@
-"""Agents API 端点单测（使用 TestClient + mock app.state）"""
-import json
+"""Agents API 端点单测 — 使用真实组件，无 mock"""
 import pytest
+import pytest_asyncio
+from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentos.interfaces.http.agents import router
-from agentos.capabilities.agents.config import AgentConfig
-
-
-def _make_agent_config(id="default", name="Default Agent", enabled=True, **kwargs):
-    """辅助：创建 AgentConfig 实例"""
-    return AgentConfig(
-        id=id,
-        name=name,
-        enabled=enabled,
-        provider=kwargs.get("provider", "openai"),
-        model=kwargs.get("model", "gpt-4o-mini"),
-        temperature=kwargs.get("temperature", 0.2),
-        max_tokens=kwargs.get("max_tokens"),
-        system_prompt=kwargs.get("system_prompt", ""),
-        tools=kwargs.get("tools", []),
-        skills=kwargs.get("skills", []),
-        can_delegate_to=kwargs.get("can_delegate_to", []),
-        max_delegation_depth=kwargs.get("max_delegation_depth", 3),
-        created_at=kwargs.get("created_at", 1000.0),
-        updated_at=kwargs.get("updated_at", 1000.0),
-    )
+from agentos.capabilities.agents.registry import AgentRegistry
+from agentos.capabilities.tools.registry import ToolRegistry
+from agentos.capabilities.skills.registry import SkillRegistry
+from agentos.platform.config.config import Config
+from agentos.adapters.storage.repository import Repository
 
 
 @pytest.fixture
 def app(tmp_path):
+    """构建挂载真实组件的 FastAPI 测试应用"""
     app = FastAPI()
     app.include_router(router)
 
-    default_agent = _make_agent_config()
-    custom_agent = _make_agent_config(id="research", name="Research Agent")
+    # 临时 workspace
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir()
 
-    # mock agent_registry
-    agent_registry = MagicMock()
-    agent_registry.list_all.return_value = [default_agent, custom_agent]
-    agent_registry.get.side_effect = lambda aid: {
-        "default": default_agent,
-        "research": custom_agent,
-    }.get(aid)
-    agent_registry.register.return_value = None
-    agent_registry.save.return_value = None
-    agent_registry.update.side_effect = lambda aid, updates: _make_agent_config(id=aid, **updates)
-    agent_registry.delete.side_effect = lambda aid: aid != "nonexistent"
+    # 真实 Config
+    config_path = tmp_path / "config.yml"
+    config_path.write_text("", encoding="utf-8")
+    cfg = Config(config_path=config_path)
+    cfg.set("system.workspace_dir", str(workspace_dir))
 
-    # mock tool_registry
-    mock_tool = MagicMock()
-    mock_tool.description = "Run bash"
-    mock_tool.risk_level = MagicMock(value="high")
-    mock_tool.parameters = {}
+    # 真实 AgentRegistry，加载 default agent
+    agent_config_dir = tmp_path / "agents"
+    agent_config_dir.mkdir()
+    agent_registry = AgentRegistry(config_dir=agent_config_dir)
+    agent_registry.load_from_config(cfg.data)
 
-    tool_registry = MagicMock()
-    tool_registry._tools = {"bash_command": mock_tool}
-    tool_registry.get.side_effect = lambda name: mock_tool if name == "bash_command" else None
+    # 注册一个额外的 research agent 用于测试
+    from agentos.capabilities.agents.config import AgentConfig
+    research = AgentConfig.create(
+        id="research", name="Research Agent",
+        provider="openai", model="gpt-4o-mini",
+    )
+    agent_registry.register(research)
+    agent_registry.save(research)
 
-    # mock skill_registry
-    mock_skill = MagicMock()
-    mock_skill.name = "test-skill"
-    mock_skill.description = "A test skill"
-    mock_skill.install_info = None
-    mock_skill.path = Path("/fake/builtin/path")
+    # 真实 ToolRegistry（自动注册 builtin 工具）
+    tool_registry = ToolRegistry()
 
-    skill_registry = MagicMock()
-    skill_registry.get_all.return_value = [mock_skill]
+    # 真实 SkillRegistry（不加载 builtin skills 目录，避免环境依赖）
+    skills_dir = workspace_dir / "skills"
+    skills_dir.mkdir()
+    state_file = workspace_dir / "skills_state.json"
+    skill_registry = SkillRegistry(
+        workspace_dir=skills_dir,
+        state_file=state_file,
+        builtin_dir=None,
+    )
+    skill_registry.load_skills(cfg.data)
 
-    # mock config (workspace_dir 指向 tmp_path)
-    config = MagicMock()
-    config.get.return_value = str(tmp_path / "workspace")
+    # 真实 Repository（临时 SQLite）
+    import asyncio
+    repo = Repository(db_path=str(tmp_path / "test.db"))
+    asyncio.get_event_loop().run_until_complete(repo.init())
 
-    # mock services (with repo)
-    repo = AsyncMock()
-    repo.list_sessions.return_value = [
-        {"session_id": "s1", "agent_id": "default", "last_active": 0, "status": "active",
-         "channel": "websocket", "message_count": 5, "created_at": 0},
-    ]
-    services = MagicMock()
-    services.repo = repo
+    @dataclass
+    class Services:
+        repo: Repository
+    services = Services(repo=repo)
 
     app.state.agent_registry = agent_registry
     app.state.tool_registry = tool_registry
     app.state.skill_registry = skill_registry
-    app.state.config = config
+    app.state.config = cfg
     app.state.services = services
 
     return app
@@ -107,16 +93,18 @@ def test_list_agents(client):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
+    ids = {a["id"] for a in data}
+    assert "default" in ids
+    assert "research" in ids
     # 每个 agent 包含基本字段
-    assert data[0]["id"] == "default"
-    assert "toolCount" in data[0]
-    assert "sessionCount" in data[0]
-    assert "lastActive" in data[0]
+    for agent in data:
+        assert "toolCount" in agent
+        assert "sessionCount" in agent
+        assert "lastActive" in agent
 
 
-def test_list_agents_no_sessions(client, app):
+def test_list_agents_no_sessions(client):
     """Agent 无会话时 lastActive 应为 'never'"""
-    app.state.services.repo.list_sessions.return_value = []
     resp = client.get("/api/agents")
     assert resp.status_code == 200
     for agent in resp.json():
@@ -137,7 +125,7 @@ def test_get_agent_found(client):
     assert "skillsDetail" in data
 
 
-def test_get_agent_not_found(client, app):
+def test_get_agent_not_found(client):
     """查询不存在的 Agent 返回 404"""
     resp = client.get("/api/agents/nonexistent")
     assert resp.status_code == 404
@@ -146,18 +134,8 @@ def test_get_agent_not_found(client, app):
 # ── 创建 ──
 
 
-def test_create_agent(client, app):
+def test_create_agent(client):
     """正常创建 Agent"""
-    # 确保 registry.get 对新 id 返回 None（不存在）
-    original = app.state.agent_registry.get.side_effect
-
-    def get_side(aid):
-        if aid == "new-agent":
-            return None
-        return original(aid)
-
-    app.state.agent_registry.get.side_effect = get_side
-
     resp = client.post("/api/agents", json={
         "id": "new-agent",
         "name": "New Agent",
@@ -166,8 +144,6 @@ def test_create_agent(client, app):
     assert resp.status_code == 200
     data = resp.json()
     assert data["id"] == "new-agent"
-    app.state.agent_registry.register.assert_called_once()
-    app.state.agent_registry.save.assert_called_once()
 
 
 def test_create_agent_conflict(client):
@@ -189,8 +165,9 @@ def test_update_agent_config(client):
         "temperature": 0.5,
     })
     assert resp.status_code == 200
-    app_state = client.app.state
-    app_state.agent_registry.update.assert_called_once()
+    data = resp.json()
+    assert data["name"] == "Updated"
+    assert data["temperature"] == 0.5
 
 
 def test_update_agent_config_syncs_global_for_default(client, app):
@@ -200,11 +177,12 @@ def test_update_agent_config_syncs_global_for_default(client, app):
         "model": "claude-3",
     })
     assert resp.status_code == 200
-    app.state.config.set.assert_any_call("agent.provider", "anthropic")
-    app.state.config.set.assert_any_call("agent.default_model", "claude-3")
+    # 验证全局 config 被同步
+    assert app.state.config.get("agent.provider") == "anthropic"
+    assert app.state.config.get("agent.default_model") == "claude-3"
 
 
-def test_update_agent_config_not_found(client, app):
+def test_update_agent_config_not_found(client):
     """更新不存在的 Agent 返回 404"""
     resp = client.put("/api/agents/nonexistent/config", json={"name": "x"})
     assert resp.status_code == 404
@@ -239,13 +217,13 @@ def test_update_preferences(client):
     """正常更新偏好"""
     resp = client.put("/api/agents/default/preferences", json={
         "tools": {"bash_command": False},
-        "skills": {"test-skill": True},
+        "skills": {},
     })
     assert resp.status_code == 200
     assert resp.json()["status"] == "saved"
 
 
-def test_update_preferences_agent_not_found(client, app):
+def test_update_preferences_agent_not_found(client):
     """偏好更新：Agent 不存在返回 404"""
     resp = client.put("/api/agents/nonexistent/preferences", json={
         "tools": {"bash_command": False},

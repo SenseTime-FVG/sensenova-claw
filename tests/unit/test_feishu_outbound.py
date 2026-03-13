@@ -1,4 +1,7 @@
-"""v0.9 单元测试：飞书出站增强（card/text/event_filter/outbound/MessageTool）"""
+"""v0.9 集成测试：飞书出站增强（card/text/event_filter/outbound/MessageTool）
+
+去除所有 mock/MagicMock/AsyncMock/patch，使用真实组件验证。
+"""
 
 from __future__ import annotations
 
@@ -99,7 +102,7 @@ class TestChunkText:
 # ---- Gateway event_filter 测试 ----
 
 
-class FilteredMockChannel(Channel):
+class FilteredTestChannel(Channel):
     """只接收 AGENT_STEP_COMPLETED 事件的 Channel"""
 
     def __init__(self, channel_id: str):
@@ -122,8 +125,8 @@ class FilteredMockChannel(Channel):
         self.received_events.append(event)
 
 
-class OutboundMockChannel(Channel):
-    """支持 OutboundCapable 的 Mock Channel"""
+class OutboundTestChannel(Channel):
+    """支持 OutboundCapable 的真实 Channel 实现"""
 
     def __init__(self, channel_id: str):
         self._channel_id = channel_id
@@ -143,17 +146,16 @@ class OutboundMockChannel(Channel):
 
     async def send_outbound(self, target: str, text: str, msg_type: str = "card") -> dict:
         self.outbound_calls.append({"target": target, "text": text, "msg_type": msg_type})
-        return {"success": True, "message_id": "mock_msg_001"}
+        return {"success": True, "message_id": "test_msg_001"}
 
 
-@pytest.mark.asyncio
 async def test_gateway_event_filter():
     """测试 Channel event_filter 过滤事件"""
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
     gateway = Gateway(publisher=publisher)
 
-    channel = FilteredMockChannel("filtered")
+    channel = FilteredTestChannel("filtered")
     gateway.register_channel(channel)
     gateway.bind_session("sess_1", "filtered")
 
@@ -194,24 +196,22 @@ async def test_gateway_event_filter():
     assert channel.received_events[0].type == AGENT_STEP_COMPLETED
 
 
-@pytest.mark.asyncio
 async def test_gateway_send_outbound():
     """测试 Gateway.send_outbound"""
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
     gateway = Gateway(publisher=publisher)
 
-    channel = OutboundMockChannel("feishu")
+    channel = OutboundTestChannel("feishu")
     gateway.register_channel(channel)
 
     result = await gateway.send_outbound("feishu", "chat_123", "Hello!")
     assert result["success"] is True
-    assert result["message_id"] == "mock_msg_001"
+    assert result["message_id"] == "test_msg_001"
     assert len(channel.outbound_calls) == 1
     assert channel.outbound_calls[0]["target"] == "chat_123"
 
 
-@pytest.mark.asyncio
 async def test_gateway_send_outbound_not_found():
     """测试 send_outbound 到不存在的 channel"""
     bus = PublicEventBus()
@@ -223,14 +223,13 @@ async def test_gateway_send_outbound_not_found():
     assert "not found" in result["error"]
 
 
-@pytest.mark.asyncio
 async def test_gateway_send_outbound_not_capable():
     """测试 send_outbound 到不支持 outbound 的 channel"""
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
     gateway = Gateway(publisher=publisher)
 
-    channel = FilteredMockChannel("ws")  # 不支持 OutboundCapable
+    channel = FilteredTestChannel("ws")  # 不支持 OutboundCapable
     gateway.register_channel(channel)
 
     result = await gateway.send_outbound("ws", "target", "text")
@@ -241,20 +240,20 @@ async def test_gateway_send_outbound_not_capable():
 # ---- MessageTool 测试 ----
 
 
-@pytest.mark.asyncio
 async def test_message_tool_success():
     """测试 MessageTool 成功发送"""
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
     gateway = Gateway(publisher=publisher)
 
-    channel = OutboundMockChannel("feishu")
+    channel = OutboundTestChannel("feishu")
     gateway.register_channel(channel)
 
     tool = MessageTool(gateway=gateway, publisher=publisher)
 
     # 收集审计事件
     collected: list[EventEnvelope] = []
+
     async def collector():
         async for event in bus.subscribe():
             if event.type == MESSAGE_OUTBOUND_SENT:
@@ -268,7 +267,7 @@ async def test_message_tool_success():
         target="chat_test", message="Hello from tool", _session_id="sess_1",
     )
     assert result["success"] is True
-    assert result["message_id"] == "mock_msg_001"
+    assert result["message_id"] == "test_msg_001"
 
     await asyncio.wait_for(collect_task, timeout=2)
     assert len(collected) == 1
@@ -277,7 +276,6 @@ async def test_message_tool_success():
     assert collected[0].session_id == "sess_1"
 
 
-@pytest.mark.asyncio
 async def test_message_tool_missing_target():
     """测试 MessageTool 缺少 target"""
     bus = PublicEventBus()
@@ -294,12 +292,12 @@ async def test_message_tool_missing_target():
 
 
 def test_outbound_capable_protocol():
-    """OutboundMockChannel 应满足 OutboundCapable 协议"""
-    channel = OutboundMockChannel("test")
+    """OutboundTestChannel 应满足 OutboundCapable 协议"""
+    channel = OutboundTestChannel("test")
     assert isinstance(channel, OutboundCapable)
 
 
 def test_filtered_channel_not_outbound_capable():
-    """FilteredMockChannel 不应满足 OutboundCapable 协议"""
-    channel = FilteredMockChannel("test")
+    """FilteredTestChannel 不应满足 OutboundCapable 协议"""
+    channel = FilteredTestChannel("test")
     assert not isinstance(channel, OutboundCapable)

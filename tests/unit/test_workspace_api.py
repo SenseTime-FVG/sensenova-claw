@@ -1,16 +1,17 @@
-"""Workspace API 端点单测（使用 TestClient + mock app.state）"""
+"""Workspace API 端点单测 — 使用真实组件，无 mock"""
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentos.interfaces.http.workspace import router
+from agentos.platform.config.config import Config
 
 
 @pytest.fixture
 def app(tmp_path):
+    """构建挂载真实 Config 的测试应用"""
     app = FastAPI()
     app.include_router(router)
 
@@ -23,10 +24,13 @@ def app(tmp_path):
     (ws_dir / "CUSTOM.md").write_text("# Custom", encoding="utf-8")
     (ws_dir / "notes.txt").write_text("not md")  # 非 .md 文件
 
-    config = MagicMock()
-    config.get.return_value = str(ws_dir)
-    app.state.config = config
+    # 真实 Config
+    config_path = tmp_path / "config.yml"
+    config_path.write_text("", encoding="utf-8")
+    cfg = Config(config_path=config_path)
+    cfg.set("system.workspace_dir", str(ws_dir))
 
+    app.state.config = cfg
     return app
 
 
@@ -57,7 +61,7 @@ def test_list_workspace_files(client):
 
 def test_list_workspace_files_dir_not_exists(client, app):
     """workspace 目录不存在时返回空列表"""
-    app.state.config.get.return_value = "/nonexistent/path"
+    app.state.config.set("system.workspace_dir", "/nonexistent/path")
     resp = client.get("/api/workspace/files")
     assert resp.status_code == 200
     assert resp.json() == []

@@ -27,6 +27,9 @@ dev = [
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "slow: 真实 API 调用测试，耗时较长",
+]
 
 [build-system]
 requires = ["hatchling"]
