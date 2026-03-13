@@ -5,13 +5,14 @@ import asyncio
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agentos.kernel.events.bus import PrivateEventBus, PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.types import (
+    ERROR_RAISED,
     TOOL_CALL_COMPLETED,
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
@@ -346,3 +347,182 @@ class TestPermissionManagement:
 
         assert worker._confirmation_results[tool_call_id] is False
         assert wait_event.is_set()
+
+
+# ---------- PathPolicy/AgentRegistry 注入不污染 arguments ----------
+
+
+class TestContextInjectionIsolation:
+    """验证 _path_policy 和 _agent_registry 注入不会污染原始 arguments，
+    防止 JSON 序列化失败（如 'Object of type PathPolicy is not JSON serializable'）。
+    """
+
+    def _make_worker_with_policy(self):
+        """创建带 path_policy 和 agent_registry 的 ToolSessionWorker"""
+        public = PublicEventBus()
+        private = PrivateEventBus(session_id="test_inject", public_bus=public)
+        registry = ToolRegistry()
+
+        rt = MagicMock()
+        rt.registry = registry
+        # 不可 JSON 序列化的对象
+        rt.path_policy = MagicMock()
+        rt.agent_registry = MagicMock()
+
+        return ToolSessionWorker(
+            session_id="test_inject",
+            private_bus=private,
+            runtime=rt,
+        )
+
+    @staticmethod
+    def _config_side_effect(key, default=None):
+        """模拟 config.get，权限管理关闭、工具超时 15 秒"""
+        mapping = {
+            "tools.permission.enabled": False,
+        }
+        if key in mapping:
+            return mapping[key]
+        # 工具超时等其他 key 返回 default 或 15
+        if "timeout" in key:
+            return 15
+        return default
+
+    @pytest.mark.asyncio
+    async def test_arguments_not_polluted_on_success(self):
+        """工具执行成功后，原始 arguments 不应包含 _path_policy/_agent_registry"""
+        worker = self._make_worker_with_policy()
+
+        # 注册一个会成功的 mock 工具
+        mock_tool = MagicMock(spec=Tool)
+        mock_tool.name = "test_tool"
+        mock_tool.risk_level = ToolRiskLevel.LOW
+        mock_tool.execute = AsyncMock(return_value="ok")
+        worker.rt.registry.register(mock_tool)
+
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_inject",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": "tc_success",
+                "tool_name": "test_tool",
+                "arguments": {"query": "test"},
+            },
+        )
+
+        # 收集发布的事件
+        published = []
+        original_publish = worker.bus.publish
+        async def capture_publish(e):
+            published.append(e)
+            await original_publish(e)
+        worker.bus.publish = capture_publish
+
+        with patch("agentos.kernel.runtime.workers.tool_worker.config") as mock_config:
+            mock_config.get.side_effect = self._config_side_effect
+            await worker._handle_tool_requested(event)
+
+        # 原始 event payload 中的 arguments 不应被污染
+        original_args = event.payload["arguments"]
+        assert "_path_policy" not in original_args
+        assert "_agent_registry" not in original_args
+
+        # 确认工具接收到了注入的参数
+        call_kwargs = mock_tool.execute.call_args[1]
+        assert "_path_policy" in call_kwargs
+        assert "_agent_registry" in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_arguments_not_polluted_on_failure(self):
+        """工具执行失败时，错误事件中的 arguments 必须可 JSON 序列化"""
+        worker = self._make_worker_with_policy()
+
+        # 注册一个会抛异常的 mock 工具
+        mock_tool = MagicMock(spec=Tool)
+        mock_tool.name = "fail_tool"
+        mock_tool.risk_level = ToolRiskLevel.LOW
+        mock_tool.execute = AsyncMock(side_effect=RuntimeError("boom"))
+        worker.rt.registry.register(mock_tool)
+
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_inject",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": "tc_fail",
+                "tool_name": "fail_tool",
+                "arguments": {"query": "test"},
+            },
+        )
+
+        # 收集发布的事件
+        published = []
+        original_publish = worker.bus.publish
+        async def capture_publish(e):
+            published.append(e)
+            await original_publish(e)
+        worker.bus.publish = capture_publish
+
+        with patch("agentos.kernel.runtime.workers.tool_worker.config") as mock_config:
+            mock_config.get.side_effect = self._config_side_effect
+            await worker._handle_tool_requested(event)
+
+        # 找到 ERROR_RAISED 事件
+        error_events = [e for e in published if e.type == ERROR_RAISED]
+        assert len(error_events) == 1
+
+        # 关键断言：error payload 中的 arguments 必须可 JSON 序列化
+        error_payload = error_events[0].payload
+        try:
+            json.dumps(error_payload, ensure_ascii=False)
+        except TypeError as e:
+            pytest.fail(f"ERROR_RAISED payload 不可 JSON 序列化: {e}")
+
+        # arguments 不应包含不可序列化的内部对象
+        ctx_args = error_payload["context"]["arguments"]
+        assert "_path_policy" not in ctx_args
+        assert "_agent_registry" not in ctx_args
+
+    @pytest.mark.asyncio
+    async def test_event_payload_serializable_for_persistence(self):
+        """所有工具执行产生的事件 payload 都必须可 JSON 序列化（用于 SQLite 持久化）"""
+        worker = self._make_worker_with_policy()
+
+        mock_tool = MagicMock(spec=Tool)
+        mock_tool.name = "serial_tool"
+        mock_tool.risk_level = ToolRiskLevel.LOW
+        mock_tool.execute = AsyncMock(return_value={"data": "result"})
+        worker.rt.registry.register(mock_tool)
+
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_inject",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": "tc_serial",
+                "tool_name": "serial_tool",
+                "arguments": {"key": "value"},
+            },
+        )
+
+        published = []
+        original_publish = worker.bus.publish
+        async def capture_publish(e):
+            published.append(e)
+            await original_publish(e)
+        worker.bus.publish = capture_publish
+
+        with patch("agentos.kernel.runtime.workers.tool_worker.config") as mock_config:
+            mock_config.get.side_effect = self._config_side_effect
+            await worker._handle_tool_requested(event)
+
+        # 所有发布的事件 payload 都必须可 JSON 序列化
+        for evt in published:
+            try:
+                json.dumps(evt.payload, ensure_ascii=False)
+            except TypeError as e:
+                pytest.fail(f"事件 {evt.type} 的 payload 不可 JSON 序列化: {e}")

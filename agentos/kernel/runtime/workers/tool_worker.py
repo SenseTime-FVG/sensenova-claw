@@ -229,15 +229,16 @@ class ToolSessionWorker(SessionWorker):
         success = True
         error = ""
         result = None
-        try:
-            # 注入上下文对象供工具使用
-            if self.rt.path_policy:
-                arguments["_path_policy"] = self.rt.path_policy
-            if self.rt.agent_registry:
-                arguments["_agent_registry"] = self.rt.agent_registry
+        # 构建执行参数：注入内部上下文对象（不可 JSON 序列化，仅供工具内部使用）
+        exec_kwargs = dict(arguments)
+        if self.rt.path_policy:
+            exec_kwargs["_path_policy"] = self.rt.path_policy
+        if self.rt.agent_registry:
+            exec_kwargs["_agent_registry"] = self.rt.agent_registry
 
+        try:
             result = await asyncio.wait_for(
-                tool.execute(**arguments, _session_id=event.session_id),
+                tool.execute(**exec_kwargs, _session_id=event.session_id),
                 timeout=timeout,
             )
             result = self._truncate_result(result, tool_call_id)
