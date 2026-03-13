@@ -1,259 +1,124 @@
-# AgentOS 文档索引
+# AgentOS
 
-欢迎使用 AgentOS 技术文档。本文档详细描述了 AgentOS 的架构设计、技术选型和实现细节。
+> 基于事件驱动架构的 AI Agent 平台
 
-## 文档结构
+AgentOS 是一个开源的 AI Agent 运行平台，采用事件驱动架构，支持 Web、CLI、TUI 多种接入方式。它提供了完整的 Agent 运行时、工具系统、Skills 编排和多渠道接入能力，帮助开发者快速构建和部署智能 Agent 应用。
 
-### 核心架构
-- [01_architecture.md](./01_architecture.md) - 系统架构总览
-- [02_event_system.md](./02_event_system.md) - 事件系统设计
-- [03_core_modules.md](./03_core_modules.md) - 核心模块详解（AgentRuntime、LLMRuntime、ToolRuntime等）
+## 核心特性
 
-### 数据与通信
-- [04_database.md](./04_database.md) - 数据库设计
-- [05_websocket_protocol.md](./05_websocket_protocol.md) - WebSocket 通信协议
-- [11_gateway.md](./11_gateway.md) - Gateway 架构设计（多 Channel 支持）
-
-### 工具与技能系统
-- [12_builtin_tools.md](./12_builtin_tools.md) - 内置工具文档（bash_command、serper_search等）
-- [13_skills_system.md](./13_skills_system.md) - Skills 系统设计（声明式任务编排）
-
-### 演进规划（PRD）
-- [14_dual_bus_architecture.md](./14_dual_bus_architecture.md) - 双总线架构（Public + Private Bus + 轻量 Worker）
-- [15_event_standardization.md](./15_event_standardization.md) - 事件系统标准化（生命周期对称 + 命名规范）
-- [16_tool_system_enhancement.md](./16_tool_system_enhancement.md) - 工具系统增强（权限管理 + 截断统一 + write_file 增强）
-- [17_system_prompt_workspace_session.md](./17_system_prompt_workspace_session.md) - System Prompt 模块化 + Workspace 文件体系 + Session 持久化增强
-- [18_memory_system.md](./18_memory_system.md) - 长期记忆系统（文件记忆 + 语义搜索 + MEMORY.md 注入）
-- [22_multi_agent_and_workflow.md](./22_multi_agent_and_workflow.md) - 多 Agent 与 Workflow 编排系统（v1.0）
-- [23_skills_marketplace_and_visualization.md](./23_skills_marketplace_and_visualization.md) - Skills 市场、安装与可视化（v1.1）
-- [24_path_security_policy.md](./24_path_security_policy.md) - 路径安全策略 PathPolicy（v1.2）
-- [25_cli_enhancement.md](./25_cli_enhancement.md) - CLI 客户端增强
-- [26_thorough_test_plan.md](./26_thorough_test_plan.md) - 全面测试计划
-- [27_tidy_and_next.md](./27_tidy_and_next.md) - 整理与下一步规划
-- [28_orchestration_ui_and_tools.md](./28_orchestration_ui_and_tools.md) - 编排中心 UI 整合 + 对话式创建工具（v1.7）
-
-### 前端与配置
-- [06_frontend_architecture.md](./06_frontend_architecture.md) - 前端架构设计
-- [07_configuration.md](./07_configuration.md) - 配置文件设计
-
-### 开发与部署
-- [08_development_guide.md](./08_development_guide.md) - 开发指南
-- [09_deployment.md](./09_deployment.md) - 部署指南
-- [10_technical_decisions.md](./10_technical_decisions.md) - 技术决策记录
-
-## 快速开始
-
-### 1. 环境准备
-
-```bash
-# 安装后端依赖
-cd backend && uv sync
-
-# 安装前端依赖
-cd frontend && npm install
-```
-
-### 2. 配置
-
-在项目根目录创建 `config.yaml`，填入必要的 API Keys：
-
-```yaml
-agent:
-  provider: openai
-  default_model: gpt-5.2
-  default_temperature: 0.6
-  system_prompt: "你是一个有用的AI助手"
-
-tools:
-  serper_search:
-    api_key: "your_serper_api_key"
-
-llm:
-  openai:
-    api_key: "your_openai_api_key"
-```
-
-### 3. 启动服务
-
-```bash
-# 一键启动前后端
-npm run dev
-
-# 或分别启动
-cd backend && uv run python3 main.py
-cd frontend && npm run dev
-```
-
-服务地址：
-- 前端：http://localhost:3000
-- 后端：http://localhost:8000
-
-### 4. CLI 客户端
-
-除了 Web 界面，还可以使用命令行客户端：
-
-```bash
-cd backend
-python3 cli_client.py --host localhost --port 8000
-```
-
-## 核心概念
-
-### 事件驱动架构
-AgentOS 采用事件驱动架构，所有模块通过事件总线通信。这种设计提供了良好的解耦性和可扩展性。
-
-### Gateway 与 Channel
-- **Gateway**: 消息网关，管理多个 Channel
-- **Channel**: 用户接入方式的抽象（WebSocket、未来可扩展 CLI、Slack 等）
-- **事件路由**: Gateway 负责在 Channel 和 PublicEventBus 之间路由消息
-
-### 核心 Runtime 模块
-- **AgentRuntime**: 对话流程编排
-- **LLMRuntime**: LLM 调用管理
-- **ToolRuntime**: 工具执行管理
-- **TitleRuntime**: 会话标题生成
-
-### 工具系统
-内置工具包括：
-- `bash_command`: 执行 shell 命令
-- `serper_search`: 网络搜索
-- `fetch_url`: 获取网页内容
-- `read_file`: 读取文件
-- `write_file`: 写入文件
-- `grant_path`: 授权目录访问
-- `create_agent`: 对话中创建 Agent（v1.7 新增）
-- `create_workflow`: 对话中创建 Workflow（v1.7 新增）
-
-详见 [12_builtin_tools.md](./12_builtin_tools.md) 和 [28_orchestration_ui_and_tools.md](./28_orchestration_ui_and_tools.md)
-
-### Skills 系统
-16 个内置 skills 提供声明式任务编排能力，包括：
-- PDF/DOCX/XLSX 文档处理
-- 前端设计与测试
-- Skill 创建工具
-
-详见 [13_skills_system.md](./13_skills_system.md)
+- **事件驱动架构** — 所有模块通过 PublicEventBus 解耦通信，事件封装为 `EventEnvelope`，支持会话隔离和全链路追踪
+- **多 Agent 协作** — 支持多 Agent 配置与协作，灵活编排复杂任务流程
+- **工具系统** — 内置 5 个常用工具（Shell 命令、网络搜索、网页抓取、文件读写），支持通过装饰器自定义扩展
+- **Skills 编排** — 声明式任务编排机制，16 个内置 Skills 覆盖文档处理、前端开发等场景
+- **多渠道接入** — 统一 Gateway 架构，支持 WebSocket、CLI/TUI、飞书等多种 Channel
+- **插件化扩展** — LLM 提供商、Channel、存储、工具均可插件化替换
 
 ## 技术栈
 
-**前端**:
-- Next.js 14 + TypeScript
-- React Context API
-- shadcn/ui + Tailwind CSS
-- 原生 WebSocket
+| 层级 | 技术选型 |
+|------|----------|
+| 后端框架 | FastAPI + Python 3.12 + asyncio |
+| 数据库 | SQLite |
+| 前端框架 | Next.js 14 + TypeScript |
+| 实时通信 | WebSocket |
+| Python 包管理 | uv |
+| Node.js 包管理 | npm |
 
-**后端**:
-- FastAPI + Python 3.12
-- asyncio 事件驱动
-- SQLite 数据存储
-- OpenAI / Anthropic SDK
+## 六层架构
 
+AgentOS 采用清晰的六层架构设计，各层职责明确、边界分明：
 
-## 架构特点
-
-### 1. 事件驱动
-所有模块通过事件总线解耦，易于扩展和测试。
-
-### 2. 多 Channel 支持
-通过 Gateway 架构支持多种接入方式：
-- WebSocket Channel（Web 前端）
-- CLI 客户端（命令行工具）
-- 未来可扩展：Slack、Discord、HTTP API 等
-
-### 3. 状态管理
-- 内存状态：SessionStateStore 管理运行时状态
-- 持久化：SQLite 存储会话、消息、事件
-
-### 4. 工具结果截断
-自动处理超长工具结果，避免 token 超限。
-
-### 5. 消息归一化
-OpenAI Provider 自动归一化消息格式，避免 API 调用失败。
-
-## 版本说明
-
-当前版本: **v1.7**
-
-v1.7 新增特性：
-- ✅ 编排中心 UI（Agents + Workflows 合并展示）
-- ✅ 会话目标选择器（选择 Agent/Workflow 开始对话）
-- ✅ 对话式编排工具（create_agent / create_workflow）
-- ✅ Workflow 直接运行模式（Chat 页面支持 Workflow 执行）
-
-v1.0 新增特性：
-- ✅ 多 Agent 系统（AgentConfig / AgentRegistry）
-- ✅ Workflow 编排（DAG 工作流引擎）
-- ✅ Agent 委托机制（delegate_tool）
-- ✅ Workflow 运行（workflow_tool）
-
-v0.4 新增特性：
-- ✅ Skills 系统（声明式任务编排）
-- ✅ 16 个内置 skills（PDF、DOCX、前端设计等）
-- ✅ Skills 配置管理
-
-v0.2 新增特性：
-- ✅ Gateway 架构
-- ✅ CLI 客户端支持
-- ✅ 自动标题生成
-- ✅ 工具结果截断
-- ✅ 消息归一化
-
-v0.1 核心功能：
-- ✅ 基础对话功能
-- ✅ 工具调用
-- ✅ 会话管理
-- ✅ 事件追踪
-
-暂不支持：
-- ❌ 流式响应
-- ❌ Token 管理
-- ❌ 用户认证
-- ❌ 沙箱执行
-
-## 开发指南
-
-### 运行测试
-
-```bash
-# 后端测试
-cd backend
-uv run python3 -m pytest
-
-# 前端测试
-cd frontend
-npm run test:e2e
+```
+┌─────────────────────────────────────────────┐
+│  interfaces    HTTP REST API / WebSocket     │  ← 对外协议层
+├─────────────────────────────────────────────┤
+│  adapters      LLM / Channel / Storage       │  ← 外部系统适配层
+├─────────────────────────────────────────────┤
+│  capabilities  Tools / Skills / Memory       │  ← 能力层
+├─────────────────────────────────────────────┤
+│  kernel        EventBus / Runtime / Scheduler│  ← 核心运行时
+├─────────────────────────────────────────────┤
+│  platform      Config / Logging / Security   │  ← 平台基础设施
+├─────────────────────────────────────────────┤
+│  app           Gateway / CLI / Web           │  ← 应用入口
+└─────────────────────────────────────────────┘
 ```
 
-### 日志查看
+**各层职责：**
 
-开发模式下，后端会输出 DEBUG 级别日志，包括：
-- 每次 LLM 调用的完整输入
-- 工具执行详情
-- 事件流转追踪
+- **interfaces** — 对外暴露 HTTP REST API 和 WebSocket 端点，处理协议转换
+- **adapters** — 适配 LLM 提供商（OpenAI / Anthropic / Gemini）、Channel（WebSocket / 飞书）、存储等外部系统
+- **capabilities** — 提供工具调用、Skills 编排、记忆管理等 Agent 核心能力
+- **kernel** — 核心事件总线、Agent / LLM / Tool Runtime 调度引擎
+- **platform** — 配置加载、日志系统、路径安全策略等基础设施
+- **app** — 后端 Gateway 入口、CLI / TUI 客户端、Next.js 前端应用
 
-### 添加自定义工具
+## 事件流概览
 
-参考 [12_builtin_tools.md](./12_builtin_tools.md) 中的"扩展自定义工具"章节。
+AgentOS 中一次完整的用户交互，事件流转如下：
 
-## 贡献指南
+```
+ui.user_input
+  → agent.step_started
+    → llm.call_requested
+      → llm.call_completed
+        → tool.call_requested (如果模型调用了工具)
+          → tool.call_completed
+    → agent.step_completed
+```
 
-欢迎贡献代码和文档！请遵循以下步骤：
+所有事件通过 `session_id` 进行会话隔离，通过 `turn_id` 标识对话轮次，通过 `trace_id` 关联请求与响应。
 
-1. Fork 项目
-2. 创建特性分支
-3. 提交变更
-4. 发起 Pull Request
+## 核心 Runtime 模块
 
-## 文档维护
+| 模块 | 职责 | 监听事件 | 发布事件 |
+|------|------|----------|----------|
+| AgentRuntime | 对话流程编排 | `ui.user_input` | `agent.step_started` / `agent.step_completed` |
+| LLMRuntime | LLM 调用管理 | `llm.call_requested` | `llm.call_completed` |
+| ToolRuntime | 工具执行管理 | `tool.call_requested` | `tool.call_completed` |
+| TitleRuntime | 会话标题生成 | `agent.step_completed` | — |
 
-- `docs_raw/`: 用户手动维护的原始文档，不要修改
-- `docs/`: 模型生成的技术文档，可以修改和更新
+## 快速导航
 
-## 许可证
+- [快速开始](guide/quickstart.md) — 环境准备、安装配置、启动运行
+- [配置指南](guide/configuration.md) — 配置文件详解、环境变量、多 Agent 配置
+- [架构设计](architecture/) — 事件驱动架构、六层架构、Gateway 设计
+- [核心模块](core/) — Runtime、EventBus、状态管理
+- [能力系统](capabilities/) — 工具系统、Skills 编排、记忆系统
+- [适配器](adapters/) — LLM 提供商、Channel、存储适配
+- [API 参考](api/) — REST API、WebSocket 协议
+- [开发指南](dev/) — 测试、日志、贡献指南
 
-待定
+## 内置工具
 
-## 联系方式
+| 工具名 | 功能 |
+|--------|------|
+| `bash_command` | 执行 Shell 命令 |
+| `serper_search` | 网络搜索（需要 SERPER_API_KEY） |
+| `fetch_url` | 获取网页内容 |
+| `read_file` | 读取文件内容 |
+| `write_file` | 写入文件内容 |
 
-- 项目地址: [待补充]
-- 问题反馈: [待补充]
+工具通过 `@tool_registry.register()` 装饰器注册到 `ToolRegistry`，支持自定义扩展。
+
+## Skills 系统
+
+16 个内置 Skills 提供声明式任务编排能力：
+
+- **文档处理**: `pdf_to_markdown`、`docx_to_markdown`、`xlsx_to_markdown`
+- **前端开发**: `design_frontend`、`test_frontend`
+- **Skill 管理**: `create_skill`
+
+Skills 通过 YAML 配置定义，支持多步骤编排和条件分支。
+
+## 版本信息
+
+当前版本: **v0.5**
+
+| 版本 | 主要变更 |
+|------|----------|
+| v0.5 | 代码架构重组（六层架构）、移除 Workflow 模块、完整测试覆盖（734 tests） |
+| v0.4 | Skills 系统（16 个内置 Skills）、Skills 配置管理 |
+| v0.2 | Gateway 架构、CLI/TUI 客户端、自动标题生成、工具结果截断、消息归一化 |
+
+**暂不支持**: 流式响应、Token 管理、用户认证、沙箱执行
