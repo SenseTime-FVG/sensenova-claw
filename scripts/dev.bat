@@ -44,20 +44,20 @@ if %errorlevel% neq 0 exit /b 1
 
 echo.
 echo Starting backend...
-cd /d "%ROOT_DIR%\backend"
+cd /d "%ROOT_DIR%"
 
 where uv >nul 2>&1
 if %errorlevel% equ 0 (
-    start "AgentOS Backend" cmd /k "cd /d "%ROOT_DIR%\backend" && uv run uvicorn main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%"
+    start "AgentOS Backend" cmd /k "cd /d "%ROOT_DIR%" && uv run uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%"
 ) else (
-    start "AgentOS Backend" cmd /k "cd /d "%ROOT_DIR%\backend" && python -m uvicorn main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%"
+    start "AgentOS Backend" cmd /k "cd /d "%ROOT_DIR%" && python -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%"
 )
 
 timeout /t 3 /nobreak >nul
 
 echo Starting frontend...
-cd /d "%ROOT_DIR%\frontend"
-start "AgentOS Frontend" cmd /k "cd /d "%ROOT_DIR%\frontend" && npm run dev"
+cd /d "%ROOT_DIR%\agentos\app\web"
+start "AgentOS Frontend" cmd /k "cd /d "%ROOT_DIR%\agentos\app\web" && npm run dev"
 
 timeout /t 3 /nobreak >nul
 

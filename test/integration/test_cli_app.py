@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "backend"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from helpers import MockCLIApp
-from cli.commands import CommandDispatcher
+from agentos.app.cli.commands import CommandDispatcher
 
 
 class TestCLIApp:

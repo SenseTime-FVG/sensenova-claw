@@ -1,11 +1,11 @@
 """R02: CronScheduler 时间计算"""
 import time
-from app.cron.models import (
+from agentos.kernel.scheduler.models import (
     CronJob, CronJobState,
     AtSchedule, EverySchedule, CronSchedule,
     SystemEventPayload,
 )
-from app.cron.scheduler import compute_initial_next_run_ms, compute_next_run_at_ms, is_job_runnable
+from agentos.kernel.scheduler.scheduler import compute_initial_next_run_ms, compute_next_run_at_ms, is_job_runnable
 
 
 def _make_job(schedule, **kwargs) -> CronJob:

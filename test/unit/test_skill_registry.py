@@ -1,6 +1,6 @@
 """S01: SkillRegistry 加载/分类/启停"""
 from pathlib import Path
-from app.skills.registry import SkillRegistry, Skill
+from agentos.capabilities.skills.registry import SkillRegistry, Skill
 
 
 def _create_skill_dir(base: Path, name: str, desc: str = "test") -> Path:

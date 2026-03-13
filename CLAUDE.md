@@ -20,41 +20,44 @@ AgentOS 是基于事件驱动架构的 AI Agent 平台，支持 Web、CLI、TUI 
 npm run dev
 
 # 单独启动后端
-npm run dev:backend
-# 或: cd backend && uv run python main.py
+npm run dev:server
+# 或: python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8000
 
 # 单独启动前端
-npm run dev:frontend
+npm run dev:web
 
 # 启动 TUI 客户端（需后端已运行）
-cd backend && uv run python run_tui.py --port 8000
+python3 -m agentos.app.cli.cli_client --port 8000
 ```
 
 ### 测试
 
 ```bash
 # 后端 e2e 测试（需要真实 API key）
-npm run test:backend:e2e
-# 或: cd backend && uv run python -m pytest tests/e2e -q
+npm run test:e2e
+# 或: python3 -m pytest tests/e2e -q
 
 # 前端 e2e 测试
-npm run test:frontend:e2e
+npm run test:web:e2e
 
 # 后端单元测试
-cd backend && uv run python -m pytest tests/test_*.py
+python3 -m pytest tests/unit/ -q
+
+# 全部测试
+python3 -m pytest tests/ -q
 ```
 
 ### Python 环境
 
 ```bash
 # 安装依赖
-cd backend && uv sync
+uv sync
 
 # 安装开发依赖
-cd backend && uv sync --extra dev
+uv sync --extra dev
 
 # 运行 Python 脚本
-uv run python xxx.py
+python3 xxx.py
 ```
 
 ## 核心架构
@@ -102,7 +105,7 @@ ui.user_input → agent.step_started → llm.call_requested → llm.call_complet
 
 ### 工具系统
 
-内置 5 个工具（`backend/app/tools/builtin.py`）：
+内置 5 个工具（`agentos/capabilities/tools/builtin.py`）：
 - `bash_command`: 执行 shell 命令
 - `serper_search`: 网络搜索（需 SERPER_API_KEY）
 - `fetch_url`: 获取网页内容
@@ -113,7 +116,7 @@ ui.user_input → agent.step_started → llm.call_requested → llm.call_complet
 
 ### Skills 系统
 
-Skills 是声明式任务编排机制（`backend/app/skills/`），16 个内置 skills 包括：
+Skills 是声明式任务编排机制（`agentos/capabilities/skills/`），16 个内置 skills 包括：
 - 文档处理: `pdf_to_markdown`, `docx_to_markdown`, `xlsx_to_markdown`
 - 前端开发: `design_frontend`, `test_frontend`
 - Skill 管理: `create_skill`
@@ -176,27 +179,41 @@ tools:
 ## 关键文件路径
 
 ```
-backend/
+agentos/
+  kernel/
+    events/            # 事件系统（bus.py, envelope.py, types.py）
+    runtime/           # Runtime 模块（agent_runtime.py, llm_runtime.py, tool_runtime.py）
+    scheduler/         # Cron 调度
+    heartbeat/         # 心跳
+  capabilities/
+    agents/            # 多 Agent 配置
+    tools/             # 工具系统（base.py, builtin.py, registry.py）
+    skills/            # Skills 系统
+    memory/            # 记忆系统
+  adapters/
+    llm/               # LLM 提供商（openai, anthropic, gemini, mock）
+    channels/          # Channel（websocket, feishu）
+    storage/           # 数据库仓储
+    skill_sources/     # Skill 市场适配器
+    plugins/           # 插件系统
+  interfaces/
+    http/              # REST API 端点
+    ws/                # WebSocket Gateway
+  platform/
+    config/            # 配置加载
+    logging/           # 日志
+    security/          # 路径策略、拒绝列表
   app/
-    events/          # 事件系统（bus.py, envelope.py, types.py）
-    runtime/         # Runtime 模块（agent_runtime.py, llm_runtime.py, tool_runtime.py）
-    tools/           # 工具系统（base.py, builtin.py, registry.py）
-    skills/          # Skills 系统
-    gateway/         # Gateway 和 Channel
-    core/            # 配置、数据库
-  main.py            # 后端入口
-  run_tui.py         # TUI 客户端入口
+    gateway/           # 后端入口（main.py）
+    cli/               # CLI/TUI 客户端
+    web/               # Next.js 前端
 
-frontend/
-  src/
-    app/             # Next.js 页面
-    components/      # React 组件
-    contexts/        # WebSocket 上下文
-    lib/             # 工具函数
-
-docs/                # 技术文档
-docs_raw/            # 原始文档（不修改）
-scripts/dev.sh       # 一键启动脚本
+tests/                 # 测试（unit/, integration/, e2e/, cross_feature/）
+workspace/             # 运行时工作区（skills, workflows）
+var/                   # 运行时数据（数据库等）
+docs/                  # 技术文档
+docs_raw/              # 原始文档（不修改）
+scripts/               # 开发脚本
 ```
 
 ## 已知问题
@@ -207,7 +224,12 @@ scripts/dev.sh       # 一键启动脚本
 
 ## 版本信息
 
-当前版本: v0.4
+当前版本: v0.5
+
+v0.5 新增:
+- 代码架构重组（backend/app/ → agentos/ 六层架构）
+- 移除 Workflow 功能模块
+- 完整测试覆盖（734 tests）
 
 v0.4 新增:
 - Skills 系统（16 个内置 skills）
@@ -263,7 +285,7 @@ v0.2 新增:
 
 失败/风险经验：
 - 当前后端在第二次 `chat.completions` 请求中，会把上一轮 assistant 的 `tool_calls` 以 `{id,name,arguments}` 回传，但缺少 `tool_calls[*].type=\"function\"`，导致 OpenAI 兼容网关返回 `400 invalid_value`。  
-- `scripts/dev.sh` 启动后端时工作目录在 `backend/`，默认不会读取仓库根目录 `config.yml`；需要显式同步配置或调整配置加载路径。
+- v0.5 重构后，后端已从项目根目录启动，自动读取根目录 `config.yml`。
 
 ### 2026-03-05 Bug修复补充
 
@@ -282,7 +304,7 @@ v0.2 新增:
 - Playwright 断言改为“WebSocket 已连接 + 用户消息已回显 + 出现非用户响应气泡”后，对真实 API 返回波动更稳健。  
 
 失败/风险经验：
-- `npm run test:backend:e2e` 依赖 `pytest` 可执行文件，当前环境不存在该命令；需要使用 `python3 -m pytest` 或改脚本兼容。  
+- `npm run test:e2e` 已使用 `python3 -m pytest`，无需单独的 `pytest` 命令。
 
 ### 2026-03-07 CLI 交互修复补充
 

@@ -21,26 +21,12 @@ check_port() {
   return 0
 }
 
-ensure_config_hint() {
-  if [ ! -f "$HOME/.SenseAssistant/config.yaml" ]; then
-    echo "提示: 未检测到 ~/.SenseAssistant/config.yaml，将使用默认配置或仓库根目录 config.yml。"
-  fi
-}
-
-check_frontend_backend_config_consistency() {
-  local expected_ws="ws://localhost:${BACKEND_PORT}/ws"
-  local configured_ws="${NEXT_PUBLIC_WS_URL:-$expected_ws}"
-  if [ "$configured_ws" != "$expected_ws" ]; then
-    echo "警告: NEXT_PUBLIC_WS_URL=${configured_ws} 与后端端口 ${BACKEND_PORT} 不一致。"
-  fi
-}
-
 start_backend() {
-  cd "$ROOT_DIR/backend"
+  cd "$ROOT_DIR"
   if command -v uv >/dev/null 2>&1; then
-    uv run uvicorn main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
+    uv run uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
   else
-    python3 -m uvicorn main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
+    python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
   fi
   BACKEND_PID=$!
   sleep 2
@@ -51,7 +37,7 @@ start_backend() {
 }
 
 start_frontend() {
-  cd "$ROOT_DIR/frontend"
+  cd "$ROOT_DIR/agentos/app/web"
   npm run dev &
   FRONTEND_PID=$!
   sleep 2
@@ -72,10 +58,8 @@ cleanup() {
 }
 
 main() {
-  ensure_config_hint
   check_port "$BACKEND_PORT"
   check_port "$FRONTEND_PORT"
-  check_frontend_backend_config_consistency
 
   trap cleanup EXIT INT TERM
 
@@ -86,7 +70,6 @@ main() {
   echo "后端: http://localhost:${BACKEND_PORT}"
   echo "前端: http://localhost:${FRONTEND_PORT}"
 
-  # 任一进程退出都触发整体退出，避免残留。
   while true; do
     if ! kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
       echo "后端进程退出，正在停止前端。"

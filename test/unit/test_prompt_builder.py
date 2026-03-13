@@ -1,5 +1,5 @@
 """B07: PromptBuilder"""
-from app.runtime.prompt_builder import (
+from agentos.kernel.runtime.prompt_builder import (
     build_system_prompt,
     SystemPromptParams,
     ContextFile,

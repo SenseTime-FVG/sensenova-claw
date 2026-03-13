@@ -1,5 +1,5 @@
 """R01: CronJob 模型序列化"""
-from app.cron.models import (
+from agentos.kernel.scheduler.models import (
     CronJob, CronJobState, CronDelivery,
     AtSchedule, EverySchedule, CronSchedule,
     SystemEventPayload, AgentTurnPayload,
