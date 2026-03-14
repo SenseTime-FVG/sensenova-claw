@@ -1,98 +1,381 @@
-# AgentOS Docs Workspace
+<div align="center">
+  <h1>AgentOS</h1>
+  <p><strong>基于事件驱动架构的 AI Agent 平台</strong></p>
+  <p>
+    <img src="https://img.shields.io/badge/python-≥3.12-blue" alt="Python">
+    <img src="https://img.shields.io/badge/node-≥18-green" alt="Node.js">
+    <img src="https://img.shields.io/badge/version-v0.5-orange" alt="Version">
+    <img src="https://img.shields.io/badge/license-MIT-brightgreen" alt="License">
+  </p>
+  <p>
+    支持 Web、CLI、TUI、飞书多种接入方式 · 多 LLM Provider · 多 Agent 编排 · Skills 市场 · 记忆系统
+  </p>
+</div>
 
-本仓库用于维护 AgentOS 的代码与文档，包含前端、后端与架构文档。
+## Key Features
 
-## 目录说明
+- **事件驱动架构** — 所有模块通过 PublicEventBus 解耦通信，支持会话级隔离
+- **多 Provider 支持** — OpenAI / Anthropic / Gemini / 自定义，一键切换
+- **多 Agent 编排** — 动态创建子 Agent，支持委托调用和配置继承
+- **Skills 市场** — 声明式任务编排，支持从 ClawHub 安装/更新/卸载
+- **多渠道接入** — Web (Next.js) / CLI / TUI / 飞书，统一 Gateway 架构
+- **工具系统** — 内置 bash / 搜索 / 文件读写 / URL 抓取，支持权限管理
+- **记忆系统** — 向量检索 + 文本搜索混合模式，跨会话持久记忆
+- **定时任务** — Cron 表达式 / 间隔 / 一次性任务，支持心跳巡检
 
-```text
-.
-├── backend/         # FastAPI 后端
-├── frontend/        # Next.js 前端
-├── docs/            # 模型生成文档（可修改）
-├── docs_raw/        # 原始文档（不要修改）
-├── scripts/         # 一键启动等脚本
-└── config.yml       # 本地 API 配置（建议本地保存，不入库）
+## 🏗️ Architecture
+
+[todo: architecture_diagram]
+
+**事件流**:
+```
+ui.user_input → agent.step_started → llm.call_requested → llm.call_completed
+  → tool.call_requested → tool.call_completed → agent.step_completed
 ```
 
-## 环境要求
+**核心模块**:
 
-- Node.js 18+
+| 层级 | 模块 | 职责 |
+|------|------|------|
+| **Kernel** | EventBus, Runtime, Scheduler, Heartbeat | 事件通信、运行时编排、定时调度 |
+| **Capabilities** | Agents, Tools, Skills, Memory | 多 Agent、工具执行、技能编排、记忆 |
+| **Adapters** | LLM, Channels, Storage, Plugins | LLM 对接、渠道适配、持久化、插件 |
+| **Interfaces** | HTTP API, WebSocket | REST 接口、WebSocket 实时通信 |
+| **Platform** | Config, Logging, Security | 配置管理、日志、路径安全策略 |
+| **App** | Gateway, CLI, Web | 应用入口、命令行、前端 |
+
+## Table of Contents
+
+- [Key Features](#key-features)
+- [Architecture](#️-architecture)
+- [Install](#-install)
+- [Quick Start](#-quick-start)
+- [Configuration](#️-configuration)
+- [Chat Channels](#-chat-channels)
+- [LLM Providers](#-llm-providers)
+- [Tools](#-tools)
+- [Skills](#-skills)
+- [CLI Reference](#-cli-reference)
+- [Project Structure](#-project-structure)
+- [Testing](#-testing)
+- [Contribute & Roadmap](#-contribute--roadmap)
+
+## 📦 Install
+
+**环境要求**:
 - Python 3.12+
+- Node.js 18+
 - npm
 
-## 快速开始
-
-1. 安装依赖
+**安装依赖**:
 
 ```bash
+git clone https://github.com/SenseTime-FVG/agentos.git
+cd agentos
+
+# Python 依赖
+uv sync          # 或 pip install -e .
+
+# 前端依赖
+cd agentos/app/web && npm install && cd -
+
+# 根目录 Playwright（可选，用于前端 e2e 测试）
 npm install
-cd frontend && npm install && cd ..
 ```
 
-2. 配置 API Key（项目根目录 `config.yml`）
+## 🚀 Quick Start
 
-将项目根目录下的 `config_example.yml` 重命名为 `config.yml`，然后根据你的实际 API Key 进行填写：
+**1. 配置 API Key**
 
 ```bash
 cp config_example.yml config.yml
-# 手动编辑 config.yml，填入各项 provider 与工具的 API Key
+# 编辑 config.yml，填入 LLM provider 和工具的 API Key
 ```
 
-**注意：**  
-- `config.yml` 仅用于本地开发环境，建议不要将包含私密信息的该文件提交到版本库。
-
-3. 一键启动前后端
+**2. 一键启动**
 
 ```bash
 npm run dev
 ```
 
-- 前端: http://localhost:3000
-- 后端: http://localhost:8000
+- Web 前端: http://localhost:3000
+- API 后端: http://localhost:8000
 
-4. 启动 TUI（终端界面）
-
-TUI 作为客户端连接到已运行的后端 Gateway。
-
-首先确保后端已启动（步骤3），然后在新终端中运行：
+**3. 单独启动**
 
 ```bash
-cd backend
-uv run python run_tui.py --port 8000
+# 启动 API 服务
+npm run dev:server
+
+# 启动 Web 前端
+npm run dev:web
+
+# 启动 CLI 客户端（需后端已运行）
+python3 -m agentos.app.cli.cli_client --port 8000
 ```
 
-或使用模块方式：
+**4. 发送第一条消息**
+
+打开 http://localhost:3000，在对话框中输入消息即可开始对话。
+
+## ⚙️ Configuration
+
+配置文件 `config.yml` 位于项目根目录（不入库）：
+
+```yaml
+# LLM 提供商
+llm_providers:
+  openai:
+    api_key: sk-xxx
+    base_url: https://api.openai.com/v1
+    default_model: gpt-4o
+  anthropic:
+    api_key: sk-ant-xxx
+    base_url: https://api.anthropic.com
+    default_model: claude-sonnet-4-6
+  gemini:
+    api_key: xxx
+    base_url: https://generativelanguage.googleapis.com/v1
+    default_model: gemini-2.5-pro
+
+# Agent 配置
+agent:
+  provider: openai           # 当前使用的 provider
+  default_model: gpt-4o      # 默认模型
+  system_prompt: "你是一个有工具能力的AI助手"
+
+# 工具配置
+tools:
+  serper_search:
+    api_key: xxx              # Serper 搜索 API Key
+    max_results: 10
+```
+
+**配置加载优先级**: 环境变量 > `.agentos/config.yaml` > `config.yml` > 默认值
+
+## 💬 Chat Channels
+
+通过 Gateway 统一管理多渠道接入，每个 Channel 独立管理会话。
+
+| 渠道 | 说明 | 配置 |
+|------|------|------|
+| **Web** | Next.js 14 前端，WebSocket 实时通信 | 默认启用 |
+| **CLI** | 命令行交互客户端 | `python3 -m agentos.app.cli.cli_client` |
+| **飞书** | 企业 IM 集成，支持私聊/群聊 | `config.yml` plugins.feishu |
+
+<details>
+<summary><b>飞书配置</b></summary>
+
+```yaml
+plugins:
+  feishu:
+    enabled: true
+    app_id: "cli_xxx"
+    app_secret: "xxx"
+    dm_policy: "open"          # 私聊策略: open / allowlist
+    group_policy: "mention"    # 群聊策略: mention / open / disabled
+```
+
+启动 Gateway 后飞书机器人自动连接。
+
+</details>
+
+## 🤖 LLM Providers
+
+| Provider | 配置字段 | 说明 |
+|----------|----------|------|
+| **OpenAI** | `llm_providers.openai` | GPT-4o, GPT-4o-mini 等 |
+| **Anthropic** | `llm_providers.anthropic` | Claude Sonnet/Opus 等 |
+| **Gemini** | `llm_providers.gemini` | Gemini Pro 等 |
+| **Mock** | 内置 | 测试用，无需 API Key |
+
+切换 Provider 只需修改 `config.yml`:
+
+```yaml
+agent:
+  provider: anthropic
+  default_model: claude-sonnet-4-6
+```
+
+<details>
+<summary><b>添加新 Provider（开发者指南）</b></summary>
+
+1. 在 `agentos/adapters/llm/providers/` 下创建 `xxx_provider.py`
+2. 继承 `LLMProvider` 基类，实现 `async def call()` 方法
+3. 在 `agentos/adapters/llm/factory.py` 的 `LLMFactory` 中注册
+4. 在 `config.yml` 的 `llm_providers` 中添加配置
+
+</details>
+
+## 🔧 Tools
+
+内置工具：
+
+| 工具 | 风险等级 | 说明 |
+|------|---------|------|
+| `bash_command` | HIGH | 执行 shell 命令 |
+| `serper_search` | LOW | 网络搜索（需 Serper API Key） |
+| `fetch_url` | LOW | 抓取网页内容 |
+| `read_file` | LOW | 读取文件 |
+| `write_file` | MEDIUM | 写入/追加/插入文件 |
+
+**权限管理**:
+
+```yaml
+tools:
+  permission:
+    enabled: true
+    auto_approve_levels: ["low"]     # 自动批准低风险工具
+    confirmation_timeout: 60         # 高风险工具等待用户确认（秒）
+```
+
+**路径安全策略**: `PathPolicy` 限制文件操作在 workspace 目录内，防止越权访问。
+
+## 🎯 Skills
+
+Skills 是声明式任务编排机制，通过 YAML 配置定义多步骤工作流。
+
+**内置 Skills**:
+- 文档处理: `pdf_to_markdown`, `docx_to_markdown`, `xlsx_to_markdown`
+- 前端开发: `design_frontend`, `test_frontend`
+- Skill 管理: `create_skill`
+
+**从市场安装**:
+
+通过 Web 界面的 Skills 管理页面搜索并安装 ClawHub 市场中的 Skills。
+
+<details>
+<summary><b>创建自定义 Skill</b></summary>
+
+在 `workspace/skills/` 下创建目录，包含 `SKILL.md`：
+
+```markdown
+---
+name: my-skill
+description: 我的自定义技能
+arguments:
+  - name: target
+    description: 目标参数
+---
+
+请根据 $ARGUMENTS 执行以下步骤：
+
+1. 分析需求
+2. 执行操作
+3. 返回结果
+```
+
+</details>
+
+## 💻 CLI Reference
+
+| 命令 | 说明 |
+|------|------|
+| `npm run dev` | 一键启动前后端 |
+| `npm run dev:server` | 启动 API 服务 |
+| `npm run dev:web` | 启动 Web 前端 |
+| `npm run test` | 运行全部测试 |
+| `npm run test:unit` | 运行单元测试 |
+| `npm run test:e2e` | 运行 e2e 测试 |
+| `npm run test:web:e2e` | 运行前端 e2e 测试 |
+
+**CLI 客户端**:
 
 ```bash
-cd backend
-uv run python -m app.gateway.channels.tui_channel --port 8000
+python3 -m agentos.app.cli.cli_client [OPTIONS]
+
+Options:
+  --host TEXT       服务地址（默认: localhost）
+  --port INT        端口号（默认: 8000）
+  --agent TEXT      Agent ID
+  --session TEXT    恢复指定 session
+  --debug           显示调试信息
+  -e, --execute TEXT  执行单条消息后退出
 ```
 
-参数说明：
-- `--port`: Gateway WebSocket 端口（默认: 8000）
-- `--host`: Gateway 主机地址（默认: localhost）
+**交互命令**: `/quit` 退出, `/` 打开命令菜单
 
-TUI 提供了终端下的交互式界面，可以直接在命令行中与 Agent 对话。
+## 📁 Project Structure
 
-## 测试
+```
+agentos/
+├── kernel/              # 🧠 内核层
+│   ├── events/          #    事件总线（PublicEventBus, PrivateEventBus）
+│   ├── runtime/         #    运行时编排（Agent/LLM/Tool Worker）
+│   ├── scheduler/       #    Cron 定时调度
+│   └── heartbeat/       #    心跳巡检
+├── capabilities/        # 💎 能力层
+│   ├── agents/          #    多 Agent 配置与注册
+│   ├── tools/           #    工具系统（builtin + 编排）
+│   ├── skills/          #    Skills 注册与市场
+│   └── memory/          #    记忆系统（向量 + 文本）
+├── adapters/            # 🔌 适配层
+│   ├── llm/             #    LLM Providers（OpenAI/Anthropic/Gemini）
+│   ├── channels/        #    渠道适配（WebSocket/飞书）
+│   ├── storage/         #    SQLite 仓储
+│   ├── skill_sources/   #    Skill 市场适配器
+│   └── plugins/         #    插件系统
+├── interfaces/          # 🌐 接口层
+│   ├── http/            #    REST API 端点
+│   └── ws/              #    WebSocket Gateway
+├── platform/            # ⚙️ 平台层
+│   ├── config/          #    配置加载与管理
+│   ├── logging/         #    日志系统
+│   └── security/        #    路径安全策略
+└── app/                 # 🚀 应用层
+    ├── gateway/         #    FastAPI 入口（main.py）
+    ├── cli/             #    CLI/TUI 客户端
+    └── web/             #    Next.js 前端
 
-后端 e2e：
+tests/                   # ✅ 测试（unit/integration/e2e/cross_feature）
+workspace/               # 📂 运行时工作区（skills, 数据）
+docs/                    # 📖 技术文档
+scripts/                 # 🛠️ 开发脚本
+```
+
+## ✅ Testing
 
 ```bash
-npm run test:backend:e2e
+# 全部测试
+npm run test              # 或 python3 -m pytest tests/ -q
+
+# 按类型
+npm run test:unit         # 单元测试
+npm run test:e2e          # 后端 e2e
+npm run test:web:e2e      # 前端 Playwright e2e
+
+# 跳过慢速测试（真实 API 调用）
+python3 -m pytest tests/ -q -m "not slow"
 ```
 
-前端 Playwright e2e：
+**测试体系**:
 
-```bash
-npm run test:frontend:e2e
-```
+| 类型 | 目录 | 说明 |
+|------|------|------|
+| 单元测试 | `tests/unit/` | 真实组件测试，无 mock |
+| 集成测试 | `tests/integration/` | 跨模块集成验证 |
+| E2E 测试 | `tests/e2e/` | 全链路端到端 |
+| 交叉特性 | `tests/cross_feature/` | 跨特性交互验证 |
 
-## 文档入口
+所有 LLM 测试同时覆盖 mock_provider + 真实 API（config.yml 中有 key 的 provider）。
 
-- 架构与设计文档: `docs/README.md`
+## 🤝 Contribute & Roadmap
 
-## 说明
+欢迎提交 PR！
 
-- `docs_raw/` 内容为用户原始文档，按约定不应修改。
-- 后端默认输出 DEBUG 日志，便于排查 LLM 调用与工具链路问题。
+**Roadmap**:
+
+- [ ] 流式响应
+- [ ] Token 用量管理
+- [ ] 用户认证与权限
+- [ ] 沙箱执行环境
+- [ ] 更多渠道集成（钉钉、企业微信）
+- [ ] 更多 Skill 市场源
+
+[todo: contributors_badge]
+
+---
+
+<p align="center">
+  <sub>AgentOS is for educational, research, and technical exchange purposes.</sub>
+</p>
