@@ -80,6 +80,32 @@ class AgentSessionWorker(SessionWorker):
         always_keep = {"send_message"}
         return [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
 
+    # ── 持久化辅助 ─────────────────────────────────────
+
+    async def _persist_message(
+        self,
+        session_id: str,
+        turn_id: str,
+        msg: dict[str, Any],
+    ) -> None:
+        """立即将单条消息写入 SQLite（增量持久化）。"""
+        role = msg.get("role", "")
+        if role == "system":
+            return
+        tool_calls_json = None
+        if msg.get("tool_calls"):
+            tool_calls_json = json.dumps(msg["tool_calls"], ensure_ascii=False)
+        await self.rt.repo.save_message(
+            session_id=session_id,
+            turn_id=turn_id,
+            role=role,
+            content=msg.get("content"),
+            tool_calls=tool_calls_json,
+            tool_call_id=msg.get("tool_call_id"),
+            tool_name=msg.get("name"),
+        )
+        await self.rt.repo.increment_message_count(session_id)
+
     # ── 事件处理 ──────────────────────────────────────
 
     async def _handle(self, event: EventEnvelope) -> None:
@@ -173,7 +199,7 @@ class AgentSessionWorker(SessionWorker):
             context_files = await load_workspace_files(workspace_dir)
             self.rt.state_store.mark_first_turn_done(self.session_id)
 
-        # 从内存或 SQLite 惰性加载历史消息
+        # 从内存或 SQLite 惰性加载历史消息（必须在 persist_message 之前，避免重复）
         history = await self.rt.state_store.load_session_history(
             self.session_id, self.rt.repo,
         )
@@ -193,6 +219,11 @@ class AgentSessionWorker(SessionWorker):
         # 记录新消息的起始位置：跳过 system prompt(1条) + 旧历史
         state.history_offset = 1 + len(history)
         self.rt.state_store.set_turn(self.session_id, state)
+
+        # 增量持久化：在 history 加载后保存 user 消息，避免重复
+        await self._persist_message(
+            self.session_id, turn_id, {"role": "user", "content": content},
+        )
 
         await self.bus.publish(
             EventEnvelope(
@@ -245,6 +276,9 @@ class AgentSessionWorker(SessionWorker):
                 assistant_msg[extra_key] = response[extra_key]
         state.messages.append(assistant_msg)
 
+        # 增量持久化：立即保存 assistant 消息
+        await self._persist_message(event.session_id, event.turn_id, assistant_msg)
+
     async def _handle_llm_completed(self, event: EventEnvelope) -> None:
         """处理 LLM 调用完成，决定下一步动作"""
         if not event.turn_id:
@@ -291,27 +325,12 @@ class AgentSessionWorker(SessionWorker):
         state.final_response = content
         await self.rt.repo.complete_turn(event.turn_id, agent_response=content)
 
-        # 只保存本轮新消息到历史（跳过 system prompt + 旧历史）
+        # 追加本轮新消息到内存历史（供后续 turn 上下文使用）
         new_messages = state.messages[state.history_offset:]
         self.rt.state_store.append_to_history(event.session_id, new_messages)
 
-        # 持久化新消息到 SQLite
-        for msg in new_messages:
-            role = msg.get("role", "")
-            if role == "system":
-                continue
-            tool_calls_json = None
-            if msg.get("tool_calls"):
-                tool_calls_json = json.dumps(msg["tool_calls"], ensure_ascii=False)
-            await self.rt.repo.save_message(
-                session_id=event.session_id,
-                turn_id=event.turn_id,
-                role=role,
-                content=msg.get("content"),
-                tool_calls=tool_calls_json,
-                tool_call_id=msg.get("tool_call_id"),
-                tool_name=msg.get("name"),
-            )
+        # 注意：消息已在 _handle_user_input / _handle_llm_result / _handle_tool_result
+        # 中增量持久化到 SQLite，此处无需再批量保存
 
         await self.bus.publish(
             EventEnvelope(
@@ -348,6 +367,16 @@ class AgentSessionWorker(SessionWorker):
             result=result,
             tool_call_id=str(tool_call_id) if tool_call_id else None,
         )
+
+        # 增量持久化：立即保存 tool 结果消息
+        tool_msg: dict[str, Any] = {
+            "role": "tool",
+            "content": result if isinstance(result, str) else json.dumps(result, ensure_ascii=False),
+            "name": tool_name,
+        }
+        if tool_call_id:
+            tool_msg["tool_call_id"] = str(tool_call_id)
+        await self._persist_message(event.session_id, event.turn_id, tool_msg)
 
         if state.pending_tool_calls:
             return
