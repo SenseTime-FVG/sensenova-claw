@@ -304,3 +304,35 @@ class GrantPathTool(Tool):
             return {"success": False, "error": str(e)}
 
 
+class DocSourceTool(Tool):
+    """文档来源工具，自动识别并获取文档内容"""
+
+    name = "doc_source_tool"
+    description = "获取文档内容，自动识别来源（本地文件、飞书、Notion等）"
+    risk_level = ToolRiskLevel.LOW
+    parameters = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "文档路径或链接"},
+        },
+        "required": ["url"],
+    }
+
+    async def execute(self, **kwargs: Any) -> Any:
+        from agentos.adapters.doc_sources import DocSourceRegistry
+
+        url = str(kwargs["url"])
+        adapter = DocSourceRegistry.get_adapter(url)
+        
+        if not adapter:
+            return {"success": False, "error": f"不支持的文档来源: {url}"}
+        
+        try:
+            content = adapter.fetch(url)
+            return {
+                "success": True,
+                "content": content,
+                "source": adapter.__class__.__name__,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
