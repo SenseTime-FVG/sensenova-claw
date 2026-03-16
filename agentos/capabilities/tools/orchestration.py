@@ -21,7 +21,7 @@ class CreateAgentTool(Tool):
     name = "create_agent"
     description = (
         "创建一个新的 AI Agent。可以指定名称、描述、模型、系统提示词等参数。"
-        "创建后 Agent 立即可用，可在后续对话中通过委托机制调用。"
+        "创建后 Agent 立即可用，可在后续对话中通过 send_message 调用。"
     )
     risk_level = ToolRiskLevel.MEDIUM
     parameters = {
@@ -121,5 +121,5 @@ class CreateAgentTool(Tool):
             "name": name,
             "provider": provider,
             "model": model,
-            "message": f"Agent '{name}' (id={agent_id}) 已创建成功，可在委托或新会话中使用",
+            "message": f"Agent '{name}' (id={agent_id}) 已创建成功，可通过 send_message 或新会话使用",
         }
