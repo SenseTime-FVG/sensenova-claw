@@ -4,6 +4,7 @@ from agentos.capabilities.tools.base import Tool
 from agentos.capabilities.tools.builtin import (
     BashCommandTool,
     FetchUrlTool,
+    ImageSearchTool,
     ReadFileTool,
     SerperSearchTool,
     WriteFileTool,
@@ -20,6 +21,7 @@ class ToolRegistry:
         for tool in [
             BashCommandTool(),
             SerperSearchTool(),
+            ImageSearchTool(),
             FetchUrlTool(),
             ReadFileTool(),
             WriteFileTool(),
