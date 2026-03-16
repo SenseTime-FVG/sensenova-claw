@@ -161,7 +161,7 @@ class SendMessageTool(Tool):
                 "description": "sync=等待对方回复; async=发送后继续执行，对方回复后会通知你"
             }
         },
-        "required": ["target_id", "message"]
+        "required": ["target_agent", "message"]
     }
 ```
 
@@ -174,7 +174,9 @@ class SendMessageTool(Tool):
 4. async 模式：立即返回
 
 ```python
-async def execute(self, target_id, message, session_id=None, mode="sync"):
+async def execute(self, target_agent, message, session_id=None, mode="sync"):
+    target_id = target_agent  # schema 参数名 target_agent，内部使用 target_id
+
     # 1. 验证目标 Agent 存在
     target = self.agent_registry.get(target_id)
     if not target:
@@ -411,7 +413,7 @@ async def _handle_new_session(self, payload):
         type=EventTypes.USER_INPUT,
         session_id=child_session_id,
         payload={
-            "text": payload["message"],
+            "content": payload["message"],
             "send_depth": payload["depth"],
             "send_chain": payload.get("send_chain", []) + [target_id],
         },
@@ -460,7 +462,7 @@ async def _handle_pingpong(self, payload):
     await self._bus.publish(EventEnvelope(
         type=EventTypes.USER_INPUT,
         session_id=session_id,
-        payload={"text": payload["message"]},
+        payload={"content": payload["message"]},
         source="agent_to_agent",
     ))
 ```
@@ -877,6 +879,7 @@ Agent1 LLM → tool_call: send_message(target_id="agent2", message="...", mode="
 7. **ERROR_RAISED 映射**: 子 session 抛出 `ERROR_RAISED` 时，MessageRuntime 将其映射为 `AGENT_MESSAGE_FAILED`，sync 模式通过 Future 返回错误，async 模式经 BusRouter 路由到父 session 的 PrivateEventBus 排队处理
 8. **索引 GC**: `_child_session_index` 不在子 session 完成时立即清理（为 ping-pong 保留），由 BusRouter GC 在 session 过期时调用 `MessageRuntime.cleanup_session()` 统一回收
 9. **并发安全**: 同一 session 的多个 ping-pong 请求串行处理（通过 `_child_session_index` 指向最新 record_id），避免多个 Future 竞争同一 STEP_COMPLETED
+10. **GC 与异步回传**: 当 MessageRuntime spawn 异步子 session 时，必须刷新父 session 的 `_last_active`（调用 `BusRouter.touch(parent_session_id)`），防止父 session 在等待子 Agent 期间因 TTL 过期被 GC 回收，导致 `AGENT_MESSAGE_COMPLETED` 事件因找不到 PrivateEventBus 而丢失
 
 ## 实现分期
 
@@ -885,14 +888,16 @@ Agent1 LLM → tool_call: send_message(target_id="agent2", message="...", mode="
 - MessageRuntime（全局单例，统一处理 sync/async 路径 + spawn 子 session + Future 映射）
 - MessageRecord + DB 持久化（agent_messages 表）
 - ContextBuilder 可通信目标注入（列出所有 Agent）
-- 循环检测 + 深度检查 + pingpong 轮数限制 + target_id/session_id 一致性校验
-- ERROR_RAISED → AGENT_MESSAGE_FAILED 映射
+- 循环检测 + 深度检查 + target_id/session_id 一致性校验
+- ERROR_RAISED → AGENT_MESSAGE_FAILED 映射（sync 路径：通过 Future 返回错误）
 - 自然语言 tool 返回
 - 索引 GC（BusRouter 回调 MessageRuntime.cleanup_session）
+- Pingpong 验证代码作为脚手架预置（v2 session 复用时激活）
 
 ### v2
-- Session 复用（ping-pong 多轮对话）
+- Session 复用（ping-pong 多轮对话）+ pingpong 轮数限制生效
 - Async 模式 + PrivateEventBus 轮间触发（AgentSessionWorker 新增 AGENT_MESSAGE_COMPLETED/FAILED 处理）
+- ERROR_RAISED → AGENT_MESSAGE_FAILED 映射（async 路径：经 PrivateEventBus 轮间触发）
 - 前端事件映射
 - 取消传播（父 session cancel → 子 session cancel）
 - report_progress tool (announce)
@@ -916,13 +921,13 @@ Agent1 LLM → tool_call: send_message(target_id="agent2", message="...", mode="
 | 文件 | 变更 |
 |------|------|
 | `agentos/kernel/events/types.py` | 重命名 AGENT_DELEGATE_* → AGENT_MESSAGE_*；新增 AGENT_MESSAGE_ANNOUNCE |
-| `agentos/capabilities/agents/registry.py` | `get_delegatable()` 重命名为 `get_sendable()`，遵循 `can_send_message_to` 白名单 |
+| `agentos/capabilities/agents/registry.py` | `get_delegatable()` 重命名为 `get_sendable()`；`load_from_config()` 中 `can_delegate_to`/`max_delegation_depth` 配置键更新 |
 | `agentos/kernel/runtime/workers/agent_worker.py` | always_keep 改为 `{"send_message"}`；v2: 新增 AGENT_MESSAGE_COMPLETED/FAILED 事件处理 |
-| `agentos/kernel/runtime/context_builder.py` | 注入可通信目标列表 + 子 session 信息 |
+| `agentos/kernel/runtime/context_builder.py` | 注入可通信目标列表 + 子 session 信息；`_build_delegation_prompt` 重命名为 `_build_agent_to_agent_context`；`{"delegate"}` 改为 `{"send_message"}` |
 | `agentos/adapters/storage/repository.py` | 新增 agent_messages 表 + CRUD |
 | `agentos/adapters/channels/websocket_channel.py` | v2: 映射 agent-to-agent 事件 |
 | `agentos/app/gateway/main.py` | 初始化 MessageRuntime |
-| `agentos/capabilities/agents/config.py` | `can_delegate_to` 重命名为 `can_send_message_to` |
+| `agentos/capabilities/agents/config.py` | `can_delegate_to` 重命名为 `can_send_message_to`；`max_delegation_depth` 重命名为 `max_send_depth`；更新 `to_dict()`/`from_dict()` 序列化方法 |
 
 ### 删除
 
@@ -940,6 +945,7 @@ Agent1 LLM → tool_call: send_message(target_id="agent2", message="...", mode="
    - ERROR_RAISED → AGENT_MESSAGE_FAILED 映射 + 合成 USER_INPUT
    - 多个异步子 Agent 同时完成时的 FIFO 逐个触发
    - 超时 → Future cancel 清理
+   - BusRouter GC → MessageRuntime.cleanup_session() 集成路径
 3. **E2E 测试**: 配置多 Agent，用户输入触发 agent-to-agent 通信，验证最终响应
 
 ## 设计考量
