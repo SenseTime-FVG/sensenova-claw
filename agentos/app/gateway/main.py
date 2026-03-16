@@ -41,6 +41,12 @@ from agentos.platform.security.path_policy import PathPolicy
 from agentos.platform.config.workspace import ensure_workspace
 from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api
 
+# Token 认证模块
+from agentos.platform.security.auth import AuthService
+from agentos.platform.security.middleware import AuthMiddleware
+from agentos.adapters.storage.user_repository import UserRepository
+from agentos.interfaces.http.auth import create_auth_router
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +65,10 @@ class Services:
     ws_channel: WebSocketChannel
     cron_runtime: CronRuntime
     heartbeat_runtime: HeartbeatRuntime
+    # Token 认证服务
+    auth_service: AuthService
+    user_repo: UserRepository
+    auth_middleware: AuthMiddleware
 
 
 @asynccontextmanager
@@ -216,6 +226,25 @@ async def lifespan(app: FastAPI):
     await cron_runtime.start()
     await heartbeat_runtime.start()
 
+    # v0.6: 初始化 Token 认证服务
+    jwt_secret = config.get("security.jwt.secret_key", "")
+    if not jwt_secret or len(jwt_secret) < 32:
+        logger.warning("JWT_SECRET_KEY not configured or too short, using insecure default for development")
+        jwt_secret = "insecure-dev-secret-change-in-production-min-32-chars-long-1234567890"
+
+    auth_service = AuthService(
+        secret_key=jwt_secret,
+        algorithm=config.get("security.jwt.algorithm", "HS256"),
+        access_token_expire_minutes=int(config.get("security.jwt.access_token_expire_minutes", 60)),
+        refresh_token_expire_days=int(config.get("security.jwt.refresh_token_expire_days", 30)),
+    )
+
+    # 初始化用户仓储
+    user_repo = UserRepository(db_path=str(repo.db_path))
+
+    # 初始化认证中间件
+    auth_middleware = AuthMiddleware(auth_service, user_repo)
+
     app.state.services = Services(
         repo=repo,
         bus=bus,
@@ -230,6 +259,9 @@ async def lifespan(app: FastAPI):
         ws_channel=ws_channel,
         cron_runtime=cron_runtime,
         heartbeat_runtime=heartbeat_runtime,
+        auth_service=auth_service,
+        user_repo=user_repo,
+        auth_middleware=auth_middleware,
     )
     # 挂载 registries 供 API 路由使用
     app.state.tool_registry = tool_registry
@@ -237,7 +269,17 @@ async def lifespan(app: FastAPI):
     app.state.agent_registry = agent_registry
     app.state.config = config
     app.state.market_service = market_service
-    logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled)")
+
+    # 注册认证路由
+    auth_router = create_auth_router(
+        auth_service=auth_service,
+        user_repo=user_repo,
+        auth_middleware=auth_middleware,
+        enable_registration=config.get("security.public_registration", False),
+    )
+    app.include_router(auth_router)
+
+    logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled, auth enabled)")
 
     try:
         yield
