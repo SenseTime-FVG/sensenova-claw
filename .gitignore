@@ -38,7 +38,6 @@ agentos/app/web/playwright-report/
 # ========== 运行时目录 ==========
 SenseAssistant/
 archived/
-var/
 
 # workspace 中忽略运行时产物和 skills
 workspace/memory/
