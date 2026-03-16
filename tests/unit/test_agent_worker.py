@@ -43,6 +43,7 @@ class _SimpleAgentRuntime:
         self.context_builder = context_builder
         self.tool_registry = tool_registry
         self.memory_manager = memory_manager
+        self.jsonl_writer = None
 
 
 # ── Fixtures ─────────────────────────────────────────────
@@ -507,11 +508,14 @@ class TestHandleLLMResultExtraFields:
         assert "provider_specific_fields" not in state.messages[0]
 
 
-# ── LLM_CALL_COMPLETED 持久化测试 ────────────────────────
+# ── 增量持久化测试 ────────────────────────────────────
 
 
-class TestHandleLLMCompletedPersistence:
-    async def test_save_message_called_for_new_messages(self, private_bus, public_bus, runtime, state_store, repo):
+class TestIncrementalPersistence:
+    """测试消息在各 handler 中增量保存到 SQLite"""
+
+    async def test_llm_result_persists_assistant_message(self, private_bus, public_bus, runtime, state_store, repo):
+        """_handle_llm_result 应立即保存 assistant 消息"""
         worker = AgentSessionWorker("s1", private_bus, runtime)
 
         await repo.create_session("s1")
@@ -521,76 +525,94 @@ class TestHandleLLMCompletedPersistence:
             turn_id="t1", user_input="你好",
             messages=[
                 {"role": "system", "content": "系统提示"},
-                {"role": "user", "content": "旧问题"},
                 {"role": "user", "content": "你好"},
-                {"role": "assistant", "content": "你好！"},
             ],
         )
-        state.history_offset = 2
+        state.history_offset = 1
         state_store.set_turn("s1", state)
 
-        collected, done, task = await _collect_from_bus(public_bus, target_type=AGENT_STEP_COMPLETED)
+        event = EventEnvelope(
+            type=LLM_CALL_RESULT, session_id="s1", turn_id="t1",
+            payload={"response": {"content": "你好！", "tool_calls": []}},
+        )
+        await worker._handle(event)
+
+        messages = await repo.get_session_messages("s1")
+        assert len(messages) == 1
+        assert messages[0]["role"] == "assistant"
+        assert messages[0]["content"] == "你好！"
+
+    async def test_tool_result_persists_tool_message(self, private_bus, public_bus, runtime, state_store, repo):
+        """_handle_tool_result 应立即保存 tool 消息"""
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+
+        await repo.create_session("s1")
+        await repo.create_turn(turn_id="t1", session_id="s1", user_input="执行ls")
+
+        state = TurnState(
+            turn_id="t1", user_input="执行ls",
+            messages=[
+                {"role": "system", "content": "系统"},
+                {"role": "user", "content": "执行ls"},
+                {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "tc1", "name": "bash_command", "arguments": {"cmd": "ls"}}
+                ]},
+            ],
+        )
+        state.history_offset = 1
+        state.pending_tool_calls = {"tc1"}
+        state_store.set_turn("s1", state)
+
+        # 等待 LLM_CALL_REQUESTED（工具结果收齐后触发下一轮 LLM）
+        collected, done, task = await _collect_from_bus(public_bus, target_type=LLM_CALL_REQUESTED)
 
         event = EventEnvelope(
-            type=LLM_CALL_COMPLETED, session_id="s1", turn_id="t1", payload={},
+            type=TOOL_CALL_RESULT, session_id="s1", turn_id="t1",
+            payload={"tool_call_id": "tc1", "tool_name": "bash_command", "result": "file1.py"},
         )
         await worker._handle(event)
         await asyncio.wait_for(done.wait(), timeout=5)
         task.cancel()
 
         messages = await repo.get_session_messages("s1")
-        roles_saved = [m["role"] for m in messages]
-        assert "user" in roles_saved
-        assert "assistant" in roles_saved
-        assert len(messages) == 2
+        tool_msgs = [m for m in messages if m["role"] == "tool"]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0]["name"] == "bash_command"
+        assert tool_msgs[0]["tool_call_id"] == "tc1"
 
-    async def test_save_message_skips_system_role(self, private_bus, public_bus, runtime, state_store, repo):
+    async def test_persist_message_skips_system_role(self, private_bus, public_bus, runtime, state_store, repo):
+        """_persist_message 应跳过 system 角色"""
         worker = AgentSessionWorker("s1", private_bus, runtime)
 
         await repo.create_session("s1")
         await repo.create_turn(turn_id="t1", session_id="s1", user_input="测试")
 
-        state = TurnState(
-            turn_id="t1", user_input="测试",
-            messages=[
-                {"role": "system", "content": "注入提示"},
-                {"role": "user", "content": "测试"},
-                {"role": "system", "content": "不应保存"},
-                {"role": "assistant", "content": "好的"},
-            ],
-        )
-        state.history_offset = 1
-        state_store.set_turn("s1", state)
-
-        collected, done, task = await _collect_from_bus(public_bus, target_type=AGENT_STEP_COMPLETED)
-
-        event = EventEnvelope(
-            type=LLM_CALL_COMPLETED, session_id="s1", turn_id="t1", payload={},
-        )
-        await worker._handle(event)
-        await asyncio.wait_for(done.wait(), timeout=5)
-        task.cancel()
+        await worker._persist_message("s1", "t1", {"role": "system", "content": "不应保存"})
+        await worker._persist_message("s1", "t1", {"role": "user", "content": "测试"})
+        await worker._persist_message("s1", "t1", {"role": "assistant", "content": "好的"})
 
         messages = await repo.get_session_messages("s1")
         roles_saved = [m["role"] for m in messages]
         assert "system" not in roles_saved
         assert len(messages) == 2
 
-    async def test_save_message_with_tool_calls_json(self, private_bus, public_bus, runtime, state_store, repo):
+    async def test_llm_completed_does_not_duplicate_save(self, private_bus, public_bus, runtime, state_store, repo):
+        """_handle_llm_completed 不应重复保存已增量保存的消息"""
         worker = AgentSessionWorker("s1", private_bus, runtime)
 
         await repo.create_session("s1")
-        await repo.create_turn(turn_id="t1", session_id="s1", user_input="执行ls")
+        await repo.create_turn(turn_id="t1", session_id="s1", user_input="你好")
 
-        tc = [{"id": "tc1", "name": "bash_command", "arguments": {"cmd": "ls"}}]
+        # 模拟已增量保存了 user + assistant 消息
+        await repo.save_message("s1", "t1", "user", "你好")
+        await repo.save_message("s1", "t1", "assistant", "你好！")
+
         state = TurnState(
-            turn_id="t1", user_input="执行ls",
+            turn_id="t1", user_input="你好",
             messages=[
-                {"role": "system", "content": "系统"},
-                {"role": "user", "content": "执行ls"},
-                {"role": "assistant", "content": "", "tool_calls": tc},
-                {"role": "tool", "content": "file1.py", "tool_call_id": "tc1", "name": "bash_command"},
-                {"role": "assistant", "content": "执行完毕"},
+                {"role": "system", "content": "系统提示"},
+                {"role": "user", "content": "你好"},
+                {"role": "assistant", "content": "你好！"},
             ],
         )
         state.history_offset = 1
@@ -605,9 +627,6 @@ class TestHandleLLMCompletedPersistence:
         await asyncio.wait_for(done.wait(), timeout=5)
         task.cancel()
 
+        # 验证消息没有被重复保存（仍然只有 2 条）
         messages = await repo.get_session_messages("s1")
-        assert len(messages) == 4
-
-        assistant_with_tc = [m for m in messages if m["role"] == "assistant" and m.get("tool_calls")]
-        assert len(assistant_with_tc) == 1
-        assert assistant_with_tc[0]["tool_calls"] == tc
+        assert len(messages) == 2

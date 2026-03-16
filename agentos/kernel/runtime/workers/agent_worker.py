@@ -88,7 +88,7 @@ class AgentSessionWorker(SessionWorker):
         turn_id: str,
         msg: dict[str, Any],
     ) -> None:
-        """立即将单条消息写入 SQLite（增量持久化）。"""
+        """立即将单条消息写入 SQLite + JSONL（增量持久化）。"""
         role = msg.get("role", "")
         if role == "system":
             return
@@ -105,6 +105,14 @@ class AgentSessionWorker(SessionWorker):
             tool_name=msg.get("name"),
         )
         await self.rt.repo.increment_message_count(session_id)
+
+        # 同步写入 JSONL 文件（按 agent 分目录）
+        if self.rt.jsonl_writer:
+            try:
+                agent_id = (self.agent_config.id if self.agent_config else "default")
+                self.rt.jsonl_writer.append(agent_id, session_id, turn_id, msg)
+            except Exception:
+                logger.warning("JSONL write failed session=%s", session_id, exc_info=True)
 
     # ── 事件处理 ──────────────────────────────────────
 

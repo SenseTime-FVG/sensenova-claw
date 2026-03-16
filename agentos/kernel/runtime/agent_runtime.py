@@ -5,6 +5,7 @@ import uuid
 from typing import Any, TYPE_CHECKING
 
 from agentos.adapters.storage.repository import Repository
+from agentos.adapters.storage.session_jsonl import SessionJsonlWriter
 from agentos.kernel.events.bus import PrivateEventBus
 from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.types import USER_INPUT
@@ -32,6 +33,7 @@ class AgentRuntime:
         state_store: SessionStateStore,
         agent_registry: AgentRegistry | None = None,
         memory_manager: Any = None,
+        jsonl_writer: SessionJsonlWriter | None = None,
     ):
         self.bus_router = bus_router
         self.repo = repo
@@ -40,6 +42,7 @@ class AgentRuntime:
         self.state_store = state_store
         self.agent_registry = agent_registry
         self.memory_manager = memory_manager  # 可能为 None（记忆系统未启用）
+        self.jsonl_writer = jsonl_writer  # 可能为 None（JSONL 导出未启用）
         self._workers: dict[str, AgentSessionWorker] = {}
 
     async def start(self) -> None:
