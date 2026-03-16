@@ -60,10 +60,10 @@ class CreateAgentTool(Tool):
                 "items": {"type": "string"},
                 "description": "允许使用的工具名称列表，空数组表示允许全部工具",
             },
-            "can_delegate_to": {
+            "can_send_message_to": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "可委托的目标 Agent ID 列表，空数组表示可委托给所有",
+                "description": "可发送消息的目标 Agent ID 列表，空数组表示可向所有 Agent 发送消息",
             },
         },
         "required": ["id", "name"],
@@ -106,7 +106,9 @@ class CreateAgentTool(Tool):
             temperature=float(temperature),
             system_prompt=str(kwargs.get("system_prompt", "")),
             tools=list(kwargs.get("tools", [])),
-            can_delegate_to=list(kwargs.get("can_delegate_to", [])),
+            can_send_message_to=list(
+                kwargs.get("can_send_message_to", kwargs.get("can_delegate_to", []))
+            ),
         )
 
         registry.register(agent)

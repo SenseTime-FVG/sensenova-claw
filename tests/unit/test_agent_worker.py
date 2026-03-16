@@ -13,6 +13,8 @@ from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.kernel.events.bus import PublicEventBus, PrivateEventBus
 from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.types import (
+    AGENT_MESSAGE_COMPLETED,
+    AGENT_MESSAGE_FAILED,
     AGENT_STEP_COMPLETED,
     AGENT_STEP_STARTED,
     ERROR_RAISED,
@@ -22,6 +24,7 @@ from agentos.kernel.events.types import (
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
     USER_INPUT,
+    USER_TURN_CANCEL_REQUESTED,
 )
 from agentos.kernel.runtime.context_builder import ContextBuilder
 from agentos.kernel.runtime.state import SessionStateStore, TurnState
@@ -156,6 +159,62 @@ class TestHandleRouting:
         worker = AgentSessionWorker("s1", private_bus, runtime)
         await worker._handle(EventEnvelope(type="unknown", session_id="s1"))
 
+    async def test_agent_message_completed_triggers_follow_up(self, private_bus, public_bus, runtime):
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+        collected, done, task = await _collect_from_bus(public_bus, target_type=LLM_CALL_REQUESTED)
+
+        event = EventEnvelope(
+            type=AGENT_MESSAGE_COMPLETED,
+            session_id="s1",
+            payload={"agent_id": "helper", "result": "异步结果"},
+        )
+        await worker._handle(event)
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        published_types = [e.type for e in collected]
+        assert AGENT_STEP_STARTED in published_types
+        assert LLM_CALL_REQUESTED in published_types
+
+    async def test_agent_message_failed_triggers_follow_up(self, private_bus, public_bus, runtime):
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+        collected, done, task = await _collect_from_bus(public_bus, target_type=LLM_CALL_REQUESTED)
+
+        event = EventEnvelope(
+            type=AGENT_MESSAGE_FAILED,
+            session_id="s1",
+            payload={"agent_id": "helper", "error": "出错了"},
+        )
+        await worker._handle(event)
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        published_types = [e.type for e in collected]
+        assert AGENT_STEP_STARTED in published_types
+        assert LLM_CALL_REQUESTED in published_types
+
+    async def test_cancel_request_marks_turn_cancelled(self, private_bus, public_bus, runtime, repo, state_store):
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+        await repo.create_session("s1")
+        await repo.create_turn(turn_id="t1", session_id="s1", user_input="hi")
+        state_store.set_turn("s1", TurnState(turn_id="t1", user_input="hi", messages=[]))
+
+        collected, done, task = await _collect_from_bus(public_bus, target_type=ERROR_RAISED)
+        await worker._handle(
+            EventEnvelope(
+                type=USER_TURN_CANCEL_REQUESTED,
+                session_id="s1",
+                payload={"reason": "user_stop"},
+            )
+        )
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        assert state_store.is_turn_cancelled("s1", "t1") is True
+        turns = await repo.get_session_turns("s1")
+        assert turns[0]["status"] == "cancelled"
+        assert collected[-1].payload["error_type"] == "TurnCancelled"
+
 
 # ── USER_INPUT 处理测试 ──────────────────────────────────
 
@@ -238,6 +297,22 @@ class TestHandleLLMResult:
             payload={"response": {"content": "x"}},
         )
         await worker._handle(event)
+
+    async def test_ignores_llm_result_for_cancelled_turn(self, private_bus, runtime, state_store):
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+        state = TurnState(turn_id="t1", user_input="hi", messages=[])
+        state_store.set_turn("s1", state)
+        state_store.mark_turn_cancelled("s1", "t1")
+
+        await worker._handle(
+            EventEnvelope(
+                type=LLM_CALL_RESULT,
+                session_id="s1",
+                turn_id="t1",
+                payload={"response": {"content": "不会写入", "tool_calls": []}},
+            )
+        )
+        assert state.messages == []
 
 
 # ── LLM_CALL_COMPLETED 处理测试 ──────────────────────────

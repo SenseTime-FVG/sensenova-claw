@@ -49,3 +49,8 @@ AGENT_DELEGATE_REQUESTED = "agent.delegate_requested"
 AGENT_DELEGATE_STARTED = "agent.delegate_started"
 AGENT_DELEGATE_COMPLETED = "agent.delegate_completed"
 AGENT_DELEGATE_FAILED = "agent.delegate_failed"
+
+# v1.1: Agent 消息通信事件
+AGENT_MESSAGE_REQUESTED = "agent.message_requested"
+AGENT_MESSAGE_COMPLETED = "agent.message_completed"
+AGENT_MESSAGE_FAILED = "agent.message_failed"
