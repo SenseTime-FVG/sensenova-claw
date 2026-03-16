@@ -76,26 +76,29 @@ class AuthMiddleware:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-    async def get_current_admin_user(
-        self, current_user: User = Depends(lambda self: self.get_current_user)
-    ) -> User:
+    def get_current_admin_user(self):
         """
-        获取当前管理员用户（仅管理员可访问）
+        返回一个依赖注入函数，用于获取当前管理员用户（仅管理员可访问）
 
         用法:
             @app.delete("/users/{user_id}")
             async def delete_user(
                 user_id: str,
-                admin: User = Depends(auth.get_current_admin_user)
+                admin: User = Depends(auth.get_current_admin_user())
             ):
                 ...
         """
-        if not current_user.is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin privileges required",
-            )
-        return current_user
+        get_user = self.get_current_user
+
+        async def _get_admin(current_user: User = Depends(get_user)) -> User:
+            if not current_user.is_admin:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Admin privileges required",
+                )
+            return current_user
+
+        return _get_admin
 
     async def authenticate_websocket(self, websocket: WebSocket, token: str) -> User:
         """
@@ -164,35 +167,3 @@ class AuthMiddleware:
             )
 
         return user
-
-
-def require_auth(enabled: bool = True):
-    """
-    路由装饰器工厂：根据配置决定是否启用认证
-
-    用法:
-        @app.get("/api/sessions")
-        @require_auth(config.get("security.auth_enabled", False))
-        async def list_sessions(user: User = Depends(auth.get_current_user)):
-            ...
-    """
-
-    def decorator(func):
-        if enabled:
-            return func  # 启用认证时返回原函数（由 Depends 处理）
-        else:
-            # 禁用认证时注入匿名用户
-            async def wrapper(*args, **kwargs):
-                # 移除 user 参数，或注入匿名用户
-                if "user" in kwargs:
-                    kwargs["user"] = User(
-                        user_id="anonymous",
-                        username="anonymous",
-                        is_active=True,
-                        is_admin=False,
-                    )
-                return await func(*args, **kwargs)
-
-            return wrapper
-
-    return decorator

@@ -3,6 +3,7 @@ from __future__ import annotations
 from agentos.capabilities.tools.base import Tool
 from agentos.capabilities.tools.builtin import (
     BashCommandTool,
+    DocSourceTool,
     FetchUrlTool,
     ImageSearchTool,
     ReadFileTool,
@@ -34,6 +35,7 @@ class ToolRegistry:
             ReadFileTool(),
             WriteFileTool(),
             CreateAgentTool(),
+            DocSourceTool(),
             SendEmailTool(),
             ListEmailsTool(),
             ReadEmailTool(),

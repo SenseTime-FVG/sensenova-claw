@@ -11,7 +11,9 @@ class LocalFileAdapter(DocSourceAdapter):
 
     @staticmethod
     def can_handle(url: str) -> bool:
-        """判断是否为本地文件路径"""
+        """判断是否为本地文件路径（排除 URL 协议）"""
+        if url.startswith(("http://", "https://", "ftp://")):
+            return False
         return Path(url).exists()
 
     def fetch(self, url: str) -> str:

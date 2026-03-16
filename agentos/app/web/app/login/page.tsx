@@ -92,7 +92,7 @@ export default function LoginPage() {
           </div>
 
           <div className="text-sm text-center text-gray-600">
-            <p>默认账户：admin / admin123</p>
+            <p>首次使用请通过 API 初始化管理员账户</p>
           </div>
         </form>
       </div>

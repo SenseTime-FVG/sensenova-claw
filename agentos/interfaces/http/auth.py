@@ -211,9 +211,10 @@ def create_auth_router(
             )
 
         except Exception as e:
+            logger.warning(f"Refresh token validation failed: {e}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid refresh token: {e}",
+                detail="Invalid or expired refresh token",
             )
 
     @router.get("/me", response_model=UserResponse)
@@ -265,13 +266,20 @@ def create_auth_router(
     @router.post("/init-admin", response_model=UserResponse)
     async def initialize_admin():
         """
-        初始化默认管理员账户（仅在无用户时可用）
+        初始化默认管理员账户（仅在无用户且配置允许时可用）
 
         用户名: admin
         密码: admin123
 
-        ⚠️ 生产环境应删除此端点或添加访问限制
+        ⚠️ 生产环境应在 config.yml 中设置 security.allow_init_admin: false
         """
+        from agentos.platform.config.config import config as app_config
+        if not app_config.get("security.allow_init_admin", True):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin initialization is disabled in configuration",
+            )
+
         # 检查是否已有用户
         users = await user_repo.list_users(limit=1)
         if users:

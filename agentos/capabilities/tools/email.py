@@ -6,7 +6,9 @@
 import asyncio
 import email
 import imaplib
+import json
 import smtplib
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -17,6 +19,35 @@ from typing import Any
 
 from agentos.capabilities.tools.base import Tool, ToolRiskLevel
 from agentos.platform.config.config import config
+
+
+def _decode_email_header(header: str) -> str:
+    """解码邮件头部（RFC 2047 编码）"""
+    if not header:
+        return ""
+    decoded = decode_header(header)
+    parts = []
+    for content, charset in decoded:
+        if isinstance(content, bytes):
+            parts.append(content.decode(charset or "utf-8", errors="ignore"))
+        else:
+            parts.append(content)
+    return "".join(parts)
+
+
+def _sanitize_imap_string(value: str) -> str:
+    """转义 IMAP 搜索字符串中的双引号，防止注入"""
+    return value.replace('"', '\\"')
+
+
+def _convert_date_to_imap(date_str: str) -> str:
+    """将 YYYY-MM-DD 格式转为 IMAP 要求的 DD-Mon-YYYY 格式"""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%d-%b-%Y")
+    except ValueError:
+        # 如果格式不对，原样返回
+        return date_str
 
 
 class SendEmailTool(Tool):
@@ -85,13 +116,20 @@ class SendEmailTool(Tool):
             return {"success": False, "error": f"发送邮件失败: {str(e)}"}
 
     def _send_smtp(self, host, port, username, password, msg, to, cc):
-        with smtplib.SMTP(host, port, timeout=30) as server:
-            server.starttls()
-            server.login(username, password)
-            recipients = [addr.strip() for addr in to.split(",")]
-            if cc:
-                recipients.extend([addr.strip() for addr in cc.split(",")])
-            server.sendmail(username, recipients, msg.as_string())
+        recipients = [addr.strip() for addr in to.split(",")]
+        if cc:
+            recipients.extend([addr.strip() for addr in cc.split(",")])
+
+        # 根据端口选择连接方式：465 用 SMTP_SSL，其他用 SMTP + STARTTLS
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=30) as server:
+                server.login(username, password)
+                server.sendmail(username, recipients, msg.as_string())
+        else:
+            with smtplib.SMTP(host, port, timeout=30) as server:
+                server.starttls()
+                server.login(username, password)
+                server.sendmail(username, recipients, msg.as_string())
 
 
 class ListEmailsTool(Tool):
@@ -136,7 +174,7 @@ class ListEmailsTool(Tool):
                 self._fetch_emails, imap_host, imap_port, username, password,
                 folder, limit, unread_only, from_email, subject_contains, since_date
             )
-            return {"success": True, "output": str(emails)}
+            return {"success": True, "output": json.dumps(emails, ensure_ascii=False)}
         except Exception as e:
             return {"success": False, "error": f"列出邮件失败: {str(e)}"}
 
@@ -149,11 +187,11 @@ class ListEmailsTool(Tool):
             if unread_only:
                 criteria.append("UNSEEN")
             if from_email:
-                criteria.append(f'FROM "{from_email}"')
+                criteria.append(f'FROM "{_sanitize_imap_string(from_email)}"')
             if subject_contains:
-                criteria.append(f'SUBJECT "{subject_contains}"')
+                criteria.append(f'SUBJECT "{_sanitize_imap_string(subject_contains)}"')
             if since_date:
-                criteria.append(f'SINCE {since_date.replace("-", "-")}')
+                criteria.append(f'SINCE {_convert_date_to_imap(since_date)}')
 
             search_str = " ".join(criteria) if criteria else "ALL"
             _, message_numbers = mail.search(None, search_str)
@@ -163,25 +201,13 @@ class ListEmailsTool(Tool):
                 _, msg_data = mail.fetch(num, "(RFC822.HEADER)")
                 msg = email.message_from_bytes(msg_data[0][1])
 
-                subject = self._decode_header(msg.get("Subject", ""))
-                from_addr = self._decode_header(msg.get("From", ""))
+                subject = _decode_email_header(msg.get("Subject", ""))
+                from_addr = _decode_email_header(msg.get("From", ""))
                 date = msg.get("Date", "")
 
                 emails.append({"id": num.decode(), "from": from_addr, "subject": subject, "date": date})
 
             return emails[::-1]
-
-    def _decode_header(self, header):
-        if not header:
-            return ""
-        decoded = decode_header(header)
-        parts = []
-        for content, charset in decoded:
-            if isinstance(content, bytes):
-                parts.append(content.decode(charset or "utf-8", errors="ignore"))
-            else:
-                parts.append(content)
-        return "".join(parts)
 
 
 class ReadEmailTool(Tool):
@@ -219,7 +245,7 @@ class ReadEmailTool(Tool):
             email_data = await asyncio.to_thread(
                 self._read_email, imap_host, imap_port, username, password, folder, email_id, mark_as_read
             )
-            return {"success": True, "output": str(email_data)}
+            return {"success": True, "output": json.dumps(email_data, ensure_ascii=False)}
         except Exception as e:
             return {"success": False, "error": f"读取邮件失败: {str(e)}"}
 
@@ -231,9 +257,9 @@ class ReadEmailTool(Tool):
             _, msg_data = mail.fetch(email_id, "(RFC822)")
             msg = email.message_from_bytes(msg_data[0][1])
 
-            subject = self._decode_header(msg.get("Subject", ""))
-            from_addr = self._decode_header(msg.get("From", ""))
-            to_addr = self._decode_header(msg.get("To", ""))
+            subject = _decode_email_header(msg.get("Subject", ""))
+            from_addr = _decode_email_header(msg.get("From", ""))
+            to_addr = _decode_email_header(msg.get("To", ""))
             date = msg.get("Date", "")
 
             body = ""
@@ -247,7 +273,7 @@ class ReadEmailTool(Tool):
                     if "attachment" in disposition:
                         filename = part.get_filename()
                         if filename:
-                            attachments.append(self._decode_header(filename))
+                            attachments.append(_decode_email_header(filename))
                     elif content_type == "text/plain" and not body:
                         body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
                     elif content_type == "text/html" and not body:
@@ -259,18 +285,6 @@ class ReadEmailTool(Tool):
                 mail.store(email_id, "+FLAGS", "\\Seen")
 
             return {"id": email_id, "from": from_addr, "to": to_addr, "subject": subject, "date": date, "body": body, "attachments": attachments}
-
-    def _decode_header(self, header):
-        if not header:
-            return ""
-        decoded = decode_header(header)
-        parts = []
-        for content, charset in decoded:
-            if isinstance(content, bytes):
-                parts.append(content.decode(charset or "utf-8", errors="ignore"))
-            else:
-                parts.append(content)
-        return "".join(parts)
 
 
 class DownloadAttachmentTool(Tool):
@@ -341,7 +355,7 @@ class DownloadAttachmentTool(Tool):
                     continue
 
                 part_filename = part.get_filename()
-                if part_filename and self._decode_header(part_filename) == filename:
+                if part_filename and _decode_email_header(part_filename) == filename:
                     payload = part.get_payload(decode=True)
 
                     size_mb = len(payload) / (1024 * 1024)
@@ -354,18 +368,6 @@ class DownloadAttachmentTool(Tool):
                     return
 
             raise ValueError(f"未找到附件: {filename}")
-
-    def _decode_header(self, header):
-        if not header:
-            return ""
-        decoded = decode_header(header)
-        parts = []
-        for content, charset in decoded:
-            if isinstance(content, bytes):
-                parts.append(content.decode(charset or "utf-8", errors="ignore"))
-            else:
-                parts.append(content)
-        return "".join(parts)
 
 
 class MarkEmailTool(Tool):
@@ -457,7 +459,7 @@ class SearchEmailsTool(Tool):
             emails = await asyncio.to_thread(
                 self._search_emails, imap_host, imap_port, username, password, folder, query, since_date, limit
             )
-            return {"success": True, "output": str(emails)}
+            return {"success": True, "output": json.dumps(emails, ensure_ascii=False)}
         except Exception as e:
             return {"success": False, "error": f"搜索邮件失败: {str(e)}"}
 
@@ -466,9 +468,9 @@ class SearchEmailsTool(Tool):
             mail.login(username, password)
             mail.select(folder)
 
-            criteria = [f'TEXT "{query}"']
+            criteria = [f'TEXT "{_sanitize_imap_string(query)}"']
             if since_date:
-                criteria.append(f'SINCE {since_date.replace("-", "-")}')
+                criteria.append(f'SINCE {_convert_date_to_imap(since_date)}')
 
             search_str = " ".join(criteria)
             _, message_numbers = mail.search(None, search_str)
@@ -478,22 +480,10 @@ class SearchEmailsTool(Tool):
                 _, msg_data = mail.fetch(num, "(RFC822.HEADER)")
                 msg = email.message_from_bytes(msg_data[0][1])
 
-                subject = self._decode_header(msg.get("Subject", ""))
-                from_addr = self._decode_header(msg.get("From", ""))
+                subject = _decode_email_header(msg.get("Subject", ""))
+                from_addr = _decode_email_header(msg.get("From", ""))
                 date = msg.get("Date", "")
 
                 emails.append({"id": num.decode(), "from": from_addr, "subject": subject, "date": date})
 
             return emails[::-1]
-
-    def _decode_header(self, header):
-        if not header:
-            return ""
-        decoded = decode_header(header)
-        parts = []
-        for content, charset in decoded:
-            if isinstance(content, bytes):
-                parts.append(content.decode(charset or "utf-8", errors="ignore"))
-            else:
-                parts.append(content)
-        return "".join(parts)

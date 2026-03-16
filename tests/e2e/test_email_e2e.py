@@ -42,8 +42,8 @@ async def test_send_email_e2e():
         body="这是一封自动化测试邮件，请忽略。"
     )
 
-    assert result.success, f"发送失败: {result.error}"
-    assert "已发送" in result.output
+    assert result["success"], f"发送失败: {result.get('error')}"
+    assert "已发送" in result["output"]
 
 
 @pytest.mark.asyncio
@@ -53,9 +53,9 @@ async def test_list_emails_e2e():
 
     result = await tool.execute(limit=5)
 
-    assert result.success, f"列出失败: {result.error}"
-    # 输出应该是邮件列表的字符串表示
-    assert result.output
+    assert result["success"], f"列出失败: {result.get('error')}"
+    # 输出应该是邮件列表的 JSON 字符串
+    assert result["output"]
 
 
 @pytest.mark.asyncio
@@ -68,4 +68,4 @@ async def test_search_emails_e2e():
         limit=10
     )
 
-    assert result.success, f"搜索失败: {result.error}"
+    assert result["success"], f"搜索失败: {result.get('error')}"

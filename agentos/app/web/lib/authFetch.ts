@@ -43,6 +43,7 @@ export async function authFetch(
     localStorage.removeItem('refresh_token');
     // 跳转到登录页
     window.location.href = '/login';
+    throw new Error('Authentication expired, redirecting to login');
   }
 
   return response;

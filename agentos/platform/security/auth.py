@@ -11,7 +11,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
@@ -117,13 +117,13 @@ class AuthService:
         self, user_id: str, username: str, is_admin: bool = False
     ) -> str:
         """创建访问令牌（短期有效）"""
-        expire = datetime.utcnow() + self.access_token_expire
+        expire = datetime.now(timezone.utc) + self.access_token_expire
         to_encode = {
             "sub": user_id,  # Subject: 用户 ID
             "username": username,
             "is_admin": is_admin,
             "exp": expire,  # Expiration time
-            "iat": datetime.utcnow(),  # Issued at
+            "iat": datetime.now(timezone.utc),  # Issued at
             "jti": str(uuid.uuid4()),  # JWT ID（唯一标识符）
             "type": "access",
         }
@@ -131,11 +131,11 @@ class AuthService:
 
     def create_refresh_token(self, user_id: str) -> str:
         """创建刷新令牌（长期有效）"""
-        expire = datetime.utcnow() + self.refresh_token_expire
+        expire = datetime.now(timezone.utc) + self.refresh_token_expire
         to_encode = {
             "sub": user_id,
             "exp": expire,
-            "iat": datetime.utcnow(),
+            "iat": datetime.now(timezone.utc),
             "jti": str(uuid.uuid4()),
             "type": "refresh",
         }
@@ -187,23 +187,6 @@ class AuthService:
         except jwt.InvalidTokenError as e:
             logger.warning(f"Invalid token: {e}")
             raise
-
-    def refresh_access_token(self, refresh_token: str) -> str:
-        """使用刷新令牌生成新的访问令牌"""
-        try:
-            # 验证 refresh token
-            payload = self.verify_token(refresh_token, token_type="refresh")
-            user_id = payload["sub"]
-
-            # 注意：这里需要从数据库获取用户信息
-            # 实际实现中应该调用 UserRepository.get_user(user_id)
-            # 这里仅作为示例返回基础 token
-            return self.create_access_token(user_id, username="unknown")
-
-        except jwt.ExpiredSignatureError:
-            raise ValueError("Refresh token has expired, please login again")
-        except jwt.InvalidTokenError as e:
-            raise ValueError(f"Invalid refresh token: {e}")
 
     def generate_api_key(self, user_id: str, name: str = "") -> str:
         """生成 API Key（用于机器对机器认证）"""

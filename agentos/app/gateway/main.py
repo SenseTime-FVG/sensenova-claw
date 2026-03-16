@@ -229,8 +229,9 @@ async def lifespan(app: FastAPI):
     # v0.6: 初始化 Token 认证服务
     jwt_secret = config.get("security.jwt.secret_key", "")
     if not jwt_secret or len(jwt_secret) < 32:
-        logger.warning("JWT_SECRET_KEY not configured or too short, using insecure default for development")
-        jwt_secret = "insecure-dev-secret-change-in-production-min-32-chars-long-1234567890"
+        import secrets as _secrets
+        jwt_secret = _secrets.token_urlsafe(48)
+        logger.warning("JWT_SECRET_KEY 未配置或过短，已自动生成临时密钥（重启后失效，生产环境请在 config.yml 中配置 security.jwt.secret_key）")
 
     auth_service = AuthService(
         secret_key=jwt_secret,
@@ -323,27 +324,32 @@ async def health_check() -> dict:
     return {"status": "healthy", "timestamp": time.time(), "version": "0.1.0"}
 
 
+async def _verify_auth_if_enabled(authorization: str | None) -> None:
+    """统一的 API 认证检查辅助函数"""
+    if not config.get("security.auth_enabled", False):
+        return
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+    token = authorization[7:]
+    services: Services = app.state.services
+    try:
+        payload = services.auth_service.verify_token(token, token_type="access")
+        user_id = payload["sub"]
+        user = await services.user_repo.get_user_by_id(user_id)
+        if not user or not user.is_active:
+            raise HTTPException(status_code=403, detail="Invalid or inactive user")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"API authentication failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
 @app.get("/api/sessions")
 async def list_sessions(authorization: str = Header(None)):
     """获取会话列表（需要认证）"""
+    await _verify_auth_if_enabled(authorization)
     services: Services = app.state.services
-
-    # v0.6: 认证保护
-    if config.get("security.auth_enabled", False):
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-
-        token = authorization[7:]  # 移除 "Bearer " 前缀
-        try:
-            payload = services.auth_service.verify_token(token, token_type="access")
-            user_id = payload["sub"]
-            user = await services.user_repo.get_user_by_id(user_id)
-            if not user or not user.is_active:
-                raise HTTPException(status_code=403, detail="Invalid or inactive user")
-        except Exception as e:
-            logger.warning(f"API authentication failed: {e}")
-            raise HTTPException(status_code=401, detail="Invalid token")
-
     sessions = await services.repo.list_sessions(limit=50)
     return JSONResponse(content={"sessions": sessions})
 
@@ -351,23 +357,8 @@ async def list_sessions(authorization: str = Header(None)):
 @app.get("/api/sessions/{session_id}/turns")
 async def get_session_turns(session_id: str, authorization: str = Header(None)):
     """获取会话的所有轮次（需要认证）"""
+    await _verify_auth_if_enabled(authorization)
     services: Services = app.state.services
-
-    # v0.6: 认证保护
-    if config.get("security.auth_enabled", False):
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-        token = authorization[7:]
-        try:
-            payload = services.auth_service.verify_token(token, token_type="access")
-            user_id = payload["sub"]
-            user = await services.user_repo.get_user_by_id(user_id)
-            if not user or not user.is_active:
-                raise HTTPException(status_code=403, detail="Invalid or inactive user")
-        except Exception as e:
-            logger.warning(f"API authentication failed: {e}")
-            raise HTTPException(status_code=401, detail="Invalid token")
-
     turns = await services.repo.get_session_turns(session_id)
     return JSONResponse(content={"turns": turns})
 
@@ -375,23 +366,8 @@ async def get_session_turns(session_id: str, authorization: str = Header(None)):
 @app.get("/api/sessions/{session_id}/events")
 async def get_session_events(session_id: str, authorization: str = Header(None)):
     """获取会话的所有事件（需要认证）"""
+    await _verify_auth_if_enabled(authorization)
     services: Services = app.state.services
-
-    # v0.6: 认证保护
-    if config.get("security.auth_enabled", False):
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-        token = authorization[7:]
-        try:
-            payload = services.auth_service.verify_token(token, token_type="access")
-            user_id = payload["sub"]
-            user = await services.user_repo.get_user_by_id(user_id)
-            if not user or not user.is_active:
-                raise HTTPException(status_code=403, detail="Invalid or inactive user")
-        except Exception as e:
-            logger.warning(f"API authentication failed: {e}")
-            raise HTTPException(status_code=401, detail="Invalid token")
-
     events = await services.repo.get_session_events(session_id)
     return JSONResponse(content={"events": events})
 
@@ -399,23 +375,8 @@ async def get_session_events(session_id: str, authorization: str = Header(None))
 @app.get("/api/sessions/{session_id}/messages")
 async def list_session_messages(session_id: str, authorization: str = Header(None)):
     """获取会话的所有消息（需要认证）"""
+    await _verify_auth_if_enabled(authorization)
     services: Services = app.state.services
-
-    # v0.6: 认证保护
-    if config.get("security.auth_enabled", False):
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-        token = authorization[7:]
-        try:
-            payload = services.auth_service.verify_token(token, token_type="access")
-            user_id = payload["sub"]
-            user = await services.user_repo.get_user_by_id(user_id)
-            if not user or not user.is_active:
-                raise HTTPException(status_code=403, detail="Invalid or inactive user")
-        except Exception as e:
-            logger.warning(f"API authentication failed: {e}")
-            raise HTTPException(status_code=401, detail="Invalid token")
-
     messages = await services.repo.get_session_messages(session_id)
     return JSONResponse(content={"messages": messages})
 
