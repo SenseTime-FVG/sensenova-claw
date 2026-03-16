@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -41,6 +41,12 @@ from agentos.platform.security.path_policy import PathPolicy
 from agentos.platform.config.workspace import ensure_workspace
 from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api
 
+# Token 认证模块
+from agentos.platform.security.auth import AuthService
+from agentos.platform.security.middleware import AuthMiddleware
+from agentos.adapters.storage.user_repository import UserRepository
+from agentos.interfaces.http.auth import create_auth_router
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +65,10 @@ class Services:
     ws_channel: WebSocketChannel
     cron_runtime: CronRuntime
     heartbeat_runtime: HeartbeatRuntime
+    # Token 认证服务
+    auth_service: AuthService
+    user_repo: UserRepository
+    auth_middleware: AuthMiddleware
 
 
 @asynccontextmanager
@@ -216,6 +226,25 @@ async def lifespan(app: FastAPI):
     await cron_runtime.start()
     await heartbeat_runtime.start()
 
+    # v0.6: 初始化 Token 认证服务
+    jwt_secret = config.get("security.jwt.secret_key", "")
+    if not jwt_secret or len(jwt_secret) < 32:
+        logger.warning("JWT_SECRET_KEY not configured or too short, using insecure default for development")
+        jwt_secret = "insecure-dev-secret-change-in-production-min-32-chars-long-1234567890"
+
+    auth_service = AuthService(
+        secret_key=jwt_secret,
+        algorithm=config.get("security.jwt.algorithm", "HS256"),
+        access_token_expire_minutes=int(config.get("security.jwt.access_token_expire_minutes", 60)),
+        refresh_token_expire_days=int(config.get("security.jwt.refresh_token_expire_days", 30)),
+    )
+
+    # 初始化用户仓储
+    user_repo = UserRepository(db_path=str(repo.db_path))
+
+    # 初始化认证中间件
+    auth_middleware = AuthMiddleware(auth_service, user_repo)
+
     app.state.services = Services(
         repo=repo,
         bus=bus,
@@ -230,6 +259,9 @@ async def lifespan(app: FastAPI):
         ws_channel=ws_channel,
         cron_runtime=cron_runtime,
         heartbeat_runtime=heartbeat_runtime,
+        auth_service=auth_service,
+        user_repo=user_repo,
+        auth_middleware=auth_middleware,
     )
     # 挂载 registries 供 API 路由使用
     app.state.tool_registry = tool_registry
@@ -237,7 +269,17 @@ async def lifespan(app: FastAPI):
     app.state.agent_registry = agent_registry
     app.state.config = config
     app.state.market_service = market_service
-    logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled)")
+
+    # 注册认证路由
+    auth_router = create_auth_router(
+        auth_service=auth_service,
+        user_repo=user_repo,
+        auth_middleware=auth_middleware,
+        enable_registration=config.get("security.public_registration", False),
+    )
+    app.include_router(auth_router)
+
+    logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled, auth enabled)")
 
     try:
         yield
@@ -282,33 +324,98 @@ async def health_check() -> dict:
 
 
 @app.get("/api/sessions")
-async def list_sessions():
-    """获取会话列表"""
+async def list_sessions(authorization: str = Header(None)):
+    """获取会话列表（需要认证）"""
     services: Services = app.state.services
+
+    # v0.6: 认证保护
+    if config.get("security.auth_enabled", False):
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+
+        token = authorization[7:]  # 移除 "Bearer " 前缀
+        try:
+            payload = services.auth_service.verify_token(token, token_type="access")
+            user_id = payload["sub"]
+            user = await services.user_repo.get_user_by_id(user_id)
+            if not user or not user.is_active:
+                raise HTTPException(status_code=403, detail="Invalid or inactive user")
+        except Exception as e:
+            logger.warning(f"API authentication failed: {e}")
+            raise HTTPException(status_code=401, detail="Invalid token")
+
     sessions = await services.repo.list_sessions(limit=50)
     return JSONResponse(content={"sessions": sessions})
 
 
 @app.get("/api/sessions/{session_id}/turns")
-async def get_session_turns(session_id: str):
-    """获取会话的所有轮次"""
+async def get_session_turns(session_id: str, authorization: str = Header(None)):
+    """获取会话的所有轮次（需要认证）"""
     services: Services = app.state.services
+
+    # v0.6: 认证保护
+    if config.get("security.auth_enabled", False):
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+        token = authorization[7:]
+        try:
+            payload = services.auth_service.verify_token(token, token_type="access")
+            user_id = payload["sub"]
+            user = await services.user_repo.get_user_by_id(user_id)
+            if not user or not user.is_active:
+                raise HTTPException(status_code=403, detail="Invalid or inactive user")
+        except Exception as e:
+            logger.warning(f"API authentication failed: {e}")
+            raise HTTPException(status_code=401, detail="Invalid token")
+
     turns = await services.repo.get_session_turns(session_id)
     return JSONResponse(content={"turns": turns})
 
 
 @app.get("/api/sessions/{session_id}/events")
-async def get_session_events(session_id: str):
-    """获取会话的所有事件"""
+async def get_session_events(session_id: str, authorization: str = Header(None)):
+    """获取会话的所有事件（需要认证）"""
     services: Services = app.state.services
+
+    # v0.6: 认证保护
+    if config.get("security.auth_enabled", False):
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+        token = authorization[7:]
+        try:
+            payload = services.auth_service.verify_token(token, token_type="access")
+            user_id = payload["sub"]
+            user = await services.user_repo.get_user_by_id(user_id)
+            if not user or not user.is_active:
+                raise HTTPException(status_code=403, detail="Invalid or inactive user")
+        except Exception as e:
+            logger.warning(f"API authentication failed: {e}")
+            raise HTTPException(status_code=401, detail="Invalid token")
+
     events = await services.repo.get_session_events(session_id)
     return JSONResponse(content={"events": events})
 
 
 @app.get("/api/sessions/{session_id}/messages")
-async def list_session_messages(session_id: str):
-    """获取会话的所有消息（用于聊天历史展示）"""
+async def list_session_messages(session_id: str, authorization: str = Header(None)):
+    """获取会话的所有消息（需要认证）"""
     services: Services = app.state.services
+
+    # v0.6: 认证保护
+    if config.get("security.auth_enabled", False):
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+        token = authorization[7:]
+        try:
+            payload = services.auth_service.verify_token(token, token_type="access")
+            user_id = payload["sub"]
+            user = await services.user_repo.get_user_by_id(user_id)
+            if not user or not user.is_active:
+                raise HTTPException(status_code=403, detail="Invalid or inactive user")
+        except Exception as e:
+            logger.warning(f"API authentication failed: {e}")
+            raise HTTPException(status_code=401, detail="Invalid token")
+
     messages = await services.repo.get_session_messages(session_id)
     return JSONResponse(content={"messages": messages})
 
@@ -320,6 +427,31 @@ async def websocket_endpoint(websocket: WebSocket):
     gateway = services.gateway
     repo = services.repo
     publisher = services.publisher
+    auth_service = services.auth_service
+    user_repo = services.user_repo
+
+    # v0.6: Token 认证（从查询参数获取）
+    auth_enabled = config.get("security.auth_enabled", False)
+    if auth_enabled:
+        token = websocket.query_params.get("token")
+        if not token:
+            logger.warning("WebSocket connection rejected: missing token")
+            await websocket.close(code=1008, reason="Missing authentication token")
+            return
+
+        try:
+            payload = auth_service.verify_token(token, token_type="access")
+            user_id = payload["sub"]
+            user = await user_repo.get_user_by_id(user_id)
+            if not user or not user.is_active:
+                logger.warning(f"WebSocket connection rejected: invalid user (user_id={user_id})")
+                await websocket.close(code=1008, reason="Invalid or inactive user")
+                return
+            logger.info(f"WebSocket authenticated: {user.username} (user_id={user_id})")
+        except Exception as e:
+            logger.warning(f"WebSocket connection rejected: {e}")
+            await websocket.close(code=1008, reason="Invalid token")
+            return
 
     await ws_channel.connect(websocket)
     logger.info("WebSocket client connected")
