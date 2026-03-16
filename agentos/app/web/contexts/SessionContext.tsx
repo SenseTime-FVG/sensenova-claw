@@ -83,6 +83,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (content) {
           setMessages((prev) => [...prev, toMessage('assistant', content)]);
         }
+        setIsTyping(false); 
         break;
       }
       case 'tool_execution': {
