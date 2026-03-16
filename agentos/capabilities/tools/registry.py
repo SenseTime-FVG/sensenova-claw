@@ -9,6 +9,14 @@ from agentos.capabilities.tools.builtin import (
     SerperSearchTool,
     WriteFileTool,
 )
+from agentos.capabilities.tools.email import (
+    SendEmailTool,
+    ListEmailsTool,
+    ReadEmailTool,
+    DownloadAttachmentTool,
+    MarkEmailTool,
+    SearchEmailsTool,
+)
 from agentos.capabilities.tools.orchestration import CreateAgentTool
 
 
@@ -26,6 +34,12 @@ class ToolRegistry:
             ReadFileTool(),
             WriteFileTool(),
             CreateAgentTool(),
+            SendEmailTool(),
+            ListEmailsTool(),
+            ReadEmailTool(),
+            DownloadAttachmentTool(),
+            MarkEmailTool(),
+            SearchEmailsTool(),
         ]:
             self.register(tool)
 

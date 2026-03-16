@@ -73,6 +73,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "timeout": 15,
             "allowed_extensions": [".txt", ".md", ".py", ".json", ".yaml", ".yml", ".ts", ".tsx", ".js", ".jsx"],
         },
+        "email": {
+            "enabled": False,
+            "smtp_host": "",
+            "smtp_port": 587,
+            "imap_host": "",
+            "imap_port": 993,
+            "username": "${EMAIL_USERNAME}",
+            "password": "${EMAIL_PASSWORD}",
+            "max_attachment_size_mb": 10,
+            "timeout": 30,
+        },
         "result_truncation": {
             "max_tokens": 8000,
             "save_dir": "workspace",
