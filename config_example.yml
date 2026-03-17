@@ -1,8 +1,8 @@
 # AgentOS 配置文件
 
 system:
-  workspace_dir: ~/.SenseAssistant/workspace
-  database_path: ~/.SenseAssistant/agentos.db
+  workspace_dir: ~/.agentos/workspace
+  database_path: ~/.agentos/db/agentos.db
   max_concurrent_sessions: 10
 
 # LLM 提供商配置
