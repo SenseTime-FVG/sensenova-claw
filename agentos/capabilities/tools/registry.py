@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from agentos.capabilities.tools.base import Tool
+from agentos.capabilities.tools.ask_user_tool import AskUserTool
 from agentos.capabilities.tools.builtin import (
     BashCommandTool,
     DocSourceTool,
@@ -42,6 +43,7 @@ class ToolRegistry:
             DownloadAttachmentTool(),
             MarkEmailTool(),
             SearchEmailsTool(),
+            AskUserTool(),
         ]:
             self.register(tool)
 
