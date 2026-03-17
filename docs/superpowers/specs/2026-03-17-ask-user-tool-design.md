@@ -1,7 +1,7 @@
 # AskUserQuestion 工具设计文档
 
 **日期**: 2026-03-17
-**版本**: v1.0
+**版本**: v1.1
 
 ## 概述
 
@@ -28,18 +28,24 @@
 ```
 Agent 调用 ask_user 工具
   ↓
-ToolRuntime 创建 Future，发布 user.question_asked 事件
+ToolRuntime 识别为特殊工具，生成 question_id
   ↓
-Gateway 路由到对应 Channel
+ToolRuntime 创建 Future，发布 user.question_asked 到 PrivateEventBus
+  ↓
+PrivateEventBus → Gateway 路由到对应 Channel
   ↓
 Channel 渲染问题 UI（Web 显示对话框，CLI 显示菜单）
   ↓
-用户回答，Channel 发布 user.question_answered 事件
+用户回答，Channel 发布 user.question_answered 到 PrivateEventBus
   ↓
-ToolRuntime 接收事件，完成 Future
+ToolRuntime 监听事件，完成 Future
   ↓
 工具返回答案给 Agent
 ```
+
+**事件总线路由：**
+- `user.question_asked` 和 `user.question_answered` 都通过 **PrivateEventBus** 传递
+- 使用 `trace_id` 字段关联问答对，便于调试和追踪
 
 ## 数据结构
 
@@ -50,6 +56,31 @@ ToolRuntime 接收事件，完成 Future
     "question": str,              # 问题文本
     "options": list[str],         # 可选项列表（可选，不提供则为开放式问答）
     "multi_select": bool          # 是否多选，默认 False
+}
+```
+
+**返回格式：**
+```python
+{
+    "success": bool,
+    "answer": str | list[str] | None,  # 单选返回 str，多选返回 list[str]
+    "error": str | None                # 失败时的错误信息
+}
+```
+
+**参数验证规则：**
+- `multi_select=True` 时，`options` 必须非空
+- 开放式问答（`options=None`）不能使用 `multi_select=True`
+
+**LLM 调用示例：**
+```json
+{
+  "name": "ask_user",
+  "arguments": {
+    "question": "选择部署环境？",
+    "options": ["dev", "staging", "prod"],
+    "multi_select": false
+  }
 }
 ```
 
@@ -93,13 +124,26 @@ class AskUserTool(Tool):
     description = "向用户提问并等待回答"
 
     async def execute(self, **kwargs):
-        1. 生成 question_id (UUID)
-        2. 构造 user.question_asked 事件
-        3. 调用 ToolRuntime 的 ask_question() 方法
-        4. ToolRuntime 创建 Future 并发布事件
-        5. 使用 asyncio.wait_for(future, timeout) 等待
-        6. 超时返回错误，成功返回答案
+        # 工具本身只做参数验证，返回特殊标记
+        # 实际的问答逻辑由 ToolRuntime 处理
+        question = kwargs.get("question")
+        options = kwargs.get("options")
+        multi_select = kwargs.get("multi_select", False)
+
+        # 参数验证
+        if multi_select and not options:
+            return {"success": False, "error": "多选模式必须提供 options"}
+
+        # 返回特殊标记，让 ToolRuntime 识别并处理
+        return {
+            "_ask_user": True,
+            "question": question,
+            "options": options,
+            "multi_select": multi_select
+        }
 ```
+
+**说明：** AskUserTool 不直接调用 ToolRuntime 方法，而是返回特殊标记 `_ask_user: True`，由 ToolRuntime 在工具执行后识别并进入问答流程。
 
 ### ToolRuntime 扩展
 
@@ -108,21 +152,45 @@ class AskUserTool(Tool):
 ```python
 class ToolSessionWorker:
     def __init__(self):
-        self._pending_questions: dict[str, asyncio.Future] =
+        self._pending_questions: dict[str, asyncio.Future] = {}
 
-    async def ask_question(self, event: EventEnvelope) -> dict:
-        """创建 Future，发布事件，等待响应"""
-        question_id = event.payload["question_id"]
-        timeout = event.payload["timeout"]
+    async def _execute_tool(self, tool_call):
+        """执行工具，检查是否为 ask_user 特殊工具"""
+        result = await tool.execute(**kwargs)
+
+        # 检查是否为 ask_user 工具
+        if isinstance(result, dict) and result.get("_ask_user"):
+            return await self._handle_ask_user(result, tool_call_id)
+
+        return result
+
+    async def _handle_ask_user(self, params: dict, tool_call_id: str) -> dict:
+        """处理 ask_user 工具的问答流程"""
+        question_id = str(uuid.uuid4())
+        timeout = config.get("tools.ask_user.timeout", 300)
 
         # 检查并发
         if self._pending_questions:
-            raise RuntimeError("已有待回答问题")
+            return {"success": False, "error": "已有待回答问题"}
 
+        # 创建 Future
         future = asyncio.Future()
         self._pending_questions[question_id] = future
 
-        # 发布事件
+        # 发布事件到 PrivateEventBus
+        event = EventEnvelope(
+            type="user.question_asked",
+            session_id=self.session_id,
+            trace_id=tool_call_id,
+            source="tool_runtime",
+            payload={
+                "question_id": question_id,
+                "question": params["question"],
+                "options": params.get("options"),
+                "multi_select": params.get("multi_select", False),
+                "timeout": timeout
+            }
+        )
         await self._private_bus.publish(event)
 
         try:
@@ -145,6 +213,13 @@ class ToolSessionWorker:
             future.set_result({"success": False, "error": "用户取消了回答"})
         else:
             future.set_result({"success": True, "answer": event.payload["answer"]})
+
+    async def stop(self):
+        """Session 销毁时清理所有待处理的 Future"""
+        for future in self._pending_questions.values():
+            if not future.done():
+                future.cancel()
+        self._pending_questions.clear()
 ```
 
 ### Channel 适配
@@ -152,21 +227,40 @@ class ToolSessionWorker:
 各 Channel 需要监听 `user.question_asked` 事件并渲染 UI：
 
 **CLI Channel（简单文本菜单）：**
+
+**单选示例：**
 ```
 Agent 问题：选择部署环境？
 1. dev
 2. staging
 3. prod
 
-请输入选项编号 (1-3) 或自定义输入:
+请输入选项编号 (1-3) 或自定义输入 (输入 'c' 取消):
 ```
 
+**多选示例：**
+```
+Agent 问题：启用哪些功能？
+1. 日志
+2. 监控
+3. 缓存
+
+请输入选项编号，用逗号分隔 (如: 1,3) 或输入 'c' 取消:
+```
+
+**输入验证：**
+- 单选：接受数字（1-N）或任意文本（作为自定义输入）
+- 多选：接受 "1,3" 格式，解析为对应选项
+- 无效数字（如输入 "5" 但只有 3 个选项）：提示错误并重新输入
+- 开放式问答：接受任意非空文本
+
 **Web Channel：**
-- 显示模态对话框
+- 显示模态对话框，阻塞其他消息输入
 - 单选：Radio buttons
 - 多选：Checkboxes
 - 开放式：Text input
-- 提供"取消"按钮
+- 提供"确认"和"取消"按钮
+- 对话框显示剩余超时时间
 
 **TUI Channel：**
 - 使用 Rich 的 Prompt 组件
@@ -180,21 +274,47 @@ Agent 问题：选择部署环境？
 
 2. **用户取消** - Channel 发送 `cancelled: True`，工具返回 `{"success": False, "error": "用户取消了回答"}`
 
-3. **无效答案** - 用户输入不在 options 中时，接受为自定义输入
+3. **无效答案处理**
+   - **有 options 时**：用户输入不在选项中，Channel 提示错误并重新输入（最多 3 次），超过后接受为自定义输入
+   - **无 options 时**：接受任意非空文本
 
-4. **Session 断开** - Future 被取消，工具抛出异常
+4. **Session 断开** - Future 被取消，工具抛出 `asyncio.CancelledError`
 
 5. **重复问题** - 同一 question_id 只能有一个 Future，重复调用返回错误
 
 ### 并发控制
 
 - 同一 session 同时只能有一个待回答问题
-- 如果工具被并发调用，后续调用立即返回错误："已有待回答问题"
+- 如果 `ask_user` 工具被并发调用，后续调用立即返回错误："已有待回答问题"
+- 其他工具可以正常并发执行，不受 `ask_user` 阻塞影响
+- Agent 可以在等待用户回答期间调用其他工具（如 `read_file`），但不能再次调用 `ask_user`
 
 ### 清理机制
 
 - 超时或完成后，从 `_pending_questions` 移除
-- Session 销毁时，取消所有待处理的 Future
+- Session 销毁时，调用 `ToolSessionWorker.stop()` 取消所有待处理的 Future
+- 利用现有的 `BusRouter.on_destroy()` 回调机制触发清理
+
+## 扩展设计
+
+### 问答历史存储
+
+将问答记录存储到 `SessionStateStore`，便于：
+- 调试和追踪用户决策
+- 在对话上下文中引用历史问答
+- 审计和分析用户行为
+
+**存储结构：**
+```python
+{
+    "question_id": str,
+    "question": str,
+    "options": list[str] | None,
+    "answer": str | list[str] | None,
+    "timestamp": float,
+    "cancelled": bool
+}
+```
 
 ## 测试策略
 
