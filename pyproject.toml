@@ -15,8 +15,6 @@ dependencies = [
   "textual>=0.47.0",
   "lark-oapi>=1.5.3",
   "croniter>=2.0.0",
-  "pyjwt>=2.8.0",
-  "passlib[argon2]>=1.7.4",  # 使用 argon2 代替 bcrypt（更安全，无 72 字节限制）
   "python-multipart>=0.0.6",
 ]
 

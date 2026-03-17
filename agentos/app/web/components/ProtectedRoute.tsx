@@ -10,7 +10,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   const pathname = usePathname();
 
   useEffect(() => {
-    // 如果未登录且不在登录页，重定向到登录页
+    // 如果未认证且不在登录页，重定向到登录页（token 输入页）
     if (!isLoading && !isAuthenticated && pathname !== '/login') {
       router.push('/login');
     }
@@ -22,7 +22,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">加载中...</p>
+          <p className="mt-4 text-gray-600">验证中...</p>
         </div>
       </div>
     );

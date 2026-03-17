@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -46,10 +46,9 @@ from agentos.platform.config.workspace import (
 )
 from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api
 
-# Token 认证模块
-from agentos.platform.security.auth import AuthService
-from agentos.platform.security.middleware import AuthMiddleware
-from agentos.adapters.storage.user_repository import UserRepository
+# Token 认证模块（Jupyter-lab 风格）
+from agentos.platform.security.auth import TokenAuthService
+from agentos.platform.security.middleware import verify_request, verify_websocket
 from agentos.interfaces.http.auth import create_auth_router
 
 logger = logging.getLogger(__name__)
@@ -71,10 +70,8 @@ class Services:
     ws_channel: WebSocketChannel
     cron_runtime: CronRuntime
     heartbeat_runtime: HeartbeatRuntime
-    # Token 认证服务
-    auth_service: AuthService
-    user_repo: UserRepository
-    auth_middleware: AuthMiddleware
+    # Token 认证服务（Jupyter-lab 风格）
+    auth_service: TokenAuthService
 
 
 @asynccontextmanager
@@ -250,25 +247,8 @@ async def lifespan(app: FastAPI):
     await cron_runtime.start()
     await heartbeat_runtime.start()
 
-    # v0.6: 初始化 Token 认证服务
-    jwt_secret = config.get("security.jwt.secret_key", "")
-    if not jwt_secret or len(jwt_secret) < 32:
-        import secrets as _secrets
-        jwt_secret = _secrets.token_urlsafe(48)
-        logger.warning("JWT_SECRET_KEY 未配置或过短，已自动生成临时密钥（重启后失效，生产环境请在 config.yml 中配置 security.jwt.secret_key）")
-
-    auth_service = AuthService(
-        secret_key=jwt_secret,
-        algorithm=config.get("security.jwt.algorithm", "HS256"),
-        access_token_expire_minutes=int(config.get("security.jwt.access_token_expire_minutes", 60)),
-        refresh_token_expire_days=int(config.get("security.jwt.refresh_token_expire_days", 30)),
-    )
-
-    # 初始化用户仓储
-    user_repo = UserRepository(db_path=str(repo.db_path))
-
-    # 初始化认证中间件
-    auth_middleware = AuthMiddleware(auth_service, user_repo)
+    # Token 认证服务（Jupyter-lab 风格，每次启动生成新 token）
+    auth_service = TokenAuthService()
 
     app.state.services = Services(
         repo=repo,
@@ -286,8 +266,6 @@ async def lifespan(app: FastAPI):
         cron_runtime=cron_runtime,
         heartbeat_runtime=heartbeat_runtime,
         auth_service=auth_service,
-        user_repo=user_repo,
-        auth_middleware=auth_middleware,
     )
     # 挂载 registries 供 API 路由使用
     app.state.tool_registry = tool_registry
@@ -298,15 +276,22 @@ async def lifespan(app: FastAPI):
     app.state.market_service = market_service
 
     # 注册认证路由
-    auth_router = create_auth_router(
-        auth_service=auth_service,
-        user_repo=user_repo,
-        auth_middleware=auth_middleware,
-        enable_registration=config.get("security.public_registration", False),
-    )
+    auth_router = create_auth_router(auth_service=auth_service)
     app.include_router(auth_router)
 
-    logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled, auth enabled)")
+    # 打印 token 访问 URL
+    server_port = config.get("server.port", 8000)
+    frontend_port = 3000  # 默认前端端口
+    print()
+    print("=" * 60)
+    print("  AgentOS Token Authentication")
+    print(f"  访问地址: http://localhost:{frontend_port}/?token={auth_service.token}")
+    print(f"  API 地址: http://localhost:{server_port}")
+    print("  (token 每次启动重新生成)")
+    print("=" * 60)
+    print()
+
+    logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled, token auth enabled)")
 
     try:
         yield
@@ -351,58 +336,47 @@ async def health_check() -> dict:
     return {"status": "healthy", "timestamp": time.time(), "version": "0.1.0"}
 
 
-async def _verify_auth_if_enabled(authorization: str | None) -> None:
-    """统一的 API 认证检查辅助函数"""
-    if not config.get("security.auth_enabled", False):
+async def _verify_auth(request: Request) -> None:
+    """统一的 API 认证检查（基于 token cookie/query param/header）"""
+    auth_enabled = config.get("security.auth_enabled", False)
+    if not auth_enabled:
         return
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization[7:]
     services: Services = app.state.services
-    try:
-        payload = services.auth_service.verify_token(token, token_type="access")
-        user_id = payload["sub"]
-        user = await services.user_repo.get_user_by_id(user_id)
-        if not user or not user.is_active:
-            raise HTTPException(status_code=403, detail="Invalid or inactive user")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning(f"API authentication failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid token")
+    if not verify_request(request, services.auth_service):
+        raise HTTPException(status_code=401, detail="Invalid or missing token")
 
 
 @app.get("/api/sessions")
-async def list_sessions(authorization: str = Header(None)):
+async def list_sessions(request: Request):
     """获取会话列表（需要认证）"""
-    await _verify_auth_if_enabled(authorization)
+    await _verify_auth(request)
     services: Services = app.state.services
     sessions = await services.repo.list_sessions(limit=50)
     return JSONResponse(content={"sessions": sessions})
 
 
 @app.get("/api/sessions/{session_id}/turns")
-async def get_session_turns(session_id: str, authorization: str = Header(None)):
+async def get_session_turns(session_id: str, request: Request):
     """获取会话的所有轮次（需要认证）"""
-    await _verify_auth_if_enabled(authorization)
+    await _verify_auth(request)
     services: Services = app.state.services
     turns = await services.repo.get_session_turns(session_id)
     return JSONResponse(content={"turns": turns})
 
 
 @app.get("/api/sessions/{session_id}/events")
-async def get_session_events(session_id: str, authorization: str = Header(None)):
+async def get_session_events(session_id: str, request: Request):
     """获取会话的所有事件（需要认证）"""
-    await _verify_auth_if_enabled(authorization)
+    await _verify_auth(request)
     services: Services = app.state.services
     events = await services.repo.get_session_events(session_id)
     return JSONResponse(content={"events": events})
 
 
 @app.get("/api/sessions/{session_id}/messages")
-async def list_session_messages(session_id: str, authorization: str = Header(None)):
+async def list_session_messages(session_id: str, request: Request):
     """获取会话的所有消息（需要认证）"""
-    await _verify_auth_if_enabled(authorization)
+    await _verify_auth(request)
     services: Services = app.state.services
     messages = await services.repo.get_session_messages(session_id)
     return JSONResponse(content={"messages": messages})
@@ -415,30 +389,13 @@ async def websocket_endpoint(websocket: WebSocket):
     gateway = services.gateway
     repo = services.repo
     publisher = services.publisher
-    auth_service = services.auth_service
-    user_repo = services.user_repo
 
-    # v0.6: Token 认证（从查询参数获取）
+    # Token 认证（cookie 或 query param）
     auth_enabled = config.get("security.auth_enabled", False)
     if auth_enabled:
-        token = websocket.query_params.get("token")
-        if not token:
-            logger.warning("WebSocket connection rejected: missing token")
-            await websocket.close(code=1008, reason="Missing authentication token")
-            return
-
-        try:
-            payload = auth_service.verify_token(token, token_type="access")
-            user_id = payload["sub"]
-            user = await user_repo.get_user_by_id(user_id)
-            if not user or not user.is_active:
-                logger.warning(f"WebSocket connection rejected: invalid user (user_id={user_id})")
-                await websocket.close(code=1008, reason="Invalid or inactive user")
-                return
-            logger.info(f"WebSocket authenticated: {user.username} (user_id={user_id})")
-        except Exception as e:
-            logger.warning(f"WebSocket connection rejected: {e}")
-            await websocket.close(code=1008, reason="Invalid token")
+        if not verify_websocket(websocket, services.auth_service):
+            logger.warning("WebSocket connection rejected: invalid or missing token")
+            await websocket.close(code=1008, reason="Invalid or missing token")
             return
 
     await ws_channel.connect(websocket)

@@ -119,6 +119,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 cleanup()
                 return 1
 
+    # 读取后端生成的 token（通过环境变量传递，或从 stdout 解析）
+    # 后端会在启动时打印 token URL，这里也提示用户
     print()
     print("=" * 50)
     print(f"  AgentOS 已启动")
@@ -126,6 +128,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     if frontend_proc:
         print(f"  Dashboard:   http://localhost:{frontend_port}")
     print(f"  CLI 连接:    agentos cli --port {backend_port}")
+    print()
+    print("  注意: 后端日志中包含带 token 的访问 URL")
     print("=" * 50)
     print("按 Ctrl+C 停止所有服务\n")
 
