@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { WsMessage } from '@/types/websocket';
-import { useAuth } from './AuthContext';
 
 interface WebSocketContextValue {
   isConnected: boolean;
@@ -23,17 +22,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(true);
-  const { token, isAuthenticated } = useAuth();
 
   useEffect(() => {
-    // 如果未认证，不建立连接
-    if (!isAuthenticated || !token) {
-      return;
-    }
-
-    // 重置重连标志（cleanup 可能将其设为 false）
-    shouldReconnectRef.current = true;
-
     const connect = () => {
       // 清理之前的连接
       if (wsRef.current) {
@@ -41,9 +31,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        // 在 WebSocket URL 中添加 token 作为查询参数
-        const wsUrlWithToken = `${WS_URL}?token=${encodeURIComponent(token)}`;
-        const ws = new WebSocket(wsUrlWithToken);
+        const ws = new WebSocket(WS_URL);
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -95,7 +83,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         wsRef.current.close();
       }
     };
-  }, [token, isAuthenticated]);
+  }, []);
 
   const value = useMemo<WebSocketContextValue>(
     () => ({

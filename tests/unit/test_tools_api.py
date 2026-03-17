@@ -30,7 +30,6 @@ def app(tmp_path):
 
     app.state.tool_registry = tool_registry
     app.state.config = cfg
-    app.state.agentos_home = str(workspace_dir)
     return app
 
 

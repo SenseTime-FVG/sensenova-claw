@@ -9,7 +9,6 @@ Thumbs.db
 
 # ========== Claude Code ==========
 .claude/
-docs/superpowers/
 
 # ========== Python ==========
 __pycache__/
@@ -37,15 +36,14 @@ agentos/app/web/test-results/
 agentos/app/web/playwright-report/
 
 # ========== 运行时目录 ==========
-.SenseAssistant/
 SenseAssistant/
 archived/
-
-# workspace 运行时目录（已迁移到 ~/.agentos/）
-workspace/
-
-# var/ 运行时数据（已废弃，迁移到 ~/.agentos/data/）
 var/
+
+# workspace 中忽略运行时产物和 skills
+workspace/memory/
+workspace/skills/
+workspace/*.json
 
 *.db
 *.sqlite

@@ -73,7 +73,13 @@ ui.user_input → agent.step_started → llm.call_requested → llm.call_complet
 git clone https://github.com/SenseTime-FVG/agentos.git
 cd agentos
 
-# 一键安装所有依赖（Python + 前端 + Playwright）
+# Python 依赖
+uv sync          # 或 pip install -e .
+
+# 前端依赖
+cd agentos/app/web && npm install && cd -
+
+# 根目录 Playwright（可选，用于前端 e2e 测试）
 npm install
 ```
 

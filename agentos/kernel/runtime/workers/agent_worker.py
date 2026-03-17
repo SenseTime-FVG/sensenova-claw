@@ -199,13 +199,12 @@ class AgentSessionWorker(SessionWorker):
         await self.rt.repo.update_session_activity(self.session_id)
         await self.rt.repo.create_turn(turn_id=turn_id, session_id=self.session_id, user_input=content)
 
-        # v0.5: 首轮加载 per-agent workspace 文件
+        # v0.5: 首轮加载 workspace 文件
         context_files = None
         if self.rt.state_store.is_first_turn(self.session_id):
-            from agentos.platform.config.workspace import load_workspace_files, resolve_agentos_home
-            agentos_home = str(resolve_agentos_home(config))
-            agent_id = self.agent_config.id if self.agent_config else "default"
-            context_files = await load_workspace_files(agentos_home, agent_id=agent_id)
+            from agentos.platform.config.workspace import load_workspace_files
+            workspace_dir = config.get("system.workspace_dir", "./SenseAssistant/workspace")
+            context_files = await load_workspace_files(workspace_dir)
             self.rt.state_store.mark_first_turn_done(self.session_id)
 
         # 从内存或 SQLite 惰性加载历史消息（必须在 persist_message 之前，避免重复）
@@ -312,11 +311,6 @@ class AgentSessionWorker(SessionWorker):
 
         # 如果有工具调用，触发工具执行
         if tool_calls:
-            # 解析 per-agent workdir 注入工具调用事件
-            from agentos.platform.config.workspace import resolve_agent_workdir, resolve_agentos_home
-            agentos_home = str(resolve_agentos_home(config))
-            agent_workdir = resolve_agent_workdir(agentos_home, self.agent_config)
-
             state.pending_tool_calls = {call["id"] for call in tool_calls}
             for call in tool_calls:
                 await self.bus.publish(
@@ -330,7 +324,6 @@ class AgentSessionWorker(SessionWorker):
                             "tool_call_id": call["id"],
                             "tool_name": call["name"],
                             "arguments": call.get("arguments", {}),
-                            "_agent_workdir": agent_workdir,
                         },
                     )
                 )

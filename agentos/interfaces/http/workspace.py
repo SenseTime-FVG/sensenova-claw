@@ -19,8 +19,7 @@ ALLOWED_EXTENSION = ".md"
 
 def _workspace_dir(request: Request) -> Path:
     cfg = request.app.state.config
-    home = getattr(request.app.state, "agentos_home", "") or str(Path.home() / ".agentos")
-    return Path(home)
+    return Path(cfg.get("system.workspace_dir", "./SenseAssistant/workspace"))
 
 
 class FileContent(BaseModel):

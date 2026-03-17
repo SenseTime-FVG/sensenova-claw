@@ -27,13 +27,12 @@ class ContextBuilder:
         skill_registry: SkillRegistry | None = None,
         tool_registry: ToolRegistry | None = None,
         agent_registry: AgentRegistry | None = None,
-        agentos_home: str | None = None,
-        workspace_dir: str | None = None,  # 向后兼容，等同 agentos_home
+        workspace_dir: str | None = None,
     ):
         self.skill_registry = skill_registry
         self.tool_registry = tool_registry
         self.agent_registry = agent_registry
-        self.agentos_home = agentos_home or workspace_dir
+        self.workspace_dir = workspace_dir
 
     def build_messages(
         self,
@@ -72,11 +71,6 @@ class ContextBuilder:
         if delegation_prompt:
             extra = f"{extra}\n\n{delegation_prompt}" if extra else delegation_prompt
 
-        # 解析 per-agent workdir 注入 system prompt
-        from agentos.platform.config.workspace import resolve_agent_workdir
-        home = self.agentos_home or str(resolve_agentos_home_default())
-        effective_workdir = resolve_agent_workdir(home, agent_config)
-
         params = SystemPromptParams(
             base_prompt=base_prompt,
             tool_names=tool_names,
@@ -86,7 +80,7 @@ class ContextBuilder:
             context_files=context_files or [],
             extra_system_prompt=extra,
             runtime_info=self._collect_runtime_info(agent_config),
-            workspace_dir=effective_workdir,
+            workspace_dir=self.workspace_dir,
         )
         system_prompt = build_system_prompt(params)
 
@@ -167,10 +161,3 @@ class ContextBuilder:
             model=model,
             channel=None,  # 由调用方根据场景填充
         )
-
-
-def resolve_agentos_home_default() -> str:
-    """快速获取 agentos_home 默认值（不依赖 config 对象）"""
-    import os
-    from pathlib import Path as _Path
-    return os.environ.get("AGENTOS_HOME", str(_Path.home() / ".agentos"))
