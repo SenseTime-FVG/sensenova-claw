@@ -283,6 +283,51 @@ install_deps() {
   log "项目依赖安装完成"
 }
 
+# ── 步骤 5b: 构建 AGENTOS_HOME 目录结构 ──
+
+setup_home_dir() {
+  info "初始化 AGENTOS_HOME 目录结构..."
+
+  # 创建核心子目录
+  for subdir in agents/default data skills workdir/default db; do
+    mkdir -p "$AGENTOS_HOME/$subdir"
+  done
+
+  local builtin_dir="$APP_DIR/.agentos"
+
+  # 复制预置 agents（不覆盖已有文件）
+  if [ -d "$builtin_dir/agents" ]; then
+    find "$builtin_dir/agents" -mindepth 1 -maxdepth 1 -type d | while read -r agent_dir; do
+      local agent_name
+      agent_name=$(basename "$agent_dir")
+      local target_dir="$AGENTOS_HOME/agents/$agent_name"
+      mkdir -p "$target_dir"
+      find "$agent_dir" -maxdepth 1 -type f | while read -r f; do
+        local target_file="$target_dir/$(basename "$f")"
+        if [ ! -f "$target_file" ]; then
+          cp "$f" "$target_file"
+        fi
+      done
+    done
+    log "预置 Agents 已复制"
+  fi
+
+  # 复制预置 skills（不覆盖已有目录）
+  if [ -d "$builtin_dir/skills" ]; then
+    find "$builtin_dir/skills" -mindepth 1 -maxdepth 1 -type d | while read -r skill_dir; do
+      local skill_name
+      skill_name=$(basename "$skill_dir")
+      local target_dir="$AGENTOS_HOME/skills/$skill_name"
+      if [ ! -d "$target_dir" ]; then
+        cp -r "$skill_dir" "$target_dir"
+      fi
+    done
+    log "预置 Skills 已复制"
+  fi
+
+  log "AGENTOS_HOME 初始化完成: $AGENTOS_HOME"
+}
+
 # ── 步骤 6: 交互式配置 ──
 
 setup_config() {
@@ -436,6 +481,7 @@ main() {
   install_node
   setup_repo
   install_deps
+  setup_home_dir
   setup_config
   register_command
   print_success

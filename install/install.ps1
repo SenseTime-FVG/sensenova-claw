@@ -234,6 +234,49 @@ function Install-Deps {
     Log "项目依赖安装完成"
 }
 
+# ── 步骤 5b: 构建 AGENTOS_HOME 目录结构 ──
+
+function Setup-HomeDir {
+    Info "初始化 AGENTOS_HOME 目录结构..."
+
+    # 创建核心子目录
+    foreach ($subdir in @("agents\default", "data", "skills", "workdir\default", "db")) {
+        New-Item -ItemType Directory -Force -Path "$AGENTOS_HOME\$subdir" | Out-Null
+    }
+
+    $builtinDir = "$APP_DIR\.agentos"
+
+    # 复制预置 agents（不覆盖已有文件）
+    $builtinAgents = "$builtinDir\agents"
+    if (Test-Path $builtinAgents) {
+        Get-ChildItem $builtinAgents -Directory | ForEach-Object {
+            $targetDir = "$AGENTOS_HOME\agents\$($_.Name)"
+            New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+            Get-ChildItem $_.FullName -File | ForEach-Object {
+                $targetFile = "$targetDir\$($_.Name)"
+                if (-not (Test-Path $targetFile)) {
+                    Copy-Item $_.FullName $targetFile
+                }
+            }
+        }
+        Log "预置 Agents 已复制"
+    }
+
+    # 复制预置 skills（不覆盖已有目录）
+    $builtinSkills = "$builtinDir\skills"
+    if (Test-Path $builtinSkills) {
+        Get-ChildItem $builtinSkills -Directory | ForEach-Object {
+            $targetDir = "$AGENTOS_HOME\skills\$($_.Name)"
+            if (-not (Test-Path $targetDir)) {
+                Copy-Item $_.FullName $targetDir -Recurse
+            }
+        }
+        Log "预置 Skills 已复制"
+    }
+
+    Log "AGENTOS_HOME 初始化完成: $AGENTOS_HOME"
+}
+
 # ── 步骤 6: 交互式配置 ──
 
 function Setup-Config {
@@ -377,6 +420,7 @@ function Main {
     Install-Node
     Setup-Repo
     Install-Deps
+    Setup-HomeDir
     Setup-Config
     Register-Command
     Print-Success
