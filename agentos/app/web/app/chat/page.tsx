@@ -285,6 +285,10 @@ function ChatPageInner() {
 
   // ── WebSocket ──
 
+  // 用 ref 保持 handleWsMessage 始终指向最新版本，避免 stale closure
+  const handleWsMessageRef = useRef(handleWsMessage);
+  handleWsMessageRef.current = handleWsMessage;
+
   useEffect(() => {
     // 从 cookie 读取 token（Jupyter-lab 风格认证）
     const cookieMatch = document.cookie.match(/(?:^|; )agentos_token=([^;]*)/);
@@ -301,7 +305,7 @@ function ChatPageInner() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        handleWsMessage(data);
+        handleWsMessageRef.current(data);
       } catch { /* ignore */ }
     };
 
