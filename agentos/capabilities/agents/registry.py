@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from agentos.capabilities.agents.config import AgentConfig
 
 logger = logging.getLogger(__name__)
@@ -83,47 +85,72 @@ class AgentRegistry:
     def load_from_config(self, config_data: dict[str, Any]) -> None:
         """从 config.yml 加载 Agent 配置
 
-        1. 始终从 agent.* 创建 id="default" 的 AgentConfig（向后兼容）
-        2. 加载 agents.* 配置中的额外 Agent
+        新格式：agents 为 id 列表，每个 agent 的配置从 {config_dir}/{id}/config.yml 加载。
+        兼容旧格式：agents 为 dict 时按旧逻辑处理。
+        始终确保 default agent 存在。
         """
         agent_section = config_data.get("agent", {})
-        default = AgentConfig(
-            id="default",
-            name="Default Agent",
-            description="默认 AI Agent",
-            provider=agent_section.get("provider", "openai"),
-            model=agent_section.get("default_model", "gpt-4o-mini"),
-            temperature=agent_section.get("default_temperature", 0.2),
-            system_prompt=agent_section.get("system_prompt", ""),
-        )
-        self.register(default)
+        agents_section = config_data.get("agents", ["default"])
 
-        agents_section = config_data.get("agents", {})
-        for agent_id, agent_dict in agents_section.items():
-            agent = AgentConfig(
-                id=agent_id,
-                name=agent_dict.get("name", agent_id),
-                description=agent_dict.get("description", ""),
-                provider=agent_dict.get("provider", default.provider),
-                model=agent_dict.get("model", default.model),
-                temperature=agent_dict.get("temperature", default.temperature),
-                max_tokens=agent_dict.get("max_tokens"),
-                system_prompt=agent_dict.get("system_prompt", ""),
-                tools=list(agent_dict.get("tools", [])),
-                skills=list(agent_dict.get("skills", [])),
-                workdir=agent_dict.get("workdir", ""),
-                can_delegate_to=list(
-                    agent_dict.get("can_send_message_to", agent_dict.get("can_delegate_to", []))
-                ),
-                max_delegation_depth=agent_dict.get(
-                    "max_send_depth",
-                    agent_dict.get("max_delegation_depth", 3),
-                ),
-                max_pingpong_turns=agent_dict.get("max_pingpong_turns", 10),
-                enabled=agent_dict.get("enabled", True),
-            )
-            self.register(agent)
-            logger.info("Loaded agent from config: %s", agent_id)
+        # 新格式：agents 为 id 列表
+        if isinstance(agents_section, list):
+            for agent_id in agents_section:
+                if not isinstance(agent_id, str):
+                    continue
+                config_file = self._config_dir / agent_id / "config.yml"
+                if config_file.exists():
+                    try:
+                        with config_file.open("r", encoding="utf-8") as f:
+                            agent_dict = yaml.safe_load(f) or {}
+                        agent = self._build_agent_from_dict(agent_id, agent_dict, agent_section)
+                        self.register(agent)
+                        logger.info("Loaded agent from config.yml: %s", agent_id)
+                    except Exception:
+                        logger.exception("Failed to load agent config: %s", config_file)
+                else:
+                    # 配置文件不存在时，使用 agent 段的默认值
+                    agent = self._build_agent_from_dict(agent_id, {}, agent_section)
+                    self.register(agent)
+                    logger.info("Agent '%s' config.yml not found, using defaults", agent_id)
+
+        # 兼容旧格式：agents 为 dict
+        elif isinstance(agents_section, dict):
+            for agent_id, agent_dict in agents_section.items():
+                agent = self._build_agent_from_dict(agent_id, agent_dict, agent_section)
+                self.register(agent)
+                logger.info("Loaded agent from config (legacy): %s", agent_id)
+
+        # 确保 default agent 始终存在
+        if not self.get("default"):
+            default = self._build_agent_from_dict("default", {}, agent_section)
+            self.register(default)
+
+    def _build_agent_from_dict(
+        self, agent_id: str, agent_dict: dict[str, Any], fallback: dict[str, Any]
+    ) -> AgentConfig:
+        """从配置 dict 构建 AgentConfig，缺失字段从 fallback（agent 段）取默认值"""
+        return AgentConfig(
+            id=agent_id,
+            name=agent_dict.get("name", agent_id.replace("-", " ").title() if agent_id != "default" else "Default Agent"),
+            description=agent_dict.get("description", "默认 AI Agent" if agent_id == "default" else ""),
+            provider="",  # provider 现在由 model key 通过 resolve_model 动态解析
+            model=agent_dict.get("model", fallback.get("model", "mock")),
+            temperature=agent_dict.get("temperature", fallback.get("temperature", 0.2)),
+            max_tokens=agent_dict.get("max_tokens"),
+            system_prompt=agent_dict.get("system_prompt", fallback.get("system_prompt", "")),
+            tools=list(agent_dict.get("tools", [])),
+            skills=list(agent_dict.get("skills", [])),
+            workdir=agent_dict.get("workdir", ""),
+            can_delegate_to=list(
+                agent_dict.get("can_send_message_to", agent_dict.get("can_delegate_to", []))
+            ),
+            max_delegation_depth=agent_dict.get(
+                "max_send_depth",
+                agent_dict.get("max_delegation_depth", 3),
+            ),
+            max_pingpong_turns=agent_dict.get("max_pingpong_turns", 10),
+            enabled=agent_dict.get("enabled", True),
+        )
 
     # ── 从磁盘加载 / 持久化 ──────────────────────────
 

@@ -56,19 +56,27 @@ class AgentSessionWorker(SessionWorker):
     # ── 配置读取辅助 ──────────────────────────────────
 
     def _get_provider(self) -> str:
-        if self.agent_config and self.agent_config.provider:
-            return self.agent_config.provider
-        return config.get("agent.provider", "mock")
+        """解析 provider 名称：从 agent_config.model → llm.models → provider"""
+        model_key = self._get_model_key()
+        provider, _ = config.resolve_model(model_key)
+        return provider
 
     def _get_model(self) -> str:
+        """解析实际 model_id（传给 LLM API 的模型名）"""
+        model_key = self._get_model_key()
+        _, model_id = config.resolve_model(model_key)
+        return model_id
+
+    def _get_model_key(self) -> str:
+        """获取 model key（llm.models 中的 key）"""
         if self.agent_config and self.agent_config.model:
             return self.agent_config.model
-        return config.get("agent.default_model")
+        return config.get("agent.model") or config.get("llm.default_model", "mock")
 
     def _get_temperature(self) -> float:
         if self.agent_config:
             return self.agent_config.temperature
-        return config.get("agent.default_temperature", 0.2)
+        return config.get("agent.temperature", 0.2)
 
     def _get_filtered_tools(self) -> list[dict]:
         """根据 Agent 配置过滤可用工具"""

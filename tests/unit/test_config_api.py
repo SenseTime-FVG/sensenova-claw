@@ -17,10 +17,13 @@ def app(tmp_path):
     app.include_router(router)
 
     config_path = tmp_path / "config.yml"
-    # 写入初始配置
     initial = {
-        "llm_providers": {"openai": {"api_key": "sk-xxx"}},
-        "agent": {"provider": "openai", "default_model": "gpt-4o-mini"},
+        "llm": {
+            "providers": {"openai": {"api_key": "sk-xxx"}},
+            "models": {"gpt_4o_mini": {"provider": "openai", "model_id": "gpt-4o-mini"}},
+            "default_model": "gpt_4o_mini",
+        },
+        "agent": {"model": "gpt_4o_mini", "temperature": 0.2},
         "plugins": {},
     }
     config_path.write_text(yaml.dump(initial), encoding="utf-8")
@@ -43,10 +46,10 @@ def test_get_sections(client):
     resp = client.get("/api/config/sections")
     assert resp.status_code == 200
     data = resp.json()
-    assert "llm_providers" in data
+    assert "llm" in data
     assert "agent" in data
     assert "plugins" in data
-    assert data["agent"]["provider"] == "openai"
+    assert data["agent"]["model"] == "gpt_4o_mini"
 
 
 def test_get_sections_has_defaults(client, app):
@@ -54,7 +57,6 @@ def test_get_sections_has_defaults(client, app):
     resp = client.get("/api/config/sections")
     assert resp.status_code == 200
     data = resp.json()
-    # 即使初始 config.yml 中未配 plugins，默认配置会填充
     assert "plugins" in data
 
 
@@ -64,27 +66,26 @@ def test_get_sections_has_defaults(client, app):
 def test_update_sections(client, app):
     """正常更新 agent section"""
     resp = client.put("/api/config/sections", json={
-        "agent": {"provider": "anthropic", "default_model": "claude-3"},
+        "agent": {"model": "claude_opus", "temperature": 0.5},
     })
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "saved"
     assert "sections" in data
-    # 验证 config.yml 被写入
     raw = app.state.config._config_path.read_text(encoding="utf-8")
     written = yaml.safe_load(raw)
-    assert written["agent"]["provider"] == "anthropic"
+    assert written["agent"]["model"] == "claude_opus"
 
 
 def test_update_sections_multiple(client, app):
     """同时更新多个 section"""
     resp = client.put("/api/config/sections", json={
-        "llm_providers": {"anthropic": {"api_key": "sk-yyy"}},
+        "llm": {"providers": {"anthropic": {"api_key": "sk-yyy"}}},
         "plugins": {"search": {"enabled": True}},
     })
     assert resp.status_code == 200
     raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
-    assert "anthropic" in raw["llm_providers"]
+    assert "anthropic" in raw["llm"]["providers"]
     assert raw["plugins"]["search"]["enabled"] is True
 
 
@@ -96,13 +97,12 @@ def test_update_sections_empty_body(client):
 
 def test_update_sections_preserves_other_keys(client, app):
     """更新不会覆盖 config.yml 中已有的其他顶层 key"""
-    # 先手动添加一个额外 key
     raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
     raw["custom_key"] = "keep_me"
     app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
 
     resp = client.put("/api/config/sections", json={
-        "agent": {"provider": "test"},
+        "agent": {"model": "test"},
     })
     assert resp.status_code == 200
     written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))

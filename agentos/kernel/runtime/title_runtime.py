@@ -74,7 +74,7 @@ class TitleRuntime:
             ]
 
             from agentos.platform.config.config import config
-            model = config.get("agent.default_model", "")
+            _, model = config.resolve_model()
             response = await provider.call(model=model, messages=messages, tools=None, temperature=0.7)
             title = response.get("content", "").strip()
 

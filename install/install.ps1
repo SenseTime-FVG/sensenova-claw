@@ -301,42 +301,76 @@ function Setup-Config {
     switch ($provider) {
         "openai" {
             $defaultBaseUrl = "https://api.openai.com/v1"
-            $defaultModel = "gpt-4o-mini"
+            $defaultModelKey = "gpt_4o_mini"
+            $defaultModelId = "gpt-4o-mini"
         }
         "anthropic" {
             $defaultBaseUrl = "https://api.anthropic.com"
-            $defaultModel = "claude-sonnet-4-20250514"
+            $defaultModelKey = "claude_sonnet"
+            $defaultModelId = "claude-sonnet-4-20250514"
         }
         "gemini" {
             $defaultBaseUrl = "https://generativelanguage.googleapis.com"
-            $defaultModel = "gemini-2.5-pro"
+            $defaultModelKey = "gemini_pro"
+            $defaultModelId = "gemini-2.5-pro"
         }
     }
 
     $baseUrl = Prompt-Input "API Base URL" $defaultBaseUrl
-    $model = Prompt-Input "默认模型" $defaultModel
+    $modelKey = Prompt-Input "默认模型 (key)" $defaultModelKey
 
     @"
 # AgentOS 配置文件（由安装脚本生成）
 
 system:
-  workspace_dir: ~/.agentos/workspace
-  database_path: ~/.agentos/db/agentos.db
+  workspace_dir: $AGENTOS_HOME/workspace
+  database_path: $AGENTOS_HOME/db/agentos.db
 
 security:
   auth_enabled: true
 
-llm_providers:
-  ${provider}:
-    api_key: "${apiKey}"
-    base_url: "${baseUrl}"
-    default_model: "${model}"
+llm:
+  providers:
+    ${provider}:
+      api_key: "${apiKey}"
+      base_url: "${baseUrl}"
+      timeout: 60
+      max_retries: 3
+
+  models:
+    ${modelKey}:
+      provider: ${provider}
+      model_id: ${defaultModelId}
+      timeout: 60
+      max_output_tokens: 8192
+
+  default_model: ${modelKey}
 
 agent:
-  provider: ${provider}
-  default_model: ${model}
+  model: ${modelKey}
+  temperature: 0.2
   system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
+
+agents:
+  - default
 "@ | Set-Content $configFile -Encoding UTF8
+
+    # 写入 default agent 配置
+    $agentConfigDir = "$AGENTOS_HOME\agents\default"
+    $agentConfigFile = "$agentConfigDir\config.yml"
+    New-Item -ItemType Directory -Force -Path $agentConfigDir | Out-Null
+    if (-not (Test-Path $agentConfigFile)) {
+        @"
+name: Default Agent
+description: 默认 AI Agent
+model: ${modelKey}
+temperature: 0.2
+system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
+tools: []
+skills: []
+"@ | Set-Content $agentConfigFile -Encoding UTF8
+        Log "Agent 配置已写入 $agentConfigFile"
+    }
 
     Log "配置已写入 $configFile"
 }

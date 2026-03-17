@@ -306,18 +306,6 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
     if body.max_delegation_depth is not None:
         updates["max_delegation_depth"] = body.max_delegation_depth
 
-    # default Agent 的 provider/model/temperature/system_prompt 也同步到全局 config
-    if agent_id == "default":
-        cfg = request.app.state.config
-        if "provider" in updates:
-            cfg.set("agent.provider", updates["provider"])
-        if "model" in updates:
-            cfg.set("agent.default_model", updates["model"])
-        if "temperature" in updates:
-            cfg.set("agent.default_temperature", updates["temperature"])
-        if "system_prompt" in updates:
-            cfg.set("agent.system_prompt", updates["system_prompt"])
-
     updated = registry.update(agent_id, updates)
     logger.info("Agent config updated: %s -> %s", agent_id, list(updates.keys()))
     return _build_agent_detail(updated, request)

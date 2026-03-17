@@ -24,8 +24,8 @@ class EmbeddingService:
         try:
             from openai import OpenAI
 
-            # 优先使用 openai provider 配置，其次使用 anthropic provider 的 base_url
-            provider_cfg = config.get("llm_providers.openai", {})
+            # 优先使用 openai provider 配置
+            provider_cfg = config.get("llm.providers.openai", {})
             api_key = provider_cfg.get("api_key", "")
             base_url = provider_cfg.get("base_url") or None
 

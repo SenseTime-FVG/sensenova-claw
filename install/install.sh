@@ -353,50 +353,83 @@ setup_config() {
   local api_key
   api_key=$(prompt_input "输入 API Key")
 
-  local default_base_url default_model
+  local default_base_url default_model_key default_model_id
   case "$provider" in
     openai)
       default_base_url="https://api.openai.com/v1"
-      default_model="gpt-4o-mini"
+      default_model_key="gpt_4o_mini"
+      default_model_id="gpt-4o-mini"
       ;;
     anthropic)
       default_base_url="https://api.anthropic.com"
-      default_model="claude-sonnet-4-20250514"
+      default_model_key="claude_sonnet"
+      default_model_id="claude-sonnet-4-20250514"
       ;;
     gemini)
       default_base_url="https://generativelanguage.googleapis.com"
-      default_model="gemini-2.5-pro"
+      default_model_key="gemini_pro"
+      default_model_id="gemini-2.5-pro"
       ;;
   esac
 
   local base_url
   base_url=$(prompt_input "API Base URL" "$default_base_url")
 
-  local model
-  model=$(prompt_input "默认模型" "$default_model")
+  local model_key
+  model_key=$(prompt_input "默认模型 (key)" "$default_model_key")
 
-  # 写入配置
+  # 写入主配置
   cat > "$config_file" <<EOF
 # AgentOS 配置文件（由安装脚本生成）
 
 system:
-  workspace_dir: ~/.agentos/workspace
-  database_path: ~/.agentos/db/agentos.db
+  workspace_dir: ${AGENTOS_HOME}/workspace
+  database_path: ${AGENTOS_HOME}/db/agentos.db
 
 security:
   auth_enabled: true
 
-llm_providers:
-  ${provider}:
-    api_key: "${api_key}"
-    base_url: "${base_url}"
-    default_model: "${model}"
+llm:
+  providers:
+    ${provider}:
+      api_key: "${api_key}"
+      base_url: "${base_url}"
+      timeout: 60
+      max_retries: 3
+
+  models:
+    ${model_key}:
+      provider: ${provider}
+      model_id: ${default_model_id}
+      timeout: 60
+      max_output_tokens: 8192
+
+  default_model: ${model_key}
 
 agent:
-  provider: ${provider}
-  default_model: ${model}
+  model: ${model_key}
+  temperature: 0.2
   system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
+
+agents:
+  - default
 EOF
+
+  # 写入 default agent 配置
+  local agent_config="$AGENTOS_HOME/agents/default/config.yml"
+  mkdir -p "$(dirname "$agent_config")"
+  if [ ! -f "$agent_config" ]; then
+    cat > "$agent_config" <<EOF
+name: Default Agent
+description: 默认 AI Agent
+model: ${model_key}
+temperature: 0.2
+system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
+tools: []
+skills: []
+EOF
+    log "Agent 配置已写入 $agent_config"
+  fi
 
   log "配置已写入 $config_file"
 }
