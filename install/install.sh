@@ -421,6 +421,13 @@ main() {
   echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}"
   echo ""
 
+  # 选择安装路径
+  local default_dir="$AGENTOS_HOME"
+  AGENTOS_HOME=$(prompt_input "安装路径" "$default_dir")
+  APP_DIR="$AGENTOS_HOME/app"
+  log "安装到: $AGENTOS_HOME"
+  echo ""
+
   detect_region
   configure_cn_mirrors
   install_uv

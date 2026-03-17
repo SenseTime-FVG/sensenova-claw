@@ -363,6 +363,12 @@ function Main {
     Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host ""
 
+    # 选择安装路径
+    $script:AGENTOS_HOME = Prompt-Input "安装路径" $AGENTOS_HOME
+    $script:APP_DIR = "$AGENTOS_HOME\app"
+    Log "安装到: $AGENTOS_HOME"
+    Write-Host ""
+
     Detect-Region
     Configure-CN-Mirrors
     Install-Uv
