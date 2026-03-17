@@ -44,126 +44,149 @@ function mockAuthAndWebSocket() {
   (window as any).WebSocket = MockWebSocket;
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.route('**/api/auth/me', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        user_id: 'u_e2e',
-        username: 'e2e',
-        email: null,
-        is_active: true,
-        is_admin: true,
-        created_at: Date.now() / 1000,
-        last_login: Date.now() / 1000,
-      }),
+test.describe('ask_user UI（mock websocket）', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          user_id: 'u_e2e',
+          username: 'e2e',
+          email: null,
+          is_active: true,
+          is_admin: true,
+          created_at: Date.now() / 1000,
+          last_login: Date.now() / 1000,
+        }),
+      });
     });
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_e2e',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: 'E2E Session' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/messages', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ messages: [] }),
+      });
+    });
+
+    await page.addInitScript(mockAuthAndWebSocket);
   });
 
-  await page.route('**/api/sessions', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        sessions: [
-          {
-            session_id: 'sess_e2e',
-            created_at: Date.now() / 1000,
-            last_active: Date.now() / 1000,
-            status: 'active',
-            meta: JSON.stringify({ title: 'E2E Session' }),
-          },
-        ],
-      }),
+  test('ask_user 问题应显示弹窗', async ({ page }) => {
+    await page.goto('/chat');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_e2e_1',
+          question: '请选择部署环境',
+          options: ['dev', 'prod'],
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
     });
+
+    await expect(page.getByTestId('ask-user-dialog')).toBeVisible({ timeout: 10000 });
   });
 
-  await page.route('**/api/sessions/*/messages', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ messages: [] }),
+  test('chat 页面可提交 ask_user 回答', async ({ page }) => {
+    await page.goto('/chat');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'session_created',
+        session_id: 'sess_e2e',
+        payload: { created_at: Date.now() / 1000 },
+        timestamp: Date.now() / 1000,
+      });
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_e2e_2',
+          question: '请补充你的部署环境',
+          options: ['dev', 'prod'],
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
     });
+
+    await expect(page.getByTestId('ask-user-dialog')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('chat-input')).toBeDisabled();
+    await page.getByTestId('ask-user-custom-input').fill('staging');
+    await page.getByTestId('ask-user-confirm').click();
+    await expect(page.getByTestId('ask-user-dialog')).not.toBeVisible();
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(parsed.some((msg) => msg.type === 'user_question_answered' && msg.payload?.question_id === 'q_e2e_2')).toBeTruthy();
   });
 
-  await page.addInitScript(mockAuthAndWebSocket);
+  test('session 页面可处理 ask_user', async ({ page }) => {
+    await page.goto('/sessions/sess_e2e');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_e2e_3',
+          question: '请选择功能',
+          options: ['日志', '监控'],
+          multi_select: true,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByTestId('ask-user-dialog')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('current-session-id')).toHaveText('sess_e2e');
+  });
 });
 
-test('ask_user 问题应显示弹窗', async ({ page }) => {
-  await page.goto('/chat');
+test.describe('真实 API ask_user 回归', () => {
+  test.skip(process.env.ENABLE_REAL_API_E2E !== '1', '设置 ENABLE_REAL_API_E2E=1 后执行真实 API 回归');
 
-  await page.evaluate(() => {
-    (window as any).__mockWs.emit({
-      type: 'user_question_asked',
-      session_id: 'sess_e2e',
-      payload: {
-        question_id: 'q_e2e_1',
-        question: '请选择部署环境',
-        options: ['dev', 'prod'],
-        multi_select: false,
-        timeout: 300,
-      },
-      timestamp: Date.now() / 1000,
-    });
+  test('真实 API ask_user 回归', async ({ page }) => {
+    await page.goto('/chat');
+    await expect(page.getByText('已连接')).toBeVisible({ timeout: 30000 });
+
+    await page.getByTestId('chat-input').fill(
+      process.env.ASK_USER_REAL_QUERY || '请先调用 ask_user 工具向我提一个确认问题，然后根据我的回答给出最终建议。'
+    );
+    await page.getByTestId('send-button').click();
+
+    await expect(page.getByTestId('ask-user-dialog')).toBeVisible({ timeout: 120000 });
+    await page.getByTestId('ask-user-custom-input').fill('生产环境，优先稳定');
+    await page.getByTestId('ask-user-confirm').click();
+    await expect(page.getByTestId('ask-user-dialog')).not.toBeVisible({ timeout: 30000 });
+
+    await expect(page.locator('.text-\\[13px\\].text-\\[\\#cccccc\\]').last()).not.toHaveText(/^$/, { timeout: 120000 });
   });
-
-  await expect(page.getByTestId('ask-user-dialog')).toBeVisible({ timeout: 10000 });
-});
-
-test('chat 页面可提交 ask_user 回答', async ({ page }) => {
-  await page.goto('/chat');
-
-  await page.evaluate(() => {
-    (window as any).__mockWs.emit({
-      type: 'session_created',
-      session_id: 'sess_e2e',
-      payload: { created_at: Date.now() / 1000 },
-      timestamp: Date.now() / 1000,
-    });
-    (window as any).__mockWs.emit({
-      type: 'user_question_asked',
-      session_id: 'sess_e2e',
-      payload: {
-        question_id: 'q_e2e_2',
-        question: '请补充你的部署环境',
-        options: ['dev', 'prod'],
-        multi_select: false,
-        timeout: 300,
-      },
-      timestamp: Date.now() / 1000,
-    });
-  });
-
-  await expect(page.getByTestId('ask-user-dialog')).toBeVisible({ timeout: 10000 });
-  await expect(page.getByTestId('chat-input')).toBeDisabled();
-  await page.getByTestId('ask-user-custom-input').fill('staging');
-  await page.getByTestId('ask-user-confirm').click();
-  await expect(page.getByTestId('ask-user-dialog')).not.toBeVisible();
-
-  const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
-  const parsed = sent.map((item) => JSON.parse(item));
-  expect(parsed.some((msg) => msg.type === 'user_question_answered' && msg.payload?.question_id === 'q_e2e_2')).toBeTruthy();
-});
-
-test('session 页面可处理 ask_user', async ({ page }) => {
-  await page.goto('/sessions/sess_e2e');
-
-  await page.evaluate(() => {
-    (window as any).__mockWs.emit({
-      type: 'user_question_asked',
-      session_id: 'sess_e2e',
-      payload: {
-        question_id: 'q_e2e_3',
-        question: '请选择功能',
-        options: ['日志', '监控'],
-        multi_select: true,
-        timeout: 300,
-      },
-      timestamp: Date.now() / 1000,
-    });
-  });
-
-  await expect(page.getByTestId('ask-user-dialog')).toBeVisible({ timeout: 10000 });
-  await expect(page.getByTestId('current-session-id')).toHaveText('sess_e2e');
 });

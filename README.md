@@ -346,6 +346,12 @@ npm run test:web:e2e      # 前端 Playwright e2e
 
 # 跳过慢速测试（真实 API 调用）
 python3 -m pytest tests/ -q -m "not slow"
+
+# ask_user 真实 API 回归（后端事件链）
+./.venv/bin/python tests/e2e/run_ask_user_real_api.py --provider gemini --timeout 120
+
+# ask_user 前端回归脚本（需先安装 Playwright 浏览器与系统依赖）
+cd agentos/app/web && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright test e2e/ask-user.spec.ts --reporter=line
 ```
 
 **测试体系**:
