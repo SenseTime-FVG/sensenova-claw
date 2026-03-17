@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { QuestionDialog } from '@/components/chat/QuestionDialog';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
@@ -31,6 +32,15 @@ interface SessionInfo {
   last_active: number;
   status: string;
   meta: string;
+}
+
+interface PendingQuestion {
+  questionId: string;
+  question: string;
+  options: string[] | null;
+  multiSelect: boolean;
+  timeout: number;
+  createdAt: number;
 }
 
 function parseTitle(meta: string): string {
@@ -176,6 +186,8 @@ export default function SessionDetailPage() {
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
+  const [questionSubmitting, setQuestionSubmitting] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -235,6 +247,8 @@ export default function SessionDetailPage() {
             if (finalResponse) {
               setMessages((prev) => [...prev, { role: 'assistant', content: finalResponse }]);
             }
+            setPendingQuestion(null);
+            setQuestionSubmitting(false);
             setIsTyping(false);
             break;
           }
@@ -243,7 +257,28 @@ export default function SessionDetailPage() {
               ...prev,
               { role: 'assistant', content: `错误: ${data.payload?.message || '未知错误'}` },
             ]);
+            setPendingQuestion(null);
+            setQuestionSubmitting(false);
             setIsTyping(false);
+            break;
+          }
+          case 'user_question_asked': {
+            if (pendingQuestion) {
+              setMessages((prev) => [
+                ...prev,
+                { role: 'assistant', content: '检测到新的问题请求，但当前已有待回答问题。' },
+              ]);
+              break;
+            }
+            setPendingQuestion({
+              questionId: String(data.payload?.question_id || ''),
+              question: String(data.payload?.question || ''),
+              options: Array.isArray(data.payload?.options) ? data.payload.options.map(String) : null,
+              multiSelect: Boolean(data.payload?.multi_select),
+              timeout: Number(data.payload?.timeout || 300),
+              createdAt: Date.now(),
+            });
+            setIsTyping(true);
             break;
           }
         }
@@ -285,7 +320,7 @@ export default function SessionDetailPage() {
 
   const sendMessage = useCallback(() => {
     const content = inputValue.trim();
-    if (!content || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!content || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || pendingQuestion || questionSubmitting) return;
 
     setMessages((prev) => [...prev, { role: 'user', content }]);
     wsRef.current.send(JSON.stringify({
@@ -300,7 +335,26 @@ export default function SessionDetailPage() {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [inputValue, sessionId]);
+  }, [inputValue, sessionId, pendingQuestion, questionSubmitting]);
+
+  const sendQuestionAnswer = useCallback((answer: string | string[] | null, cancelled: boolean) => {
+    if (!pendingQuestion) return;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+    setQuestionSubmitting(true);
+    wsRef.current.send(JSON.stringify({
+      type: 'user_question_answered',
+      session_id: sessionId,
+      payload: {
+        question_id: pendingQuestion.questionId,
+        answer,
+        cancelled,
+      },
+      timestamp: Date.now() / 1000,
+    }));
+    setPendingQuestion(null);
+    setQuestionSubmitting(false);
+  }, [pendingQuestion, sessionId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -331,7 +385,7 @@ export default function SessionDetailPage() {
             <div className="flex-1 min-w-0">
               <h1 className="text-base font-semibold text-[#cccccc] truncate">{title}</h1>
               <div className="flex items-center gap-4 text-xs text-[#858585] mt-1">
-                <span className="font-mono">{sessionId}</span>
+                <span data-testid="current-session-id" className="font-mono">{sessionId}</span>
                 {sessionInfo && (
                   <>
                     <span>{formatTimestamp(sessionInfo.created_at)}</span>
@@ -392,19 +446,21 @@ export default function SessionDetailPage() {
             <div className="flex-1 relative">
               <textarea
                 ref={textareaRef}
+                data-testid="chat-input"
                 value={inputValue}
                 onChange={handleTextareaInput}
                 onKeyDown={handleKeyDown}
                 placeholder={wsConnected ? '输入消息... (Enter 发送, Shift+Enter 换行)' : '等待连接...'}
-                disabled={!wsConnected || isTyping}
+                disabled={!wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
                 rows={1}
                 className="w-full bg-[#3c3c3c] border border-[#5a5a5a] rounded-lg px-4 py-2.5 text-sm text-[#cccccc] placeholder-[#858585] focus:outline-none focus:border-[#007acc] resize-none disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ minHeight: '40px', maxHeight: '120px' }}
               />
             </div>
             <button
+              data-testid="send-button"
               onClick={sendMessage}
-              disabled={!inputValue.trim() || !wsConnected || isTyping}
+              disabled={!inputValue.trim() || !wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
               className="px-4 py-2.5 bg-[#0e639c] text-white rounded-lg hover:bg-[#1177bb] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 shrink-0"
             >
               <Send size={16} />
@@ -412,6 +468,19 @@ export default function SessionDetailPage() {
           </div>
         </div>
       </div>
+      <QuestionDialog
+        open={!!pendingQuestion}
+        questionId={pendingQuestion?.questionId || ''}
+        question={pendingQuestion?.question || ''}
+        options={pendingQuestion?.options || null}
+        multiSelect={pendingQuestion?.multiSelect || false}
+        timeout={pendingQuestion?.timeout || 300}
+        createdAt={pendingQuestion?.createdAt || Date.now()}
+        submitting={questionSubmitting}
+        wsConnected={wsConnected}
+        onSubmit={(answer) => sendQuestionAnswer(answer, false)}
+        onCancel={() => sendQuestionAnswer(null, true)}
+      />
     </DashboardLayout>
   );
 }

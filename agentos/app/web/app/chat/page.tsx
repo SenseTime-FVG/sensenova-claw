@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, ChevronDown, Check } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
+import { QuestionDialog } from '@/components/chat/QuestionDialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
@@ -35,6 +36,15 @@ interface SessionItem {
 }
 
 interface AgentOption { id: string; name: string; description: string; }
+
+interface PendingQuestion {
+  questionId: string;
+  question: string;
+  options: string[] | null;
+  multiSelect: boolean;
+  timeout: number;
+  createdAt: number;
+}
 
 function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -255,6 +265,8 @@ function ChatPageInner() {
   const [loadingSessions, setLoadingSessions] = useState(false);
 
   const [selectedAgent, setSelectedAgent] = useState(initialAgent);
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
+  const [questionSubmitting, setQuestionSubmitting] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -356,6 +368,8 @@ function ChatPageInner() {
       case 'turn_completed': {
         const final = String(payload.final_response || '');
         if (final) addMsg('assistant', final);
+        setPendingQuestion(null);
+        setQuestionSubmitting(false);
         setIsTyping(false);
         break;
       }
@@ -370,11 +384,29 @@ function ChatPageInner() {
       }
       case 'error':
         addMsg('system', `错误: ${payload.message || '未知错误'}`);
+        setPendingQuestion(null);
+        setQuestionSubmitting(false);
         setIsTyping(false);
         break;
       case 'notification': {
         const text = String(payload.text || '');
         if (text) addMsg('system', text);
+        break;
+      }
+      case 'user_question_asked': {
+        if (pendingQuestion) {
+          addMsg('system', '检测到新的问题请求，但当前已有待回答问题。');
+          break;
+        }
+        setPendingQuestion({
+          questionId: String(payload.question_id || ''),
+          question: String(payload.question || ''),
+          options: Array.isArray(payload.options) ? payload.options.map(String) : null,
+          multiSelect: Boolean(payload.multi_select),
+          timeout: Number(payload.timeout || 300),
+          createdAt: Date.now(),
+        });
+        setIsTyping(true);
         break;
       }
     }
@@ -387,6 +419,27 @@ function ChatPageInner() {
   function wsSend(msg: Record<string, unknown>) {
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(msg));
   }
+
+  const sendQuestionAnswer = (answer: string | string[] | null, cancelled: boolean) => {
+    if (!pendingQuestion) return;
+    if (!sessionId) {
+      addMsg('system', '当前会话不存在，无法提交问答结果。');
+      return;
+    }
+    setQuestionSubmitting(true);
+    wsSend({
+      type: 'user_question_answered',
+      session_id: sessionId,
+      payload: {
+        question_id: pendingQuestion.questionId,
+        answer,
+        cancelled,
+      },
+      timestamp: Date.now() / 1000,
+    });
+    setPendingQuestion(null);
+    setQuestionSubmitting(false);
+  };
 
   // ── Sessions ──
 
@@ -432,6 +485,13 @@ function ChatPageInner() {
         } else if (et === 'agent.step_completed') {
           const resp = p.final_response || '';
           if (resp) rebuilt.push({ id: makeId(), role: 'assistant', content: resp, timestamp: Date.now() });
+        } else if (et === 'user.question_asked') {
+          rebuilt.push({
+            id: makeId(),
+            role: 'system',
+            content: `Agent 发起了问题确认：${String(p.question || '')}`,
+            timestamp: Date.now(),
+          });
         }
       }
       setMessages(rebuilt);
@@ -442,6 +502,8 @@ function ChatPageInner() {
     setSessionId(null);
     setMessages([]);
     setIsTyping(false);
+    setPendingQuestion(null);
+    setQuestionSubmitting(false);
     toolCallMapRef.current.clear();
     pendingInputRef.current = null;
   };
@@ -450,7 +512,7 @@ function ChatPageInner() {
 
   const sendMessage = () => {
     const content = inputValue.trim();
-    if (!content || !wsConnected) return;
+    if (!content || !wsConnected || pendingQuestion || questionSubmitting) return;
 
     // 斜杠命令拦截
     if (handleSlashSubmit(content)) {
@@ -570,6 +632,7 @@ function ChatPageInner() {
                 />
                 <textarea
                   ref={textareaRef}
+                  data-testid="chat-input"
                   value={inputValue}
                   onChange={handleInput}
                   onKeyDown={handleKeyDown}
@@ -578,15 +641,16 @@ function ChatPageInner() {
                       ? '输入消息... (Enter 发送, Shift+Enter 换行)'
                       : '等待连接...'
                   }
-                  disabled={!wsConnected || isTyping}
+                  disabled={!wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
                   rows={1}
                   className="w-full bg-[#3c3c3c] border border-[#5a5a5a] rounded-lg px-4 py-2.5 text-sm text-[#cccccc] placeholder-[#858585] focus:outline-none focus:border-[#007acc] resize-none disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ minHeight: '40px', maxHeight: '120px' }}
                 />
               </div>
               <button
+                data-testid="send-button"
                 onClick={sendMessage}
-                disabled={!inputValue.trim() || !wsConnected || isTyping}
+                disabled={!inputValue.trim() || !wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
                 className="px-4 py-2.5 bg-[#0e639c] text-white rounded-lg hover:bg-[#1177bb] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 shrink-0"
               >
                 <Send size={16} />
@@ -601,11 +665,24 @@ function ChatPageInner() {
                 <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
                 {wsConnected ? '已连接' : '未连接'}
               </span>
-              {sessionId && <span className="font-mono">{sessionId}</span>}
+              {sessionId && <span data-testid="current-session-id" className="font-mono">{sessionId}</span>}
             </div>
           </div>
         </div>
       </div>
+      <QuestionDialog
+        open={!!pendingQuestion}
+        questionId={pendingQuestion?.questionId || ''}
+        question={pendingQuestion?.question || ''}
+        options={pendingQuestion?.options || null}
+        multiSelect={pendingQuestion?.multiSelect || false}
+        timeout={pendingQuestion?.timeout || 300}
+        createdAt={pendingQuestion?.createdAt || Date.now()}
+        submitting={questionSubmitting}
+        wsConnected={wsConnected}
+        onSubmit={(answer) => sendQuestionAnswer(answer, false)}
+        onCancel={() => sendQuestionAnswer(null, true)}
+      />
     </DashboardLayout>
   );
 }
