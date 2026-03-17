@@ -196,16 +196,20 @@ class CLIApp:
         if not user_input:
             return None, True
 
-        if options and user_input.isdigit():
+        if options and multi_select:
+            if "," in user_input:
+                indices = [int(x.strip()) - 1 for x in user_input.split(",") if x.strip().isdigit()]
+                selected = [options[i] for i in indices if 0 <= i < len(options)]
+                if selected:
+                    return selected, False
+            if user_input.isdigit():
+                idx = int(user_input) - 1
+                if 0 <= idx < len(options):
+                    return [options[idx]], False
+        elif options and user_input.isdigit():
             idx = int(user_input) - 1
             if 0 <= idx < len(options):
                 return options[idx], False
-
-        if options and multi_select and "," in user_input:
-            indices = [int(x.strip()) - 1 for x in user_input.split(",") if x.strip().isdigit()]
-            selected = [options[i] for i in indices if 0 <= i < len(options)]
-            if selected:
-                return selected, False
 
         return user_input, False
 
