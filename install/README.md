@@ -22,13 +22,15 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.
 
 | 步骤 | 说明 |
 |------|------|
-| 1. 地区检测 | 通过 iping.cc API 判断国内/海外，国内自动配置 npm 和 pip 镜像 |
-| 2. 安装 Python | 通过 [uv](https://docs.astral.sh/uv/) 安装 Python 3.12+（已有则跳过） |
-| 3. 安装 Node.js | 通过 [nvm](https://github.com/nvm-sh/nvm)（Linux/macOS）或 [fnm](https://github.com/Schniz/fnm)（Windows）安装 Node.js 18+（已有则跳过） |
-| 4. 克隆仓库 | 将 AgentOS 克隆到 `~/.agentos/app/`（已存在则更新） |
-| 5. 安装依赖 | `npm install` 自动安装 Node.js 和 Python 依赖 |
-| 6. 交互配置 | 引导选择 LLM 提供商、输入 API Key，生成 `config.yml` |
-| 7. 注册命令 | 注册全局 `agentos` 命令 |
+| 1. 选择安装路径 | 默认 `~/.agentos`，可自定义 |
+| 2. 地区检测 | 通过 iping.cc API 判断国内/海外，国内自动配置 npm 和 pip 镜像 |
+| 3. 安装 Python | 通过 [uv](https://docs.astral.sh/uv/) 安装 Python 3.12+（已有则跳过） |
+| 4. 安装 Node.js | 通过 [nvm](https://github.com/nvm-sh/nvm)（Linux/macOS）或 [fnm](https://github.com/Schniz/fnm)（Windows）安装 Node.js 18+（已有则跳过） |
+| 5. 克隆仓库 | 将 AgentOS 克隆到 `{安装路径}/app/`（已存在则更新） |
+| 6. 安装依赖 | `npm install` 自动安装 Node.js 和 Python 依赖 |
+| 7. 初始化目录 | 创建 AGENTOS_HOME 目录结构，复制预置 agents 和 skills |
+| 8. 交互配置 | 引导选择 LLM 提供商、输入 API Key，自动生成 `config.yml` |
+| 9. 注册命令 | 注册全局 `agentos` 命令 |
 
 ## 安装完成后
 
@@ -47,15 +49,26 @@ agentos cli
 
 ## 目录结构
 
+安装完成后的目录结构：
+
 ```
-~/.agentos/
-├── app/             # AgentOS 程序代码
-│   ├── config.yml   # 配置文件
+~/.agentos/                # AGENTOS_HOME（可自定义）
+├── app/                   # AgentOS 程序代码（git 仓库）
+│   ├── config.yml         # 配置文件（安装时自动生成）
+│   ├── config_example.yml # 配置示例
 │   └── ...
-├── data/            # 数据库
-├── workspace/       # 工作区
-├── agents/          # Agent 配置
-└── skills/          # 已安装的 Skills
+├── agents/                # Agent 配置（预置 + 用户自建）
+│   └── default/           # 默认 Agent
+│       ├── AGENTS.md
+│       └── USER.md
+├── skills/                # Skills（预置 + 用户安装）
+│   ├── pptx/
+│   ├── paddleocr-doc-parsing/
+│   └── ...
+├── data/                  # 数据库
+├── db/                    # SQLite 数据库
+└── workdir/               # Agent 工作目录
+    └── default/
 ```
 
 ## 国内镜像说明
@@ -97,19 +110,28 @@ cd ~/.agentos/app
 npm install
 ```
 
-### 3. 配置
+### 3. 初始化目录
 
-复制示例配置并编辑：
+```bash
+# 复制预置 agents 和 skills
+cp -rn .agentos/agents/* ~/.agentos/agents/
+cp -rn .agentos/skills/* ~/.agentos/skills/
+
+# 创建数据目录
+mkdir -p ~/.agentos/{data,db,workdir/default}
+```
+
+### 4. 配置
 
 ```bash
 cp config_example.yml config.yml
-# 编辑 config.yml，填入 LLM API Key
+# 编辑 config.yml，填入 LLM provider 和 API Key
 ```
 
-### 4. 启动
+### 5. 启动
 
 ```bash
-npm run dev
+agentos run
 # 或
 python3 -m agentos.app.main run
 ```
@@ -119,8 +141,9 @@ python3 -m agentos.app.main run
 | 项目 | 要求 |
 |------|------|
 | 操作系统 | Linux / macOS / Windows 10+ |
-| Python | >= 3.12 |
-| Node.js | >= 18 |
+| Python | >= 3.12（脚本自动安装） |
+| Node.js | >= 18（脚本自动安装） |
+| Git | 任意版本 |
 | 磁盘空间 | >= 500MB |
 | 网络 | 需要访问 GitHub 和 LLM API |
 
@@ -158,6 +181,24 @@ uv python install 3.12  # 手动安装
 ```powershell
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
+
+### Q: 如何更新 AgentOS
+
+```bash
+cd ~/.agentos/app
+git pull origin dev
+npm install
+```
+
+### Q: 如何重新配置 LLM
+
+直接编辑配置文件：
+
+```bash
+vim ~/.agentos/app/config.yml
+```
+
+或重新运行安装脚本（会询问是否覆盖现有配置）。
 
 ### Q: 如何卸载
 
