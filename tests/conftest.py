@@ -2,6 +2,8 @@
 import asyncio
 import sys
 import os
+import shutil
+import uuid
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -53,6 +55,19 @@ def tmp_workspace(tmp_path):
     ws = tmp_path / "workspace"
     ws.mkdir()
     return ws
+
+
+@pytest.fixture
+def tmp_path():
+    """在仓库内创建临时目录，绕开系统 Temp 目录权限问题。"""
+    base = _PROJECT_ROOT / "pytest_tmp"
+    base.mkdir(exist_ok=True)
+    path = base / uuid.uuid4().hex
+    path.mkdir()
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 @pytest.fixture

@@ -222,9 +222,10 @@ class ToolSessionWorker(SessionWorker):
                 await self._publish_tool_result(event, result="用户拒绝执行该工具", success=False)
                 return
 
-        timeout = float(config.get(f"tools.{tool_name}.timeout", 15))
+        default_timeout = 600 if tool_name == "send_message" else 15
+        timeout = float(config.get(f"tools.{tool_name}.timeout", default_timeout))
         if timeout <= 0:
-            timeout = 15
+            timeout = default_timeout
 
         success = True
         error = ""
@@ -235,6 +236,10 @@ class ToolSessionWorker(SessionWorker):
             exec_kwargs["_path_policy"] = self.rt.path_policy
         if self.rt.agent_registry:
             exec_kwargs["_agent_registry"] = self.rt.agent_registry
+        if event.turn_id:
+            exec_kwargs["_turn_id"] = event.turn_id
+        if tool_call_id:
+            exec_kwargs["_tool_call_id"] = tool_call_id
 
         try:
             result = await asyncio.wait_for(

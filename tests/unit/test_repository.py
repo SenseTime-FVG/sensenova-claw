@@ -1,6 +1,8 @@
 """B05: Repository CRUD"""
 import pytest
 
+from agentos.kernel.runtime.message_record import MessageRecord
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -36,6 +38,20 @@ class TestRepository:
         assert len(msgs) == 2
         assert msgs[0]["role"] == "user"
         assert msgs[1]["role"] == "assistant"
+
+    async def test_agent_id_column_set_from_meta(self, test_repo):
+        """create_session 应同时把 agent_id 写入 meta JSON 和 agent_id 列"""
+        await test_repo.create_session("agent_s", meta={"agent_id": "searcher-agent"})
+        sessions = await test_repo.list_sessions()
+        s = next(s for s in sessions if s["session_id"] == "agent_s")
+        assert s["agent_id"] == "searcher-agent"
+
+    async def test_agent_id_column_defaults_to_default(self, test_repo):
+        """未指定 agent_id 的 session 列值应为 'default'"""
+        await test_repo.create_session("plain_s", meta={"title": "hello"})
+        sessions = await test_repo.list_sessions()
+        s = next(s for s in sessions if s["session_id"] == "plain_s")
+        assert s["agent_id"] == "default"
 
     async def test_get_session_meta(self, test_repo):
         await test_repo.create_session("meta_s", meta={"agent_id": "helper", "depth": 2})
@@ -75,3 +91,45 @@ class TestRepository:
 
         await test_repo.delete_cron_job("cj1")
         assert await test_repo.get_cron_job("cj1") is None
+
+    async def test_agent_message_record_crud(self, test_repo):
+        record = MessageRecord(
+            id="msg_1",
+            parent_session_id="parent",
+            parent_turn_id="turn_1",
+            parent_tool_call_id="tool_1",
+            child_session_id="child",
+            target_id="helper",
+            status="running",
+            mode="sync",
+            message="请处理",
+            result=None,
+            error=None,
+            depth=1,
+            pingpong_count=0,
+            created_at=1.0,
+            active_turn_id="turn_child_1",
+            attempt_count=2,
+            max_attempts=3,
+            timeout_seconds=12.5,
+        )
+        await test_repo.save_message_record(record)
+
+        loaded = await test_repo.get_message_record("msg_1")
+        assert loaded is not None
+        assert loaded.target_id == "helper"
+        assert loaded.status == "running"
+        assert loaded.active_turn_id == "turn_child_1"
+        assert loaded.attempt_count == 2
+        assert loaded.max_attempts == 3
+        assert loaded.timeout_seconds == 12.5
+
+        record.status = "completed"
+        record.result = "done"
+        record.completed_at = 2.0
+        await test_repo.update_message_record(record)
+
+        by_child = await test_repo.get_message_record_by_child_session("child")
+        assert by_child is not None
+        assert by_child.result == "done"
+        assert by_child.status == "completed"
