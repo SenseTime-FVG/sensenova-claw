@@ -16,18 +16,24 @@ AgentOS 是基于事件驱动架构的 AI Agent 平台，支持 Web、CLI、TUI 
 ### 开发启动
 
 ```bash
-# 一键启动前后端（推荐）
-npm run dev
+# 一键启动后端 + 前端 dashboard（推荐）
+agentos run
+# 或: npm run dev  /  python3 -m agentos.app.main run
 
-# 单独启动后端
-npm run dev:server
-# 或: python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8000
+# 仅启动后端
+agentos run --no-frontend
+# 或: npm run dev:server
 
 # 单独启动前端
 npm run dev:web
 
-# 启动 TUI 客户端（需后端已运行）
-python3 -m agentos.app.cli.cli_client --port 8000
+# 启动 CLI 客户端（需后端已运行）
+agentos cli
+# 或: python3 -m agentos.app.main cli --port 8000
+
+# 自定义端口
+agentos run --port 9000 --frontend-port 3001
+agentos cli --port 9000
 ```
 
 ### 测试

@@ -546,6 +546,54 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
 
+            # v1.5: 删除会话
+            if msg_type == "delete_session":
+                sid = payload.get("session_id")
+                if sid:
+                    try:
+                        await repo.delete_session_cascade(sid)
+                        ws_channel._session_bindings.pop(sid, None)
+                        await ws_channel.send_json(websocket, {
+                            "type": "session_deleted",
+                            "payload": {"session_id": sid},
+                            "timestamp": time.time(),
+                        })
+                        logger.info(f"Session deleted: {sid}")
+                    except Exception as e:
+                        await ws_channel.send_json(websocket, {
+                            "type": "error",
+                            "payload": {"message": f"删除会话失败: {e}"},
+                            "timestamp": time.time(),
+                        })
+                continue
+
+            # v1.5: 重命名会话
+            if msg_type == "rename_session":
+                sid = payload.get("session_id") or session_id
+                title = payload.get("title", "")
+                if sid and title:
+                    try:
+                        await repo.update_session_title(sid, title)
+                        await ws_channel.send_json(websocket, {
+                            "type": "session_renamed",
+                            "payload": {"session_id": sid, "title": title},
+                            "timestamp": time.time(),
+                        })
+                        logger.info(f"Session renamed: {sid} -> {title}")
+                    except Exception as e:
+                        await ws_channel.send_json(websocket, {
+                            "type": "error",
+                            "payload": {"message": f"重命名会话失败: {e}"},
+                            "timestamp": time.time(),
+                        })
+                else:
+                    await ws_channel.send_json(websocket, {
+                        "type": "error",
+                        "payload": {"message": "需要 session_id 和 title"},
+                        "timestamp": time.time(),
+                    })
+                continue
+
             # v1.4: 列出可用 Agent
             if msg_type == "list_agents":
                 agent_registry = app.state.agent_registry
