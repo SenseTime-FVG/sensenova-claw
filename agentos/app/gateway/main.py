@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -39,18 +39,8 @@ from agentos.capabilities.skills.registry import SkillRegistry
 from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.adapters.plugins import PluginRegistry
 from agentos.platform.security.path_policy import PathPolicy
-from agentos.platform.config.workspace import (
-    ensure_agentos_home,
-    ensure_agent_workspace,
-    resolve_agentos_home,
-)
+from agentos.platform.config.workspace import ensure_workspace
 from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api
-
-# Token 认证模块
-from agentos.platform.security.auth import AuthService
-from agentos.platform.security.middleware import AuthMiddleware
-from agentos.adapters.storage.user_repository import UserRepository
-from agentos.interfaces.http.auth import create_auth_router
 
 logger = logging.getLogger(__name__)
 
@@ -71,33 +61,23 @@ class Services:
     ws_channel: WebSocketChannel
     cron_runtime: CronRuntime
     heartbeat_runtime: HeartbeatRuntime
-    # Token 认证服务
-    auth_service: AuthService
-    user_repo: UserRepository
-    auth_middleware: AuthMiddleware
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
 
-    # 解析 AGENTOS_HOME（默认 ~/.agentos）
-    from agentos.platform.config.config import PROJECT_ROOT
-    agentos_home = resolve_agentos_home(config)
-    await ensure_agentos_home(agentos_home, project_root=PROJECT_ROOT)
-    agentos_home_str = str(agentos_home)
-
-    # 数据库路径：优先配置，否则 {agentos_home}/data/agentos.db
-    db_path = config.get("system.database_path", "")
-    if not db_path:
-        db_path = str(agentos_home / "data" / "agentos.db")
-
-    repo = Repository(db_path=db_path)
+    repo = Repository()
     await repo.init()
 
-    # 路径安全策略：AGENTOS_HOME 为 GREEN zone
+    # 确保 workspace 目录和引导文件存在
+    workspace_dir = config.get("system.workspace_dir", "./workspace")
+    await ensure_workspace(workspace_dir)
+
+    # v1.2: 初始化路径安全策略
+    workspace_path = Path(workspace_dir).expanduser().resolve()
     granted_paths = config.get("system.granted_paths", [])
-    path_policy = PathPolicy(workspace=agentos_home, granted_paths=granted_paths)
+    path_policy = PathPolicy(workspace=workspace_path, granted_paths=granted_paths)
     app.state.path_policy = path_policy
 
     # 会话维护：清理过期会话
@@ -121,9 +101,10 @@ async def lifespan(app: FastAPI):
     state_store = SessionStateStore()
 
     # 初始化 SkillRegistry
-    skills_dir = agentos_home / "skills"
-    state_file = agentos_home / "skills_state.json"
-    builtin_skills_dir = PROJECT_ROOT / ".agentos" / "skills"
+    skills_dir = Path(config.get("system.workspace_dir", ".")) / "skills"
+    state_file = Path(config.get("system.workspace_dir", ".")) / "skills_state.json"
+    from agentos.platform.config.config import PROJECT_ROOT
+    builtin_skills_dir = PROJECT_ROOT / "workspace" / "skills"
     skill_registry = SkillRegistry(
         workspace_dir=skills_dir,
         state_file=state_file,
@@ -142,18 +123,14 @@ async def lifespan(app: FastAPI):
     context_builder = ContextBuilder(
         skill_registry=skill_registry,
         tool_registry=tool_registry,
-        agentos_home=agentos_home_str,
+        workspace_dir=str(workspace_path),
     )
 
     # v1.0: 初始化 AgentRegistry
-    agent_config_dir = agentos_home / "agents"
+    agent_config_dir = Path(config.get("system.workspace_dir", ".")) / "agents"
     agent_registry = AgentRegistry(config_dir=agent_config_dir)
     agent_registry.load_from_config(config.data)
     agent_registry.load_from_dir()
-
-    # 为所有已注册 agent 初始化 per-agent workspace 和 workdir
-    for agent_cfg in agent_registry.list_all():
-        await ensure_agent_workspace(agentos_home_str, agent_cfg.id)
 
     # 将 agent_registry 注入 ContextBuilder（供多 Agent prompt 使用）
     context_builder.agent_registry = agent_registry
@@ -168,11 +145,11 @@ async def lifespan(app: FastAPI):
         from agentos.capabilities.memory.tools import MemorySearchTool
 
         mem_config = MemoryConfig.from_dict(config.data)
-        mem_db_path = repo.db_path.parent / "memory_index.db"
+        db_path = repo.db_path.parent / "memory_index.db"
         memory_manager = MemoryManager(
-            workspace_dir=agentos_home_str,
+            workspace_dir=str(workspace_dir),
             config=mem_config,
-            db_path=mem_db_path,
+            db_path=db_path,
         )
         await memory_manager.sync_index()
 
@@ -182,7 +159,7 @@ async def lifespan(app: FastAPI):
         if mem_config.search.enabled:
             tool_registry.register(MemorySearchTool(memory_manager))
 
-        logger.info("Memory system enabled (home=%s)", agentos_home_str)
+        logger.info("Memory system enabled (workspace=%s)", workspace_dir)
 
     # Runtime 使用 BusRouter（管理者模式）
     agent_runtime = AgentRuntime(
@@ -250,26 +227,6 @@ async def lifespan(app: FastAPI):
     await cron_runtime.start()
     await heartbeat_runtime.start()
 
-    # v0.6: 初始化 Token 认证服务
-    jwt_secret = config.get("security.jwt.secret_key", "")
-    if not jwt_secret or len(jwt_secret) < 32:
-        import secrets as _secrets
-        jwt_secret = _secrets.token_urlsafe(48)
-        logger.warning("JWT_SECRET_KEY 未配置或过短，已自动生成临时密钥（重启后失效，生产环境请在 config.yml 中配置 security.jwt.secret_key）")
-
-    auth_service = AuthService(
-        secret_key=jwt_secret,
-        algorithm=config.get("security.jwt.algorithm", "HS256"),
-        access_token_expire_minutes=int(config.get("security.jwt.access_token_expire_minutes", 60)),
-        refresh_token_expire_days=int(config.get("security.jwt.refresh_token_expire_days", 30)),
-    )
-
-    # 初始化用户仓储
-    user_repo = UserRepository(db_path=str(repo.db_path))
-
-    # 初始化认证中间件
-    auth_middleware = AuthMiddleware(auth_service, user_repo)
-
     app.state.services = Services(
         repo=repo,
         bus=bus,
@@ -285,28 +242,14 @@ async def lifespan(app: FastAPI):
         ws_channel=ws_channel,
         cron_runtime=cron_runtime,
         heartbeat_runtime=heartbeat_runtime,
-        auth_service=auth_service,
-        user_repo=user_repo,
-        auth_middleware=auth_middleware,
     )
     # 挂载 registries 供 API 路由使用
     app.state.tool_registry = tool_registry
     app.state.skill_registry = skill_registry
     app.state.agent_registry = agent_registry
     app.state.config = config
-    app.state.agentos_home = agentos_home_str
     app.state.market_service = market_service
-
-    # 注册认证路由
-    auth_router = create_auth_router(
-        auth_service=auth_service,
-        user_repo=user_repo,
-        auth_middleware=auth_middleware,
-        enable_registration=config.get("security.public_registration", False),
-    )
-    app.include_router(auth_router)
-
-    logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled, auth enabled)")
+    logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled)")
 
     try:
         yield
@@ -351,58 +294,33 @@ async def health_check() -> dict:
     return {"status": "healthy", "timestamp": time.time(), "version": "0.1.0"}
 
 
-async def _verify_auth_if_enabled(authorization: str | None) -> None:
-    """统一的 API 认证检查辅助函数"""
-    if not config.get("security.auth_enabled", False):
-        return
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization[7:]
-    services: Services = app.state.services
-    try:
-        payload = services.auth_service.verify_token(token, token_type="access")
-        user_id = payload["sub"]
-        user = await services.user_repo.get_user_by_id(user_id)
-        if not user or not user.is_active:
-            raise HTTPException(status_code=403, detail="Invalid or inactive user")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning(f"API authentication failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-
 @app.get("/api/sessions")
-async def list_sessions(authorization: str = Header(None)):
-    """获取会话列表（需要认证）"""
-    await _verify_auth_if_enabled(authorization)
+async def list_sessions():
+    """获取会话列表"""
     services: Services = app.state.services
     sessions = await services.repo.list_sessions(limit=50)
     return JSONResponse(content={"sessions": sessions})
 
 
 @app.get("/api/sessions/{session_id}/turns")
-async def get_session_turns(session_id: str, authorization: str = Header(None)):
-    """获取会话的所有轮次（需要认证）"""
-    await _verify_auth_if_enabled(authorization)
+async def get_session_turns(session_id: str):
+    """获取会话的所有轮次"""
     services: Services = app.state.services
     turns = await services.repo.get_session_turns(session_id)
     return JSONResponse(content={"turns": turns})
 
 
 @app.get("/api/sessions/{session_id}/events")
-async def get_session_events(session_id: str, authorization: str = Header(None)):
-    """获取会话的所有事件（需要认证）"""
-    await _verify_auth_if_enabled(authorization)
+async def get_session_events(session_id: str):
+    """获取会话的所有事件"""
     services: Services = app.state.services
     events = await services.repo.get_session_events(session_id)
     return JSONResponse(content={"events": events})
 
 
 @app.get("/api/sessions/{session_id}/messages")
-async def list_session_messages(session_id: str, authorization: str = Header(None)):
-    """获取会话的所有消息（需要认证）"""
-    await _verify_auth_if_enabled(authorization)
+async def list_session_messages(session_id: str):
+    """获取会话的所有消息（用于聊天历史展示）"""
     services: Services = app.state.services
     messages = await services.repo.get_session_messages(session_id)
     return JSONResponse(content={"messages": messages})
@@ -415,31 +333,6 @@ async def websocket_endpoint(websocket: WebSocket):
     gateway = services.gateway
     repo = services.repo
     publisher = services.publisher
-    auth_service = services.auth_service
-    user_repo = services.user_repo
-
-    # v0.6: Token 认证（从查询参数获取）
-    auth_enabled = config.get("security.auth_enabled", False)
-    if auth_enabled:
-        token = websocket.query_params.get("token")
-        if not token:
-            logger.warning("WebSocket connection rejected: missing token")
-            await websocket.close(code=1008, reason="Missing authentication token")
-            return
-
-        try:
-            payload = auth_service.verify_token(token, token_type="access")
-            user_id = payload["sub"]
-            user = await user_repo.get_user_by_id(user_id)
-            if not user or not user.is_active:
-                logger.warning(f"WebSocket connection rejected: invalid user (user_id={user_id})")
-                await websocket.close(code=1008, reason="Invalid or inactive user")
-                return
-            logger.info(f"WebSocket authenticated: {user.username} (user_id={user_id})")
-        except Exception as e:
-            logger.warning(f"WebSocket connection rejected: {e}")
-            await websocket.close(code=1008, reason="Invalid token")
-            return
 
     await ws_channel.connect(websocket)
     logger.info("WebSocket client connected")
@@ -545,54 +438,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 continue
 
-
-            # v1.5: 删除会话
-            if msg_type == "delete_session":
-                sid = payload.get("session_id")
-                if sid:
-                    try:
-                        await repo.delete_session_cascade(sid)
-                        ws_channel._session_bindings.pop(sid, None)
-                        await ws_channel.send_json(websocket, {
-                            "type": "session_deleted",
-                            "payload": {"session_id": sid},
-                            "timestamp": time.time(),
-                        })
-                        logger.info(f"Session deleted: {sid}")
-                    except Exception as e:
-                        await ws_channel.send_json(websocket, {
-                            "type": "error",
-                            "payload": {"message": f"删除会话失败: {e}"},
-                            "timestamp": time.time(),
-                        })
-                continue
-
-            # v1.5: 重命名会话
-            if msg_type == "rename_session":
-                sid = payload.get("session_id") or session_id
-                title = payload.get("title", "")
-                if sid and title:
-                    try:
-                        await repo.update_session_title(sid, title)
-                        await ws_channel.send_json(websocket, {
-                            "type": "session_renamed",
-                            "payload": {"session_id": sid, "title": title},
-                            "timestamp": time.time(),
-                        })
-                        logger.info(f"Session renamed: {sid} -> {title}")
-                    except Exception as e:
-                        await ws_channel.send_json(websocket, {
-                            "type": "error",
-                            "payload": {"message": f"重命名会话失败: {e}"},
-                            "timestamp": time.time(),
-                        })
-                else:
-                    await ws_channel.send_json(websocket, {
-                        "type": "error",
-                        "payload": {"message": "需要 session_id 和 title"},
-                        "timestamp": time.time(),
-                    })
-                continue
 
             # v1.4: 列出可用 Agent
             if msg_type == "list_agents":

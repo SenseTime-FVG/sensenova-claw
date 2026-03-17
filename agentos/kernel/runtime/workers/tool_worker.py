@@ -57,10 +57,9 @@ class ToolSessionWorker(SessionWorker):
             return result
 
         save_dir = config.get("tools.result_truncation.save_dir", "workspace")
-        from agentos.platform.config.workspace import resolve_agentos_home
-        home = resolve_agentos_home(config)
+        workspace_dir = Path(config.get("system.workspace_dir", "./SenseAssistant/workspace"))
         if save_dir == "workspace":
-            base_dir = home
+            base_dir = workspace_dir
         else:
             base_dir = Path(save_dir)
         session_dir = base_dir / self.session_id
@@ -237,9 +236,6 @@ class ToolSessionWorker(SessionWorker):
             exec_kwargs["_path_policy"] = self.rt.path_policy
         if self.rt.agent_registry:
             exec_kwargs["_agent_registry"] = self.rt.agent_registry
-        agent_workdir = event.payload.get("_agent_workdir")
-        if agent_workdir:
-            exec_kwargs["_agent_workdir"] = agent_workdir
         if event.turn_id:
             exec_kwargs["_turn_id"] = event.turn_id
         if tool_call_id:

@@ -29,7 +29,6 @@ class BashCommandTool(Tool):
         from agentos.platform.security.path_policy import PathPolicy, PathVerdict
 
         policy: PathPolicy | None = kwargs.pop("_path_policy", None)
-        agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         command = str(kwargs.get("command", ""))
         cwd_raw = kwargs.get("working_dir")
 
@@ -46,10 +45,9 @@ class BashCommandTool(Tool):
                     }
                 cwd = str(policy.safe_resolve(cwd_raw))
             else:
-                # 优先使用 per-agent workdir，否则回退到全局 workspace
-                cwd = agent_workdir or str(policy.workspace)
+                cwd = str(policy.workspace)    # 默认在 workspace 执行
         else:
-            cwd = cwd_raw or agent_workdir or "."
+            cwd = cwd_raw or "."
 
         def _run() -> dict[str, Any]:
             proc = subprocess.run(
@@ -306,100 +304,3 @@ class GrantPathTool(Tool):
             return {"success": False, "error": str(e)}
 
 
-class ImageSearchTool(Tool):
-    name = "image_search"
-    description = "搜索图片，返回候选图片列表（使用 Serper Images API）"
-    parameters = {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "图片搜索关键词，使用简短的主题词"}
-        },
-        "required": ["query"]
-    }
-
-    async def execute(self, **kwargs: Any) -> Any:
-        from urllib.parse import urlparse
-
-        query = str(kwargs.get("query", "")).strip()
-        if not query:
-            return {"success": False, "error": "query 不能为空"}
-
-        api_key = config.get("tools.image_search.api_key") or config.get("tools.serper_search.api_key", "")
-        if not api_key:
-            return {"success": False, "error": "SERPER_API_KEY 未配置"}
-
-        top_k = config.get("tools.image_search.top_k", 10)
-        timeout = config.get("tools.image_search.timeout", 30)
-
-        # 构建请求 payload
-        payload: dict[str, Any] = {"q": query}
-        if any("\u4E00" <= char <= "\u9FFF" for char in query):
-            payload.update({"gl": "cn", "hl": "zh-cn"})
-        else:
-            payload.update({"gl": "us", "hl": "en"})
-
-        headers = {"X-API-KEY": api_key, "Content-Type": "application/json"}
-
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post("https://google.serper.dev/images", headers=headers, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-
-            raw_items = data.get("images", [])
-            results = []
-            for item in raw_items[:top_k]:
-                if not isinstance(item, dict):
-                    continue
-                image_url = item.get("imageUrl") or item.get("image_url") or item.get("original")
-                if not image_url:
-                    continue
-                source_page = item.get("link") or item.get("sourceUrl") or ""
-                domain = urlparse(source_page).netloc if source_page else ""
-                results.append({
-                    "title": item.get("title", ""),
-                    "image_url": image_url,
-                    "source_page": source_page,
-                    "source_domain": domain,
-                    "thumbnail_url": item.get("thumbnailUrl", ""),
-                    "width": item.get("imageWidth"),
-                    "height": item.get("imageHeight")
-                })
-
-            return {"success": True, "query": query, "top_k": top_k, "results": results}
-        except Exception as e:
-            return {"success": False, "error": f"图片搜索失败: {str(e)}"}
-
-
-class DocSourceTool(Tool):
-    """文档来源工具，自动识别并获取文档内容"""
-
-    name = "doc_source_tool"
-    description = "获取文档内容，自动识别来源（本地文件、飞书、Notion等）"
-    risk_level = ToolRiskLevel.LOW
-    parameters = {
-        "type": "object",
-        "properties": {
-            "url": {"type": "string", "description": "文档路径或链接"},
-        },
-        "required": ["url"],
-    }
-
-    async def execute(self, **kwargs: Any) -> Any:
-        from agentos.adapters.doc_sources import DocSourceRegistry
-
-        url = str(kwargs["url"])
-        adapter = DocSourceRegistry.get_adapter(url)
-
-        if not adapter:
-            return {"success": False, "error": f"不支持的文档来源: {url}"}
-
-        try:
-            content = adapter.fetch(url)
-            return {
-                "success": True,
-                "content": content,
-                "source": adapter.__class__.__name__,
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}

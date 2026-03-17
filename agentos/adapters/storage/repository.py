@@ -134,12 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_cron_runs_job ON cron_runs(job_id);
 
 class Repository:
     def __init__(self, db_path: str | None = None):
-        if not db_path:
-            db_path = config.get("system.database_path", "")
-        if not db_path:
-            from agentos.platform.config.workspace import resolve_agentos_home
-            db_path = str(resolve_agentos_home(config) / "data" / "agentos.db")
-        self.db_path = Path(db_path).expanduser()
+        self.db_path = Path(db_path or config.get("system.database_path", "./SenseAssistant/agentos.db")).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _conn(self) -> sqlite3.Connection:

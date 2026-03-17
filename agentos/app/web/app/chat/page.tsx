@@ -5,8 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, ChevronDown, Check } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
-import { authFetch, API_BASE } from '@/lib/authFetch';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
 interface ToolInfo {
@@ -270,7 +270,7 @@ function ChatPageInner() {
 
   const handleSkillInvoke = async (skillName: string, args: string) => {
     if (!sessionId) return;
-    await authFetch(`${API_BASE}/api/sessions/${sessionId}/skill-invoke`, {
+    await fetch(`${API_BASE}/api/sessions/${sessionId}/skill-invoke`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ skill_name: skillName, arguments: args }),
@@ -286,16 +286,7 @@ function ChatPageInner() {
   // ── WebSocket ──
 
   useEffect(() => {
-    // 获取 token
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-      console.warn('No access token found, WebSocket connection may fail');
-      return;
-    }
-
-    // 在 WebSocket URL 中添加 token
-    const wsUrlWithToken = `${WS_URL}?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(wsUrlWithToken);
+    const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
     ws.onopen = () => setWsConnected(true);
     ws.onclose = () => setWsConnected(false);
@@ -393,7 +384,8 @@ function ChatPageInner() {
   const loadSessionList = async () => {
     setLoadingSessions(true);
     try {
-      const d = await authFetch(`${API_BASE}/api/sessions`).then(res => res.json());
+      const res = await fetch(`${API_BASE}/api/sessions`);
+      const d = await res.json();
       setSessions(d.sessions || []);
     } catch { /* ignore */ }
     finally { setLoadingSessions(false); }
@@ -407,7 +399,8 @@ function ChatPageInner() {
     setIsTyping(false);
     toolCallMapRef.current.clear();
     try {
-      const d = await authFetch(`${API_BASE}/api/sessions/${sid}/events`).then(res => res.json());
+      const res = await fetch(`${API_BASE}/api/sessions/${sid}/events`);
+      const d = await res.json();
       const events = (d.events || []) as Record<string, unknown>[];
       const rebuilt: ChatMessage[] = [];
       const tMap = new Map<string, string>();

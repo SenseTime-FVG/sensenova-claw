@@ -3,9 +3,8 @@
   "private": true,
   "version": "0.5.0",
   "scripts": {
-    "postinstall": "bash ./scripts/postinstall.sh",
-    "dev": "python3 -m agentos.app.main run",
-    "dev:server": "python3 -m agentos.app.main run --no-frontend",
+    "dev": "bash ./scripts/dev.sh",
+    "dev:server": "python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8000",
     "dev:web": "cd agentos/app/web && npm run dev",
     "test": "python3 -m pytest tests/ -q",
     "test:unit": "python3 -m pytest tests/unit/ -q",

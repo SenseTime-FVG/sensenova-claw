@@ -11,9 +11,9 @@ def setup_logging() -> None:
     level_name = str(config.get("system.log_level", "DEBUG")).upper()
     level = getattr(logging, level_name, logging.DEBUG)
 
-    from agentos.platform.config.workspace import resolve_agentos_home
-    home = resolve_agentos_home(config)
-    log_dir = home / "logs"
+    workspace = Path(config.get("system.workspace_dir", "./SenseAssistant/workspace")).expanduser()
+    root_dir = workspace.parent
+    log_dir = root_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(filename)s | %(message)s")

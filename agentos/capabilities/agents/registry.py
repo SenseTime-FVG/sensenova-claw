@@ -49,12 +49,7 @@ class AgentRegistry:
         agent = self._agents.pop(agent_id, None)
         if agent is None:
             return False
-        # 删除 agent 目录（新格式）
-        agent_dir = self._config_dir / agent_id
-        if agent_dir.is_dir():
-            import shutil
-            shutil.rmtree(agent_dir)
-        # 兼容删除旧格式扁平文件
+        # 删除持久化文件
         fp = self._config_dir / f"{agent_id}.json"
         if fp.exists():
             fp.unlink()
@@ -111,7 +106,6 @@ class AgentRegistry:
                 system_prompt=agent_dict.get("system_prompt", ""),
                 tools=list(agent_dict.get("tools", [])),
                 skills=list(agent_dict.get("skills", [])),
-                workdir=agent_dict.get("workdir", ""),
                 can_delegate_to=list(
                     agent_dict.get("can_send_message_to", agent_dict.get("can_delegate_to", []))
                 ),
@@ -128,42 +122,22 @@ class AgentRegistry:
     # ── 从磁盘加载 / 持久化 ──────────────────────────
 
     def load_from_dir(self) -> None:
-        """从持久化目录加载 Agent 配置。
-
-        优先读取 agents/{id}/config.json（新格式），
-        同时兼容旧的 agents/{id}.json 扁平文件。
-        """
+        """从持久化目录加载 Agent 配置（JSON 文件）"""
         if not self._config_dir.exists():
             return
-        # 新格式：子目录下的 config.json
-        for agent_dir in self._config_dir.iterdir():
-            if agent_dir.is_dir():
-                fp = agent_dir / "config.json"
-                if fp.exists():
-                    try:
-                        data = json.loads(fp.read_text(encoding="utf-8"))
-                        agent = AgentConfig.from_dict(data)
-                        self.register(agent)
-                        logger.info("Loaded agent from dir: %s", agent_dir.name)
-                    except Exception:
-                        logger.exception("Failed to load agent from %s", fp)
-        # 向后兼容：扁平 JSON 文件
         for fp in self._config_dir.glob("*.json"):
             try:
                 data = json.loads(fp.read_text(encoding="utf-8"))
-                agent_id = data.get("id", fp.stem)
-                if agent_id not in self._agents:
-                    agent = AgentConfig.from_dict(data)
-                    self.register(agent)
-                    logger.info("Loaded agent from legacy file: %s", fp.name)
+                agent = AgentConfig.from_dict(data)
+                self.register(agent)
+                logger.info("Loaded agent from file: %s", fp.name)
             except Exception:
                 logger.exception("Failed to load agent from %s", fp)
 
     def save(self, agent: AgentConfig) -> None:
-        """持久化 Agent 配置到磁盘（agents/{id}/config.json）"""
-        agent_dir = self._config_dir / agent.id
-        agent_dir.mkdir(parents=True, exist_ok=True)
-        fp = agent_dir / "config.json"
+        """持久化 Agent 配置到磁盘"""
+        self._config_dir.mkdir(parents=True, exist_ok=True)
+        fp = self._config_dir / f"{agent.id}.json"
         fp.write_text(
             json.dumps(agent.to_dict(), indent=2, ensure_ascii=False),
             encoding="utf-8",

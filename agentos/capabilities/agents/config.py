@@ -28,7 +28,6 @@ class AgentConfig:
     system_prompt: str = ""                           # 系统提示词
     tools: list[str] = field(default_factory=list)    # 允许使用的工具列表（空 = 全部）
     skills: list[str] = field(default_factory=list)   # 允许使用的 Skills 列表（空 = 全部）
-    workdir: str = ""                                 # 工作目录（空=运行时解析为 workspace/workdir/{id}）
 
     # 委托配置
     can_delegate_to: list[str] = field(default_factory=list)   # 可委托的 Agent ID 列表（空 = 全部）
@@ -53,7 +52,6 @@ class AgentConfig:
             "system_prompt": self.system_prompt,
             "tools": list(self.tools),
             "skills": list(self.skills),
-            "workdir": self.workdir,
             "can_delegate_to": list(self.can_delegate_to),
             "max_delegation_depth": self.max_delegation_depth,
             "max_pingpong_turns": self.max_pingpong_turns,
@@ -76,7 +74,6 @@ class AgentConfig:
             system_prompt=data.get("system_prompt", ""),
             tools=list(data.get("tools", [])),
             skills=list(data.get("skills", [])),
-            workdir=data.get("workdir", ""),
             can_delegate_to=list(
                 data.get("can_send_message_to", data.get("can_delegate_to", []))
             ),

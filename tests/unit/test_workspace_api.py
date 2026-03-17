@@ -31,7 +31,6 @@ def app(tmp_path):
     cfg.set("system.workspace_dir", str(ws_dir))
 
     app.state.config = cfg
-    app.state.agentos_home = str(ws_dir)
     return app
 
 
@@ -62,7 +61,7 @@ def test_list_workspace_files(client):
 
 def test_list_workspace_files_dir_not_exists(client, app):
     """workspace 目录不存在时返回空列表"""
-    app.state.agentos_home = "/nonexistent/path"
+    app.state.config.set("system.workspace_dir", "/nonexistent/path")
     resp = client.get("/api/workspace/files")
     assert resp.status_code == 200
     assert resp.json() == []

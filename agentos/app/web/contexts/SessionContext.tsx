@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import type { Message, ToolInfo } from '@/types/message';
-import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface SessionContextValue {
   sessionId: string | null;
@@ -205,7 +204,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setPendingUserInput(null);
 
         // 从 events 重建完整历史
-        authFetch(`${API_BASE}/api/sessions/${newSessionId}/events`)
+        fetch(`http://localhost:8000/api/sessions/${newSessionId}/events`)
           .then((res) => res.json())
           .then((data) => {
             const events = data.events || [];
