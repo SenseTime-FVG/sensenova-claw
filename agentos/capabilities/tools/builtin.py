@@ -29,6 +29,7 @@ class BashCommandTool(Tool):
         from agentos.platform.security.path_policy import PathPolicy, PathVerdict
 
         policy: PathPolicy | None = kwargs.pop("_path_policy", None)
+        agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         command = str(kwargs.get("command", ""))
         cwd_raw = kwargs.get("working_dir")
 
@@ -45,9 +46,10 @@ class BashCommandTool(Tool):
                     }
                 cwd = str(policy.safe_resolve(cwd_raw))
             else:
-                cwd = str(policy.workspace)    # 默认在 workspace 执行
+                # 优先使用 per-agent workdir，否则回退到全局 workspace
+                cwd = agent_workdir or str(policy.workspace)
         else:
-            cwd = cwd_raw or "."
+            cwd = cwd_raw or agent_workdir or "."
 
         def _run() -> dict[str, Any]:
             proc = subprocess.run(

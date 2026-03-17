@@ -17,8 +17,8 @@ router = APIRouter(prefix="/api/tools", tags=["tools"])
 
 def _prefs_path(request: Request) -> Path:
     cfg = request.app.state.config
-    ws = Path(cfg.get("system.workspace_dir", "./SenseAssistant/workspace"))
-    return ws / ".agent_preferences.json"
+    home = Path(getattr(request.app.state, "agentos_home", "") or str(Path.home() / ".agentos"))
+    return home / ".agent_preferences.json"
 
 
 def _load_prefs(request: Request) -> dict:

@@ -36,8 +36,8 @@ def _get_agent_registry(request: Request):
 
 def _prefs_path(request: Request) -> Path:
     cfg = request.app.state.config
-    ws = Path(cfg.get("system.workspace_dir", "./SenseAssistant/workspace"))
-    return ws / ".agent_preferences.json"
+    home = Path(getattr(request.app.state, "agentos_home", "") or str(Path.home() / ".agentos"))
+    return home / ".agent_preferences.json"
 
 
 def _load_prefs(request: Request) -> dict:
@@ -264,6 +264,12 @@ async def create_agent(body: AgentCreate, request: Request):
     )
     registry.register(agent)
     registry.save(agent)
+
+    # 初始化 per-agent workspace 目录（AGENTS.md / USER.md + workdir）
+    from agentos.platform.config.workspace import ensure_agent_workspace
+    agentos_home = getattr(request.app.state, "agentos_home", "") or str(Path.home() / ".agentos")
+    await ensure_agent_workspace(agentos_home, agent.id)
+
     logger.info("Created agent: %s", agent.id)
     return _build_agent_detail(agent, request)
 
