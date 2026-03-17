@@ -401,3 +401,9 @@ class DocSourceTool(Tool):
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+
+# 注册 ask_user 工具
+from agentos.capabilities.tools.ask_user_tool import AskUserTool
+
+ask_user_tool = AskUserTool()

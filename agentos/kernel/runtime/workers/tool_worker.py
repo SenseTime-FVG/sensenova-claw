@@ -18,6 +18,7 @@ from agentos.kernel.events.types import (
     TOOL_CALL_STARTED,
     TOOL_CONFIRMATION_REQUESTED,
     TOOL_CONFIRMATION_RESPONSE,
+    USER_QUESTION_ANSWERED,
 )
 from agentos.capabilities.tools.base import Tool
 from agentos.kernel.runtime.workers.base import SessionWorker
@@ -34,17 +35,17 @@ class ToolSessionWorker(SessionWorker):
     def __init__(self, session_id: str, private_bus: PrivateEventBus, runtime: ToolRuntime):
         super().__init__(session_id, private_bus)
         self.rt = runtime
-        # 挂起中的确认请求：tool_call_id → asyncio.Event
         self._pending_confirmations: dict[str, asyncio.Event] = {}
-        # 确认结果缓存：tool_call_id → bool
         self._confirmation_results: dict[str, bool] = {}
+        self._pending_questions: dict[str, asyncio.Future] = {}
 
     async def _handle(self, event: EventEnvelope) -> None:
         if event.type == TOOL_CALL_REQUESTED:
-            # 保留并发执行：每个工具调用独立 task
             asyncio.create_task(self._handle_tool_requested(event))
         elif event.type == TOOL_CONFIRMATION_RESPONSE:
             await self._handle_confirmation_response(event)
+        elif event.type == USER_QUESTION_ANSWERED:
+            await self._handle_question_answered(event)
 
     def _truncate_result(self, result: any, tool_call_id: str) -> any:
         """Token 截断：统一控制传给 LLM 的结果长度"""
@@ -241,7 +242,10 @@ class ToolSessionWorker(SessionWorker):
                 tool.execute(**exec_kwargs, _session_id=event.session_id),
                 timeout=timeout,
             )
-            result = self._truncate_result(result, tool_call_id)
+            if isinstance(result, dict) and result.get("_ask_user"):
+                result = await self._handle_ask_user(result, tool_call_id, event)
+            else:
+                result = self._truncate_result(result, tool_call_id)
         except Exception as exc:  # noqa: BLE001
             success = False
             error = str(exc) or f"{type(exc).__name__}"
@@ -295,3 +299,58 @@ class ToolSessionWorker(SessionWorker):
                 },
             )
         )
+
+    async def _handle_ask_user(self, params: dict, tool_call_id: str, event: EventEnvelope) -> dict:
+        from agentos.kernel.events.types import USER_QUESTION_ASKED
+
+        question_id = str(uuid.uuid4())
+        timeout = config.get("tools.ask_user.timeout", 300)
+
+        if self._pending_questions:
+            return {"success": False, "error": "已有待回答问题"}
+
+        future = asyncio.Future()
+        self._pending_questions[question_id] = future
+
+        await self.bus.publish(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=event.session_id,
+                turn_id=event.turn_id,
+                trace_id=tool_call_id,
+                source="tool_runtime",
+                payload={
+                    "question_id": question_id,
+                    "question": params["question"],
+                    "options": params.get("options"),
+                    "multi_select": params.get("multi_select", False),
+                    "timeout": timeout,
+                },
+            )
+        )
+
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except asyncio.TimeoutError:
+            return {"success": False, "error": f"用户未在 {timeout} 秒内回答"}
+        finally:
+            self._pending_questions.pop(question_id, None)
+
+    async def _handle_question_answered(self, event: EventEnvelope) -> None:
+        question_id = event.payload.get("question_id")
+        future = self._pending_questions.get(question_id)
+
+        if not future or future.done():
+            return
+
+        if event.payload.get("cancelled"):
+            future.set_result({"success": False, "error": "用户取消了回答"})
+        else:
+            future.set_result({"success": True, "answer": event.payload.get("answer")})
+
+    async def stop(self) -> None:
+        for future in self._pending_questions.values():
+            if not future.done():
+                future.cancel()
+        self._pending_questions.clear()
+        await super().stop()

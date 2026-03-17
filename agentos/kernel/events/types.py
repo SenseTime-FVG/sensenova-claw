@@ -49,3 +49,7 @@ AGENT_DELEGATE_REQUESTED = "agent.delegate_requested"
 AGENT_DELEGATE_STARTED = "agent.delegate_started"
 AGENT_DELEGATE_COMPLETED = "agent.delegate_completed"
 AGENT_DELEGATE_FAILED = "agent.delegate_failed"
+
+# 用户问答事件
+USER_QUESTION_ASKED = "user.question_asked"
+USER_QUESTION_ANSWERED = "user.question_answered"
