@@ -158,6 +158,23 @@ class AgentCreate(BaseModel):
 # ── 路由 ──────────────────────────────────────────────
 
 
+def _resolve_agent_id(session: dict[str, Any]) -> str:
+    """从 session 记录中解析 agent_id（优先用列，回退 meta JSON）"""
+    aid = session.get("agent_id")
+    if aid and aid != "default":
+        return aid
+    meta_str = session.get("meta")
+    if meta_str:
+        try:
+            meta = json.loads(meta_str) if isinstance(meta_str, str) else meta_str
+            meta_aid = meta.get("agent_id")
+            if meta_aid:
+                return meta_aid
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass
+    return aid or "default"
+
+
 @router.get("")
 async def list_agents(request: Request):
     """获取所有 Agents"""
@@ -169,8 +186,8 @@ async def list_agents(request: Request):
     for agent_cfg in registry.list_all():
         agent = _build_agent_detail(agent_cfg, request)
 
-        # 统计该 Agent 的会话数
-        agent_sessions = [s for s in sessions if (s.get("agent_id") or "default") == agent_cfg.id]
+        # 统计该 Agent 的会话数（兼容 agent_id 列与 meta JSON）
+        agent_sessions = [s for s in sessions if _resolve_agent_id(s) == agent_cfg.id]
         agent["sessionCount"] = len(agent_sessions)
 
         if agent_sessions:
@@ -204,7 +221,7 @@ async def get_agent(agent_id: str, request: Request):
     agent = _build_agent_detail(agent_cfg, request)
 
     sessions = await services.repo.list_sessions(limit=9999)
-    agent_sessions = [s for s in sessions if (s.get("agent_id") or "default") == agent_id]
+    agent_sessions = [s for s in sessions if _resolve_agent_id(s) == agent_id]
     agent["sessionCount"] = len(agent_sessions)
     agent["sessions"] = [
         {

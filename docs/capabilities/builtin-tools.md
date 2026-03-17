@@ -13,7 +13,7 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 | `write_file` | 写入文本文件 | MEDIUM | builtin.py |
 | `grant_path` | 授权目录访问权限 | HIGH | builtin.py |
 | `create_agent` | 创建新 Agent 配置 | MEDIUM | orchestration.py |
-| `delegate` | 委托任务给其他 Agent | MEDIUM | delegate_tool.py |
+| `send_message` | 向其他 Agent 发送消息或任务 | MEDIUM | send_message_tool.py |
 
 ## bash_command
 
@@ -222,7 +222,7 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 
 ## create_agent
 
-在对话中动态创建新的 Agent 配置。创建后 Agent 立即可用，可在后续对话中通过委托机制调用。
+在对话中动态创建新的 Agent 配置。创建后 Agent 立即可用，可在后续对话中通过 `send_message` 调用。
 
 **风险等级**：MEDIUM
 
@@ -238,7 +238,7 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 | `model` | string | 否 | 模型名称（如 `gpt-4o-mini`），留空继承默认 |
 | `temperature` | number | 否 | 温度参数（0-2），默认 0.2 |
 | `tools` | array[string] | 否 | 允许使用的工具列表，空数组 = 全部 |
-| `can_delegate_to` | array[string] | 否 | 可委托的目标 Agent ID 列表，空数组 = 全部 |
+| `can_send_message_to` | array[string] | 否 | 可发送消息的目标 Agent ID 列表，空数组 = 全部 |
 
 **返回值**：
 
@@ -249,7 +249,7 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
   "name": "研究助手",
   "provider": "openai",
   "model": "gpt-4o-mini",
-  "message": "Agent '研究助手' (id=research-agent) 已创建成功，可在委托或新会话中使用"
+  "message": "Agent '研究助手' (id=research-agent) 已创建成功，可通过 send_message 或新会话使用"
 }
 ```
 
@@ -258,9 +258,9 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 - 创建后同时持久化到 `workspace/agents/{id}.json`
 - 若 `id` 已存在，返回错误
 
-## delegate
+## send_message
 
-将子任务委托给另一个 Agent 处理。对调用方（LLM）表现为同步工具调用，内部通过事件系统异步执行。
+向另一个 Agent 发送消息、任务或追问。支持同步等待结果，也支持异步回传。
 
 **风险等级**：MEDIUM
 
@@ -269,28 +269,30 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `target_agent` | string | 是 | 目标 Agent 的 ID |
-| `task` | string | 是 | 要委托的任务描述 |
-| `context` | string | 否 | 传递给目标 Agent 的上下文信息 |
+| `message` | string | 是 | 要发送的消息或任务内容 |
+| `session_id` | string | 否 | 已有子会话 ID，用于继续与目标 Agent 的 ping-pong 对话 |
+| `mode` | string | 否 | `sync` 或 `async`，默认 `sync` |
+| `timeout_seconds` | number | 否 | 整条消息链路的总超时秒数 |
+| `max_retries` | integer | 否 | 自动重试次数 |
 
 **返回值**：
 
 ```json
 {
-  "success": true,
   "result": "目标 Agent 的最终响应内容"
 }
 ```
 
 **内部机制**：
-1. 验证目标 Agent 存在且可委托
-2. 检查委托深度（防止无限递归，默认最大 3 层）
-3. 创建子 session（`delegate_{random_id}`），绑定目标 Agent 配置
-4. 向子 session 发布 `ui.user_input` 事件
-5. 监听子 session 的 `agent.step_completed` 事件
-6. 返回子 Agent 的最终响应
-7. 超时：默认 300 秒
+1. 验证目标 Agent 存在且当前 Agent 允许向其发送消息
+2. 检查消息深度、循环链路和可选的 `session_id` 复用是否合法
+3. 发布 `agent.message_requested` 事件
+4. 由 `AgentMessageCoordinator` 创建或复用子 session
+5. `sync` 模式等待 `agent.message_completed / agent.message_failed`
+6. `async` 模式立即返回，由父 session 后续消费结果
+7. 支持总超时、取消传播和失败自动重试
 
 **错误情况**：
 - 目标 Agent 不存在：`Agent '{id}' not found`
-- 超过最大委托深度：`Maximum delegation depth exceeded`
-- 子 Agent 执行超时：`Delegation timed out after 300s`
+- 超过最大消息深度：`当前已达到最大消息传递深度`
+- 子 Agent 链路超时：`发送失败：{agent} 在 {timeout} 秒内未完成处理`

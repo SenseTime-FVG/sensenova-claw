@@ -3,7 +3,7 @@
 职责：
 1. 管理 Agent 配置的 CRUD
 2. 从 config.yml 和持久化 JSON 文件加载 Agent 配置
-3. 提供 Agent 发现机制（供 DelegateTool 使用）
+3. 提供 Agent 发现机制（供多 Agent 工具使用）
 
 不做：
 - 不管理 Agent 实例的生命周期（那是 AgentRuntime 的事）
@@ -55,19 +55,23 @@ class AgentRegistry:
             fp.unlink()
         return True
 
-    # ── 委托发现 ──────────────────────────────────────
+    # ── Agent 发现 ───────────────────────────────────
 
-    def get_delegatable(self, from_agent_id: str) -> list[AgentConfig]:
-        """获取某个 Agent 可以委托的目标 Agent 列表"""
+    def get_sendable(self, from_agent_id: str) -> list[AgentConfig]:
+        """获取某个 Agent 可以发送消息的目标 Agent 列表"""
         source = self._agents.get(from_agent_id)
         if not source:
             return []
-        if not source.can_delegate_to:
-            # 空列表 = 可以委托给所有其他已启用 Agent
+        if not source.can_send_message_to:
+            # 空列表 = 可以向所有其他已启用 Agent 发送消息
             return [a for a in self._agents.values()
                     if a.id != from_agent_id and a.enabled]
-        return [self._agents[aid] for aid in source.can_delegate_to
+        return [self._agents[aid] for aid in source.can_send_message_to
                 if aid in self._agents and self._agents[aid].enabled]
+
+    def get_delegatable(self, from_agent_id: str) -> list[AgentConfig]:
+        """兼容旧命名：内部复用 get_sendable。"""
+        return self.get_sendable(from_agent_id)
 
     # ── 从 config.yml 加载 ────────────────────────────
 
@@ -102,8 +106,14 @@ class AgentRegistry:
                 system_prompt=agent_dict.get("system_prompt", ""),
                 tools=list(agent_dict.get("tools", [])),
                 skills=list(agent_dict.get("skills", [])),
-                can_delegate_to=list(agent_dict.get("can_delegate_to", [])),
-                max_delegation_depth=agent_dict.get("max_delegation_depth", 3),
+                can_delegate_to=list(
+                    agent_dict.get("can_send_message_to", agent_dict.get("can_delegate_to", []))
+                ),
+                max_delegation_depth=agent_dict.get(
+                    "max_send_depth",
+                    agent_dict.get("max_delegation_depth", 3),
+                ),
+                max_pingpong_turns=agent_dict.get("max_pingpong_turns", 10),
                 enabled=agent_dict.get("enabled", True),
             )
             self.register(agent)

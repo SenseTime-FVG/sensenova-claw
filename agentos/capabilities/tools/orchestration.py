@@ -21,7 +21,7 @@ class CreateAgentTool(Tool):
     name = "create_agent"
     description = (
         "创建一个新的 AI Agent。可以指定名称、描述、模型、系统提示词等参数。"
-        "创建后 Agent 立即可用，可在后续对话中通过委托机制调用。"
+        "创建后 Agent 立即可用，可在后续对话中通过 send_message 调用。"
     )
     risk_level = ToolRiskLevel.MEDIUM
     parameters = {
@@ -60,10 +60,10 @@ class CreateAgentTool(Tool):
                 "items": {"type": "string"},
                 "description": "允许使用的工具名称列表，空数组表示允许全部工具",
             },
-            "can_delegate_to": {
+            "can_send_message_to": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "可委托的目标 Agent ID 列表，空数组表示可委托给所有",
+                "description": "可发送消息的目标 Agent ID 列表，空数组表示可向所有 Agent 发送消息",
             },
         },
         "required": ["id", "name"],
@@ -106,7 +106,9 @@ class CreateAgentTool(Tool):
             temperature=float(temperature),
             system_prompt=str(kwargs.get("system_prompt", "")),
             tools=list(kwargs.get("tools", [])),
-            can_delegate_to=list(kwargs.get("can_delegate_to", [])),
+            can_send_message_to=list(
+                kwargs.get("can_send_message_to", kwargs.get("can_delegate_to", []))
+            ),
         )
 
         registry.register(agent)
@@ -119,5 +121,5 @@ class CreateAgentTool(Tool):
             "name": name,
             "provider": provider,
             "model": model,
-            "message": f"Agent '{name}' (id={agent_id}) 已创建成功，可在委托或新会话中使用",
+            "message": f"Agent '{name}' (id={agent_id}) 已创建成功，可通过 send_message 或新会话使用",
         }

@@ -13,6 +13,8 @@ from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.kernel.events.bus import PublicEventBus, PrivateEventBus
 from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.types import (
+    AGENT_MESSAGE_COMPLETED,
+    AGENT_MESSAGE_FAILED,
     AGENT_STEP_COMPLETED,
     AGENT_STEP_STARTED,
     ERROR_RAISED,
@@ -22,6 +24,7 @@ from agentos.kernel.events.types import (
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
     USER_INPUT,
+    USER_TURN_CANCEL_REQUESTED,
 )
 from agentos.kernel.runtime.context_builder import ContextBuilder
 from agentos.kernel.runtime.state import SessionStateStore, TurnState
@@ -40,6 +43,7 @@ class _SimpleAgentRuntime:
         self.context_builder = context_builder
         self.tool_registry = tool_registry
         self.memory_manager = memory_manager
+        self.jsonl_writer = None
 
 
 # ── Fixtures ─────────────────────────────────────────────
@@ -156,6 +160,62 @@ class TestHandleRouting:
         worker = AgentSessionWorker("s1", private_bus, runtime)
         await worker._handle(EventEnvelope(type="unknown", session_id="s1"))
 
+    async def test_agent_message_completed_triggers_follow_up(self, private_bus, public_bus, runtime):
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+        collected, done, task = await _collect_from_bus(public_bus, target_type=LLM_CALL_REQUESTED)
+
+        event = EventEnvelope(
+            type=AGENT_MESSAGE_COMPLETED,
+            session_id="s1",
+            payload={"agent_id": "helper", "result": "异步结果"},
+        )
+        await worker._handle(event)
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        published_types = [e.type for e in collected]
+        assert AGENT_STEP_STARTED in published_types
+        assert LLM_CALL_REQUESTED in published_types
+
+    async def test_agent_message_failed_triggers_follow_up(self, private_bus, public_bus, runtime):
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+        collected, done, task = await _collect_from_bus(public_bus, target_type=LLM_CALL_REQUESTED)
+
+        event = EventEnvelope(
+            type=AGENT_MESSAGE_FAILED,
+            session_id="s1",
+            payload={"agent_id": "helper", "error": "出错了"},
+        )
+        await worker._handle(event)
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        published_types = [e.type for e in collected]
+        assert AGENT_STEP_STARTED in published_types
+        assert LLM_CALL_REQUESTED in published_types
+
+    async def test_cancel_request_marks_turn_cancelled(self, private_bus, public_bus, runtime, repo, state_store):
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+        await repo.create_session("s1")
+        await repo.create_turn(turn_id="t1", session_id="s1", user_input="hi")
+        state_store.set_turn("s1", TurnState(turn_id="t1", user_input="hi", messages=[]))
+
+        collected, done, task = await _collect_from_bus(public_bus, target_type=ERROR_RAISED)
+        await worker._handle(
+            EventEnvelope(
+                type=USER_TURN_CANCEL_REQUESTED,
+                session_id="s1",
+                payload={"reason": "user_stop"},
+            )
+        )
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        assert state_store.is_turn_cancelled("s1", "t1") is True
+        turns = await repo.get_session_turns("s1")
+        assert turns[0]["status"] == "cancelled"
+        assert collected[-1].payload["error_type"] == "TurnCancelled"
+
 
 # ── USER_INPUT 处理测试 ──────────────────────────────────
 
@@ -238,6 +298,22 @@ class TestHandleLLMResult:
             payload={"response": {"content": "x"}},
         )
         await worker._handle(event)
+
+    async def test_ignores_llm_result_for_cancelled_turn(self, private_bus, runtime, state_store):
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+        state = TurnState(turn_id="t1", user_input="hi", messages=[])
+        state_store.set_turn("s1", state)
+        state_store.mark_turn_cancelled("s1", "t1")
+
+        await worker._handle(
+            EventEnvelope(
+                type=LLM_CALL_RESULT,
+                session_id="s1",
+                turn_id="t1",
+                payload={"response": {"content": "不会写入", "tool_calls": []}},
+            )
+        )
+        assert state.messages == []
 
 
 # ── LLM_CALL_COMPLETED 处理测试 ──────────────────────────
@@ -432,11 +508,14 @@ class TestHandleLLMResultExtraFields:
         assert "provider_specific_fields" not in state.messages[0]
 
 
-# ── LLM_CALL_COMPLETED 持久化测试 ────────────────────────
+# ── 增量持久化测试 ────────────────────────────────────
 
 
-class TestHandleLLMCompletedPersistence:
-    async def test_save_message_called_for_new_messages(self, private_bus, public_bus, runtime, state_store, repo):
+class TestIncrementalPersistence:
+    """测试消息在各 handler 中增量保存到 SQLite"""
+
+    async def test_llm_result_persists_assistant_message(self, private_bus, public_bus, runtime, state_store, repo):
+        """_handle_llm_result 应立即保存 assistant 消息"""
         worker = AgentSessionWorker("s1", private_bus, runtime)
 
         await repo.create_session("s1")
@@ -446,76 +525,94 @@ class TestHandleLLMCompletedPersistence:
             turn_id="t1", user_input="你好",
             messages=[
                 {"role": "system", "content": "系统提示"},
-                {"role": "user", "content": "旧问题"},
                 {"role": "user", "content": "你好"},
-                {"role": "assistant", "content": "你好！"},
             ],
         )
-        state.history_offset = 2
+        state.history_offset = 1
         state_store.set_turn("s1", state)
 
-        collected, done, task = await _collect_from_bus(public_bus, target_type=AGENT_STEP_COMPLETED)
+        event = EventEnvelope(
+            type=LLM_CALL_RESULT, session_id="s1", turn_id="t1",
+            payload={"response": {"content": "你好！", "tool_calls": []}},
+        )
+        await worker._handle(event)
+
+        messages = await repo.get_session_messages("s1")
+        assert len(messages) == 1
+        assert messages[0]["role"] == "assistant"
+        assert messages[0]["content"] == "你好！"
+
+    async def test_tool_result_persists_tool_message(self, private_bus, public_bus, runtime, state_store, repo):
+        """_handle_tool_result 应立即保存 tool 消息"""
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+
+        await repo.create_session("s1")
+        await repo.create_turn(turn_id="t1", session_id="s1", user_input="执行ls")
+
+        state = TurnState(
+            turn_id="t1", user_input="执行ls",
+            messages=[
+                {"role": "system", "content": "系统"},
+                {"role": "user", "content": "执行ls"},
+                {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "tc1", "name": "bash_command", "arguments": {"cmd": "ls"}}
+                ]},
+            ],
+        )
+        state.history_offset = 1
+        state.pending_tool_calls = {"tc1"}
+        state_store.set_turn("s1", state)
+
+        # 等待 LLM_CALL_REQUESTED（工具结果收齐后触发下一轮 LLM）
+        collected, done, task = await _collect_from_bus(public_bus, target_type=LLM_CALL_REQUESTED)
 
         event = EventEnvelope(
-            type=LLM_CALL_COMPLETED, session_id="s1", turn_id="t1", payload={},
+            type=TOOL_CALL_RESULT, session_id="s1", turn_id="t1",
+            payload={"tool_call_id": "tc1", "tool_name": "bash_command", "result": "file1.py"},
         )
         await worker._handle(event)
         await asyncio.wait_for(done.wait(), timeout=5)
         task.cancel()
 
         messages = await repo.get_session_messages("s1")
-        roles_saved = [m["role"] for m in messages]
-        assert "user" in roles_saved
-        assert "assistant" in roles_saved
-        assert len(messages) == 2
+        tool_msgs = [m for m in messages if m["role"] == "tool"]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0]["name"] == "bash_command"
+        assert tool_msgs[0]["tool_call_id"] == "tc1"
 
-    async def test_save_message_skips_system_role(self, private_bus, public_bus, runtime, state_store, repo):
+    async def test_persist_message_skips_system_role(self, private_bus, public_bus, runtime, state_store, repo):
+        """_persist_message 应跳过 system 角色"""
         worker = AgentSessionWorker("s1", private_bus, runtime)
 
         await repo.create_session("s1")
         await repo.create_turn(turn_id="t1", session_id="s1", user_input="测试")
 
-        state = TurnState(
-            turn_id="t1", user_input="测试",
-            messages=[
-                {"role": "system", "content": "注入提示"},
-                {"role": "user", "content": "测试"},
-                {"role": "system", "content": "不应保存"},
-                {"role": "assistant", "content": "好的"},
-            ],
-        )
-        state.history_offset = 1
-        state_store.set_turn("s1", state)
-
-        collected, done, task = await _collect_from_bus(public_bus, target_type=AGENT_STEP_COMPLETED)
-
-        event = EventEnvelope(
-            type=LLM_CALL_COMPLETED, session_id="s1", turn_id="t1", payload={},
-        )
-        await worker._handle(event)
-        await asyncio.wait_for(done.wait(), timeout=5)
-        task.cancel()
+        await worker._persist_message("s1", "t1", {"role": "system", "content": "不应保存"})
+        await worker._persist_message("s1", "t1", {"role": "user", "content": "测试"})
+        await worker._persist_message("s1", "t1", {"role": "assistant", "content": "好的"})
 
         messages = await repo.get_session_messages("s1")
         roles_saved = [m["role"] for m in messages]
         assert "system" not in roles_saved
         assert len(messages) == 2
 
-    async def test_save_message_with_tool_calls_json(self, private_bus, public_bus, runtime, state_store, repo):
+    async def test_llm_completed_does_not_duplicate_save(self, private_bus, public_bus, runtime, state_store, repo):
+        """_handle_llm_completed 不应重复保存已增量保存的消息"""
         worker = AgentSessionWorker("s1", private_bus, runtime)
 
         await repo.create_session("s1")
-        await repo.create_turn(turn_id="t1", session_id="s1", user_input="执行ls")
+        await repo.create_turn(turn_id="t1", session_id="s1", user_input="你好")
 
-        tc = [{"id": "tc1", "name": "bash_command", "arguments": {"cmd": "ls"}}]
+        # 模拟已增量保存了 user + assistant 消息
+        await repo.save_message("s1", "t1", "user", "你好")
+        await repo.save_message("s1", "t1", "assistant", "你好！")
+
         state = TurnState(
-            turn_id="t1", user_input="执行ls",
+            turn_id="t1", user_input="你好",
             messages=[
-                {"role": "system", "content": "系统"},
-                {"role": "user", "content": "执行ls"},
-                {"role": "assistant", "content": "", "tool_calls": tc},
-                {"role": "tool", "content": "file1.py", "tool_call_id": "tc1", "name": "bash_command"},
-                {"role": "assistant", "content": "执行完毕"},
+                {"role": "system", "content": "系统提示"},
+                {"role": "user", "content": "你好"},
+                {"role": "assistant", "content": "你好！"},
             ],
         )
         state.history_offset = 1
@@ -530,9 +627,6 @@ class TestHandleLLMCompletedPersistence:
         await asyncio.wait_for(done.wait(), timeout=5)
         task.cancel()
 
+        # 验证消息没有被重复保存（仍然只有 2 条）
         messages = await repo.get_session_messages("s1")
-        assert len(messages) == 4
-
-        assistant_with_tc = [m for m in messages if m["role"] == "assistant" and m.get("tool_calls")]
-        assert len(assistant_with_tc) == 1
-        assert assistant_with_tc[0]["tool_calls"] == tc
+        assert len(messages) == 2

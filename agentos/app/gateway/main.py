@@ -27,6 +27,7 @@ from agentos.kernel.heartbeat.runtime import HeartbeatRuntime
 from agentos.adapters.llm.factory import LLMFactory
 from agentos.capabilities.agents.registry import AgentRegistry
 from agentos.kernel.runtime.agent_runtime import AgentRuntime
+from agentos.kernel.runtime.agent_message_coordinator import AgentMessageCoordinator
 from agentos.kernel.runtime.context_builder import ContextBuilder
 from agentos.kernel.runtime.llm_runtime import LLMRuntime
 from agentos.kernel.runtime.publisher import EventPublisher
@@ -54,6 +55,7 @@ class Services:
     agent_runtime: AgentRuntime
     llm_runtime: LLMRuntime
     tool_runtime: ToolRuntime
+    agent_message_coordinator: AgentMessageCoordinator
     title_runtime: TitleRuntime
     gateway: Gateway
     ws_channel: WebSocketChannel
@@ -130,7 +132,7 @@ async def lifespan(app: FastAPI):
     agent_registry.load_from_config(config.data)
     agent_registry.load_from_dir()
 
-    # 将 agent_registry 注入 ContextBuilder（供委托 prompt 使用）
+    # 将 agent_registry 注入 ContextBuilder（供多 Agent prompt 使用）
     context_builder.agent_registry = agent_registry
 
     # v0.6: 初始化记忆系统
@@ -173,22 +175,30 @@ async def lifespan(app: FastAPI):
     tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry,
                                path_policy=path_policy,
                                agent_registry=agent_registry)
+    agent_message_coordinator = AgentMessageCoordinator(
+        bus=bus,
+        repo=repo,
+        agent_runtime=agent_runtime,
+        retry_backoff_seconds=list(config.get("delegation.retry.backoff_seconds", [0, 1, 3])),
+    )
     title_runtime = TitleRuntime(bus=bus, repo=repo)
 
     gateway = Gateway(publisher=publisher)
     ws_channel = WebSocketChannel("websocket")
     gateway.register_channel(ws_channel)
 
-    # v1.0: 注册委托工具
+    # v1.0: 注册 Agent-to-Agent 消息工具
     if config.get("delegation.enabled", True):
-        from agentos.capabilities.tools.delegate_tool import DelegateTool
-        delegate_tool = DelegateTool(
+        from agentos.capabilities.tools.send_message_tool import SendMessageTool
+        send_message_tool = SendMessageTool(
             agent_registry=agent_registry,
-            bus_router=bus_router,
+            bus=bus,
             repo=repo,
+            coordinator=agent_message_coordinator,
             timeout=float(config.get("delegation.default_timeout", 300)),
+            default_max_retries=int(config.get("delegation.retry.max_retries", 0)),
         )
-        tool_registry.register(delegate_tool)
+        tool_registry.register(send_message_tool)
 
     # v0.9: 加载插件（飞书 Channel + MessageTool + FeishuApiTool 等）
     plugin_registry = PluginRegistry()
@@ -205,6 +215,7 @@ async def lifespan(app: FastAPI):
     await agent_runtime.start()
     await llm_runtime.start()
     await tool_runtime.start()
+    await agent_message_coordinator.start()
     await title_runtime.start()
     await gateway.start()
 
@@ -225,6 +236,7 @@ async def lifespan(app: FastAPI):
         agent_runtime=agent_runtime,
         llm_runtime=llm_runtime,
         tool_runtime=tool_runtime,
+        agent_message_coordinator=agent_message_coordinator,
         title_runtime=title_runtime,
         gateway=gateway,
         ws_channel=ws_channel,
@@ -249,6 +261,7 @@ async def lifespan(app: FastAPI):
         await agent_runtime.stop()
         await llm_runtime.stop()
         await tool_runtime.stop()
+        await agent_message_coordinator.stop()
         await title_runtime.stop()
         await gateway.stop()
         await bus_router.stop()
