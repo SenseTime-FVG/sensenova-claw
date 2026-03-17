@@ -9,6 +9,7 @@ Thumbs.db
 
 # ========== Claude Code ==========
 .claude/
+docs/superpowers/
 
 # ========== Python ==========
 __pycache__/
@@ -36,6 +37,7 @@ agentos/app/web/test-results/
 agentos/app/web/playwright-report/
 
 # ========== 运行时目录 ==========
+.SenseAssistant/
 SenseAssistant/
 archived/
 
@@ -43,6 +45,12 @@ archived/
 workspace/memory/
 workspace/skills/
 workspace/*.json
+
+# var/ 运行时数据（数据库等）默认忽略，但保留内置 skills
+var/
+!var/skills/
+!var/skills/**
+!var/.gitignore
 
 *.db
 *.sqlite

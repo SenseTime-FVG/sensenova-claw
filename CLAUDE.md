@@ -105,14 +105,54 @@ ui.user_input → agent.step_started → llm.call_requested → llm.call_complet
 
 ### 工具系统
 
-内置 5 个工具（`agentos/capabilities/tools/builtin.py`）：
+内置 11 个工具：
 - `bash_command`: 执行 shell 命令
 - `serper_search`: 网络搜索（需 SERPER_API_KEY）
 - `fetch_url`: 获取网页内容
 - `read_file`: 读取文件
 - `write_file`: 写入文件
+- `send_email`: 发送邮件（需配置邮箱）
+- `list_emails`: 列出邮件
+- `read_email`: 读取邮件详情
+- `download_attachment`: 下载附件
+- `mark_email`: 标记邮件状态
+- `search_emails`: 搜索邮件
 
 工具注册在 `ToolRegistry`，通过 `@tool_registry.register()` 装饰器自动注册。
+
+#### 邮件工具配置
+
+邮件工具默认禁用，需在 `config.yml` 中配置：
+
+```yaml
+tools:
+  email:
+    enabled: true
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    imap_host: imap.gmail.com
+    imap_port: 993
+    username: ${EMAIL_USERNAME}
+    password: ${EMAIL_PASSWORD}
+    max_attachment_size_mb: 10
+    timeout: 30
+```
+
+**常见邮箱配置：**
+
+Gmail:
+- SMTP: smtp.gmail.com:587
+- IMAP: imap.gmail.com:993
+- 需使用应用专用密码: https://myaccount.google.com/apppasswords
+
+Outlook:
+- SMTP: smtp-mail.outlook.com:587
+- IMAP: outlook.office365.com:993
+
+QQ 邮箱:
+- SMTP: smtp.qq.com:587
+- IMAP: imap.qq.com:993
+- 需在设置中开启 IMAP/SMTP 服务并获取授权码
 
 ### Skills 系统
 
