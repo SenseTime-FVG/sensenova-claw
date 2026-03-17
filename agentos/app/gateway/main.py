@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -320,6 +320,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 不需要 token 认证的路径白名单
+AUTH_WHITELIST = {
+    "/health",
+    "/api/auth/verify-token",
+    "/api/auth/status",
+    "/api/auth/logout",
+}
+
+
+@app.middleware("http")
+async def token_auth_middleware(request: Request, call_next):
+    """全局 token 认证中间件（白名单路径放行，其余需要 token）"""
+    auth_enabled = config.get("security.auth_enabled", False)
+    if not auth_enabled:
+        return await call_next(request)
+
+    # 白名单放行
+    if request.url.path in AUTH_WHITELIST:
+        return await call_next(request)
+
+    # 验证 token
+    if not hasattr(app.state, "services") or not verify_request(request, app.state.services.auth_service):
+        return JSONResponse(status_code=401, content={"detail": "Invalid or missing token"})
+
+    return await call_next(request)
+
 # 注册 API 路由
 app.include_router(agents.router)
 app.include_router(tools.router)
@@ -336,47 +362,33 @@ async def health_check() -> dict:
     return {"status": "healthy", "timestamp": time.time(), "version": "0.1.0"}
 
 
-async def _verify_auth(request: Request) -> None:
-    """统一的 API 认证检查（基于 token cookie/query param/header）"""
-    auth_enabled = config.get("security.auth_enabled", False)
-    if not auth_enabled:
-        return
-    services: Services = app.state.services
-    if not verify_request(request, services.auth_service):
-        raise HTTPException(status_code=401, detail="Invalid or missing token")
-
-
 @app.get("/api/sessions")
-async def list_sessions(request: Request):
-    """获取会话列表（需要认证）"""
-    await _verify_auth(request)
+async def list_sessions():
+    """获取会话列表"""
     services: Services = app.state.services
     sessions = await services.repo.list_sessions(limit=50)
     return JSONResponse(content={"sessions": sessions})
 
 
 @app.get("/api/sessions/{session_id}/turns")
-async def get_session_turns(session_id: str, request: Request):
-    """获取会话的所有轮次（需要认证）"""
-    await _verify_auth(request)
+async def get_session_turns(session_id: str):
+    """获取会话的所有轮次"""
     services: Services = app.state.services
     turns = await services.repo.get_session_turns(session_id)
     return JSONResponse(content={"turns": turns})
 
 
 @app.get("/api/sessions/{session_id}/events")
-async def get_session_events(session_id: str, request: Request):
-    """获取会话的所有事件（需要认证）"""
-    await _verify_auth(request)
+async def get_session_events(session_id: str):
+    """获取会话的所有事件"""
     services: Services = app.state.services
     events = await services.repo.get_session_events(session_id)
     return JSONResponse(content={"events": events})
 
 
 @app.get("/api/sessions/{session_id}/messages")
-async def list_session_messages(session_id: str, request: Request):
-    """获取会话的所有消息（需要认证）"""
-    await _verify_auth(request)
+async def list_session_messages(session_id: str):
+    """获取会话的所有消息"""
     services: Services = app.state.services
     messages = await services.repo.get_session_messages(session_id)
     return JSONResponse(content={"messages": messages})
