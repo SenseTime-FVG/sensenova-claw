@@ -111,7 +111,8 @@ ToolRuntime 监听事件，完成 Future
 ```yaml
 tools:
   ask_user:
-    timeout: 300  # 默认 5 分钟
+    timeout: 300       # 默认 5 分钟
+    max_retries: 3     # CLI 无效输入最大重试次数
 ```
 
 ## 实现细节
@@ -181,7 +182,7 @@ class ToolSessionWorker:
         event = EventEnvelope(
             type="user.question_asked",
             session_id=self.session_id,
-            trace_id=tool_call_id,
+            trace_id=tool_call_id,  # 用于关联问答对
             source="tool_runtime",
             payload={
                 "question_id": question_id,
@@ -249,10 +250,10 @@ Agent 问题：启用哪些功能？
 ```
 
 **输入验证：**
-- 单选：接受数字（1-N）或任意文本（作为自定义输入）
-- 多选：接受 "1,3" 格式，解析为对应选项
-- 无效数字（如输入 "5" 但只有 3 个选项）：提示错误并重新输入
-- 开放式问答：接受任意非空文本
+- 单选：接受数字（1-N）选择选项，或任意文本作为自定义输入
+- 多选：接受 "1,3" 格式选择选项，或任意文本作为自定义输入
+- 开放式问答：接受任意非空文本，空字符串视为取消
+- 用户始终可以输入自定义内容，不限于提供的选项
 
 **Web Channel：**
 - 显示模态对话框，阻塞其他消息输入
@@ -275,8 +276,8 @@ Agent 问题：启用哪些功能？
 2. **用户取消** - Channel 发送 `cancelled: True`，工具返回 `{"success": False, "error": "用户取消了回答"}`
 
 3. **无效答案处理**
-   - **有 options 时**：用户输入不在选项中，Channel 提示错误并重新输入（最多 3 次），超过后接受为自定义输入
-   - **无 options 时**：接受任意非空文本
+   - **有 options 时**：用户可以输入选项编号或任意自定义文本
+   - **无 options 时**：接受任意非空文本，空字符串视为取消
 
 4. **Session 断开** - Future 被取消，工具抛出 `asyncio.CancelledError`
 
