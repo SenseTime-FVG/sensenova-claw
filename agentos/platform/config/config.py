@@ -173,6 +173,32 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 ],
             },
         },
+        "wecom": {
+            "enabled": False,
+            "bot_id": "",
+            "secret": "",
+            "websocket_url": "wss://openws.work.weixin.qq.com",
+            "dm_policy": "open",
+            "group_policy": "open",
+            "allowlist": [],
+            "group_allowlist": [],
+            "show_tool_progress": False,
+        },
+        "whatsapp": {
+            "enabled": False,
+            "auth_dir": "",
+            "dm_policy": "open",
+            "group_policy": "open",
+            "allowlist": [],
+            "group_allowlist": [],
+            "show_tool_progress": False,
+            "bridge": {
+                "command": "node",
+                "entry": "",
+                "startup_timeout_seconds": 30,
+                "send_timeout_seconds": 15,
+            },
+        },
     },
     # v0.6: 安全与认证配置
     "security": {

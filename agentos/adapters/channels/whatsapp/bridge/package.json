@@ -1,0 +1,14 @@
+{
+  "name": "agentos-whatsapp-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AgentOS WhatsApp sidecar based on Baileys",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.9"
+  }
+}
