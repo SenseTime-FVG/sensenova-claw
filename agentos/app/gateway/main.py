@@ -20,7 +20,7 @@ from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.persister import EventPersister
 from agentos.kernel.events.router import BusRouter
-from agentos.kernel.events.types import USER_INPUT, USER_TURN_CANCEL_REQUESTED, TOOL_CONFIRMATION_RESPONSE
+from agentos.kernel.events.types import USER_INPUT, USER_TURN_CANCEL_REQUESTED, TOOL_CONFIRMATION_RESPONSE, USER_QUESTION_ANSWERED
 from agentos.adapters.channels.websocket_channel import WebSocketChannel
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.heartbeat.runtime import HeartbeatRuntime
@@ -544,6 +544,22 @@ async def websocket_endpoint(websocket: WebSocket):
                         payload={
                             "tool_call_id": payload.get("tool_call_id"),
                             "approved": payload.get("approved", False),
+                        },
+                    )
+                )
+                continue
+
+            # 用户问答响应
+            if msg_type == "user_question_answered":
+                await gateway.publish_from_channel(
+                    EventEnvelope(
+                        type=USER_QUESTION_ANSWERED,
+                        session_id=session_id,
+                        source="websocket",
+                        payload={
+                            "question_id": payload.get("question_id"),
+                            "answer": payload.get("answer"),
+                            "cancelled": payload.get("cancelled", False),
                         },
                     )
                 )

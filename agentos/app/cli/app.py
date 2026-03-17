@@ -39,6 +39,7 @@ class CLIApp:
 
         self._waiting = asyncio.Event()
         self._confirm_queue: asyncio.Queue[dict] = asyncio.Queue()
+        self._question_queue: asyncio.Queue[dict] = asyncio.Queue()
         self._last_response: str = ""
 
         self.console = Console()
@@ -79,6 +80,11 @@ class CLIApp:
                 self._waiting.set()
                 continue
 
+            if msg_type == "user_question_asked":
+                await self._question_queue.put(data)
+                self._waiting.set()
+                continue
+
             if msg_type in ("turn_completed", "error"):
                 if msg_type == "turn_completed":
                     self._last_response = data.get("payload", {}).get("final_response", "")
@@ -91,7 +97,7 @@ class CLIApp:
             self.display.handle_event(data)
 
     async def _wait_for_turn(self) -> None:
-        """等待 turn 完成，期间处理确认请求"""
+        """等待 turn 完成，期间处理确认请求和问答请求"""
         while True:
             self._waiting.clear()
             await self._waiting.wait()
@@ -99,13 +105,23 @@ class CLIApp:
             while not self._confirm_queue.empty():
                 confirm_data = await self._confirm_queue.get()
                 if self.execute:
-                    approved = False  # 脚本模式自动拒绝
+                    approved = False
                 else:
                     approved = await self.display.prompt_confirmation(confirm_data)
                 await self._send_confirmation_response(confirm_data, approved)
                 continue
 
-            if self._confirm_queue.empty():
+            while not self._question_queue.empty():
+                question_data = await self._question_queue.get()
+                if self.execute:
+                    answer = None
+                    cancelled = True
+                else:
+                    answer, cancelled = await self._prompt_question(question_data)
+                await self._send_question_response(question_data, answer, cancelled)
+                continue
+
+            if self._confirm_queue.empty() and self._question_queue.empty():
                 break
 
     async def _send(self, msg: dict) -> None:
@@ -149,6 +165,60 @@ class CLIApp:
             "payload": {
                 "tool_call_id": payload.get("tool_call_id"),
                 "approved": approved,
+            },
+        })
+
+    async def _prompt_question(self, data: dict) -> tuple[str | list[str] | None, bool]:
+        """提示用户回答问题"""
+        payload = data.get("payload", {})
+        question = payload.get("question", "")
+        options = payload.get("options")
+        multi_select = payload.get("multi_select", False)
+
+        self.console.print(f"\n[yellow]Agent 问题：{question}[/yellow]")
+
+        if options:
+            for i, opt in enumerate(options, 1):
+                self.console.print(f"  {i}. {opt}")
+            if multi_select:
+                self.console.print("[dim]请输入选项编号，用逗号分隔 (如: 1,3) 或输入 'c' 取消[/dim]")
+            else:
+                self.console.print("[dim]请输入选项编号或自定义输入 (输入 'c' 取消)[/dim]")
+        else:
+            self.console.print("[dim]请输入答案 (输入 'c' 取消)[/dim]")
+
+        user_input = await asyncio.to_thread(input, "> ")
+        user_input = user_input.strip()
+
+        if user_input.lower() == "c":
+            return None, True
+
+        if not user_input:
+            return None, True
+
+        if options and user_input.isdigit():
+            idx = int(user_input) - 1
+            if 0 <= idx < len(options):
+                return options[idx], False
+
+        if options and multi_select and "," in user_input:
+            indices = [int(x.strip()) - 1 for x in user_input.split(",") if x.strip().isdigit()]
+            selected = [options[i] for i in indices if 0 <= i < len(options)]
+            if selected:
+                return selected, False
+
+        return user_input, False
+
+    async def _send_question_response(self, data: dict, answer: str | list[str] | None, cancelled: bool) -> None:
+        """发送问答响应"""
+        payload = data.get("payload", {})
+        await self._send({
+            "type": "user_question_answered",
+            "session_id": self.current_session_id,
+            "payload": {
+                "question_id": payload.get("question_id"),
+                "answer": answer,
+                "cancelled": cancelled,
             },
         })
 

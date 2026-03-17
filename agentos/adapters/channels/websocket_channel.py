@@ -17,6 +17,7 @@ from agentos.kernel.events.types import (
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
     TOOL_CONFIRMATION_REQUESTED,
+    USER_QUESTION_ASKED,
 )
 from agentos.adapters.channels.base import Channel
 
@@ -181,6 +182,20 @@ class WebSocketChannel(Channel):
                     "tool_name": event.payload.get("tool_name"),
                     "arguments": event.payload.get("arguments", {}),
                     "risk_level": event.payload.get("risk_level", "high"),
+                },
+                "timestamp": event.ts,
+            }
+        # 用户问答请求
+        if event.type == USER_QUESTION_ASKED:
+            return {
+                "type": "user_question_asked",
+                "session_id": event.session_id,
+                "payload": {
+                    "question_id": event.payload.get("question_id"),
+                    "question": event.payload.get("question"),
+                    "options": event.payload.get("options"),
+                    "multi_select": event.payload.get("multi_select", False),
+                    "timeout": event.payload.get("timeout", 300),
                 },
                 "timestamp": event.ts,
             }
