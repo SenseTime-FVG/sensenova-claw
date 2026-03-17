@@ -1,0 +1,187 @@
+---
+name: ppt-html-gen
+description: Generate one or more PPT HTML slide files from outline JSON, per-page layout data, style JSON, and picture placeholders. Use this skill for PPT, slide deck, slides, presentation, or html-slide subtasks that need to read files like outline.json and style.json and write page_XX.html outputs in a deck directory.
+---
+
+# PPT HTML Generation
+
+You are generating one slide of presentation HTML.
+
+Use this skill after the task already has:
+
+- a single-page layout from the outline
+- a deck-level style definition or equivalent style constraints
+- available picture references
+- the current page index and total page count
+
+This skill also applies to delegated work packages or subtasks such as:
+
+- generate all HTML slides from `outline.json`
+- read `style.json` and render `page_01.html` to `page_N.html`
+- implement PPT pages in a specified deck directory
+
+The output must be HTML only.
+
+## Core objective
+
+Generate a visually strong but implementation-safe single-slide HTML page for a `1280x720` presentation canvas.
+
+## Required inputs
+
+You should have:
+
+- `style`
+- `layout`
+- `picture2` or equivalent picture mapping
+- `current_page`
+- `total_pages`
+
+## Style JSON handling
+
+Before writing any HTML or CSS, inspect the actual `style.json` keys first. Never assume a schema.
+
+- Do not assume keys such as `primary_blue`, `secondary_blue`, `accent_cyan`, `headings`, or `body_text`.
+- If the current `style.json` shape differs from your expectation, normalize it first. Do not fall back to an unrelated default light theme just because a key name differs.
+- If you need fallback values, derive them from values that already exist in the current `style.json` so the visual direction stays consistent.
+
+Real schemas that must be handled include:
+
+1. `typography.title_strategy.font_family_css` / `typography.body_strategy.font_family_css`
+2. `typography.heading.font_family` / `typography.body.font_family`
+3. `typography.headings.family` / `typography.body_text.family`
+
+Do the same for colors by inspecting the actual structure first. Common variants include:
+
+1. `color_palette` as an array with role-based entries
+2. `color_palette.background/accent/text`
+3. `color_palette.primary_blue/secondary_blue/...`
+
+If a required style value is still unclear, do not silently switch to a generic white background plus blue accent theme. Keep the closest possible visual direction implied by the provided style.
+
+## Hard layout rules
+
+### Fixed canvas
+
+- The page must be exactly `1280x720`.
+- No scrollbar is allowed.
+- All content must fit in the viewport.
+- Any scaling logic must live on the outer container, never on inner content blocks.
+
+### Layout mechanics
+
+- Use Flexbox or CSS Grid for alignment.
+- Do not use `mt-auto`, `flex-grow`, or `flex: 1` to fake spacing.
+- Do not use `position: absolute` plus `transform: translate(...)` for flow content.
+- Image and chart regions should be controlled by explicit size logic, not empty spacer divs.
+
+### Footer safe area
+
+- Reserve the lower-right `160px x 60px` area for the page number.
+- No content may overlap that area.
+- Page number must be in `<div id="footer">`.
+- Footer must include inline positioning equivalent to `position: absolute; right: 40px; bottom: 20px;`.
+
+## Page structure
+
+The HTML must follow a two-layer wrapper structure:
+
+- `.wrapper`
+- `#bg` as background layer
+- `#ct` as content layer
+- `#footer` as page number layer
+
+Both `#bg` and `#ct` should fill the full page.
+
+## Element identity rules
+
+Every major content element should have:
+
+- a unique id such as `text_1`, `chart_1`, `table_1`, `svg_1`
+- a class that describes its type
+
+For charts:
+
+- use a `div` container only
+- initialize ECharts on that `div`
+
+## Picture and decoration rules
+
+### External pictures
+
+- Only use provided picture references.
+- Do not use network images directly.
+- Keep the picture id exactly aligned with the expected picture id from layout.
+- Do not embed real image URLs in the generated HTML if later processing will inject them.
+- If `image_selection.json` or equivalent metadata provides a successful local picture path, prefer that local file.
+- If a page has `needed_pictures`, the final HTML must explicitly consume that requirement. Do not silently drop the picture just because the layout is `grid`, `timeline`, `two_column`, `three_column`, `closing`, or another non-classic image layout.
+- If the local picture download succeeded, the final HTML must contain a local image reference such as `images/...`.
+- If the download failed, keep a visible placeholder tied to the intended visual described in `needed_pictures[].description` rather than omitting the image region.
+- Even on non-image-centric pages, integrate the picture as a background module, side card, inset illustration, or closing hero visual instead of deleting it.
+
+### Decorative graphics
+
+- Prefer CSS-drawn shapes.
+- Background pictures belong in `#bg`.
+- Background visuals should preserve readability.
+
+### Filtering
+
+- If a picture region is too small to matter, drop it instead of forcing it in.
+
+## Chart rules
+
+- Use `ECharts` or `Frappe Gantt`.
+- Do not use Chart.js.
+- Do not use `<canvas>` as the chart container.
+- Chart containers must explicitly declare width and height.
+
+## Text and table rules
+
+- Do not semantically modify, shrink, or omit layout text.
+- Adapt font size and spacing to avoid overflow.
+- Tables must fit without scrollbars.
+
+## Output rules
+
+- Output HTML only.
+- No markdown fences.
+- No natural language explanation.
+
+Use this skeleton as the baseline shape:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { margin: 0; display: flex; justify-content: center; align-items: center; background: #333; min-height: 100vh; overflow: hidden; }
+        .wrapper { width: 1280px; height: 720px; position: relative; overflow: hidden; background: #fff; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div id="bg" style="position: absolute; inset: 0; z-index: 1;"></div>
+        <div id="ct" style="position: absolute; inset: 0; z-index: 2; padding: 40px 60px;"></div>
+        <div id="footer" class="footer-page" style="position: absolute; right: 40px; bottom: 20px; z-index: 10;">
+            1 / N
+        </div>
+    </div>
+    <script>
+        // echarts init
+    </script>
+</body>
+</html>
+```
+
+## Final quality bar
+
+- strong visual hierarchy
+- no overflow
+- no footer collision
+- stable rendering
+- consistent with the provided style
+- faithful to the single-page layout input
+- pages with `needed_pictures` must not end up with successfully downloaded images that are never referenced in the final HTML

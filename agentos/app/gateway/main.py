@@ -39,7 +39,11 @@ from agentos.capabilities.skills.registry import SkillRegistry
 from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.adapters.plugins import PluginRegistry
 from agentos.platform.security.path_policy import PathPolicy
-from agentos.platform.config.workspace import ensure_workspace
+from agentos.platform.config.workspace import (
+    ensure_agentos_home,
+    ensure_agent_workspace,
+    resolve_agentos_home,
+)
 from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api
 
 # Token 认证模块
@@ -77,17 +81,23 @@ class Services:
 async def lifespan(app: FastAPI):
     setup_logging()
 
-    repo = Repository()
+    # 解析 AGENTOS_HOME（默认 ~/.agentos）
+    from agentos.platform.config.config import PROJECT_ROOT
+    agentos_home = resolve_agentos_home(config)
+    await ensure_agentos_home(agentos_home, project_root=PROJECT_ROOT)
+    agentos_home_str = str(agentos_home)
+
+    # 数据库路径：优先配置，否则 {agentos_home}/data/agentos.db
+    db_path = config.get("system.database_path", "")
+    if not db_path:
+        db_path = str(agentos_home / "data" / "agentos.db")
+
+    repo = Repository(db_path=db_path)
     await repo.init()
 
-    # 确保 workspace 目录和引导文件存在
-    workspace_dir = config.get("system.workspace_dir", "./workspace")
-    await ensure_workspace(workspace_dir)
-
-    # v1.2: 初始化路径安全策略
-    workspace_path = Path(workspace_dir).expanduser().resolve()
+    # 路径安全策略：AGENTOS_HOME 为 GREEN zone
     granted_paths = config.get("system.granted_paths", [])
-    path_policy = PathPolicy(workspace=workspace_path, granted_paths=granted_paths)
+    path_policy = PathPolicy(workspace=agentos_home, granted_paths=granted_paths)
     app.state.path_policy = path_policy
 
     # 会话维护：清理过期会话
@@ -111,10 +121,9 @@ async def lifespan(app: FastAPI):
     state_store = SessionStateStore()
 
     # 初始化 SkillRegistry
-    skills_dir = Path(config.get("system.workspace_dir", ".")) / "skills"
-    state_file = Path(config.get("system.workspace_dir", ".")) / "skills_state.json"
-    from agentos.platform.config.config import PROJECT_ROOT
-    builtin_skills_dir = PROJECT_ROOT / "workspace" / "skills"
+    skills_dir = agentos_home / "skills"
+    state_file = agentos_home / "skills_state.json"
+    builtin_skills_dir = PROJECT_ROOT / ".agentos" / "skills"
     skill_registry = SkillRegistry(
         workspace_dir=skills_dir,
         state_file=state_file,
@@ -133,14 +142,18 @@ async def lifespan(app: FastAPI):
     context_builder = ContextBuilder(
         skill_registry=skill_registry,
         tool_registry=tool_registry,
-        workspace_dir=str(workspace_path),
+        agentos_home=agentos_home_str,
     )
 
     # v1.0: 初始化 AgentRegistry
-    agent_config_dir = Path(config.get("system.workspace_dir", ".")) / "agents"
+    agent_config_dir = agentos_home / "agents"
     agent_registry = AgentRegistry(config_dir=agent_config_dir)
     agent_registry.load_from_config(config.data)
     agent_registry.load_from_dir()
+
+    # 为所有已注册 agent 初始化 per-agent workspace 和 workdir
+    for agent_cfg in agent_registry.list_all():
+        await ensure_agent_workspace(agentos_home_str, agent_cfg.id)
 
     # 将 agent_registry 注入 ContextBuilder（供多 Agent prompt 使用）
     context_builder.agent_registry = agent_registry
@@ -155,11 +168,11 @@ async def lifespan(app: FastAPI):
         from agentos.capabilities.memory.tools import MemorySearchTool
 
         mem_config = MemoryConfig.from_dict(config.data)
-        db_path = repo.db_path.parent / "memory_index.db"
+        mem_db_path = repo.db_path.parent / "memory_index.db"
         memory_manager = MemoryManager(
-            workspace_dir=str(workspace_dir),
+            workspace_dir=agentos_home_str,
             config=mem_config,
-            db_path=db_path,
+            db_path=mem_db_path,
         )
         await memory_manager.sync_index()
 
@@ -169,7 +182,7 @@ async def lifespan(app: FastAPI):
         if mem_config.search.enabled:
             tool_registry.register(MemorySearchTool(memory_manager))
 
-        logger.info("Memory system enabled (workspace=%s)", workspace_dir)
+        logger.info("Memory system enabled (home=%s)", agentos_home_str)
 
     # Runtime 使用 BusRouter（管理者模式）
     agent_runtime = AgentRuntime(
@@ -281,6 +294,7 @@ async def lifespan(app: FastAPI):
     app.state.skill_registry = skill_registry
     app.state.agent_registry = agent_registry
     app.state.config = config
+    app.state.agentos_home = agentos_home_str
     app.state.market_service = market_service
 
     # 注册认证路由

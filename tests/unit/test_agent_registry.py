@@ -1,4 +1,5 @@
 """A02/A03/A04: AgentRegistry CRUD + 持久化 + Agent 发现"""
+import json
 from pathlib import Path
 from agentos.capabilities.agents.config import AgentConfig
 from agentos.capabilities.agents.registry import AgentRegistry
@@ -99,3 +100,52 @@ class TestAgentRegistry:
     def test_update_nonexist(self, tmp_path):
         r = AgentRegistry(config_dir=tmp_path / "a")
         assert r.update("nope", {"name": "X"}) is None
+
+
+# ── per-agent 目录结构持久化测试 ──────────────────────
+
+
+class TestAgentRegistryDirLayout:
+
+    def test_save_creates_agent_dir_with_config_json(self, tmp_path):
+        """save() 将配置写入 agents/{id}/config.json"""
+        registry = AgentRegistry(config_dir=tmp_path)
+        agent = AgentConfig.create(id="researcher", name="Researcher")
+        registry.save(agent)
+
+        config_file = tmp_path / "researcher" / "config.json"
+        assert config_file.exists()
+        data = json.loads(config_file.read_text(encoding="utf-8"))
+        assert data["id"] == "researcher"
+
+    def test_load_from_dir_reads_subdir_config_json(self, tmp_path):
+        """load_from_dir() 从 agents/{id}/config.json 加载"""
+        agent_dir = tmp_path / "writer"
+        agent_dir.mkdir()
+        data = {"id": "writer", "name": "Writer"}
+        (agent_dir / "config.json").write_text(json.dumps(data), encoding="utf-8")
+
+        registry = AgentRegistry(config_dir=tmp_path)
+        registry.load_from_dir()
+        assert registry.get("writer") is not None
+        assert registry.get("writer").name == "Writer"
+
+    def test_load_from_dir_backward_compat_flat_json(self, tmp_path):
+        """向后兼容：仍能加载旧的 {id}.json 扁平文件"""
+        data = {"id": "legacy", "name": "Legacy Agent"}
+        (tmp_path / "legacy.json").write_text(json.dumps(data), encoding="utf-8")
+
+        registry = AgentRegistry(config_dir=tmp_path)
+        registry.load_from_dir()
+        assert registry.get("legacy") is not None
+
+    def test_delete_removes_agent_dir(self, tmp_path):
+        """delete() 删除整个 agent 子目录"""
+        registry = AgentRegistry(config_dir=tmp_path)
+        agent = AgentConfig.create(id="researcher", name="Researcher")
+        registry.register(agent)
+        registry.save(agent)
+
+        assert (tmp_path / "researcher" / "config.json").exists()
+        registry.delete("researcher")
+        assert not (tmp_path / "researcher").exists()
