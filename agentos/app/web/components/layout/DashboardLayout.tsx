@@ -2,7 +2,7 @@
 
 import { ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { LogOut, User } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { DashboardNav } from './DashboardNav';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -11,7 +11,7 @@ interface DashboardLayoutProps {
 }
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const router = useRouter();
 
   const handleLogout = () => {
@@ -26,15 +26,6 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         <div className="h-9 bg-[#323233] border-b border-[#2d2d30] flex items-center px-4">
           <span className="text-sm font-semibold text-[#cccccc]">AgentOS Dashboard</span>
           <div className="ml-auto flex items-center gap-3">
-            {user && (
-              <div className="flex items-center gap-2 text-xs">
-                <User size={14} />
-                <span>{user.username}</span>
-                {user.is_admin && (
-                  <span className="bg-blue-600 px-2 py-0.5 rounded text-white">Admin</span>
-                )}
-              </div>
-            )}
             <button
               onClick={handleLogout}
               className="flex items-center gap-1 text-xs hover:text-white transition-colors"
