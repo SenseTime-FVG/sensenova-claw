@@ -17,8 +17,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG: dict[str, Any] = {
     "system": {
         "log_level": "DEBUG",
-        "workspace_dir": "./workspace",
-        "database_path": "./var/data/agentos.db",
+        "agentos_home": "${AGENTOS_HOME}",           # 默认 ~/.agentos，支持环境变量覆盖
+        "workspace_dir": "",                          # 已废弃，由 agentos_home 替代
+        "database_path": "",                          # 空=自动用 {agentos_home}/data/agentos.db
         "max_concurrent_sessions": 10,
         "granted_paths": [],                         # v1.2: 预授权目录列表
     },
