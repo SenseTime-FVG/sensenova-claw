@@ -1,0 +1,189 @@
+---
+name: ppt-style-extract
+description: Extract a reusable global presentation style system from user requirements, PPT reference images, and a report or brief. Use this skill for PPT, slide deck, slides, presentation, or style-extraction subtasks that need a structured style JSON before outline generation or HTML slide generation.
+---
+
+# PPT Style Extraction
+
+You are extracting a reusable deck-level visual style for downstream HTML slide generation.
+
+Use this skill when the task includes:
+
+- PPT reference images
+- explicit visual requirements
+- a report or brief with stable visual signals
+
+The output is a strict JSON object, usually saved as `style.json`.
+
+## Inputs
+
+Prepare these inputs:
+
+- user query
+- reference images if available
+- report or synthesized brief
+
+If there is not enough real style signal, keep the result minimal and conservative. Do not fabricate a rich style system.
+
+## Core objective
+
+Extract the common visual style of the deck and convert it into a structured, reusable, controllable spec that can be used to generate HTML slides in the same style.
+
+## Extraction rules
+
+### Global vs local
+
+- Only extract traits that recur across many slides as `global style`.
+- Traits that appear only on a small subset of pages must be treated as `local style`.
+- Global style must stay abstract:
+  - colors
+  - typography
+  - shadows
+  - borders
+  - corner radius
+  - translucent overlays
+  - non-semantic background texture approximations
+- Concrete decorative graphics must stay local:
+  - mascots
+  - stamps
+  - illustrations
+  - complex SVG motifs
+  - photos
+
+Rule of thumb:
+
+- if removing an element breaks page structure, it can be global
+- if removing it only removes decoration, it must be local
+
+### Evidence only
+
+- Base the style only on the actual inputs.
+- Do not invent colors, fonts, components, or layout language not supported by the references.
+
+### Implementation safety
+
+The style must be safe for HTML/CSS generation:
+
+- never rely on Data URI
+- never include base64 image payloads
+- do not encode complex noise or texture generation logic
+- approximate texture with solid color, gradients, rgba overlays, or blur
+- prefer CSS-drawn geometry with `div`, `border-radius`, `box-shadow`, `transform`, and gradients
+- only use minimal SVG when CSS cannot reasonably express the decoration
+
+## Typography constraints
+
+Use one title font and one body font consistently across the whole deck.
+
+Allowed body fonts:
+
+- `'Noto Sans SC', sans-serif`
+- `'Noto Serif SC', serif`
+- `'Inter', sans-serif`
+- `'Source Han Sans SC', sans-serif`
+- `'puhuiti-2-35', sans-serif`
+- `'PingFang SC', sans-serif`
+- `'Microsoft YaHei', sans-serif`
+- `'Arial', sans-serif`
+
+Allowed title fonts:
+
+- `'ZCOOL KuHei', sans-serif`
+- `'Long Cang', cursive`
+- `'Ma Shan Zheng', cursive`
+- `'Zhi Mang Xing', cursive`
+- `'ZCOOL QingKe HuangYou', sans-serif`
+- `'ZCOOL XiaoWei', serif`
+- `'Liu Jian Mao Cao', cursive`
+- `'ZCOOL KuaiLe', cursive`
+
+## Output content
+
+The style JSON should cover:
+
+- `design_concept`
+- `color_palette`
+- `typography`
+- `decorative_elements`
+- `ui_components`
+
+## Output schema
+
+Return strict JSON only. No markdown fences. No explanation text.
+
+`style.json` must follow exactly one canonical schema. Do not mix in alternate key variants.
+
+- Do not output `typography.heading/body`
+- Do not output `typography.headings/body_text`
+- Do not encode `color_palette` as a nested `background/accent/text` object
+- Do not introduce shortcut color keys such as `primary_blue` or `secondary_blue`
+
+If you need to express primary background, accent, heading text, or body text colors, encode them through `color_palette` array entries with explicit `role` values. If you need typography strategy, always use `title_strategy` and `body_strategy`.
+
+```json
+{
+  "design_concept": {
+    "core_theme": "",
+    "texture_and_material": {
+      "description": "",
+      "css_rules": ""
+    },
+    "shape_language": ""
+  },
+  "color_palette": [
+    {
+      "role": "",
+      "hex": "#000000",
+      "alpha": 1,
+      "usage": "",
+      "is_global": true
+    }
+  ],
+  "typography": {
+    "title_strategy": {
+      "source_library": "",
+      "font_family_css": "",
+      "suggested_weight": ""
+    },
+    "body_strategy": {
+      "source_library": "",
+      "font_family_css": "",
+      "base_line_height": 1.6
+    }
+  },
+  "decorative_elements": {
+    "global_background_layer": [
+      {
+        "description": "",
+        "html_template": ""
+      }
+    ],
+    "local_decorations": [
+      {
+        "target_page_type": "structure_page | content_page",
+        "description": "",
+        "html_template": ""
+      }
+    ]
+  },
+  "ui_components": {
+    "charts": {
+      "color_sequence": [],
+      "echarts_options": {}
+    },
+    "lists": {
+      "marker_style": ""
+    },
+    "dividers": {
+      "css_border": ""
+    }
+  }
+}
+```
+
+## Final rules
+
+- Output valid JSON only.
+- No markdown code fences in the final answer.
+- No natural language explanation before or after the JSON.
+- Do not output schema-drift variants; downstream HTML generation depends on stable keys here.

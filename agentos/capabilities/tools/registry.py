@@ -3,10 +3,20 @@ from __future__ import annotations
 from agentos.capabilities.tools.base import Tool
 from agentos.capabilities.tools.builtin import (
     BashCommandTool,
+    DocSourceTool,
     FetchUrlTool,
+    ImageSearchTool,
     ReadFileTool,
     SerperSearchTool,
     WriteFileTool,
+)
+from agentos.capabilities.tools.email import (
+    SendEmailTool,
+    ListEmailsTool,
+    ReadEmailTool,
+    DownloadAttachmentTool,
+    MarkEmailTool,
+    SearchEmailsTool,
 )
 from agentos.capabilities.tools.orchestration import CreateAgentTool
 
@@ -20,10 +30,18 @@ class ToolRegistry:
         for tool in [
             BashCommandTool(),
             SerperSearchTool(),
+            ImageSearchTool(),
             FetchUrlTool(),
             ReadFileTool(),
             WriteFileTool(),
             CreateAgentTool(),
+            DocSourceTool(),
+            SendEmailTool(),
+            ListEmailsTool(),
+            ReadEmailTool(),
+            DownloadAttachmentTool(),
+            MarkEmailTool(),
+            SearchEmailsTool(),
         ]:
             self.register(tool)
 

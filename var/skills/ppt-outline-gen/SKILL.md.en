@@ -1,0 +1,177 @@
+---
+name: ppt-outline-gen
+description: Generate a complete PPT outline JSON from a report, brief, images, audience context, and a target page count. Use this skill for PPT, slide deck, slides, presentation, or outline-generation subtasks that need exact-page planning, page types, layout decisions, image allocation, and needed-picture suggestions before HTML generation.
+---
+
+# PPT Outline Generation
+
+You are generating the full page-by-page outline for a presentation deck.
+
+Use this skill after the task already has enough source material, such as:
+
+- a report or synthesized brief
+- available pictures or picture metadata
+- author identity
+- usage scenario
+- target audience
+- target page count
+
+The output must be a strict JSON object only.
+
+## Core objective
+
+Generate a complete PPT outline that is structurally coherent, visually reasonable, and directly usable by downstream HTML generation.
+
+For each slide, decide:
+
+- page title
+- page type
+- layout shape
+- content blocks
+- picture usage
+- needed picture suggestions
+
+## Required inputs
+
+You should have:
+
+- `report`
+- `pictures`
+- `character`
+- `scenario`
+- `audience`
+- `page_number`
+
+## Global rules
+
+### Page planning
+
+- Generate all pages exactly up to the target page count.
+- Page 1 must be the cover page with page type `title`.
+- The last page must be the ending or thanks page with page type `ending`.
+- At most one catalog page is allowed.
+- Section transition pages may be inserted when helpful.
+
+### Structure quality
+
+- The whole deck must be logically connected.
+- The page sequence should move naturally from opening to development to closing.
+- If the report already implies a page structure, preserve it as much as possible.
+- Do not drop report sub-points only because a layout seems inconvenient. Choose a better layout instead.
+
+### Layout diversity
+
+- Use varied layouts where appropriate.
+- Avoid overusing a small number of page templates.
+- The chosen layout must match the amount and type of content.
+
+### Content density
+
+- Each page must feel substantial but still presentable.
+- A page may contain at most six content blocks total.
+- Pages with six blocks must not exceed 40% of the deck.
+- If content is too dense, split it across slides or drop minor non-core material.
+
+### Pictures, charts, and tables
+
+- Reuse provided pictures whenever possible.
+- One provided picture can be used only once.
+- If a page includes picture placement, keep the related picture usage consistent with the page design.
+- Charts and pictures together should not exceed four items on a single page.
+- If the report contains substantial data, prioritize charts over extra image search.
+
+## Sub-point rules
+
+Each page contains structured content under `content`.
+
+For each `sub_point`:
+
+- include `icon`
+- include `sub_point_name`
+- include `text`
+- optionally include `table`
+- optionally include `chart`
+- optionally include `picture`
+- optionally include `sub_sub_points`
+
+For each `sub_sub_point`:
+
+- only `icon`
+- `sub_sub_point_name`
+- `text`
+- optional `picture`
+
+Within one `sub_point`, beyond text, allow at most one main attached visual among table, chart, or picture.
+
+## Needed picture rules
+
+If a page needs additional visuals, add `needed_pictures`.
+
+Each needed picture must include:
+
+- `id`
+- `caption`
+- `tag`
+- `size`
+
+Rules:
+
+- non-background needed pictures must be referenced by some content block on the same page
+- if a needed picture is not actually placed in content, remove it
+- captions should be short search phrases, not full sentences
+- captions should stay concrete, common, and search-friendly
+- avoid years, exact figures, chart-like captions, or abstract slogans
+
+## Context adaptation
+
+The outline must reflect:
+
+- author identity
+- presentation scenario
+- audience type
+- target page count
+
+This should affect:
+
+- tone
+- abstraction level
+- terminology
+- whether to emphasize methods, conclusions, risks, actions, or education
+
+## Output schema
+
+Return a strict JSON object only. No explanation. No markdown fences.
+
+```json
+{
+  "title": "deck title",
+  "page1": {
+    "title": "",
+    "template_id": "",
+    "page_type": "title | content | catalog | transition | summary | ending",
+    "layout": {
+      "category": "single_column | two_column_horizontal | two_column_vertical | three_column | image_left_text_right | text_left_image_right | chart_left_text_right | text_left_chart_right | table_left_text_right | text_left_table_right | grid | free | centered | custom",
+      "custom_description": ""
+    },
+    "content": {
+      "sub_point1": {
+        "icon": "fa-lightbulb",
+        "sub_point_name": "",
+        "text": "「」",
+        "table": "",
+        "chart": "",
+        "picture": "",
+        "sub_sub_points": {}
+      }
+    },
+    "needed_pictures": [],
+    "page_number": "第1页，共N页"
+  }
+}
+```
+
+## Final rules
+
+- Output valid JSON only.
+- No extra commentary.
+- Keep the outline exact-page, structured, and ready for downstream page generation.

@@ -1,0 +1,216 @@
+---
+name: pptx
+description: "Create presentation decks in a simplified HTML-first workflow. Use this skill when the user asks for a PPT, slide deck, presentation, or 幻灯片 and the task needs research, source parsing, information synthesis, and deck orchestration before generating slide files. The current deliverable is a slide-by-slide HTML deck, not a `.pptx` file."
+license: Proprietary. LICENSE.txt has complete terms
+---
+
+# PPT deck orchestration
+
+This is the simplified PPT workflow. The current deliverable is an HTML slide deck, not a `.pptx` file.
+
+Use this skill when the task needs the agent to:
+
+- understand the user's PPT request
+- collect or parse supporting information
+- synthesize content into an actionable brief
+- extract a reusable deck-level style when needed
+- hand off outline generation to downstream skills
+- hand off image search and selection to downstream skills
+- hand off per-slide HTML generation to downstream skills
+
+If you need the full future pipeline, read [design.md](design.md). For now, stay on the simplified path.
+
+## Default scope
+
+Use this skill for:
+
+- creating a new PPT/deck from a user query
+- creating a deck from uploaded documents or links
+- producing a slide-by-slide HTML deck with a fixed target page count
+
+Do not use this skill for:
+
+- claiming `.pptx` export exists when it does not
+- template reverse engineering or complex layout inheritance
+- animation-heavy or motion-heavy generation
+
+## Workflow
+
+### 1. Normalize the task
+
+Extract or infer:
+
+- topic
+- audience
+- presentation goal
+- target page count
+- preferred tone or style
+- must-have sections
+- provided files, URLs, or reference materials
+
+Default language rule:
+
+- By default, all user-facing natural-language content in `brief.md`, `outline.json`, `style.json`, and the final HTML pages must follow the language of the user's query.
+- Only switch to another language when the user explicitly asks for it.
+- Fixed JSON keys, tool-required field names, code identifiers, and enum values may remain in English.
+- If the user asks in Chinese, do not default to English slide titles, outline text, style descriptions, or page copy. If the user asks in English, do not default to Chinese.
+
+If page count is missing but the user clearly wants a deck, propose a reasonable count and state it.
+
+If key intent is still unclear, ask only for blocking gaps.
+
+### 2. Plan information collection
+
+Choose only the tools needed for the task:
+
+- `document_parser` for uploaded docs
+- `image_vqa` when images inside source files carry important meaning
+- `web_search` for external facts, examples, or current background
+- `fetch_url` to extract useful content from specific pages
+
+If research or source digestion is heavy, prefer `create_subtask` to isolate it and avoid polluting the main context.
+
+When creating a PPT-related subtask, make the delegated work package explicitly look like a PPT task.
+
+Include, whenever relevant:
+
+- the words `PPT`, `slide deck`, `slides`, `presentation`, or `HTML slides`
+- the concrete stage name: `style extraction`, `outline generation`, or `HTML generation`
+- the key artifact names such as `brief.md`, `outline.json`, `style.json`, and `page_XX.html`
+- the target deck directory where outputs must be written
+
+Do not write a generic subtask such as "generate html files". Write it as a PPT-specific package such as "generate PPT HTML slides from outline.json and style.json into the deck directory".
+
+### 3. Build a synthesized brief
+
+Before outline generation, produce an internal brief that contains at least:
+
+- the core story of the deck
+- audience and decision context
+- key evidence or supporting facts
+- recommended narrative structure
+- baseline visual direction for the deck
+- constraints, assumptions, and missing pieces
+
+The brief must be strong enough to support downstream decisions, and it must be saved in the same output directory as the final deck artifacts.
+
+The simplified brief format must be fixed to three sections:
+
+1. Overall content summary
+2. Narrative outline summary
+3. Page-by-page content summary
+
+Additional rules:
+
+- The brief, outline, style file, and final HTML pages must all live in the same deck output directory.
+- The first section, `Overall content summary`, must be no shorter than `400 * target_page_count` Chinese characters.
+- The third section, `Page-by-page content summary`, should summarize every planned page in order and stay aligned with the final outline.
+- Do not dump raw research verbatim into the brief.
+- The `brief` stage is complete only after the target `brief.md` has actually been written to disk. It is not enough to merely claim success inside `subtask_result`.
+- Before the main thread marks the brief task as `completed`, it must verify that the target file exists and is readable.
+- If a subtask is responsible for writing `brief.md`, the subtask description must include the target file path explicitly, and the subtask result must include verifiable evidence that the file has been written.
+- If the main thread cannot read `brief.md`, cannot find it, or finds that the file is clearly incomplete, it must not keep the task marked as completed. It should retry, repair, or keep the work package unfinished.
+- Do not patch the workflow by writing a very short placeholder brief. If a brief has to be regenerated, it must still satisfy the three-section structure and the current page-count-based length requirement.
+
+### 4. Extract deck style when needed
+
+If the task includes style reference images, explicit visual direction, or enough report-level style signal, read the `ppt-style-extract` skill with `skill_tool`.
+
+That skill produces the deck-level style spec, typically as `style.json`.
+
+If the task has no meaningful style references, skip this stage and keep the later HTML design simple and conservative.
+
+Stage-gate requirements:
+
+- Before entering the next stage, the previous stage artifact must already be written, readable, and structurally valid.
+- `style.json` must follow the canonical schema defined by `ppt-style-extract`. Do not invent a simplified `style.json` or swap in ad hoc field names.
+- If the schema does not match the contract, the stage is not complete. Fix the artifact first.
+
+### 5. Hand off to outline generation
+
+Before planning pages, read the `ppt-outline-gen` skill with `skill_tool`.
+
+That skill owns:
+
+- exact-page outline generation
+- page type and layout planning
+- picture allocation and needed-picture suggestions
+- outline JSON structure
+
+Stage-gate requirements:
+
+- Before marking the outline stage complete, the main thread must verify that `outline.json` exists in the deck directory, is readable, and matches the `ppt-outline-gen` contract.
+- Do not accept a shorter but incompatible substitute. If a subtask silently drops fields, renames keys, or flattens the structure, treat the stage as incomplete.
+
+### 6. Hand off to image selection
+
+If the outline contains `needed_pictures`, read the `ppt-image-selection` skill with `skill_tool` before HTML generation.
+
+That skill owns:
+
+- building image search queries from `needed_pictures`
+- calling `image_search` for candidate pictures
+- selecting candidates based on page semantics and picture slot intent
+- keeping only candidates that can be downloaded reliably
+- downloading the final pictures one by one into the deck `images/` directory
+- producing `image_search_results.json` and `image_selection.json`
+
+At this stage, downloads must use failure exits and timeouts, and each downloaded file must be verified to exist locally, be non-empty, and be usable as an image.
+If a candidate URL fails to download, do not continue with the remote link. Switch to another candidate or mark that slot as `unresolved`.
+
+Stage-gate requirements:
+
+- `image_selection.json` must use the structured format defined by `ppt-image-selection`. Do not invent a simplified `image_selection.json`.
+- Enter the HTML stage only after `image_search_results.json`, `image_selection.json`, and the local `images/` directory are ready, and every `selected_image.local_path` points to a real local image.
+- If some slots still have no successful local image, record their explicit failure status and reason in `image_selection.json`. Do not drop them silently.
+
+If the outline contains no `needed_pictures`, this stage can be skipped.
+
+### 7. Hand off to HTML generation
+
+After the outline is stable, read the `ppt-html-gen` skill with `skill_tool`.
+
+That skill owns:
+
+- single-page HTML generation
+- slide geometry and safe area constraints
+- image, chart, and table implementation rules
+- final per-slide file output
+
+Stage-gate requirements:
+
+- Generate `page_XX.html` only after `brief.md`, `outline.json`, and any required `style.json` / `image_selection.json` artifacts have already passed verification.
+- If any required upstream artifact is missing, unreadable, or schema-invalid, do not keep moving and do not claim the deck is ready for HTML generation.
+
+### 7. Package the result
+
+The simplified deck output should usually include:
+
+- `brief.md`
+- `style.json` when style extraction is used
+- `outline.json`
+- `image_search_results.json` when picture supplementation is used
+- `image_selection.json` when picture supplementation is used
+- the local `images/` directory when picture supplementation is used
+- `page_01.html`, `page_02.html`, ...
+
+All of these artifacts should be stored in the same deck directory.
+
+Prefer one HTML file per slide. Do not collapse the whole deck into one giant file unless the user explicitly asks for that.
+
+At the end, use `display_result` or an equivalent result tool to point the user to the generated files.
+
+## Quality bar
+
+- Match the requested page count exactly.
+- Keep a coherent story across all slides.
+- Prefer simple, clean structure over premature visual complexity.
+- Keep the brief structure normalized and complete before page generation starts.
+- `brief.md` must be a real reusable deliverable file, not just a summary that exists only in agent dialogue or `subtask_result`.
+- All user-facing natural-language content should default to the same language as the user's query unless the user explicitly requests a different language.
+- If the outline requires pictures, complete picture search and selection before the HTML stage.
+- If the picture-selection stage cannot download an image locally, do not treat the remote URL as the final deliverable asset.
+- Prefer image resources that can be downloaded reliably. Do not treat social-platform proxy links, temporary crawler links, or links that clearly depend on page scripts as final assets.
+- Use only information the agent actually has. Do not invent data, case studies, or citations.
+- If the material is too thin for the requested page count, say so in the brief and adjust the outline accordingly instead of fabricating content.
+- If the brief is rich, body slides should carry more substance instead of collapsing into empty “big title + one sentence” slides.
