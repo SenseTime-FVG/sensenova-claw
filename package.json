@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.5.0",
   "scripts": {
+    "postinstall": "bash ./scripts/postinstall.sh",
     "dev": "bash ./scripts/dev.sh",
     "dev:server": "python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8000",
     "dev:web": "cd agentos/app/web && npm run dev",
