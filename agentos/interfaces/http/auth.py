@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
+from agentos.platform.config.config import config
 from agentos.platform.security.auth import COOKIE_MAX_AGE, COOKIE_NAME, TokenAuthService
 from agentos.platform.security.middleware import verify_request
 
@@ -57,8 +58,12 @@ def create_auth_router(auth_service: TokenAuthService) -> APIRouter:
     @router.get("/status")
     async def auth_status(request: Request):
         """
-        查询当前认证状态（通过 cookie 判断）
+        查询当前认证状态
+
+        auth_enabled 关闭时直接返回 authenticated=true（无需 token）。
         """
+        if not config.get("security.auth_enabled", False):
+            return AuthStatusResponse(authenticated=True)
         authenticated = verify_request(request, auth_service)
         return AuthStatusResponse(authenticated=authenticated)
 

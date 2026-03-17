@@ -286,16 +286,13 @@ function ChatPageInner() {
   // ── WebSocket ──
 
   useEffect(() => {
-    // 获取 token
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-      console.warn('No access token found, WebSocket connection may fail');
-      return;
-    }
+    // 从 cookie 读取 token（Jupyter-lab 风格认证）
+    const cookieMatch = document.cookie.match(/(?:^|; )agentos_token=([^;]*)/);
+    const token = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
 
-    // 在 WebSocket URL 中添加 token
-    const wsUrlWithToken = `${WS_URL}?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(wsUrlWithToken);
+    // 在 WebSocket URL 中添加 token（如果有）
+    const wsUrl = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
     ws.onopen = () => setWsConnected(true);
     ws.onclose = () => setWsConnected(false);
