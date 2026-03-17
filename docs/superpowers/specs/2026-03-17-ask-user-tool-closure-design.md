@@ -53,7 +53,29 @@
 2. 在 `chat/page.tsx` 与 `sessions/[id]/page.tsx` 接入同一套问答状态。
 3. 待回答时禁用普通输入，避免并发冲突。
 
-### 4.3 配置边界
+### 4.3 组件接口契约（明确边界）
+
+`QuestionDialog` 统一使用以下输入/输出接口，避免两页实现分叉：
+
+```python
+from typing import Any, Callable, Optional
+
+
+class QuestionDialogProps:
+    open: bool
+    question_id: str
+    question: str
+    options: Optional[list[str]]
+    multi_select: bool
+    timeout: int
+    created_at: float
+    submitting: bool
+    ws_connected: bool
+    on_submit: Callable[[Any], None]      # answer: str | list[str]
+    on_cancel: Callable[[], None]
+```
+
+### 4.4 配置边界
 
 1. 在 `config.yml` 所有 `agents.*.tools` 中加入 `ask_user`。
 2. 保留 `tools.ask_user.timeout`，由后端作为超时权威。
@@ -132,7 +154,15 @@ class WebChatPage:
 3. 空输入：按取消处理。
 4. 用户取消：发送 `cancelled: true`。
 
-### 6.2 历史回放
+### 6.2 答案归一化规则（消除歧义）
+
+1. 单选模式：始终返回 `str`。
+2. 多选模式：
+   - 选项选择：返回 `list[str]`
+   - 自定义输入：返回 `str`
+3. 前后端均按上述规则处理，不做隐式类型猜测。
+
+### 6.3 历史回放
 
 1. 会话回放中，`user.question_asked` 仅展示系统提示，不重放弹窗。
 2. 刷新页面不恢复旧问题回答态，避免误答过期 `question_id`。
@@ -166,6 +196,7 @@ class WebChatPage:
 2. 单选、多选、自定义输入、取消四种交互路径。
 3. 待回答期间普通输入禁用。
 4. 提交后最终 assistant 响应非空。
+5. 迁移现有 `chat.spec.ts` 选择器为当前页面真实结构（避免旧断言导致假失败）。
 
 ### 8.4 真实 API 回归
 
