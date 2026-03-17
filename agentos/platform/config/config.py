@@ -190,6 +190,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "delegation": {
         "max_depth": 3,
         "default_timeout": 300,
+        "retry": {
+            "max_retries": 0,
+            "backoff_seconds": [0, 1, 3],
+        },
         "enabled": True,
     },
 }

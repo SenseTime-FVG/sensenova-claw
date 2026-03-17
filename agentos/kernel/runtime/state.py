@@ -24,10 +24,12 @@ class SessionStateStore:
         self._latest_turn: dict[str, str] = {}
         self._session_history: dict[str, list[dict[str, Any]]] = {}
         self._session_first_turn: dict[str, bool] = {}  # 记录是否是会话的第一轮对话
+        self._cancelled_turns: set[tuple[str, str]] = set()
 
     def set_turn(self, session_id: str, state: TurnState) -> None:
         self._turns[(session_id, state.turn_id)] = state
         self._latest_turn[session_id] = state.turn_id
+        self.clear_turn_cancelled(session_id, state.turn_id)
 
     def get_turn(self, session_id: str, turn_id: str) -> TurnState | None:
         return self._turns.get((session_id, turn_id))
@@ -37,6 +39,15 @@ class SessionStateStore:
         if not turn_id:
             return None
         return self._turns.get((session_id, turn_id))
+
+    def mark_turn_cancelled(self, session_id: str, turn_id: str) -> None:
+        self._cancelled_turns.add((session_id, turn_id))
+
+    def is_turn_cancelled(self, session_id: str, turn_id: str) -> bool:
+        return (session_id, turn_id) in self._cancelled_turns
+
+    def clear_turn_cancelled(self, session_id: str, turn_id: str) -> None:
+        self._cancelled_turns.discard((session_id, turn_id))
 
     def get_session_history(self, session_id: str) -> list[dict[str, Any]]:
         return self._session_history.get(session_id, [])

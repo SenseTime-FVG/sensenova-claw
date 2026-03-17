@@ -1,4 +1,4 @@
-"""A02/A03/A04: AgentRegistry CRUD + 持久化 + 委托发现"""
+"""A02/A03/A04: AgentRegistry CRUD + 持久化 + Agent 发现"""
 from pathlib import Path
 from agentos.capabilities.agents.config import AgentConfig
 from agentos.capabilities.agents.registry import AgentRegistry
@@ -61,6 +61,34 @@ class TestAgentRegistry:
     def test_get_delegatable_nonexist(self, tmp_path):
         r = AgentRegistry(config_dir=tmp_path / "a")
         assert r.get_delegatable("nope") == []
+
+    def test_get_sendable_filtered(self, tmp_path):
+        r = AgentRegistry(config_dir=tmp_path / "a")
+        r.register(AgentConfig.create(id="main", name="M", can_send_message_to=["a"]))
+        r.register(AgentConfig.create(id="a", name="A"))
+        r.register(AgentConfig.create(id="b", name="B"))
+        assert [x.id for x in r.get_sendable("main")] == ["a"]
+
+    def test_load_from_config_supports_send_message_keys(self, tmp_path):
+        r = AgentRegistry(config_dir=tmp_path / "a")
+        r.load_from_config(
+            {
+                "agent": {"provider": "openai"},
+                "agents": {
+                    "helper": {
+                        "name": "Helper",
+                        "can_send_message_to": ["writer"],
+                        "max_send_depth": 6,
+                        "max_pingpong_turns": 9,
+                    }
+                },
+            }
+        )
+        helper = r.get("helper")
+        assert helper is not None
+        assert helper.can_send_message_to == ["writer"]
+        assert helper.max_send_depth == 6
+        assert helper.max_pingpong_turns == 9
 
     def test_update(self, tmp_path):
         r = AgentRegistry(config_dir=tmp_path / "a")

@@ -25,6 +25,7 @@ class TestAgentConfig:
         assert a.enabled is True
         assert a.temperature == 0.2
         assert a.max_delegation_depth == 3
+        assert a.max_pingpong_turns == 10
 
     def test_from_dict_defaults(self):
         a = AgentConfig.from_dict({"id": "x"})
@@ -38,6 +39,32 @@ class TestAgentConfig:
             "id", "name", "description", "provider", "model",
             "temperature", "max_tokens", "system_prompt", "tools",
             "skills", "can_delegate_to", "max_delegation_depth",
+            "max_pingpong_turns",
             "enabled", "created_at", "updated_at",
         }
         assert set(d.keys()) == expected_keys
+
+    def test_create_supports_send_message_aliases(self):
+        a = AgentConfig.create(
+            id="alias",
+            name="Alias",
+            can_send_message_to=["helper"],
+            max_send_depth=5,
+        )
+        assert a.can_delegate_to == ["helper"]
+        assert a.can_send_message_to == ["helper"]
+        assert a.max_delegation_depth == 5
+        assert a.max_send_depth == 5
+
+    def test_from_dict_supports_send_message_aliases(self):
+        a = AgentConfig.from_dict(
+            {
+                "id": "alias",
+                "can_send_message_to": ["writer"],
+                "max_send_depth": 4,
+                "max_pingpong_turns": 7,
+            }
+        )
+        assert a.can_send_message_to == ["writer"]
+        assert a.max_send_depth == 4
+        assert a.max_pingpong_turns == 7

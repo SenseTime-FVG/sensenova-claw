@@ -50,7 +50,7 @@ class ContextBuilder:
             tools = self.tool_registry.as_llm_tools()
             # 根据 agent_config 过滤工具信息注入 prompt
             if agent_config and agent_config.tools:
-                allowed = set(agent_config.tools) | {"delegate"}
+                allowed = set(agent_config.tools) | {"send_message"}
                 tools = [t for t in tools if t["name"] in allowed]
             for t in tools:
                 tool_names.append(t["name"])
@@ -63,8 +63,8 @@ class ContextBuilder:
             else config.get("agent.system_prompt", "")
         )
 
-        # 构建委托 Agent 信息
-        delegation_prompt = self._build_delegation_prompt(agent_config)
+        # 构建多 Agent 通信信息
+        delegation_prompt = self._build_agent_to_agent_prompt(agent_config)
 
         # 合并 extra_system_prompt
         extra = config.get("agent.extra_system_prompt")
@@ -133,19 +133,19 @@ class ContextBuilder:
         lines.append("</available_skills>")
         return "\n".join(lines)
 
-    def _build_delegation_prompt(self, agent_config: AgentConfig | None) -> str | None:
-        """构建可委托 Agent 的信息（注入到 system prompt）"""
+    def _build_agent_to_agent_prompt(self, agent_config: AgentConfig | None) -> str | None:
+        """构建可通信 Agent 的信息（注入到 system prompt）"""
         if not self.agent_registry or not agent_config:
             return None
-        delegatable = self.agent_registry.get_delegatable(agent_config.id)
-        if not delegatable:
+        sendable = self.agent_registry.get_sendable(agent_config.id)
+        if not sendable:
             return None
         lines = ["<available_agents>"]
-        for agent in delegatable:
+        for agent in sendable:
             lines.append(f"- {agent.id}: {agent.description}")
         lines.append("</available_agents>")
         lines.append("")
-        lines.append("你可以使用 delegate 工具将子任务委托给以上 Agent。")
+        lines.append("你可以使用 send_message 工具向以上 Agent 发送任务或追问。")
         return "\n".join(lines)
 
     def _collect_runtime_info(self, agent_config: AgentConfig | None = None) -> RuntimeInfo:
