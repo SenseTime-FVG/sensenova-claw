@@ -116,6 +116,7 @@ class UserRepository:
     async def get_user_by_id(self, user_id: str) -> Optional[User]:
         """根据 ID 获取用户"""
         conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
             cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -129,6 +130,7 @@ class UserRepository:
     async def get_user_by_username(self, username: str) -> Optional[User]:
         """根据用户名获取用户"""
         conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
             cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
@@ -142,6 +144,7 @@ class UserRepository:
     async def get_user_by_email(self, email: str) -> Optional[User]:
         """根据邮箱获取用户"""
         conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
             cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
@@ -168,6 +171,7 @@ class UserRepository:
     async def list_users(self, limit: int = 100) -> list[User]:
         """列出所有用户"""
         conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -220,6 +224,7 @@ class UserRepository:
     async def get_user_by_api_key_hash(self, key_hash: str) -> Optional[User]:
         """根据 API Key 哈希获取用户"""
         conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -259,15 +264,16 @@ class UserRepository:
         finally:
             conn.close()
 
-    def _row_to_user(self, row: tuple) -> User:
+    @staticmethod
+    def _row_to_user(row: sqlite3.Row) -> User:
         """将数据库行转换为 User 对象"""
         return User(
-            user_id=row[0],
-            username=row[1],
-            email=row[2],
-            password_hash=row[3],
-            is_active=bool(row[4]),
-            is_admin=bool(row[5]),
-            created_at=row[6],
-            last_login=row[7],
+            user_id=row["user_id"],
+            username=row["username"],
+            email=row["email"],
+            password_hash=row["password_hash"],
+            is_active=bool(row["is_active"]),
+            is_admin=bool(row["is_admin"]),
+            created_at=row["created_at"],
+            last_login=row["last_login"],
         )

@@ -41,13 +41,13 @@ def _sanitize_imap_string(value: str) -> str:
 
 
 def _convert_date_to_imap(date_str: str) -> str:
-    """将 YYYY-MM-DD 格式转为 IMAP 要求的 DD-Mon-YYYY 格式"""
-    try:
-        dt = datetime.strptime(date_str, "%Y-%m-%d")
-        return dt.strftime("%d-%b-%Y")
-    except ValueError:
-        # 如果格式不对，原样返回
-        return date_str
+    """将 YYYY-MM-DD 格式转为 IMAP 要求的 DD-Mon-YYYY 格式
+
+    Raises:
+        ValueError: 日期格式不符合 YYYY-MM-DD
+    """
+    dt = datetime.strptime(date_str.strip(), "%Y-%m-%d")
+    return dt.strftime("%d-%b-%Y")
 
 
 class SendEmailTool(Tool):

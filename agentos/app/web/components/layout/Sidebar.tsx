@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useUIContext } from '@/contexts/UIContext';
 import { useSessionContext } from '@/contexts/SessionContext';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
-import { authFetch } from '@/lib/authFetch';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface Session {
   session_id: string;
@@ -58,7 +58,7 @@ export function Sidebar() {
   const loadSessions = async () => {
     setLoading(true);
     try {
-      const data = await authFetch('http://localhost:8000/api/sessions').then(res => res.json());
+      const data = await authFetch(`${API_BASE}/api/sessions`).then(res => res.json());
       setSessions(data.sessions || []);
     } catch (error) {
       console.error('Failed to load sessions:', error);

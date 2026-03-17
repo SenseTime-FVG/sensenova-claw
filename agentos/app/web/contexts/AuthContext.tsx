@@ -132,10 +132,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (response.ok) {
         const data = await response.json();
-        const { access_token } = data;
+        const { access_token, refresh_token: new_refresh_token } = data;
 
         localStorage.setItem('access_token', access_token);
         setToken(access_token);
+
+        // 保存新的 refresh token（支持 token 轮换）
+        if (new_refresh_token) {
+          localStorage.setItem('refresh_token', new_refresh_token);
+          setRefreshTokenValue(new_refresh_token);
+        }
       } else {
         // Refresh token 无效，需要重新登录
         logout();

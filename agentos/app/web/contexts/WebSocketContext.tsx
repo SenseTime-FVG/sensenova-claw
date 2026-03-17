@@ -31,6 +31,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // 重置重连标志（cleanup 可能将其设为 false）
+    shouldReconnectRef.current = true;
+
     const connect = () => {
       // 清理之前的连接
       if (wsRef.current) {

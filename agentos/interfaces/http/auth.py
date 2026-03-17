@@ -117,6 +117,7 @@ def create_auth_router(
                 )
 
         # 创建用户
+        import time as _time
         user = User(
             user_id=str(uuid.uuid4()),
             username=req.username,
@@ -124,6 +125,7 @@ def create_auth_router(
             password_hash=auth_service.hash_password(req.password),
             is_active=True,
             is_admin=False,
+            created_at=_time.time(),
         )
 
         await user_repo.create_user(user)
