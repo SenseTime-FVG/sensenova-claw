@@ -9,7 +9,7 @@ ToolRegistry（工具注册表）
     ├── Tool 基类（定义工具接口）
     ├── 内置工具（BashCommand, SerperSearch, FetchUrl, ReadFile, WriteFile）
     ├── 编排工具（CreateAgent）
-    └── 委托工具（Delegate）
+    └── 多 Agent 通信工具（SendMessage）
 
 ToolRuntime（工具运行时）
     └── ToolSessionWorker（会话级 Worker，每个 session 一个实例）
@@ -65,7 +65,7 @@ class ToolRegistry:
 **初始化流程**：
 1. `ToolRegistry.__init__()` 时自动调用 `_register_builtin()`
 2. 内置注册 6 个工具：`BashCommandTool`、`SerperSearchTool`、`FetchUrlTool`、`ReadFileTool`、`WriteFileTool`、`CreateAgentTool`
-3. `DelegateTool` 因依赖注入需要，在 Gateway 启动时单独注册
+3. `SendMessageTool` 因依赖注入需要，在 Gateway 启动时单独注册
 
 **`as_llm_tools()` 输出格式**：
 

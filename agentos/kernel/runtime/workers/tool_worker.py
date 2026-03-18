@@ -57,9 +57,10 @@ class ToolSessionWorker(SessionWorker):
             return result
 
         save_dir = config.get("tools.result_truncation.save_dir", "workspace")
-        workspace_dir = Path(config.get("system.workspace_dir", "./SenseAssistant/workspace"))
+        from agentos.platform.config.workspace import resolve_agentos_home
+        home = resolve_agentos_home(config)
         if save_dir == "workspace":
-            base_dir = workspace_dir
+            base_dir = home
         else:
             base_dir = Path(save_dir)
         session_dir = base_dir / self.session_id
@@ -222,9 +223,10 @@ class ToolSessionWorker(SessionWorker):
                 await self._publish_tool_result(event, result="用户拒绝执行该工具", success=False)
                 return
 
-        timeout = float(config.get(f"tools.{tool_name}.timeout", 15))
+        default_timeout = 600 if tool_name == "send_message" else 15
+        timeout = float(config.get(f"tools.{tool_name}.timeout", default_timeout))
         if timeout <= 0:
-            timeout = 15
+            timeout = default_timeout
 
         success = True
         error = ""
@@ -235,6 +237,13 @@ class ToolSessionWorker(SessionWorker):
             exec_kwargs["_path_policy"] = self.rt.path_policy
         if self.rt.agent_registry:
             exec_kwargs["_agent_registry"] = self.rt.agent_registry
+        agent_workdir = event.payload.get("_agent_workdir")
+        if agent_workdir:
+            exec_kwargs["_agent_workdir"] = agent_workdir
+        if event.turn_id:
+            exec_kwargs["_turn_id"] = event.turn_id
+        if tool_call_id:
+            exec_kwargs["_tool_call_id"] = tool_call_id
 
         try:
             result = await asyncio.wait_for(

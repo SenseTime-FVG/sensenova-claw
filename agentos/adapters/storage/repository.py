@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from agentos.kernel.runtime.message_record import MessageRecord
 from agentos.platform.config.config import config
 from agentos.kernel.events.envelope import EventEnvelope
 
@@ -67,6 +68,31 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_turn ON messages(turn_id);
 
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id TEXT PRIMARY KEY,
+    parent_session_id TEXT NOT NULL,
+    parent_turn_id TEXT,
+    parent_tool_call_id TEXT,
+    child_session_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    message TEXT NOT NULL,
+    result TEXT,
+    error TEXT,
+    depth INTEGER NOT NULL DEFAULT 0,
+    pingpong_count INTEGER NOT NULL DEFAULT 0,
+    active_turn_id TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 1,
+    max_attempts INTEGER NOT NULL DEFAULT 1,
+    timeout_seconds REAL,
+    created_at REAL NOT NULL,
+    completed_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_parent_session ON agent_messages(parent_session_id);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_child_session ON agent_messages(child_session_id);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_status ON agent_messages(status);
+
 CREATE TABLE IF NOT EXISTS cron_jobs (
     id TEXT PRIMARY KEY,
     name TEXT,
@@ -108,7 +134,12 @@ CREATE INDEX IF NOT EXISTS idx_cron_runs_job ON cron_runs(job_id);
 
 class Repository:
     def __init__(self, db_path: str | None = None):
-        self.db_path = Path(db_path or config.get("system.database_path", "./SenseAssistant/agentos.db")).expanduser()
+        if not db_path:
+            db_path = config.get("system.database_path", "")
+        if not db_path:
+            from agentos.platform.config.workspace import resolve_agentos_home
+            db_path = str(resolve_agentos_home(config) / "data" / "agentos.db")
+        self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _conn(self) -> sqlite3.Connection:
@@ -121,14 +152,17 @@ class Repository:
         conn.executescript(SCHEMA_SQL)
         conn.commit()
         self._migrate_sessions_table(conn)
+        self._migrate_agent_messages_table(conn)
         conn.close()
 
     async def create_session(self, session_id: str, meta: dict[str, Any] | None = None) -> None:
         now = time.time()
+        meta = meta or {}
+        agent_id = meta.get("agent_id", "default")
         conn = self._conn()
         conn.execute(
-            "INSERT OR IGNORE INTO sessions (session_id, created_at, last_active, meta) VALUES (?, ?, ?, ?)",
-            (session_id, now, now, json.dumps(meta or {}, ensure_ascii=False)),
+            "INSERT OR IGNORE INTO sessions (session_id, created_at, last_active, meta, agent_id) VALUES (?, ?, ?, ?, ?)",
+            (session_id, now, now, json.dumps(meta, ensure_ascii=False), agent_id),
         )
         conn.commit()
         conn.close()
@@ -174,6 +208,21 @@ class Repository:
         conn.commit()
         conn.close()
 
+    async def update_turn_status(
+        self,
+        turn_id: str,
+        status: str,
+        agent_response: str | None = None,
+    ) -> None:
+        """更新 turn 状态，必要时补充结束时间与最终输出。"""
+        conn = self._conn()
+        conn.execute(
+            "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
+            (status, time.time(), agent_response, turn_id),
+        )
+        conn.commit()
+        conn.close()
+
     async def log_event(self, event: EventEnvelope) -> None:
         conn = self._conn()
         conn.execute(
@@ -211,7 +260,7 @@ class Repository:
     # ---------- Sessions 表迁移 ----------
 
     def _migrate_sessions_table(self, conn: sqlite3.Connection) -> None:
-        """为 sessions 表添加新列（如不存在）"""
+        """为 sessions 表添加新列（如不存在），并回填 agent_id"""
         cursor = conn.execute("PRAGMA table_info(sessions)")
         existing_cols = {row[1] for row in cursor.fetchall()}
         migrations = [
@@ -219,6 +268,46 @@ class Repository:
             ("model", "ALTER TABLE sessions ADD COLUMN model TEXT"),
             ("message_count", "ALTER TABLE sessions ADD COLUMN message_count INTEGER DEFAULT 0"),
             ("agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT DEFAULT 'default'"),
+        ]
+        for col, sql in migrations:
+            if col not in existing_cols:
+                conn.execute(sql)
+        conn.commit()
+        # 回填：从 meta JSON 中提取 agent_id 写入 agent_id 列（修复历史数据）
+        rows = conn.execute(
+            "SELECT session_id, meta FROM sessions WHERE agent_id IS NULL OR agent_id = 'default'"
+        ).fetchall()
+        for row in rows:
+            meta_str = row[1]
+            if not meta_str:
+                continue
+            try:
+                meta = json.loads(meta_str)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            aid = meta.get("agent_id")
+            if aid and aid != "default":
+                conn.execute(
+                    "UPDATE sessions SET agent_id = ? WHERE session_id = ?",
+                    (aid, row[0]),
+                )
+        conn.commit()
+
+    def _migrate_agent_messages_table(self, conn: sqlite3.Connection) -> None:
+        """为 agent_messages 表补充新增列（兼容旧库）。"""
+        cursor = conn.execute("PRAGMA table_info(agent_messages)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        migrations = [
+            ("active_turn_id", "ALTER TABLE agent_messages ADD COLUMN active_turn_id TEXT"),
+            (
+                "attempt_count",
+                "ALTER TABLE agent_messages ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 1",
+            ),
+            (
+                "max_attempts",
+                "ALTER TABLE agent_messages ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 1",
+            ),
+            ("timeout_seconds", "ALTER TABLE agent_messages ADD COLUMN timeout_seconds REAL"),
         ]
         for col, sql in migrations:
             if col not in existing_cols:
@@ -306,12 +395,109 @@ class Repository:
     async def delete_session_cascade(self, session_id: str) -> None:
         """级联删除会话及关联的 turns, messages, events"""
         conn = self._conn()
+        conn.execute(
+            "DELETE FROM agent_messages WHERE parent_session_id = ? OR child_session_id = ?",
+            (session_id, session_id),
+        )
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM events WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM turns WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
         conn.commit()
         conn.close()
+
+    # ---------- Agent Messages 表操作 ----------
+
+    async def save_message_record(self, record: MessageRecord) -> None:
+        """保存 Agent-to-Agent 消息记录。"""
+        conn = self._conn()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO agent_messages (
+                id, parent_session_id, parent_turn_id, parent_tool_call_id,
+                child_session_id, target_id, status, mode, message,
+                result, error, depth, pingpong_count, active_turn_id,
+                attempt_count, max_attempts, timeout_seconds, created_at, completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.id,
+                record.parent_session_id,
+                record.parent_turn_id,
+                record.parent_tool_call_id,
+                record.child_session_id,
+                record.target_id,
+                record.status,
+                record.mode,
+                record.message,
+                record.result,
+                record.error,
+                record.depth,
+                record.pingpong_count,
+                record.active_turn_id,
+                record.attempt_count,
+                record.max_attempts,
+                record.timeout_seconds,
+                record.created_at,
+                record.completed_at,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+    async def update_message_record(self, record: MessageRecord) -> None:
+        """更新 Agent-to-Agent 消息记录。"""
+        await self.save_message_record(record)
+
+    async def get_message_record(self, record_id: str) -> MessageRecord | None:
+        """按记录 ID 查询 Agent-to-Agent 消息记录。"""
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT * FROM agent_messages WHERE id = ?",
+            (record_id,),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        return MessageRecord.from_mapping(dict(row))
+
+    async def get_message_record_by_child_session(
+        self,
+        child_session_id: str,
+    ) -> MessageRecord | None:
+        """按子会话 ID 查询最新一条 Agent-to-Agent 消息记录。"""
+        conn = self._conn()
+        row = conn.execute(
+            """
+            SELECT * FROM agent_messages
+            WHERE child_session_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (child_session_id,),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        return MessageRecord.from_mapping(dict(row))
+
+    async def list_active_message_records(
+        self,
+        parent_session_id: str,
+    ) -> list[MessageRecord]:
+        """查询父会话下仍在运行中的 Agent-to-Agent 消息记录。"""
+        conn = self._conn()
+        rows = conn.execute(
+            """
+            SELECT * FROM agent_messages
+            WHERE parent_session_id = ?
+              AND status IN ('pending', 'running', 'retrying')
+            ORDER BY created_at DESC
+            """,
+            (parent_session_id,),
+        ).fetchall()
+        conn.close()
+        return [MessageRecord.from_mapping(dict(row)) for row in rows]
 
     async def prune_sessions(self, max_age_days: int = 30) -> int:
         """删除超期未活跃的会话及关联数据，返回删除数量"""

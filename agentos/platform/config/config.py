@@ -17,8 +17,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG: dict[str, Any] = {
     "system": {
         "log_level": "DEBUG",
-        "workspace_dir": "./workspace",
-        "database_path": "./var/data/agentos.db",
+        "agentos_home": "${AGENTOS_HOME}",           # 默认 ~/.agentos，支持环境变量覆盖
+        "workspace_dir": "",                          # 已废弃，由 agentos_home 替代
+        "database_path": "",                          # 空=自动用 {agentos_home}/data/agentos.db
         "max_concurrent_sessions": 10,
         "granted_paths": [],                         # v1.2: 预授权目录列表
     },
@@ -173,23 +174,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
     },
-    # v0.6: 安全与认证配置
+    # 安全与认证配置（Jupyter-lab 风格 token）
     "security": {
-        "auth_enabled": False,
-        "public_registration": False,
-        "allow_init_admin": False,
-        "jwt": {
-            "secret_key": "",
-            "algorithm": "HS256",
-            "access_token_expire_minutes": 60,
-            "refresh_token_expire_days": 30,
-        },
+        "auth_enabled": False,  # 启用后所有 API/WebSocket 需要 token 认证
     },
     # v1.0: 多 Agent 配置
     "agents": {},
     "delegation": {
         "max_depth": 3,
         "default_timeout": 300,
+        "retry": {
+            "max_retries": 0,
+            "backoff_seconds": [0, 1, 3],
+        },
         "enabled": True,
     },
 }
