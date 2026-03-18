@@ -248,7 +248,7 @@ async def lifespan(app: FastAPI):
     await heartbeat_runtime.start()
 
     # Token 认证服务（Jupyter-lab 风格，每次启动生成新 token）
-    auth_service = TokenAuthService()
+    auth_service = TokenAuthService(agentos_home=agentos_home)
 
     app.state.services = Services(
         repo=repo,

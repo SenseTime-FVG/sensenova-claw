@@ -61,8 +61,12 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
 
     # 基础配置
     config_path = tmp_path / "config.yml"
-    config_path.write_text("", encoding="utf-8")
+    config_path.write_text("security:\n  auth_enabled: false\n", encoding="utf-8")
     cfg = Config(config_path=config_path)
+
+    # 确保全局 config 也关闭 auth（中间件使用全局 config）
+    from agentos.platform.config.config import config as global_config
+    global_config.set("security.auth_enabled", False)
     cfg.set("system.workspace_dir", str(workspace_dir))
 
     # 配置 provider
@@ -172,6 +176,10 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
         ws_channel: WebSocketChannel
         cron_runtime: CronRuntime
         heartbeat_runtime: HeartbeatRuntime
+        auth_service: object
+
+    from agentos.platform.security.auth import TokenAuthService
+    auth_service = TokenAuthService()
 
     app.state.services = Services(
         repo=repo, bus=bus, publisher=publisher,
@@ -180,6 +188,7 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
         tool_runtime=tool_runtime, title_runtime=title_runtime,
         gateway=gw, ws_channel=ws_channel,
         cron_runtime=cron_runtime, heartbeat_runtime=heartbeat_runtime,
+        auth_service=auth_service,
     )
     app.state.tool_registry = tool_registry
     app.state.skill_registry = skill_registry

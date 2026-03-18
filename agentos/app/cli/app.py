@@ -54,7 +54,14 @@ class CLIApp:
     async def run(self) -> int:
         """主入口，返回退出码 0/1/2"""
         ws_url = f"ws://{self.host}:{self.port}/ws"
-        self.console.print(f"[cyan]连接到 {ws_url}...[/cyan]")
+
+        # 自动读取 token 文件，附加到 WebSocket URL
+        from agentos.platform.security.auth import read_token_file
+        token = read_token_file()
+        if token:
+            ws_url = f"{ws_url}?token={token}"
+
+        self.console.print(f"[cyan]连接到 ws://{self.host}:{self.port}/ws...[/cyan]")
 
         async with websockets.connect(ws_url) as ws:
             self.ws = ws
