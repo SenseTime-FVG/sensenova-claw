@@ -106,11 +106,12 @@ class TestRegister:
         assert len(registry._pending_tools) >= 1
 
     async def test_api_tool_disabled_by_default(self):
-        """默认不启用 api_tool 时，只注册 MessageTool（1 次）"""
+        """默认不启用 api_tool 时，应注册 MessageTool + doc/wiki/drive 工具"""
         api = _make_plugin_api({"enabled": True, "api_tool": {}})
         registry = api._registry
         await register(api)
-        assert len(registry._pending_tools) == 1  # 仅 MessageTool
+        tool_names = {tool.name for tool in registry._pending_tools}
+        assert tool_names == {"message", "feishu_doc", "feishu_wiki", "feishu_drive"}
 
     async def test_api_tool_enabled(self):
         """api_tool.enabled=True 时应额外注册 FeishuApiTool"""
@@ -124,8 +125,14 @@ class TestRegister:
         })
         registry = api._registry
         await register(api)
-        # MessageTool + FeishuApiTool = 2
-        assert len(registry._pending_tools) == 2
+        tool_names = {tool.name for tool in registry._pending_tools}
+        assert tool_names == {
+            "message",
+            "feishu_doc",
+            "feishu_wiki",
+            "feishu_drive",
+            "feishu_api",
+        }
 
     async def test_channel_config_passthrough(self):
         """Channel 应使用 FeishuConfig 中的配置值"""

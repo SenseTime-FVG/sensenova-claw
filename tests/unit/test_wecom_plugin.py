@@ -90,9 +90,13 @@ async def test_plugin_registry_loads_channel_plugins():
 
     global_config.set("plugins.feishu.enabled", False)
     global_config.set("plugins.wecom.enabled", False)
+    global_config.set("plugins.telegram.enabled", False)
+    global_config.set("plugins.whatsapp.enabled", False)
 
     registry = PluginRegistry()
     await registry.load_plugins(config=global_config.data)
 
     assert "feishu" in registry._plugins
     assert "wecom" in registry._plugins
+    assert "telegram" in registry._plugins
+    assert "whatsapp" in registry._plugins
