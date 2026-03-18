@@ -132,8 +132,11 @@ async def ws_server(tmp_path):
     )
     title_runtime = TitleRuntime(bus=bus, repo=repo)
 
-    gw = Gateway(publisher=publisher)
-    ws_channel = WebSocketChannel("websocket")
+    from agentos.platform.security.auth import TokenAuthService
+    auth_service = TokenAuthService()
+
+    gw = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
+    ws_channel = WebSocketChannel("websocket", auth_service=auth_service)
     gw.register_channel(ws_channel)
 
     cron_runtime = CronRuntime(bus=bus, repo=repo, gateway=gw)
@@ -165,9 +168,6 @@ async def ws_server(tmp_path):
         cron_runtime: CronRuntime
         heartbeat_runtime: HeartbeatRuntime
         auth_service: object
-
-    from agentos.platform.security.auth import TokenAuthService
-    auth_service = TokenAuthService()
 
     app.state.services = Services(
         repo=repo, bus=bus, publisher=publisher,
