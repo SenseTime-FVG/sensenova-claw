@@ -286,30 +286,6 @@ function ChatPageInner() {
 
   // ── WebSocket ──
 
-  // 用 ref 保持 handleWsMessage 始终指向最新版本，避免 stale closure
-  const handleWsMessageRef = useRef<((data: Record<string, unknown>) => void) | null>(null);
-
-  useEffect(() => {
-    // 从 cookie 读取 token（Jupyter-lab 风格认证）
-    const cookieMatch = document.cookie.match(/(?:^|; )agentos_token=([^;]*)/);
-    const token = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
-    const wsUrl = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    ws.onopen = () => setWsConnected(true);
-    ws.onclose = () => setWsConnected(false);
-    ws.onerror = () => setWsConnected(false);
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        handleWsMessageRef.current?.(data);
-      } catch { /* ignore */ }
-    };
-
-    return () => { ws.close(); };
-  }, []);
-
   const handleWsMessage = (data: Record<string, unknown>) => {
     const payload = (data.payload || {}) as Record<string, unknown>;
     switch (data.type) {
@@ -378,7 +354,41 @@ function ChatPageInner() {
       }
     }
   };
+
+  // 用 ref 保持 handleWsMessage 始终指向最新版本，避免 stale closure
+  const handleWsMessageRef = useRef(handleWsMessage);
   handleWsMessageRef.current = handleWsMessage;
+
+  useEffect(() => {
+    // 从 cookie 读取 token（Jupyter-lab 风格认证）
+    const cookieMatch = document.cookie.match(/(?:^|; )agentos_token=([^;]*)/);
+    const token = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
+    const wsUrl = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
+
+    let ws: WebSocket | null = null;
+    let cancelled = false;
+
+    // 延迟连接，避免 React Strict Mode 双重执行时第一个连接被立即关闭
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+      ws.onopen = () => setWsConnected(true);
+      ws.onclose = () => setWsConnected(false);
+      ws.onerror = () => setWsConnected(false);
+      ws.onmessage = (event) => {
+        try {
+          handleWsMessageRef.current(JSON.parse(event.data));
+        } catch { /* ignore */ }
+      };
+    }, 50);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      if (ws) ws.close();
+    };
+  }, []);
 
   function addMsg(role: ChatMessage['role'], content: string) {
     setMessages(prev => [...prev, { id: makeId(), role, content, timestamp: Date.now() }]);
