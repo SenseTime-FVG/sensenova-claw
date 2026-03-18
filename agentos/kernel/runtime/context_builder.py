@@ -156,11 +156,12 @@ class ContextBuilder:
 
     def _collect_runtime_info(self, agent_config: AgentConfig | None = None) -> RuntimeInfo:
         """收集运行时信息"""
-        model = (
+        model_key = (
             agent_config.model
             if agent_config and agent_config.model
-            else config.get("agent.default_model")
+            else config.get("agent.model") or config.get("llm.default_model", "mock")
         )
+        _, model = config.resolve_model(model_key)
         return RuntimeInfo(
             os=f"{platform.system()} ({platform.machine()})",
             python=platform.python_version(),

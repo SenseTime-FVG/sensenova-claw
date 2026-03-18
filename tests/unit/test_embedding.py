@@ -24,7 +24,7 @@ def real_config() -> Config:
 
 def _is_openai_key_valid(cfg: Config) -> bool:
     """检查 OpenAI API key 是否为真实 key（非占位符）"""
-    api_key = cfg.get("llm_providers.openai.api_key", "")
+    api_key = cfg.get("llm.openai.api_key", "")
     # 占位符通常是短字符串或包含 1234567890
     if not api_key:
         return False
@@ -84,7 +84,7 @@ class TestEmbeddingServiceInit:
     def test_init_with_valid_key(self, real_config) -> None:
         """有 API key 时应初始化成功（available 取决于 key 是否有效）"""
         svc = _make_service(real_config)
-        api_key = real_config.get("llm_providers.openai.api_key", "")
+        api_key = real_config.get("llm.providers.openai.api_key", "")
         if api_key and "1234567890" not in api_key:
             # 真实 key，应可用
             assert svc.available() is True
@@ -101,8 +101,8 @@ class TestEmbeddingServiceInit:
         """无 API key 时降级：使用临时空配置"""
         empty_cfg = Config.__new__(Config)
         empty_cfg.data = {
-            "llm_providers": {
-                "openai": {"api_key": "", "base_url": None}
+            "llm": {
+                "providers": {"openai": {"api_key": "", "base_url": None}}
             }
         }
 
@@ -131,8 +131,8 @@ class TestEmbed:
         """服务不可用时抛出 RuntimeError"""
         empty_cfg = Config.__new__(Config)
         empty_cfg.data = {
-            "llm_providers": {
-                "openai": {"api_key": "", "base_url": None}
+            "llm": {
+                "providers": {"openai": {"api_key": "", "base_url": None}}
             }
         }
 

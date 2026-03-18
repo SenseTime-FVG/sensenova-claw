@@ -1,6 +1,6 @@
 # 内置工具
 
-AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、安全授权和多 Agent 协作场景。所有工具定义位于 `agentos/capabilities/tools/` 目录下。
+AgentOS 内置多种工具，覆盖命令执行、信息检索、文件操作、安全授权和多 Agent 协作场景。所有工具定义位于 `agentos/capabilities/tools/` 目录下。
 
 ## 工具总览
 
@@ -8,6 +8,9 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 |------|------|---------|---------|
 | `bash_command` | 执行 shell 命令 | HIGH | builtin.py |
 | `serper_search` | Serper API 网络搜索 | LOW | builtin.py |
+| `brave_search` | Brave Search API 网络搜索 | LOW | builtin.py |
+| `baidu_search` | 百度 AppBuilder AI Search 网页搜索 | LOW | builtin.py |
+| `tavily_search` | Tavily Search API 网络搜索 | LOW | builtin.py |
 | `fetch_url` | HTTP 获取网页内容 | LOW | builtin.py |
 | `read_file` | 读取文本文件 | LOW | builtin.py |
 | `write_file` | 写入文本文件 | MEDIUM | builtin.py |
@@ -88,6 +91,89 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 - `tools.serper_search.max_results`：最大返回结果数，默认 10
 
 **注意**：未配置 `SERPER_API_KEY` 时返回空结果（不报错），附带提示信息。
+
+## brave_search
+
+通过 Brave Search API 执行网页搜索，返回标准化的 `{query, items}` 结构。
+
+**风险等级**：LOW
+
+**参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `q` | string | 是 | 搜索关键词 |
+| `page` | integer | 否 | 页码，默认 1 |
+| `count` | integer | 否 | 返回结果数，默认读取配置 |
+| `freshness` | string | 否 | 时间过滤，如 `pd` / `pw` / `pm` / `py` |
+| `country` | string | 否 | 国家代码，如 `US` / `CN` |
+| `search_lang` | string | 否 | 搜索语言，如 `en` / `zh-hans` |
+| `ui_lang` | string | 否 | 界面语言，如 `en-US` / `zh-CN` |
+
+**配置**：
+- `tools.brave_search.api_key`：Brave Search API 密钥
+- `tools.brave_search.timeout`：请求超时，默认 15 秒
+- `tools.brave_search.max_results`：默认返回结果数，默认 10
+- `tools.brave_search.country/search_lang/ui_lang`：地域和语言偏好
+
+**注意**：未配置 `BRAVE_SEARCH_API_KEY` 时返回空结果（不报错），附带提示信息。
+
+## baidu_search
+
+通过百度 AppBuilder AI Search 的 `web_search` 接口执行网页搜索。
+
+**风险等级**：LOW
+
+**参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `q` | string | 是 | 搜索关键词 |
+| `max_results` | integer | 否 | 返回结果数，默认读取配置 |
+| `search_source` | string | 否 | 搜索源，默认 `baidu_search_v2` |
+| `search_recency_filter` | string | 否 | 时间过滤，如 `day` / `week` / `month` / `year` |
+
+**返回值补充字段**：
+- `date`：结果时间
+- `website`：站点名称
+- `authority_score`：网页权威性分数
+- `rerank_score`：相关性重排分数
+
+**配置**：
+- `tools.baidu_search.api_key`：百度 AppBuilder API 密钥
+- `tools.baidu_search.timeout`：请求超时，默认 15 秒
+- `tools.baidu_search.max_results`：默认返回结果数，默认 10
+- `tools.baidu_search.search_source`：默认搜索源，默认 `baidu_search_v2`
+
+**注意**：未配置 `BAIDU_APPBUILDER_API_KEY` 时返回空结果（不报错），附带提示信息。
+
+## tavily_search
+
+通过 Tavily Search API 执行网页搜索，支持主题和时间范围过滤。
+
+**风险等级**：LOW
+
+**参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `q` | string | 是 | 搜索关键词 |
+| `search_depth` | string | 否 | 搜索深度，如 `basic` / `advanced` / `fast` / `ultra-fast` |
+| `topic` | string | 否 | 搜索主题，如 `general` / `news` / `finance` |
+| `time_range` | string | 否 | 时间范围，如 `day` / `week` / `month` / `year` |
+| `max_results` | integer | 否 | 返回结果数，默认读取配置 |
+
+**返回值补充字段**：
+- 顶层可能包含 `answer`、`response_time`、`request_id`
+- 每条结果可能包含 `score`、`favicon`
+
+**配置**：
+- `tools.tavily_search.api_key`：Tavily API 密钥
+- `tools.tavily_search.timeout`：请求超时，默认 15 秒
+- `tools.tavily_search.max_results`：默认返回结果数，默认 5
+- `tools.tavily_search.search_depth/topic/time_range`：默认搜索策略
+
+**注意**：未配置 `TAVILY_API_KEY` 时返回空结果（不报错），附带提示信息。
 
 ## fetch_url
 

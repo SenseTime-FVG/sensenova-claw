@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { WsMessage } from '@/types/websocket';
-import { useAuth } from './AuthContext';
 
 interface WebSocketContextValue {
   isConnected: boolean;
@@ -30,16 +29,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(true);
-  const { isAuthenticated } = useAuth();
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      return;
-    }
-
-    shouldReconnectRef.current = true;
-
     const connect = () => {
+      // 清理之前的连接
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -56,13 +49,14 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         ws.onopen = () => {
           console.log('WebSocket connected');
           setIsConnected(true);
-          reconnectAttemptsRef.current = 0;
+          reconnectAttemptsRef.current = 0; // 重置重连计数
         };
 
         ws.onclose = () => {
           console.log('WebSocket disconnected');
           setIsConnected(false);
 
+          // 自动重连
           if (shouldReconnectRef.current && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttemptsRef.current += 1;
             console.log(`Attempting to reconnect (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})...`);
@@ -93,7 +87,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     connect();
 
     return () => {
-      shouldReconnectRef.current = false;
+      shouldReconnectRef.current = false; // 停止重连
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -101,7 +95,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         wsRef.current.close();
       }
     };
-  }, [isAuthenticated]);
+  }, []);
 
   const value = useMemo<WebSocketContextValue>(
     () => ({

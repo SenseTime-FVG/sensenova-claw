@@ -79,7 +79,7 @@ AgentOS 的核心引擎，包含事件系统和 Runtime 机制。
 |------|------|
 | `Tool`（基类） | 工具抽象基类，定义工具接口 |
 | `ToolRegistry` | 工具注册表，通过 `@tool_registry.register()` 装饰器注册工具 |
-| 内置工具 (`builtin.py`) | 5 个内置工具：`bash_command`、`serper_search`、`fetch_url`、`read_file`、`write_file` |
+| 内置工具 (`builtin.py`) | 多个内置工具：`bash_command`、`serper_search`、`brave_search`、`baidu_search`、`tavily_search`、`fetch_url`、`read_file`、`write_file` |
 
 ### capabilities/skills/ - Skills 系统
 

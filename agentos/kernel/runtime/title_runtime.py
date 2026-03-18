@@ -12,8 +12,9 @@ from agentos.adapters.llm.factory import LLMFactory
 
 logger = logging.getLogger(__name__)
 
+from agentos.kernel.events.types import AGENT_UPDATE_TITLE_COMPLETED
+
 AGENT_UPDATE_TITLE_STARTED = "agent.update_title_started"
-AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
 
 
 class TitleRuntime:
@@ -74,7 +75,7 @@ class TitleRuntime:
             ]
 
             from agentos.platform.config.config import config
-            model = config.get("agent.default_model", "")
+            _, model = config.resolve_model()
             response = await provider.call(model=model, messages=messages, tools=None, temperature=0.7)
             title = response.get("content", "").strip()
 
