@@ -310,6 +310,20 @@ class TestMemoryManager:
         assert "记忆读取" in result  # 包含指引文本
 
     @pytest.mark.asyncio
+    async def test_load_memory_md_includes_agent_memory(self, manager, workspace):
+        (workspace / "MEMORY.md").write_text("全局偏好: 喜欢 Python", encoding="utf-8")
+        memory_dir = workspace / "memory"
+        memory_dir.mkdir()
+        (memory_dir / "planner.md").write_text("上次已经完成接口设计", encoding="utf-8")
+
+        result = await manager.load_memory_md(agent_id="planner")
+
+        assert result is not None
+        assert "全局偏好: 喜欢 Python" in result
+        assert "planner 的历史记忆" in result
+        assert "上次已经完成接口设计" in result
+
+    @pytest.mark.asyncio
     async def test_load_memory_md_truncation(self, manager, workspace):
         # bootstrap_max_chars=200，写入超过 200 字符的内容
         long_content = "A" * 300
@@ -339,6 +353,61 @@ class TestMemoryManager:
         await manager.sync_index()
         mtimes = manager.index.get_indexed_mtimes()
         assert "memory/2026-03-10.md" in mtimes
+
+    @pytest.mark.asyncio
+    async def test_sync_index_auto_embeds_new_chunks(self, manager, workspace, monkeypatch):
+        (workspace / "MEMORY.md").write_text("这是一段需要自动嵌入的记忆", encoding="utf-8")
+
+        embed_calls: list[list[str]] = []
+
+        async def fake_embed(texts: list[str]) -> list[list[float]]:
+            embed_calls.append(list(texts))
+            return [[0.1, 0.2, 0.3] for _ in texts]
+
+        monkeypatch.setattr(manager.embedding_service, "available", lambda: True)
+        monkeypatch.setattr(manager.embedding_service, "embed", fake_embed)
+
+        await manager.sync_index()
+
+        conn = manager.index._conn()
+        rows = conn.execute("SELECT text, embedding FROM memory_chunks").fetchall()
+        conn.close()
+
+        assert len(rows) == 1
+        assert rows[0]["embedding"] is not None
+        assert embed_calls == [[rows[0]["text"]]]
+
+    @pytest.mark.asyncio
+    async def test_sync_index_retries_pending_embeddings_without_file_changes(
+        self, manager, workspace, monkeypatch
+    ):
+        (workspace / "MEMORY.md").write_text("第一次嵌入失败后应在下次 sync 重试", encoding="utf-8")
+
+        attempt = {"count": 0}
+
+        async def flaky_embed(texts: list[str]) -> list[list[float]]:
+            attempt["count"] += 1
+            if attempt["count"] == 1:
+                raise RuntimeError("mock embed error")
+            return [[0.4, 0.5, 0.6] for _ in texts]
+
+        monkeypatch.setattr(manager.embedding_service, "available", lambda: True)
+        monkeypatch.setattr(manager.embedding_service, "embed", flaky_embed)
+
+        await manager.sync_index()
+
+        conn = manager.index._conn()
+        first_row = conn.execute("SELECT embedding FROM memory_chunks").fetchone()
+        conn.close()
+        assert first_row["embedding"] is None
+
+        await manager.sync_index()
+
+        conn = manager.index._conn()
+        second_row = conn.execute("SELECT embedding FROM memory_chunks").fetchone()
+        conn.close()
+        assert second_row["embedding"] is not None
+        assert attempt["count"] == 2
 
     @pytest.mark.asyncio
     async def test_sync_index_incremental(self, manager, workspace):
@@ -371,6 +440,38 @@ class TestMemoryManager:
         results = await manager.search("Python")
         # BM25 可能返回结果也可能为空（取决于 FTS5 支持），不应崩溃
         assert isinstance(results, list)
+
+    @pytest.mark.asyncio
+    async def test_summarize_turn_appends_to_uppercase_memory_md(self, workspace, tmp_path):
+        from agentos.capabilities.memory.manager import MemoryManager
+
+        class _FakeProvider:
+            async def call(self, **kwargs):
+                return {"content": "用户偏好 Python"}
+
+        class _FakeFactory:
+            def get_provider(self, provider_name=None):
+                return _FakeProvider()
+
+        manager = MemoryManager(
+            workspace_dir=str(workspace),
+            config=MemoryConfig(enabled=True),
+            db_path=tmp_path / "test_memory_summary.db",
+            llm_factory=_FakeFactory(),
+        )
+
+        await manager.summarize_turn(
+            messages=[
+                {"role": "user", "content": "请记住我偏好 Python"},
+                {"role": "assistant", "content": "好的，我会记住。"},
+            ]
+        )
+
+        assert (workspace / "MEMORY.md").exists()
+        assert not (workspace / "memory.md").exists()
+
+        content = (workspace / "MEMORY.md").read_text(encoding="utf-8")
+        assert "用户偏好 Python" in content
 
 
 # ===== MemorySearchTool 测试 =====

@@ -13,7 +13,7 @@ definition = PluginDefinition(
 
 
 async def register(api: PluginApi) -> None:
-    """注册飞书 Channel + MessageTool + FeishuApiTool 到框架"""
+    """注册飞书 Channel + MessageTool 到框架"""
     from .channel import FeishuChannel
     from .config import FeishuConfig
 
@@ -31,12 +31,22 @@ async def register(api: PluginApi) -> None:
         publisher=api.get_publisher(),
     ))
 
-    # 按配置注册 FeishuApiTool（懒引用 channel._client，start() 后可用）
-    api_tool_config = api.get_config("api_tool", {})
-    if api_tool_config.get("enabled", False):
-        from agentos.capabilities.tools.feishu_api_tool import FeishuApiTool
-        api.register_tool(FeishuApiTool(
-            feishu_channel=channel,
-            allowed_methods=api_tool_config.get("allowed_methods", ["GET"]),
-            allowed_path_prefixes=api_tool_config.get("allowed_path_prefixes", []),
-        ))
+    # 读取工具配置
+    tools_config = api.get_config("tools", {})
+
+    # 注册专用工具（默认启用）
+    if tools_config.get("doc", True):
+        from agentos.capabilities.tools.feishu_doc_tool import FeishuDocTool
+        api.register_tool(FeishuDocTool(feishu_channel=channel))
+
+    if tools_config.get("wiki", True):
+        from agentos.capabilities.tools.feishu_wiki_tool import FeishuWikiTool
+        api.register_tool(FeishuWikiTool(feishu_channel=channel))
+
+    if tools_config.get("drive", True):
+        from agentos.capabilities.tools.feishu_drive_tool import FeishuDriveTool
+        api.register_tool(FeishuDriveTool(feishu_channel=channel))
+
+    if tools_config.get("perm", False):  # 默认禁用
+        from agentos.capabilities.tools.feishu_perm_tool import FeishuPermTool
+        api.register_tool(FeishuPermTool(feishu_channel=channel))

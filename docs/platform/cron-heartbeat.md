@@ -44,7 +44,7 @@ HeartbeatRuntime 提供周期性的 Agent 健康检查：
 心跳触发
   → 创建临时 session
   → 构建 prompt（包含 HEARTBEAT.md 内容和待处理事件）
-  → 发布 ui.user_input 事件
+  → 发布 user.input 事件
   → 等待 agent.step_completed 事件（超时保护）
   → 处理 Agent 响应（如发送通知）
   → 清理临时 session
@@ -61,8 +61,8 @@ HeartbeatRuntime 提供周期性的 Agent 健康检查：
 | `cron.job_added` | 新增定时任务 |
 | `cron.job_updated` | 更新定时任务 |
 | `cron.job_removed` | 删除定时任务 |
-| `cron.started` | 任务开始执行 |
-| `cron.finished` | 任务执行完成 |
+| `cron.job_started` | 任务开始执行 |
+| `cron.job_finished` | 任务执行完成 |
 | `cron.system_event` | 触发文本事件（传递给 Agent 处理） |
 | `cron.delivery_requested` | 广播给所有已连接的客户端 |
 
@@ -86,7 +86,7 @@ CronRuntime                          HeartbeatRuntime
     │                                       │
     │                               创建临时 session
     │                               注入 prompt
-    │                               发布 ui.user_input
+    │                               发布 user.input
     │                                       │
     │                               等待 agent.step_completed
     │                                       │

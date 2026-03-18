@@ -90,13 +90,13 @@ function MessageBubble({ msg }: { msg: Message }) {
   if (msg.role === 'assistant') {
     const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
     return (
-      <div className="flex gap-4 max-w-5xl mx-auto my-6">
+      <div className="flex gap-4 max-w-5xl mx-auto my-6 overflow-hidden">
         <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shrink-0 border border-primary/20 shadow-md">
           <Bot size={22} className="text-primary-foreground" />
         </div>
-        <div className="flex-1 space-y-4">
+        <div className="flex-1 min-w-0 space-y-4">
           {msg.content && (
-            <div className="text-base text-foreground bg-card border border-border p-5 rounded-2xl rounded-tl-none shadow-sm whitespace-pre-wrap leading-relaxed">
+            <div className="text-base text-foreground bg-card border border-border p-5 rounded-2xl rounded-tl-none shadow-sm whitespace-pre-wrap break-words leading-relaxed">
               {msg.content}
             </div>
           )}
@@ -111,7 +111,7 @@ function MessageBubble({ msg }: { msg: Message }) {
                       <Wrench size={14} className="text-yellow-500" />
                       <span className="text-foreground font-mono">{tcName}</span>
                     </div>
-                    <pre className="p-4 text-xs text-muted-foreground font-mono overflow-auto max-h-60 bg-background/50">
+                    <pre className="p-4 text-xs text-muted-foreground font-mono overflow-auto max-h-60 bg-background/50 whitespace-pre-wrap break-all">
                       {formatArgs(tcArgs)}
                     </pre>
                   </div>
@@ -130,15 +130,15 @@ function MessageBubble({ msg }: { msg: Message }) {
       displayContent = displayContent.slice(0, 1000) + '\n... (truncated)';
     }
     return (
-      <div className="flex gap-4 max-w-5xl mx-auto my-4 pl-14">
-        <div className="flex-1">
+      <div className="flex gap-4 max-w-5xl mx-auto my-4 pl-14 overflow-hidden">
+        <div className="flex-1 min-w-0">
           <div className="bg-muted/30 border border-border rounded-xl overflow-hidden shadow-sm">
             <div className="bg-muted px-4 py-2 flex items-center gap-2 text-xs font-medium border-b border-border">
               <Wrench size={14} className="text-green-500" />
               <span className="text-muted-foreground uppercase tracking-wider">Tool result</span>
               {msg.name && <span className="text-foreground font-mono ml-auto">{msg.name}</span>}
             </div>
-            <pre className="p-4 text-xs text-muted-foreground font-mono overflow-auto max-h-60 whitespace-pre-wrap bg-background/30">
+            <pre className="p-4 text-xs text-muted-foreground font-mono overflow-auto max-h-60 whitespace-pre-wrap break-all bg-background/30">
               {displayContent}
             </pre>
           </div>
@@ -353,7 +353,7 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-auto p-8 space-y-4">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-8 space-y-4">
           {loading ? (
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <Loader2 className="animate-spin text-primary" size={40} />

@@ -30,17 +30,17 @@ from tests.conftest import load_gemini_config, skip_if_gemini_unavailable
 def _apply_provider_config(provider_name: str) -> None:
     """根据 provider_name 配置全局 config。"""
     if provider_name == "mock":
-        config.data["agent"]["provider"] = "mock"
-        config.data["agent"]["default_model"] = "mock-agent-v1"
-        config.data["agent"]["default_temperature"] = 0.2
+        config.data["agent"]["model"] = "mock"
+        config.data["llm"]["default_model"] = "mock"
+        config.data["agent"]["temperature"] = 0.2
         config.data["tools"]["serper_search"]["api_key"] = ""
     else:
         gemini_cfg = load_gemini_config()
-        config.data["agent"]["provider"] = "gemini"
-        config.data["agent"]["default_model"] = gemini_cfg["default_model"]
-        config.data["agent"]["default_temperature"] = 0.2
-        config.data["llm_providers"]["gemini"] = {
-            **config.data["llm_providers"].get("gemini", {}),
+        config.data["agent"]["model"] = "gemini_pro"
+        config.data["llm"]["default_model"] = "gemini_pro"
+        config.data["agent"]["temperature"] = 0.2
+        config.data["llm"]["providers"]["gemini"] = {
+            **config.data["llm"]["providers"].get("gemini", {}),
             **gemini_cfg,
         }
 

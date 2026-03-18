@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -71,7 +72,11 @@ class AgentSessionWorker(SessionWorker):
         """获取 model key（llm.models 中的 key）"""
         if self.agent_config and self.agent_config.model:
             return self.agent_config.model
-        return config.get("agent.model") or config.get("llm.default_model", "mock")
+        return (
+            config.get("agent.model")
+            or config.get("agent.default_model")
+            or config.get("llm.default_model", "mock")
+        )
 
     def _get_temperature(self) -> float:
         if self.agent_config:
@@ -224,7 +229,8 @@ class AgentSessionWorker(SessionWorker):
         # v0.6: 加载 MEMORY.md 注入 system prompt
         memory_context = None
         if self.rt.memory_manager:
-            memory_context = await self.rt.memory_manager.load_memory_md()
+            agent_id = self.agent_config.id if self.agent_config else None
+            memory_context = await self.rt.memory_manager.load_memory_md(agent_id=agent_id)
 
         messages = self.rt.context_builder.build_messages(
             content, history,
@@ -369,6 +375,12 @@ class AgentSessionWorker(SessionWorker):
             )
         )
 
+        if self.rt.memory_manager and hasattr(self.rt.memory_manager, "summarize_turn"):
+            agent_id = self.agent_config.id if self.agent_config else None
+            asyncio.create_task(
+                self._summarize_turn_safe(state.messages, agent_id=agent_id)
+            )
+
     async def _handle_tool_result(self, event: EventEnvelope) -> None:
         """处理工具返回结果，收集结果并在所有工具完成后触发下一轮 LLM 调用"""
         if not event.turn_id:
@@ -422,6 +434,27 @@ class AgentSessionWorker(SessionWorker):
                 },
             )
         )
+
+    async def _summarize_turn_safe(
+        self,
+        messages: list[dict[str, Any]],
+        agent_id: str | None = None,
+    ) -> None:
+        """异步执行对话总结，不影响主流程结果返回。"""
+        try:
+            await self.rt.memory_manager.summarize_turn(
+                messages,
+                provider=self._get_provider(),
+                model=self._get_model(),
+                agent_id=agent_id,
+            )
+        except Exception:
+            logger.warning(
+                "对话总结失败 session=%s agent=%s",
+                self.session_id,
+                agent_id,
+                exc_info=True,
+            )
 
     async def _handle_agent_message_completed(self, event: EventEnvelope) -> None:
         """将异步子 Agent 结果转成新一轮 USER_INPUT。"""

@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/badge/license-MIT-brightgreen" alt="License">
   </p>
   <p>
-    支持 Web、CLI、TUI、飞书多种接入方式 · 多 LLM Provider · 多 Agent 编排 · Skills 市场 · 记忆系统
+    支持 Web、CLI、TUI、飞书、WhatsApp 多种接入方式 · 多 LLM Provider · 多 Agent 编排 · Skills 市场 · 记忆系统
   </p>
 </div>
 
@@ -18,7 +18,7 @@
 - **多 Provider 支持** — OpenAI / Anthropic / Gemini / 自定义，一键切换
 - **多 Agent 编排** — 动态创建子 Agent，支持委托调用和配置继承
 - **Skills 市场** — 声明式任务编排，支持从 ClawHub 安装/更新/卸载
-- **多渠道接入** — Web (Next.js) / CLI / TUI / 飞书，统一 Gateway 架构
+- **多渠道接入** — Web (Next.js) / CLI / TUI / 飞书 / WhatsApp，统一 Gateway 架构
 - **工具系统** — 内置 bash / 搜索 / 文件读写 / URL 抓取，支持权限管理
 - **记忆系统** — 向量检索 + 文本搜索混合模式，跨会话持久记忆
 - **定时任务** — Cron 表达式 / 间隔 / 一次性任务，支持心跳巡检
@@ -171,6 +171,7 @@ tools:
 | **Web** | Next.js 14 前端，WebSocket 实时通信 | 默认启用 |
 | **CLI** | 命令行交互客户端 | `python3 -m agentos.app.cli.cli_client` |
 | **飞书** | 企业 IM 集成，支持私聊/群聊 | `config.yml` plugins.feishu |
+| **WhatsApp** | 核心版 WhatsApp Web 文本接入 | `config.yml` plugins.whatsapp |
 
 <details>
 <summary><b>飞书配置</b></summary>
@@ -186,6 +187,36 @@ plugins:
 ```
 
 启动 Gateway 后飞书机器人自动连接。
+
+</details>
+
+<details>
+<summary><b>WhatsApp 配置</b></summary>
+
+```yaml
+plugins:
+  whatsapp:
+    enabled: true
+    auth_dir: ".agentos/data/channels/whatsapp/auth"
+    dm_policy: "open"          # 私聊策略: open / allowlist / disabled
+    group_policy: "open"       # 群聊策略: open / allowlist / disabled
+    allowlist: []              # 私聊允许名单，支持 +15550000001 或 JID
+    group_allowlist: []        # 群聊允许名单，使用群 JID
+    show_tool_progress: false
+    bridge:
+      command: "node"
+      entry: "agentos/adapters/channels/whatsapp/bridge/src/index.mjs"
+      startup_timeout_seconds: 30
+      send_timeout_seconds: 15
+```
+
+安装 sidecar 依赖：
+
+```bash
+npm install --prefix agentos/adapters/channels/whatsapp/bridge
+```
+
+当前仓库的 WhatsApp runtime 通过 Node sidecar + Baileys 提供；若未安装 sidecar 依赖，Python channel 只能完成协议层启动，无法真正连接 WhatsApp Web。
 
 </details>
 
@@ -323,7 +354,7 @@ agentos/
 │   └── memory/          #    记忆系统（向量 + 文本）
 ├── adapters/            # 🔌 适配层
 │   ├── llm/             #    LLM Providers（OpenAI/Anthropic/Gemini）
-│   ├── channels/        #    渠道适配（WebSocket/飞书）
+│   ├── channels/        #    渠道适配（WebSocket/飞书/WhatsApp）
 │   ├── storage/         #    SQLite 仓储
 │   ├── skill_sources/   #    Skill 市场适配器
 │   └── plugins/         #    插件系统
@@ -381,7 +412,7 @@ python3 -m pytest tests/ -q -m "not slow"
 - [ ] Token 用量管理
 - [ ] 用户认证与权限
 - [ ] 沙箱执行环境
-- [ ] 更多渠道集成（钉钉、企业微信）
+- [ ] 更多渠道集成（钉钉等）
 - [ ] 更多 Skill 市场源
 
 [todo: contributors_badge]

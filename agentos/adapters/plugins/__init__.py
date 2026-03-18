@@ -20,6 +20,34 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _iter_builtin_plugin_modules() -> list[tuple[str, str]]:
+    """收集内置插件模块名。
+
+    同时扫描两处目录：
+    - agentos/adapters/plugins/<name>/plugin.py（通用插件）
+    - agentos/adapters/channels/<name>/plugin.py（Channel 插件）
+    """
+    modules: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    scan_roots = (
+        (Path(__file__).parent, "agentos.adapters.plugins"),
+        (Path(__file__).resolve().parent.parent / "channels", "agentos.adapters.channels"),
+    )
+    for root_dir, package_prefix in scan_roots:
+        if not root_dir.exists():
+            continue
+        for _, name, is_pkg in pkgutil.iter_modules([str(root_dir)]):
+            if not is_pkg or name.startswith("_"):
+                continue
+            module_name = f"{package_prefix}.{name}.plugin"
+            if module_name in seen:
+                continue
+            seen.add(module_name)
+            modules.append((name, module_name))
+    return modules
+
+
 class PluginRegistry:
     """插件注册表：发现、加载、管理所有 Plugin"""
 
@@ -50,15 +78,8 @@ class PluginRegistry:
 
         from agentos.adapters.plugins.base import PluginApi
 
-        # 扫描内置插件目录
-        plugins_dir = Path(__file__).parent
-        for finder, name, is_pkg in pkgutil.iter_modules([str(plugins_dir)]):
-            if not is_pkg:
-                continue
-            if name.startswith("_"):
-                continue
-
-            module_name = f"agentos.adapters.plugins.{name}.plugin"
+        # 扫描内置插件目录（plugins/ + channels/）
+        for name, module_name in _iter_builtin_plugin_modules():
             try:
                 module = importlib.import_module(module_name)
             except ImportError:

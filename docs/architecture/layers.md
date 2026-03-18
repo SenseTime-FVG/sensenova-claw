@@ -79,7 +79,7 @@ AgentOS 的核心引擎，包含事件系统和 Runtime 机制。
 |------|------|
 | `Tool`（基类） | 工具抽象基类，定义工具接口 |
 | `ToolRegistry` | 工具注册表，通过 `@tool_registry.register()` 装饰器注册工具 |
-| 内置工具 (`builtin.py`) | 多个内置工具：`bash_command`、`serper_search`、`brave_search`、`baidu_search`、`tavily_search`、`fetch_url`、`read_file`、`write_file` |
+| 内置工具 (`builtin.py`, `orchestration.py`) | 多个内置工具：`bash_command`、`serper_search`、`brave_search`、`baidu_search`、`tavily_search`、`fetch_url`、`read_file`、`write_file`、`create_agent`；`send_message` 在 Gateway 启动时注册 |
 
 ### capabilities/skills/ - Skills 系统
 
@@ -130,7 +130,7 @@ AgentOS 的核心引擎，包含事件系统和 Runtime 机制。
 
 | 组件 | 职责 |
 |------|------|
-| `Repository` | SQLite 仓储，管理 sessions、turns、messages、events 四张表 |
+| `Repository` | SQLite 仓储，管理 sessions、turns、messages、events、agent_messages、cron_jobs、cron_runs 七张表 |
 
 ### adapters/skill_sources/ - Skill 来源适配
 

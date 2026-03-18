@@ -17,8 +17,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from agentos.capabilities.agents.config import AgentConfig
 
 logger = logging.getLogger(__name__)
@@ -83,42 +81,23 @@ class AgentRegistry:
     # ── 从 config.yml 加载 ────────────────────────────
 
     def load_from_config(self, config_data: dict[str, Any]) -> None:
-        """从 config.yml 加载 Agent 配置
+        """从 config.yml 的 agents 段加载 Agent 配置
 
-        新格式：agents 为 id 列表，每个 agent 的配置从 {config_dir}/{id}/config.yml 加载。
-        兼容旧格式：agents 为 dict 时按旧逻辑处理。
+        agents 为 dict 格式，每个 key 是 agent id，value 是配置。
         始终确保 default agent 存在。
         """
         agent_section = config_data.get("agent", {})
-        agents_section = config_data.get("agents", ["default"])
+        agents_section = config_data.get("agents", {})
 
-        # 新格式：agents 为 id 列表
-        if isinstance(agents_section, list):
-            for agent_id in agents_section:
-                if not isinstance(agent_id, str):
-                    continue
-                config_file = self._config_dir / agent_id / "config.yml"
-                if config_file.exists():
-                    try:
-                        with config_file.open("r", encoding="utf-8") as f:
-                            agent_dict = yaml.safe_load(f) or {}
-                        agent = self._build_agent_from_dict(agent_id, agent_dict, agent_section)
-                        self.register(agent)
-                        logger.info("Loaded agent from config.yml: %s", agent_id)
-                    except Exception:
-                        logger.exception("Failed to load agent config: %s", config_file)
-                else:
-                    # 配置文件不存在时，使用 agent 段的默认值
-                    agent = self._build_agent_from_dict(agent_id, {}, agent_section)
-                    self.register(agent)
-                    logger.info("Agent '%s' config.yml not found, using defaults", agent_id)
+        if not isinstance(agents_section, dict):
+            agents_section = {}
 
-        # 兼容旧格式：agents 为 dict
-        elif isinstance(agents_section, dict):
-            for agent_id, agent_dict in agents_section.items():
-                agent = self._build_agent_from_dict(agent_id, agent_dict, agent_section)
-                self.register(agent)
-                logger.info("Loaded agent from config (legacy): %s", agent_id)
+        for agent_id, agent_dict in agents_section.items():
+            if not isinstance(agent_dict, dict):
+                continue
+            agent = self._build_agent_from_dict(agent_id, agent_dict, agent_section)
+            self.register(agent)
+            logger.info("Loaded agent from config: %s", agent_id)
 
         # 确保 default agent 始终存在
         if not self.get("default"):
