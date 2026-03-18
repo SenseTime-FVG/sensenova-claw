@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { SkillCard } from './SkillCard';
 import { SkillDetailModal } from './SkillDetailModal';
+import { Input } from '@/components/ui/input';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -102,8 +103,8 @@ export function InstalledTab({ categoryFilter }: InstalledTabProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="animate-spin text-[#858585]" size={32} />
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="animate-spin text-muted-foreground" size={32} />
       </div>
     );
   }
@@ -120,29 +121,29 @@ export function InstalledTab({ categoryFilter }: InstalledTabProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#858585]" size={16} />
-          <input
-            className="w-full bg-[#3c3c3c] border border-[#2d2d30] rounded pl-9 pr-3 py-2 text-sm text-[#cccccc] placeholder-[#858585] focus:border-[#007acc] focus:outline-none"
-            placeholder="搜索已安装的 skills..."
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            className="pl-8 bg-background"
+            placeholder="Filter installed skills..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
         </div>
-        <span className="text-sm text-[#858585]">
-          共 {skills.length} 个 / 启用 {skills.filter(s => s.enabled).length} 个
+        <span className="text-sm text-muted-foreground">
+          Total: {skills.length} / Enabled: {skills.filter(s => s.enabled).length}
         </span>
       </div>
 
       {grouped.length === 0 ? (
-        <div className="text-center text-[#858585] py-8">无匹配结果</div>
+        <div className="text-center text-muted-foreground py-12 border border-dashed rounded-lg bg-muted/10">No matching skills found.</div>
       ) : (
         grouped.map(group => (
-          <div key={group.category}>
-            <h3 className="text-sm font-medium text-[#858585] mb-2">
+          <div key={group.category} className="space-y-3">
+            <h3 className="text-sm font-semibold text-muted-foreground pb-2 border-b">
               {group.label} ({group.items.length})
             </h3>
-            <div className="space-y-2">
+            <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
               {group.items.map(skill => (
                 <SkillCard
                   key={skill.id}

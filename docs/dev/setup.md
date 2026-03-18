@@ -66,6 +66,9 @@ OPENAI_API_KEY: sk-your-api-key
 
 # 搜索工具配置（可选）
 SERPER_API_KEY: your-serper-api-key
+BRAVE_SEARCH_API_KEY: your-brave-search-api-key
+BAIDU_APPBUILDER_API_KEY: your-baidu-appbuilder-api-key
+TAVILY_API_KEY: your-tavily-api-key
 
 # Agent 配置
 agent:
@@ -80,6 +83,18 @@ tools:
     api_key: ${SERPER_API_KEY}
     timeout: 15
     max_results: 10
+  brave_search:
+    api_key: ${BRAVE_SEARCH_API_KEY}
+    timeout: 15
+    max_results: 10
+  baidu_search:
+    api_key: ${BAIDU_APPBUILDER_API_KEY}
+    timeout: 15
+    max_results: 10
+  tavily_search:
+    api_key: ${TAVILY_API_KEY}
+    timeout: 15
+    max_results: 5
 ```
 
 配置加载优先级：**环境变量 > config.yml > 默认值**
@@ -152,7 +167,7 @@ agentos/
     agents/                      #   多 Agent 配置与注册
     tools/                       #   工具系统
       base.py                    #     工具基类
-      builtin.py                 #     5 个内置工具
+      builtin.py                 #     多个内置工具（bash/search/fetch/file）
       registry.py                #     工具注册表
     skills/                      #   Skills 声明式编排
     memory/                      #   记忆系统

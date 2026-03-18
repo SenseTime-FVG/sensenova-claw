@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect } from 'react';
 import { Search, Loader2, GitBranch, CheckCircle, XCircle, X } from 'lucide-react';
 import { SkillCard } from './SkillCard';
 import { SkillDetailModal } from './SkillDetailModal';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -269,30 +271,27 @@ export function MarketTab({
         <ToastContainer toasts={toasts} removeToast={removeToast} />
 
         {loading ? (
-          <div className="flex items-center justify-center h-32">
-            <Loader2 className="animate-spin text-[#858585]" size={24} />
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="animate-spin text-muted-foreground" size={32} />
           </div>
         ) : (
           <>
             {onClearSearch && (
               <div className="flex items-center justify-between">
-                <span className="text-sm text-[#858585]">
-                  搜索 &quot;{externalQuery}&quot;：本地 {filteredLocal.length} 个，远程 {filteredRemote.length} 个
+                <span className="text-sm text-muted-foreground">
+                  Search "{externalQuery}": Local {filteredLocal.length}, Remote {filteredRemote.length}
                 </span>
-                <button
-                  className="text-xs text-[#007acc] hover:underline"
-                  onClick={onClearSearch}
-                >
-                  清除搜索
-                </button>
+                <Button variant="link" size="sm" onClick={onClearSearch}>
+                  Clear Query
+                </Button>
               </div>
             )}
 
             {/* 本地匹配（已安装优先） */}
             {filteredLocal.length > 0 && (
               <div>
-                <h3 className="text-sm font-medium text-[#858585] mb-2">已安装匹配</h3>
-                <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-muted-foreground mb-3 pb-2 border-b">Installed Matches</h3>
+                <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
                   {filteredLocal.map(skill => (
                     <SkillCard
                       key={skill.id}
@@ -311,9 +310,9 @@ export function MarketTab({
 
             {/* 远程结果 */}
             {filteredRemote.length > 0 && (
-              <div>
-                <h3 className="text-sm font-medium text-[#858585] mb-2">市场结果</h3>
-                <div className="space-y-2">
+              <div className="pt-4">
+                <h3 className="text-sm font-semibold text-muted-foreground mb-3 pb-2 border-b">Market Results</h3>
+                <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
                   {filteredRemote.map(skill => (
                     <SkillCard
                       key={skill.id}
@@ -335,7 +334,7 @@ export function MarketTab({
             )}
 
             {filteredLocal.length === 0 && filteredRemote.length === 0 && (
-              <div className="text-center text-[#858585] py-8">无搜索结果</div>
+              <div className="text-center text-muted-foreground py-12 border border-dashed rounded-lg bg-muted/10">No Search Results Found</div>
             )}
           </>
         )}
@@ -362,143 +361,148 @@ export function MarketTab({
       <ToastContainer toasts={toasts} removeToast={removeToast} />
 
       {/* Git URL 输入 */}
-      <div className="flex items-center gap-2 bg-[#252526] rounded p-2 border border-[#2d2d30]">
-        <GitBranch size={14} className="text-[#858585] shrink-0" />
-        <input
-          className="flex-1 bg-transparent text-sm text-[#cccccc] placeholder-[#858585] focus:outline-none"
-          placeholder="从 Git URL 安装: https://github.com/user/skill-repo"
+      <div className="flex items-center gap-2 bg-muted/50 rounded-lg p-3 border border-border mt-4">
+        <GitBranch size={16} className="text-muted-foreground shrink-0" />
+        <Input
+          className="flex-1 bg-transparent border-0 focus-visible:ring-0 px-0 h-auto shadow-none"
+          placeholder="Install from Git URL: https://github.com/user/skill-repo"
           value={gitUrl}
           onChange={e => setGitUrl(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleGitInstall()}
         />
-        <button
-          className="px-3 py-1 text-xs rounded bg-[#0e639c] text-white hover:bg-[#1177bb] disabled:opacity-50"
+        <Button
+          size="sm"
           onClick={handleGitInstall}
           disabled={gitInstalling || !gitUrl.trim()}
         >
-          {gitInstalling ? '安装中...' : '安装'}
-        </button>
+          {gitInstalling ? 'Installing...' : 'Install'}
+        </Button>
       </div>
 
       {/* 搜索框 */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#858585]" size={16} />
-          <input
-            className="w-full bg-[#3c3c3c] border border-[#2d2d30] rounded pl-9 pr-3 py-2 text-sm text-[#cccccc] placeholder-[#858585] focus:border-[#007acc] focus:outline-none"
-            placeholder={`在 ${activeSource === 'clawhub' ? 'ClawHub' : 'Anthropic'} 搜索 skills...`}
+      <div className="flex items-center gap-4 mt-6">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            className="pl-8 bg-background"
+            placeholder={`Search ${activeSource === 'clawhub' ? 'ClawHub' : 'Anthropic'} market...`}
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && doSearch(activeSource, query, 1)}
           />
         </div>
-        <button
-          className="px-4 py-2 text-sm rounded bg-[#0e639c] text-white hover:bg-[#1177bb]"
-          onClick={() => doSearch(activeSource, query, 1)}
-        >
-          搜索
-        </button>
+        <Button variant="secondary" onClick={() => doSearch(activeSource, query, 1)}>
+          Search Market
+        </Button>
       </div>
 
       {/* 搜索结果 */}
       {loading ? (
-        <div className="flex items-center justify-center h-32">
-          <Loader2 className="animate-spin text-[#858585]" size={24} />
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="animate-spin text-muted-foreground" size={32} />
         </div>
       ) : results.length > 0 ? (
-        <div className="space-y-2">
-          <div className="text-xs text-[#858585]">共 {total} 个结果</div>
-          {results.map(skill => (
-            <SkillCard
-              key={skill.id}
-              name={skill.name}
-              description={skill.description}
-              category={activeSource}
-              source={skill.source}
-              version={skill.version}
-              downloads={skill.downloads}
-              author={skill.author}
-              installed={skill.installed}
-              installing={installingIds.has(skill.id)}
-              onInstall={skill.installed || installingIds.has(skill.id) ? undefined : () => handleInstall(skill.source, skill.id)}
-              onClick={() => setDetailModal({ source: skill.source, id: skill.id })}
-            />
-          ))}
-          {total > 20 && (
-            <div className="flex justify-center gap-2 pt-2">
-              <button
-                className="px-3 py-1 text-xs rounded bg-[#3c3c3c] text-[#cccccc] disabled:opacity-30"
-                disabled={page <= 1}
-                onClick={() => doSearch(activeSource, query, page - 1)}
-              >
-                上一页
-              </button>
-              <span className="text-xs text-[#858585] py-1">第 {page} 页</span>
-              <button
-                className="px-3 py-1 text-xs rounded bg-[#3c3c3c] text-[#cccccc] disabled:opacity-30"
-                disabled={page * 20 >= total}
-                onClick={() => doSearch(activeSource, query, page + 1)}
-              >
-                下一页
-              </button>
-            </div>
-          )}
-        </div>
-      ) : query ? (
-        <div className="text-center text-[#858585] py-8">无搜索结果，请尝试其他关键词</div>
-      ) : null}
-
-      {/* 浏览列表（无搜索时显示） */}
-      {!query && results.length === 0 && (
-        browseLoading ? (
-          <div className="flex items-center justify-center h-32">
-            <Loader2 className="animate-spin text-[#858585]" size={24} />
-            <span className="ml-2 text-sm text-[#858585]">正在加载 {activeSource === 'clawhub' ? 'ClawHub' : 'Anthropic'} skills...</span>
-          </div>
-        ) : browseResults.length > 0 ? (
-          <div className="space-y-2">
-            <div className="text-xs text-[#858585]">
-              {activeSource === 'clawhub' ? 'ClawHub' : 'Anthropic'} 市场 · 共 {browseTotal} 个 skills
-            </div>
-            {browseResults.map(skill => (
+        <div className="space-y-3">
+          <div className="text-xs text-muted-foreground pb-2 border-b">Displaying {total} results</div>
+          <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+            {results.map(skill => (
               <SkillCard
                 key={skill.id}
                 name={skill.name}
                 description={skill.description}
                 category={activeSource}
-                source={skill.source || activeSource}
+                source={skill.source}
                 version={skill.version}
                 downloads={skill.downloads}
                 author={skill.author}
                 installed={skill.installed}
                 installing={installingIds.has(skill.id)}
-                onInstall={skill.installed || installingIds.has(skill.id) ? undefined : () => handleInstall(activeSource, skill.id)}
-                onClick={() => setDetailModal({ source: activeSource, id: skill.id })}
+                onInstall={skill.installed || installingIds.has(skill.id) ? undefined : () => handleInstall(skill.source, skill.id)}
+                onClick={() => setDetailModal({ source: skill.source, id: skill.id })}
               />
             ))}
+          </div>
+          {total > 20 && (
+            <div className="flex justify-center gap-2 pt-6">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => doSearch(activeSource, query, page - 1)}
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-muted-foreground flex items-center px-4">Page {page}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page * 20 >= total}
+                onClick={() => doSearch(activeSource, query, page + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : query ? (
+        <div className="text-center text-muted-foreground py-12 border border-dashed rounded-lg bg-muted/10">No market results found.</div>
+      ) : null}
+
+      {/* 浏览列表（无搜索时显示） */}
+      {!query && results.length === 0 && (
+        browseLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="animate-spin text-muted-foreground" size={32} />
+            <span className="ml-3 text-sm text-muted-foreground">Loading {activeSource === 'clawhub' ? 'ClawHub' : 'Anthropic'} market...</span>
+          </div>
+        ) : browseResults.length > 0 ? (
+          <div className="space-y-3">
+            <div className="text-xs text-muted-foreground pb-2 border-b">
+              {activeSource === 'clawhub' ? 'ClawHub' : 'Anthropic'} Market · {browseTotal} Skills
+            </div>
+            <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+              {browseResults.map(skill => (
+                <SkillCard
+                  key={skill.id}
+                  name={skill.name}
+                  description={skill.description}
+                  category={activeSource}
+                  source={skill.source || activeSource}
+                  version={skill.version}
+                  downloads={skill.downloads}
+                  author={skill.author}
+                  installed={skill.installed}
+                  installing={installingIds.has(skill.id)}
+                  onInstall={skill.installed || installingIds.has(skill.id) ? undefined : () => handleInstall(activeSource, skill.id)}
+                  onClick={() => setDetailModal({ source: activeSource, id: skill.id })}
+                />
+              ))}
+            </div>
             {browseTotal > 20 && (
-              <div className="flex justify-center gap-2 pt-2">
-                <button
-                  className="px-3 py-1 text-xs rounded bg-[#3c3c3c] text-[#cccccc] disabled:opacity-30"
+              <div className="flex justify-center gap-2 pt-6">
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={browsePage <= 1}
                   onClick={() => doBrowse(activeSource, browsePage - 1)}
                 >
-                  上一页
-                </button>
-                <span className="text-xs text-[#858585] py-1">第 {browsePage} 页</span>
-                <button
-                  className="px-3 py-1 text-xs rounded bg-[#3c3c3c] text-[#cccccc] disabled:opacity-30"
+                  Previous
+                </Button>
+                <span className="text-sm text-muted-foreground flex items-center px-4">Page {browsePage}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={browsePage * 20 >= browseTotal}
                   onClick={() => doBrowse(activeSource, browsePage + 1)}
                 >
-                  下一页
-                </button>
+                  Next
+                </Button>
               </div>
             )}
           </div>
         ) : browseLoaded ? (
-          <div className="text-center text-[#858585] py-8">
-            暂时无法加载 {activeSource === 'clawhub' ? 'ClawHub' : 'Anthropic'} 市场列表，请尝试搜索
+          <div className="text-center text-muted-foreground py-12 border border-dashed rounded-lg bg-muted/10">
+            Market is unavailable right now. Try searching above!
           </div>
         ) : null
       )}
@@ -523,24 +527,24 @@ export function MarketTab({
 function ToastContainer({ toasts, removeToast }: { toasts: Toast[]; removeToast: (id: number) => void }) {
   if (toasts.length === 0) return null;
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+    <div className="fixed top-20 right-8 z-50 space-y-2 max-w-sm">
       {toasts.map(toast => (
         <div
           key={toast.id}
-          className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg border text-sm ${
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-xl border text-sm bg-card transition-all ${
             toast.type === 'loading'
-              ? 'bg-[#252526] border-[#007acc] text-[#cccccc]'
+              ? 'border-primary text-foreground'
               : toast.type === 'success'
-                ? 'bg-[#252526] border-green-600 text-green-400'
-                : 'bg-[#252526] border-red-600 text-red-400'
+                ? 'border-green-600 text-green-500'
+                : 'border-destructive text-destructive'
           }`}
         >
-          {toast.type === 'loading' && <Loader2 size={16} className="animate-spin text-[#007acc] shrink-0" />}
-          {toast.type === 'success' && <CheckCircle size={16} className="text-green-400 shrink-0" />}
-          {toast.type === 'error' && <XCircle size={16} className="text-red-400 shrink-0" />}
-          <span className="flex-1 min-w-0 truncate">{toast.message}</span>
+          {toast.type === 'loading' && <Loader2 size={16} className="animate-spin text-primary shrink-0" />}
+          {toast.type === 'success' && <CheckCircle size={16} className="text-green-500 shrink-0" />}
+          {toast.type === 'error' && <XCircle size={16} className="text-destructive shrink-0" />}
+          <span className="flex-1 min-w-0 font-medium">{toast.message}</span>
           {toast.type !== 'loading' && (
-            <button onClick={() => removeToast(toast.id)} className="text-[#858585] hover:text-[#cccccc] shrink-0">
+            <button onClick={() => removeToast(toast.id)} className="text-muted-foreground hover:text-foreground shrink-0 rounded-full hover:bg-muted p-1 transition-colors">
               <X size={14} />
             </button>
           )}
