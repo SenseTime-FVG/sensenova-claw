@@ -69,8 +69,8 @@ async def test_whatsapp_channel_end_to_end_flow(tmp_path: Path) -> None:
     config.data["system"]["workspace_dir"] = str(workspace)
     config.data["system"]["agentos_home"] = str(agentos_home)
     config.data["system"]["log_level"] = "DEBUG"
-    config.data["agent"]["provider"] = "mock"
-    config.data["agent"]["default_model"] = "mock-agent-v1"
+    config.data["agent"]["model"] = "mock"
+    config.data["llm"]["default_model"] = "mock"
 
     setup_logging()
 

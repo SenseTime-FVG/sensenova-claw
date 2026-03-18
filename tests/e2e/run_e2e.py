@@ -171,13 +171,13 @@ async def setup_services(tmp_dir: Path, provider: str, model: str | None):
     config.data["system"]["log_level"] = "DEBUG"
 
     if provider == "mock":
-        config.data["agent"]["provider"] = "mock"
-        config.data["agent"]["default_model"] = "mock-agent-v1"
+        config.data["agent"]["model"] = "mock"
+        config.data["llm"]["default_model"] = "mock"
         config.data["tools"]["serper_search"]["api_key"] = ""
     else:
-        config.data["agent"]["provider"] = provider
         if model:
-            config.data["agent"]["default_model"] = model
+            config.data["agent"]["model"] = model
+            config.data["llm"]["default_model"] = model
 
     setup_logging()
 

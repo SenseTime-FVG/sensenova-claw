@@ -62,12 +62,14 @@ class MemoryManager:
         """
         parts: list[str] = []
 
-        memory_path = Path(self.workspace_dir) / "MEMORY.md"
-        if memory_path.exists():
+        for memory_path in self._global_memory_candidates():
+            if not memory_path.exists():
+                continue
             try:
                 content = await asyncio.to_thread(memory_path.read_text, "utf-8")
                 if content.strip():
                     parts.append(content.strip())
+                    break
             except Exception:
                 logger.warning("读取 MEMORY.md 失败", exc_info=True)
 
@@ -139,9 +141,10 @@ class MemoryManager:
         memory_files: dict[str, Path] = {}
 
         # MEMORY.md
-        memory_md = workspace / "MEMORY.md"
-        if memory_md.exists():
-            memory_files["MEMORY.md"] = memory_md
+        for memory_md in self._global_memory_candidates():
+            if memory_md.exists():
+                memory_files["MEMORY.md"] = memory_md
+                break
 
         # memory/*.md
         memory_dir = workspace / "memory"
@@ -300,8 +303,15 @@ class MemoryManager:
         """调用 LLM 对当前对话进行摘要。"""
         from agentos.platform.config.config import config
 
-        provider_name = provider_name or config.get("agent.provider", "mock")
-        model = model or config.get("agent.default_model")
+        if not model:
+            model = (
+                config.get("agent.model")
+                or config.get("agent.default_model")
+                or config.get("llm.default_model")
+            )
+        resolved_provider, resolved_model = config.resolve_model(model)
+        provider_name = provider_name or resolved_provider
+        model = resolved_model
 
         provider = self.llm_factory.get_provider(provider_name)
         response = await provider.call(
@@ -321,12 +331,14 @@ class MemoryManager:
         if agent_id:
             memory_path = Path(self.workspace_dir) / "memory" / f"{agent_id}.md"
         else:
-            memory_path = Path(self.workspace_dir) / "memory.md"
+            memory_path = Path(self.workspace_dir) / "MEMORY.md"
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         entry = f"\n\n---\n[{timestamp}]\n{summary}\n"
 
         try:
+            if not agent_id:
+                await asyncio.to_thread(self._migrate_legacy_memory_file, memory_path)
             await asyncio.to_thread(self._append_file_blocking, memory_path, entry)
             logger.info("对话总结已追加到 %s", memory_path)
         except Exception:
@@ -338,6 +350,16 @@ class MemoryManager:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as file:
             file.write(content)
+
+    def _global_memory_candidates(self) -> list[Path]:
+        workspace = Path(self.workspace_dir)
+        return [workspace / "MEMORY.md", workspace / "memory.md"]
+
+    @staticmethod
+    def _migrate_legacy_memory_file(target: Path) -> None:
+        legacy = target.parent / "memory.md"
+        if legacy.exists() and not target.exists():
+            legacy.rename(target)
 
     def _format_memory_prompt(self, content: str) -> str:
         """将 MEMORY.md 内容包装为 system prompt 片段
