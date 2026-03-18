@@ -28,7 +28,7 @@ def load_gemini_config() -> dict | None:
         return None
     with config_path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-    gemini_cfg = data.get("llm_providers", {}).get("gemini", {})
+    gemini_cfg = data.get("llm", {}).get("providers", {}).get("gemini", {})
     if not gemini_cfg.get("api_key"):
         return None
     return gemini_cfg

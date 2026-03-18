@@ -12,9 +12,15 @@ class LLMFactory:
     def __init__(self):
         self._providers: dict[str, LLMProvider] = {
             "mock": MockProvider(),
-            "openai": OpenAIProvider(),
+            "openai": OpenAIProvider("openai"),
             "anthropic": AnthropicProvider(),
             "gemini": GeminiProvider(),
+            "kimi": OpenAIProvider("kimi"),
+            "glm": OpenAIProvider("glm"),
+            "minimax": OpenAIProvider("minimax"),
+            "qwen": OpenAIProvider("qwen"),
+            "deepseek": OpenAIProvider("deepseek"),
+            "step": OpenAIProvider("step"),
         }
 
     def get_provider(self, provider_name: str | None = None) -> LLMProvider:
