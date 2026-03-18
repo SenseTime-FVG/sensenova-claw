@@ -118,7 +118,7 @@ class TestExecuteSuccess:
         assert registered.name == "New Agent"
 
         # 验证已持久化到磁盘
-        saved_file = agent_registry._config_dir / "new-agent.json"
+        saved_file = agent_registry._config_dir / "new-agent" / "config.json"
         assert saved_file.exists()
 
     async def test_inherit_from_default(self, tool, registry_with_default):

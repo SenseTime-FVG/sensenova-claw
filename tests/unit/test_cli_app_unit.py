@@ -72,10 +72,10 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
     # 配置 provider
     if provider_name == "gemini":
         gemini_cfg = load_gemini_config()
-        cfg.set("agent.provider", "gemini")
-        cfg.set("agent.default_model", gemini_cfg["default_model"])
-        cfg.data["llm_providers"]["gemini"] = {
-            **cfg.data["llm_providers"].get("gemini", {}),
+        cfg.set("agent.model", "gemini_pro")
+        cfg.set("llm.default_model", "gemini_pro")
+        cfg.data["llm"]["providers"]["gemini"] = {
+            **cfg.data["llm"]["providers"].get("gemini", {}),
             **gemini_cfg,
         }
     # mock 使用默认配置即可（Config 默认就是 mock）

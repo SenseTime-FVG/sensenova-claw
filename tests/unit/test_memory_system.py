@@ -441,6 +441,38 @@ class TestMemoryManager:
         # BM25 可能返回结果也可能为空（取决于 FTS5 支持），不应崩溃
         assert isinstance(results, list)
 
+    @pytest.mark.asyncio
+    async def test_summarize_turn_appends_to_uppercase_memory_md(self, workspace, tmp_path):
+        from agentos.capabilities.memory.manager import MemoryManager
+
+        class _FakeProvider:
+            async def call(self, **kwargs):
+                return {"content": "用户偏好 Python"}
+
+        class _FakeFactory:
+            def get_provider(self, provider_name=None):
+                return _FakeProvider()
+
+        manager = MemoryManager(
+            workspace_dir=str(workspace),
+            config=MemoryConfig(enabled=True),
+            db_path=tmp_path / "test_memory_summary.db",
+            llm_factory=_FakeFactory(),
+        )
+
+        await manager.summarize_turn(
+            messages=[
+                {"role": "user", "content": "请记住我偏好 Python"},
+                {"role": "assistant", "content": "好的，我会记住。"},
+            ]
+        )
+
+        assert (workspace / "MEMORY.md").exists()
+        assert not (workspace / "memory.md").exists()
+
+        content = (workspace / "MEMORY.md").read_text(encoding="utf-8")
+        assert "用户偏好 Python" in content
+
 
 # ===== MemorySearchTool 测试 =====
 

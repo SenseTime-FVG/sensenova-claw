@@ -43,6 +43,10 @@ def real_config() -> Config:
 @pytest.fixture(scope="module")
 def provider(real_config: Config) -> Any:
     """使用真实配置创建 AnthropicProvider 实例"""
+    api_key = real_config.get("llm.providers.anthropic.api_key", "")
+    if not api_key:
+        pytest.skip("未配置 Anthropic API key，跳过真实 API 测试")
+
     # 临时替换全局 config，让 AnthropicProvider.__init__ 能读取到真实配置
     import agentos.adapters.llm.providers.anthropic_provider as mod
     original_config = mod.config
@@ -58,7 +62,7 @@ def provider(real_config: Config) -> Any:
 @pytest.fixture(scope="module")
 def model(real_config: Config) -> str:
     """从配置中获取默认模型"""
-    return real_config.get("llm_providers.anthropic.default_model", "claude-opus-4-6")
+    return real_config.get("llm.models.claude_opus.model_id", "claude-opus-4-6")
 
 
 # ---------------------------------------------------------------------------

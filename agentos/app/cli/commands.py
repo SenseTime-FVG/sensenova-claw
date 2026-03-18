@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 # 顶层命令
 TOP_COMMANDS = [
     "/new", "/session", "/agent", "/tool", "/skill",
-    "/history", "/debug", "/help", "/quit",
+    "/history", "/switch", "/cancel", "/debug", "/help", "/quit",
 ]
 
 # 子命令映射
@@ -72,11 +72,15 @@ class CommandDispatcher:
             self.app.console.print(f"[green]✓ 新会话: {sid} (Agent: {arg or 'default'})[/green]")
         elif cmd == "/session":
             await self._handle_session(arg.strip(), arg2.strip())
+        elif cmd == "/switch":
+            await self._handle_session("switch", arg.strip())
         elif cmd in ("/history", "/h"):
             await self.app._send_query({
                 "type": "get_messages",
                 "payload": {"session_id": self.app.current_session_id},
             })
+        elif cmd == "/cancel":
+            await self._cancel_turn()
 
         # ── Agent 管理 ──────────────────────────────
         elif cmd == "/agent":
@@ -126,6 +130,19 @@ class CommandDispatcher:
   /session list                 列出历史会话
   /session switch <id>          切换会话
   /session current              当前会话信息""")
+
+    async def _cancel_turn(self) -> None:
+        """兼容 /cancel 命令，向后端发送取消请求。"""
+        if not self.app.current_session_id:
+            self.app.console.print("[yellow]当前没有可取消的会话[/yellow]")
+            return
+        if hasattr(self.app, "_turn_cancelled"):
+            self.app._turn_cancelled = True
+        await self.app._send({
+            "type": "cancel_turn",
+            "session_id": self.app.current_session_id,
+            "payload": {"reason": "user_cancel"},
+        })
 
     # ── Agent 子命令 ──────────────────────────────
 
