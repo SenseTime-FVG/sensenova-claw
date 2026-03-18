@@ -442,7 +442,8 @@ function ChatPageInner() {
             }
           }
         } else if (et === 'agent.step_completed') {
-          const resp = p.final_response || '';
+          // 兼容两种格式：raw payload {result: {content}} 和映射后的 {final_response}
+          const resp = p.final_response || (p.result && p.result.content) || '';
           if (resp) rebuilt.push({ id: makeId(), role: 'assistant', content: resp, timestamp: Date.now() });
         }
       }
