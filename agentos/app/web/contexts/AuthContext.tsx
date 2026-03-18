@@ -110,6 +110,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         } catch (error) {
           console.error('Auth status check failed:', error);
+          // 后端未就绪时清除旧 cookie，避免卡在加载状态
+          deleteCookie(COOKIE_NAME);
         }
       }
 
