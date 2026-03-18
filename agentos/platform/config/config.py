@@ -28,40 +28,75 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "port": 8000,
         "cors_origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
     },
-    "llm_providers": {
-        "mock": {
-            "api_key": "",
-            "base_url": "",
-            "default_model": "mock-agent-v1",
-            "timeout": 60,
-            "max_retries": 1,
+    "llm": {
+        "providers": {
+            "mock": {
+                "api_key": "",
+                "base_url": "",
+                "timeout": 60,
+                "max_retries": 1,
+            },
+            "openai": {
+                "api_key": "${OPENAI_API_KEY}",
+                "base_url": "${OPENAI_BASE_URL}",
+                "timeout": 60,
+                "max_retries": 3,
+            },
+            "anthropic": {
+                "api_key": "${ANTHROPIC_API_KEY}",
+                "base_url": "${ANTHROPIC_BASE_URL}",
+                "timeout": 60,
+                "max_retries": 3,
+            },
+            "gemini": {
+                "api_key": "${GEMINI_API_KEY}",
+                "base_url": "${GEMINI_BASE_URL}",
+                "timeout": 120,
+                "max_retries": 3,
+            },
         },
-        "openai": {
-            "api_key": "${OPENAI_API_KEY}",
-            "base_url": "${OPENAI_BASE_URL}",
-            "default_model": "gpt-4o-mini",
-            "timeout": 60,
-            "max_retries": 3,
+        "models": {
+            "mock": {
+                "provider": "mock",
+                "model_id": "mock-agent-v1",
+            },
+            "gpt_4o_mini": {
+                "provider": "openai",
+                "model_id": "gpt-4o-mini",
+                "timeout": 60,
+                "max_output_tokens": 8192,
+            },
+            "gpt_4o": {
+                "provider": "openai",
+                "model_id": "gpt-4o",
+                "timeout": 60,
+                "max_output_tokens": 8192,
+            },
+            "claude_sonnet": {
+                "provider": "anthropic",
+                "model_id": "claude-sonnet-4-20250514",
+                "timeout": 60,
+                "max_output_tokens": 8192,
+            },
+            "claude_opus": {
+                "provider": "anthropic",
+                "model_id": "claude-opus-4-6",
+                "timeout": 60,
+                "max_output_tokens": 8192,
+            },
+            "gemini_pro": {
+                "provider": "gemini",
+                "model_id": "gemini-2.5-pro",
+                "timeout": 120,
+                "max_output_tokens": 8192,
+            },
         },
-        "anthropic": {
-            "api_key": "${ANTHROPIC_API_KEY}",
-            "base_url": "${ANTHROPIC_BASE_URL}",
-            "default_model": "claude-opus-4-20250514",
-            "timeout": 60,
-            "max_retries": 3,
-        },
-        "gemini": {
-            "api_key": "${GEMINI_API_KEY}",
-            "base_url": "${GEMINI_BASE_URL}",
-            "default_model": "gemini-2.5-pro",
-            "timeout": 120,
-            "max_retries": 3,
-        },
+        "default_model": "mock",  # 引用 llm.models 中的 key
     },
+    # agent 段保留作为 default agent 的后备配置
     "agent": {
-        "provider": "mock",
-        "default_model": "mock-agent-v1",
-        "default_temperature": 0.2,
+        "model": "mock",            # 引用 llm.models 中的 key
+        "temperature": 0.2,
         "max_turns_per_session": 50,
         "system_prompt": "你是一个有工具能力的AI助手，请在必要时调用工具。",
     },
@@ -178,8 +213,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "security": {
         "auth_enabled": False,  # 启用后所有 API/WebSocket 需要 token 认证
     },
-    # v1.0: 多 Agent 配置
-    "agents": {},
+    # Agent 列表（id 列表，配置从 ~/.agentos/agents/{id}/config.yml 加载）
+    "agents": ["default"],
     "delegation": {
         "max_depth": 3,
         "default_timeout": 300,
@@ -270,64 +305,50 @@ class Config:
         for agentos_cfg in agentos_configs:
             config = self._deep_merge(config, agentos_cfg)
 
-        # 如果 .agentos/config.yaml 中显式设置了 provider，
-        # 则根据最终 provider 填充 agent.default_model（若仍是默认值则更新）
-        config = self._sync_provider_defaults(config)
-
         config = self._resolve_env(config)
         return config
 
     def _apply_legacy_keys(self, config: dict[str, Any], legacy: dict[str, Any]) -> dict[str, Any]:
-        """将遗留 config.yml 中的顶层 key 映射到新结构，不覆盖已由 .agentos/config.yaml 设置的 provider。"""
+        """将遗留 config.yml 中的顶层 key 映射到新结构。"""
         result = deepcopy(config)
 
-        # OPENAI_BASE_URL -> llm_providers.openai.base_url
+        # OPENAI_BASE_URL -> llm.providers.openai.base_url
         if "OPENAI_BASE_URL" in legacy and legacy["OPENAI_BASE_URL"]:
-            result["llm_providers"]["openai"]["base_url"] = legacy["OPENAI_BASE_URL"]
+            result["llm"]["providers"]["openai"]["base_url"] = legacy["OPENAI_BASE_URL"]
 
-        # OPENAI_API_KEY -> llm_providers.openai.api_key
+        # OPENAI_API_KEY -> llm.providers.openai.api_key
         if "OPENAI_API_KEY" in legacy and legacy["OPENAI_API_KEY"]:
-            result["llm_providers"]["openai"]["api_key"] = legacy["OPENAI_API_KEY"]
-            # 只有当前 provider 未被显式覆盖时（仍为默认 mock），才自动切换到 openai
-            if result["agent"]["provider"] == DEFAULT_CONFIG["agent"]["provider"]:
-                result["agent"]["provider"] = "openai"
-                result["agent"]["default_model"] = result["llm_providers"]["openai"]["default_model"]
+            result["llm"]["providers"]["openai"]["api_key"] = legacy["OPENAI_API_KEY"]
+            # 仍为默认 mock 时，自动切换到 openai 的模型
+            if result["llm"]["default_model"] == DEFAULT_CONFIG["llm"]["default_model"]:
+                result["llm"]["default_model"] = "gpt_4o_mini"
+                result["agent"]["model"] = "gpt_4o_mini"
 
         # SERPER_API_KEY -> tools.serper_search.api_key
         if "SERPER_API_KEY" in legacy and legacy["SERPER_API_KEY"]:
             result["tools"]["serper_search"]["api_key"] = legacy["SERPER_API_KEY"]
 
-        # MODEL -> agent.default_model 以及 llm_providers.openai.default_model
-        if "MODEL" in legacy and legacy["MODEL"]:
-            result["agent"]["default_model"] = legacy["MODEL"]
-            result["llm_providers"]["openai"]["default_model"] = legacy["MODEL"]
+        # 兼容旧 llm_providers 格式 → 映射到 llm.providers
+        if "llm_providers" in legacy and isinstance(legacy["llm_providers"], dict):
+            for pname, pcfg in legacy["llm_providers"].items():
+                if isinstance(pcfg, dict):
+                    if pname not in result["llm"]["providers"]:
+                        result["llm"]["providers"][pname] = {}
+                    for k, v in pcfg.items():
+                        if k != "default_model":  # default_model 不再放 provider 里
+                            result["llm"]["providers"][pname][k] = v
 
-        return result
+        # 兼容旧 agent.provider + agent.default_model
+        if "agent" in legacy and isinstance(legacy["agent"], dict):
+            old_agent = legacy["agent"]
+            if "provider" in old_agent and "default_model" in old_agent:
+                # 尝试在 models 里找到匹配的 key，否则原样传递
+                result["agent"]["model"] = old_agent["default_model"]
+            if "default_temperature" in old_agent:
+                result["agent"]["temperature"] = old_agent["default_temperature"]
+            if "system_prompt" in old_agent:
+                result["agent"]["system_prompt"] = old_agent["system_prompt"]
 
-    def _sync_provider_defaults(self, config: dict[str, Any]) -> dict[str, Any]:
-        """根据最终确定的 provider 同步 agent.default_model。
-
-        如果 agent.default_model 的值与当前 provider 不匹配，
-        但恰好等于某个其他 provider 的默认模型，则说明它是由遗留映射或中间合并写入的，
-        应更新为当前 provider 的默认模型。
-        """
-        result = deepcopy(config)
-        provider = result["agent"]["provider"]
-        current_model = result["agent"]["default_model"]
-
-        # 收集所有 provider 的默认模型集合
-        all_provider_defaults = {
-            p_cfg.get("default_model")
-            for p_cfg in result.get("llm_providers", {}).values()
-            if isinstance(p_cfg, dict) and "default_model" in p_cfg
-        }
-
-        # 若当前 default_model 是某个 provider 的默认值（包括当前 provider），
-        # 则将其对齐到当前 provider 的默认模型
-        if current_model in all_provider_defaults:
-            provider_defaults = result.get("llm_providers", {}).get(provider, {})
-            if "default_model" in provider_defaults:
-                result["agent"]["default_model"] = provider_defaults["default_model"]
         return result
 
     def _load_config(self) -> dict[str, Any]:
@@ -337,6 +358,8 @@ class Config:
             with self._config_path.open("r", encoding="utf-8") as f:
                 user_config = yaml.safe_load(f) or {}
             if isinstance(user_config, dict):
+                # 兼容旧格式 llm_providers → llm.providers
+                self._migrate_legacy_config(user_config)
                 config = self._deep_merge(config, user_config)
                 logger.info("Loaded config from %s", self._config_path)
             else:
@@ -346,6 +369,28 @@ class Config:
 
         config = self._resolve_env(config)
         return config
+
+    @staticmethod
+    def _migrate_legacy_config(user_config: dict[str, Any]) -> None:
+        """将旧格式配置原地迁移到新格式（不修改文件，只影响内存）"""
+        # llm_providers → llm.providers
+        if "llm_providers" in user_config and "llm" not in user_config:
+            old_providers = user_config.pop("llm_providers")
+            user_config["llm"] = {"providers": {}}
+            for pname, pcfg in old_providers.items():
+                if isinstance(pcfg, dict):
+                    new_pcfg = {k: v for k, v in pcfg.items() if k != "default_model"}
+                    user_config["llm"]["providers"][pname] = new_pcfg
+
+        # agent.provider + agent.default_model → agent.model
+        if "agent" in user_config and isinstance(user_config["agent"], dict):
+            agent = user_config["agent"]
+            if "provider" in agent and "default_model" in agent and "model" not in agent:
+                # 尝试从 model_id 反查 model key，否则原样保留
+                agent["model"] = agent.pop("default_model")
+                agent.pop("provider", None)
+            if "default_temperature" in agent and "temperature" not in agent:
+                agent["temperature"] = agent.pop("default_temperature")
 
     def _deep_merge(self, base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
         result = deepcopy(base)
@@ -387,6 +432,38 @@ class Config:
                 target[key] = {}
             target = target[key]
         target[keys[-1]] = value
+
+    def resolve_model(self, model_key: str | None = None) -> tuple[str, str]:
+        """解析模型 key 为 (provider_name, model_id)。
+
+        优先从 llm.models 注册表查找；如果 model_key 不在注册表中，
+        则视为直接的 model_id（向后兼容），从注册表中反查 provider。
+
+        Args:
+            model_key: llm.models 中的 key（如 "claude_sonnet"），
+                       为 None 时使用 llm.default_model。
+        Returns:
+            (provider_name, model_id) 元组
+        """
+        if not model_key:
+            model_key = self.get("llm.default_model", "mock")
+
+        models = self.get("llm.models", {})
+
+        # 精确匹配 models 注册表
+        if model_key in models:
+            entry = models[model_key]
+            return entry.get("provider", "mock"), entry.get("model_id", model_key)
+
+        # 向后兼容：model_key 可能是直接的 model_id（如 "gpt-4o-mini"）
+        # 从 models 注册表中反查
+        for _key, entry in models.items():
+            if isinstance(entry, dict) and entry.get("model_id") == model_key:
+                return entry.get("provider", "mock"), model_key
+
+        # 都找不到，返回 mock
+        logger.warning("未知的模型 key: %s，使用 mock provider", model_key)
+        return "mock", model_key
 
 
 config = Config()

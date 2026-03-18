@@ -1,5 +1,5 @@
 """
-Config API - 按 section 读写 config.yml 中的 llm_providers / agent / plugins
+Config API - 按 section 读写 config.yml 中的 llm / agent / plugins
 """
 from __future__ import annotations
 
@@ -15,18 +15,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
-EDITABLE_SECTIONS = ("llm_providers", "agent", "plugins")
+EDITABLE_SECTIONS = ("llm", "agent", "plugins")
 
 
 class SectionsUpdateBody(BaseModel):
-    llm_providers: dict[str, Any] | None = None
+    llm: dict[str, Any] | None = None
     agent: dict[str, Any] | None = None
     plugins: dict[str, Any] | None = None
 
 
 @router.get("/sections")
 async def get_config_sections(request: Request):
-    """返回 llm_providers / agent / plugins 三个 section 的当前值"""
+    """返回 llm / agent / plugins 三个 section 的当前值"""
     cfg = request.app.state.config
     result: dict[str, Any] = {}
     for key in EDITABLE_SECTIONS:

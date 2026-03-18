@@ -7,6 +7,7 @@ USER_TURN_CANCEL_REQUESTED = "user.turn_cancel_requested"
 # Agent 编排事件（两阶段）
 AGENT_STEP_STARTED = "agent.step_started"
 AGENT_STEP_COMPLETED = "agent.step_completed"
+AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
 
 # LLM 执行事件（四阶段：requested → started → result → completed）
 LLM_CALL_REQUESTED = "llm.call_requested"

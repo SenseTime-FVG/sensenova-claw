@@ -34,11 +34,19 @@ class LLMSessionWorker(SessionWorker):
 
     async def _handle_llm_requested(self, event: EventEnvelope) -> None:
         llm_call_id = event.payload.get("llm_call_id")
-        model = event.payload.get("model") or config.get("agent.default_model")
-        provider_name = event.payload.get("provider") or config.get("agent.provider", "mock")
+        # model/provider 可能由事件直接指定（已是 model_id），也可能需要从 model key 解析
+        raw_model = event.payload.get("model")
+        raw_provider = event.payload.get("provider")
+        if raw_provider and raw_model:
+            # 事件已显式指定 provider 和 model_id，直接使用
+            provider_name, model = raw_provider, raw_model
+        else:
+            # 通过 model key 解析
+            model_key = raw_model or config.get("llm.default_model", "mock")
+            provider_name, model = config.resolve_model(model_key)
         messages = event.payload.get("messages", [])
         tools = event.payload.get("tools")
-        temperature = float(event.payload.get("temperature", config.get("agent.default_temperature", 0.2)))
+        temperature = float(event.payload.get("temperature", config.get("agent.temperature", 0.2)))
         max_tokens = event.payload.get("max_tokens")
 
         logger.debug(

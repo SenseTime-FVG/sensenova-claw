@@ -111,7 +111,7 @@ export function SkillDetailModal({
               </div>
 
               {/* 文件列表 */}
-              {detail.files.length > 0 && (
+              {detail.files && detail.files.length > 0 && (
                 <div>
                   <h3 className="text-sm font-medium text-[#858585] mb-2 flex items-center gap-1">
                     <Folder size={14} /> 文件列表

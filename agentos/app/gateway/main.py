@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import logging
 import time
-import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -17,10 +16,8 @@ from agentos.kernel.scheduler.runtime import CronRuntime
 from agentos.kernel.scheduler.tool import CronTool
 from agentos.adapters.storage.repository import Repository
 from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.persister import EventPersister
 from agentos.kernel.events.router import BusRouter
-from agentos.kernel.events.types import USER_INPUT, USER_TURN_CANCEL_REQUESTED, TOOL_CONFIRMATION_RESPONSE
 from agentos.adapters.channels.websocket_channel import WebSocketChannel
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.heartbeat.runtime import HeartbeatRuntime
@@ -48,7 +45,7 @@ from agentos.interfaces.http import agents, tools, gateway, skills, workspace, c
 
 # Token 认证模块（Jupyter-lab 风格）
 from agentos.platform.security.auth import TokenAuthService
-from agentos.platform.security.middleware import verify_request, verify_websocket
+from agentos.platform.security.middleware import verify_request
 from agentos.interfaces.http.auth import create_auth_router
 
 logger = logging.getLogger(__name__)
@@ -203,9 +200,7 @@ async def lifespan(app: FastAPI):
     )
     title_runtime = TitleRuntime(bus=bus, repo=repo)
 
-    gateway = Gateway(publisher=publisher)
-    ws_channel = WebSocketChannel("websocket")
-    gateway.register_channel(ws_channel)
+    gateway = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
 
     # v1.0: 注册 Agent-to-Agent 消息工具
     if config.get("delegation.enabled", True):
@@ -248,7 +243,11 @@ async def lifespan(app: FastAPI):
     await heartbeat_runtime.start()
 
     # Token 认证服务（Jupyter-lab 风格，每次启动生成新 token）
-    auth_service = TokenAuthService()
+    auth_service = TokenAuthService(agentos_home=agentos_home)
+
+    # WebSocketChannel（注入 auth_service 用于连接认证）
+    ws_channel = WebSocketChannel("websocket", auth_service=auth_service)
+    gateway.register_channel(ws_channel)
 
     app.state.services = Services(
         repo=repo,
@@ -365,275 +364,32 @@ async def health_check() -> dict:
 @app.get("/api/sessions")
 async def list_sessions():
     """获取会话列表"""
-    services: Services = app.state.services
-    sessions = await services.repo.list_sessions(limit=50)
+    sessions = await app.state.services.gateway.list_sessions()
     return JSONResponse(content={"sessions": sessions})
 
 
 @app.get("/api/sessions/{session_id}/turns")
 async def get_session_turns(session_id: str):
     """获取会话的所有轮次"""
-    services: Services = app.state.services
-    turns = await services.repo.get_session_turns(session_id)
+    turns = await app.state.services.gateway.get_session_turns(session_id)
     return JSONResponse(content={"turns": turns})
 
 
 @app.get("/api/sessions/{session_id}/events")
 async def get_session_events(session_id: str):
     """获取会话的所有事件"""
-    services: Services = app.state.services
-    events = await services.repo.get_session_events(session_id)
+    events = await app.state.services.gateway.get_session_events(session_id)
     return JSONResponse(content={"events": events})
 
 
 @app.get("/api/sessions/{session_id}/messages")
 async def list_session_messages(session_id: str):
     """获取会话的所有消息"""
-    services: Services = app.state.services
-    messages = await services.repo.get_session_messages(session_id)
+    messages = await app.state.services.gateway.get_messages(session_id)
     return JSONResponse(content={"messages": messages})
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    services: Services = app.state.services
-    ws_channel = services.ws_channel
-    gateway = services.gateway
-    repo = services.repo
-    publisher = services.publisher
-
-    # Token 认证（cookie 或 query param）
-    auth_enabled = config.get("security.auth_enabled", False)
-    if auth_enabled:
-        if not verify_websocket(websocket, services.auth_service):
-            logger.warning("WebSocket connection rejected: invalid or missing token")
-            await websocket.close(code=1008, reason="Invalid or missing token")
-            return
-
-    await ws_channel.connect(websocket)
-    logger.info("WebSocket client connected")
-
-    try:
-        while True:
-            message = await websocket.receive_json()
-            msg_type = message.get("type")
-            logger.info(f"Received message type: {msg_type}")
-            payload = message.get("payload", {})
-            session_id = message.get("session_id")
-
-            if msg_type == "create_session":
-                session_id = f"sess_{uuid.uuid4().hex[:12]}"
-                agent_id = payload.get("agent_id", "default")
-                meta = payload.get("meta", {})
-                meta["agent_id"] = agent_id
-                await repo.create_session(session_id=session_id, meta=meta)
-                ws_channel.bind_session(session_id, websocket)
-                gateway.bind_session(session_id, "websocket")
-                await ws_channel.send_json(
-                    websocket,
-                    {
-                        "type": "session_created",
-                        "session_id": session_id,
-                        "payload": {"created_at": time.time()},
-                        "timestamp": time.time(),
-                    },
-                )
-                logger.info(f"Session created: {session_id}")
-                continue
-
-            if msg_type == "list_sessions":
-                sessions = await repo.list_sessions(limit=int(payload.get("limit", 50)))
-                await ws_channel.send_json(
-                    websocket,
-                    {
-                        "type": "sessions_list",
-                        "payload": {"sessions": sessions},
-                        "timestamp": time.time(),
-                    },
-                )
-                continue
-
-            if msg_type == "load_session":
-                sid = payload.get("session_id")
-                if sid:
-                    ws_channel.bind_session(sid, websocket)
-                    gateway.bind_session(sid, "websocket")
-                    events = await repo.get_session_events(sid)
-                    await ws_channel.send_json(
-                        websocket,
-                        {
-                            "type": "session_loaded",
-                            "session_id": sid,
-                            "payload": {"events": events},
-                            "timestamp": time.time(),
-                        },
-                    )
-                continue
-
-            if msg_type == "cancel_turn":
-                if session_id:
-                    await gateway.publish_from_channel(
-                        EventEnvelope(
-                            type=USER_TURN_CANCEL_REQUESTED,
-                            session_id=session_id,
-                            source="websocket",
-                            payload={"reason": payload.get("reason", "user_cancel")},
-                        )
-                    )
-                continue
-
-            if msg_type == "user_input":
-                if not session_id:
-                    session_id = f"sess_{uuid.uuid4().hex[:12]}"
-                    await repo.create_session(session_id=session_id, meta={"title": "自动创建会话"})
-                    ws_channel.bind_session(session_id, websocket)
-                    gateway.bind_session(session_id, "websocket")
-                    await ws_channel.send_json(
-                        websocket,
-                        {
-                            "type": "session_created",
-                            "session_id": session_id,
-                            "payload": {"created_at": time.time()},
-                            "timestamp": time.time(),
-                        },
-                    )
-
-                turn_id = f"turn_{uuid.uuid4().hex[:12]}"
-                await gateway.publish_from_channel(
-                    EventEnvelope(
-                        type=USER_INPUT,
-                        session_id=session_id,
-                        turn_id=turn_id,
-                        source="websocket",
-                        payload={
-                            "content": payload.get("content", ""),
-                            "attachments": payload.get("attachments", []),
-                            "context_files": payload.get("context_files", []),
-                        },
-                    )
-                )
-                continue
-
-
-            # v1.5: 删除会话
-            if msg_type == "delete_session":
-                sid = payload.get("session_id")
-                if sid:
-                    try:
-                        await repo.delete_session_cascade(sid)
-                        ws_channel._session_bindings.pop(sid, None)
-                        await ws_channel.send_json(websocket, {
-                            "type": "session_deleted",
-                            "payload": {"session_id": sid},
-                            "timestamp": time.time(),
-                        })
-                        logger.info(f"Session deleted: {sid}")
-                    except Exception as e:
-                        await ws_channel.send_json(websocket, {
-                            "type": "error",
-                            "payload": {"message": f"删除会话失败: {e}"},
-                            "timestamp": time.time(),
-                        })
-                continue
-
-            # v1.5: 重命名会话
-            if msg_type == "rename_session":
-                sid = payload.get("session_id") or session_id
-                title = payload.get("title", "")
-                if sid and title:
-                    try:
-                        await repo.update_session_title(sid, title)
-                        await ws_channel.send_json(websocket, {
-                            "type": "session_renamed",
-                            "payload": {"session_id": sid, "title": title},
-                            "timestamp": time.time(),
-                        })
-                        logger.info(f"Session renamed: {sid} -> {title}")
-                    except Exception as e:
-                        await ws_channel.send_json(websocket, {
-                            "type": "error",
-                            "payload": {"message": f"重命名会话失败: {e}"},
-                            "timestamp": time.time(),
-                        })
-                else:
-                    await ws_channel.send_json(websocket, {
-                        "type": "error",
-                        "payload": {"message": "需要 session_id 和 title"},
-                        "timestamp": time.time(),
-                    })
-                continue
-
-            # v1.4: 列出可用 Agent
-            if msg_type == "list_agents":
-                agent_registry = app.state.agent_registry
-                agents_data = [
-                    {"id": a.id, "name": a.name, "description": a.description,
-                     "model": a.model, "provider": a.provider}
-                    for a in agent_registry.list_all()
-                ]
-                await ws_channel.send_json(websocket, {
-                    "type": "agents_list",
-                    "payload": {"agents": agents_data},
-                    "timestamp": time.time(),
-                })
-                continue
-
-            # v1.4: 工具确认响应
-            if msg_type == "tool_confirmation_response":
-                await gateway.publish_from_channel(
-                    EventEnvelope(
-                        type=TOOL_CONFIRMATION_RESPONSE,
-                        session_id=session_id,
-                        source="websocket",
-                        payload={
-                            "tool_call_id": payload.get("tool_call_id"),
-                            "approved": payload.get("approved", False),
-                        },
-                    )
-                )
-                continue
-
-            # v1.4: 获取会话消息历史
-            if msg_type == "get_messages":
-                sid = payload.get("session_id") or session_id
-                messages = await repo.get_session_messages(sid) if sid else []
-                await ws_channel.send_json(websocket, {
-                    "type": "messages_list",
-                    "payload": {"messages": messages},
-                    "timestamp": time.time(),
-                })
-                continue
-
-            await ws_channel.send_json(
-                websocket,
-                {
-                    "type": "error",
-                    "payload": {
-                        "error_type": "InvalidMessage",
-                        "message": f"unsupported message type: {msg_type}",
-                        "details": {"message": message},
-                    },
-                    "timestamp": time.time(),
-                },
-            )
-
-    except WebSocketDisconnect:
-        ws_channel.disconnect(websocket)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("websocket endpoint error")
-        ws_channel.disconnect(websocket)
-        try:
-            await ws_channel.send_json(
-                websocket,
-                {
-                    "type": "error",
-                    "payload": {
-                        "error_type": type(exc).__name__,
-                        "message": str(exc),
-                        "details": {},
-                    },
-                    "timestamp": time.time(),
-                },
-            )
-        except Exception:  # noqa: BLE001
-            pass
+    """WebSocket 端点 — 委托给 WebSocketChannel 处理"""
+    await app.state.services.ws_channel.handle_connection(websocket)

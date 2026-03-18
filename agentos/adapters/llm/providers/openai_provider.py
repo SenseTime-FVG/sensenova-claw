@@ -11,7 +11,7 @@ from agentos.adapters.llm.base import LLMProvider
 
 class OpenAIProvider(LLMProvider):
     def __init__(self):
-        provider_cfg = config.get("llm_providers.openai", {})
+        provider_cfg = config.get("llm.providers.openai", {})
         self.client = AsyncOpenAI(
             api_key=provider_cfg.get("api_key"),
             base_url=provider_cfg.get("base_url") or None,

@@ -170,16 +170,14 @@ def test_update_agent_config(client):
     assert data["temperature"] == 0.5
 
 
-def test_update_agent_config_syncs_global_for_default(client, app):
-    """更新 default Agent 时同步全局 config"""
+def test_update_agent_config_model(client):
+    """更新 default Agent 的 model"""
     resp = client.put("/api/agents/default/config", json={
-        "provider": "anthropic",
-        "model": "claude-3",
+        "model": "claude_opus",
     })
     assert resp.status_code == 200
-    # 验证全局 config 被同步
-    assert app.state.config.get("agent.provider") == "anthropic"
-    assert app.state.config.get("agent.default_model") == "claude-3"
+    data = resp.json()
+    assert data["model"] == "claude_opus"
 
 
 def test_update_agent_config_not_found(client):
