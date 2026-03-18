@@ -103,6 +103,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "tools": {
         "bash_command": {"enabled": True, "timeout": 15},
         "serper_search": {"enabled": True, "api_key": "${SERPER_API_KEY}", "timeout": 15, "max_results": 10},
+        "brave_search": {"enabled": True, "api_key": "${BRAVE_API_KEY}", "timeout": 15, "max_results": 10},
+        "baidu_search": {"enabled": True, "timeout": 15, "max_results": 10},
+        "tavily_search": {"enabled": True, "api_key": "${TAVILY_API_KEY}", "timeout": 15, "max_results": 10},
         "fetch_url": {"enabled": True, "timeout": 15, "max_response_mb": 10},
         "file_operations": {
             "enabled": True,

@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Loader2 } from 'lucide-react';
+import { Loader2, Globe, Settings } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -39,71 +41,120 @@ export default function GatewayPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const getStatusColor = (status: string) => {
-    return status === 'connected'
-      ? 'text-green-400 bg-green-400/20'
-      : 'text-gray-400 bg-gray-400/20';
-  };
-
   return (
     <DashboardLayout>
-      <div className="h-full flex flex-col">
-        <div className="bg-[#252526] border-b border-[#2d2d30] p-4">
-          <h1 className="text-xl font-semibold text-[#cccccc] mb-4">Gateway & Channels</h1>
-
-          {/* Gateway Stats */}
-          {stats && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-[#1e1e1e] border border-[#2d2d30] rounded p-3">
-                <div className="text-xs text-[#858585] mb-1">Total Channels</div>
-                <div className="text-xl font-semibold text-[#cccccc]">{stats.totalChannels}</div>
-              </div>
-              <div className="bg-[#1e1e1e] border border-[#2d2d30] rounded p-3">
-                <div className="text-xs text-[#858585] mb-1">Active</div>
-                <div className="text-xl font-semibold text-green-400">{stats.activeChannels}</div>
-              </div>
-              <div className="bg-[#1e1e1e] border border-[#2d2d30] rounded p-3">
-                <div className="text-xs text-[#858585] mb-1">Active Connections</div>
-                <div className="text-xl font-semibold text-[#cccccc]">{stats.totalConnections}</div>
-              </div>
-              <div className="bg-[#1e1e1e] border border-[#2d2d30] rounded p-3">
-                <div className="text-xs text-[#858585] mb-1">Total Sessions</div>
-                <div className="text-xl font-semibold text-[#cccccc]">{stats.totalSessions}</div>
-              </div>
-            </div>
-          )}
+      <div className="flex-1 space-y-8 p-10 lg:p-12">
+        <div className="flex items-center justify-between space-y-2">
+          <h2 className="text-4xl font-extrabold tracking-tight text-foreground/90">Gateway & Channels</h2>
         </div>
 
-        <div className="flex-1 overflow-auto p-4">
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <Loader2 className="animate-spin text-[#858585]" size={32} />
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {channels.map((channel) => (
-                <div key={channel.id} className="bg-[#252526] border border-[#2d2d30] rounded p-3 hover:border-[#3e3e42] transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="text-sm font-medium text-[#cccccc]">{channel.name}</h3>
-                        <span className={`px-1.5 py-0.5 rounded text-xs capitalize ${getStatusColor(channel.status)}`}>
-                          {channel.status}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded text-xs bg-[#3c3c3c] text-[#858585]">
-                          {channel.type}
-                        </span>
-                      </div>
-                    </div>
-                    <div className={`w-2 h-2 rounded-full ${channel.status === 'connected' ? 'bg-green-500' : 'bg-gray-500'}`} />
+        <div className="flex flex-col md:flex-row gap-8 mt-10">
+          {/* Nested Sidebar */}
+          <aside className="w-full md:w-64 lg:w-72 shrink-0">
+            <nav className="flex space-x-2 md:flex-col md:space-x-0 md:space-y-2">
+               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70 mb-2 px-4">Traffic</p>
+               <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+                  <Globe className="h-5 w-5" /> Live Channels
+               </button>
+               <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground opacity-60">
+                  <Settings className="h-5 w-5" /> Global Settings
+               </button>
+            </nav>
+          </aside>
+
+          {/* Main Content Area */}
+          <div className="flex-1 space-y-8">
+            {/* Gateway Stats */}
+            {stats && (
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+                <Card className="shadow-lg border-border/60">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                    <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Total Channels</CardTitle>
+                    <Globe className="h-5 w-5 text-primary" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-4xl font-black">{stats.totalChannels}</div>
+                    <p className="text-sm font-medium text-muted-foreground mt-2">Configured routes</p>
+                  </CardContent>
+                </Card>
+                <Card className="shadow-lg border-border/60">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                    <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Active Channels</CardTitle>
+                    <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-4xl font-black text-green-600 dark:text-green-500">{stats.activeChannels}</div>
+                    <p className="text-sm font-medium text-muted-foreground mt-2">Heathy & connected</p>
+                  </CardContent>
+                </Card>
+                <Card className="shadow-lg border-border/60">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                    <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Active Connections</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-4xl font-black">{stats.totalConnections}</div>
+                    <p className="text-sm font-medium text-muted-foreground mt-2">Current client links</p>
+                  </CardContent>
+                </Card>
+                <Card className="shadow-lg border-border/60">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                    <CardTitle className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Total Sessions</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-4xl font-black">{stats.totalSessions}</div>
+                    <p className="text-sm font-medium text-muted-foreground mt-2">All-time throughput</p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            <Card className="shadow-xl border-border/80 overflow-hidden">
+              <CardHeader className="bg-muted/30 border-b p-8">
+                <CardTitle className="text-2xl font-bold">Channel Registry</CardTitle>
+                <CardDescription className="text-base mt-2">View and manage active communication channels across the gateway.</CardDescription>
+              </CardHeader>
+              <CardContent className="p-8">
+                {loading ? (
+                  <div className="flex flex-col items-center justify-center py-24 gap-4">
+                    <Loader2 className="animate-spin text-primary" size={48} />
+                    <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Hydrating gateway stats...</p>
                   </div>
-                </div>
-              ))}
-              {channels.length === 0 && (
-                <p className="text-sm text-[#858585] text-center py-8">No channels registered</p>
-              )}
-            </div>
-          )}
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {channels.map((channel) => (
+                      <div key={channel.id} className="flex flex-col p-8 border border-border/60 rounded-2xl bg-card hover:bg-muted/30 transition-all shadow-sm group relative overflow-hidden">
+                        <div className={`absolute top-0 right-0 w-2 h-full ${channel.status === 'connected' ? 'bg-green-500/40' : 'bg-muted-foreground/20'}`} />
+                        <div className="flex-1">
+                          <div className="flex flex-col mb-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="text-xl font-bold text-foreground group-hover:text-primary transition-colors">{channel.name}</h3>
+                              <span className={`w-3 h-3 rounded-full ${channel.status === 'connected' ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)]' : 'bg-muted-foreground/40'}`} />
+                            </div>
+                            <div className="flex items-center gap-2">
+                               <Badge 
+                                variant={channel.status === 'connected' ? 'default' : 'secondary'} 
+                                className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ${channel.status === 'connected' ? 'bg-green-500 text-white shadow-sm' : ''}`}>
+                                {channel.status}
+                              </Badge>
+                              <Badge variant="outline" className="capitalize px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-muted-foreground/60">
+                                {channel.type}
+                              </Badge>
+                            </div>
+                          </div>
+                          <p className="text-xs font-mono text-muted-foreground/50 truncate">ID: {channel.id}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {channels.length === 0 && (
+                      <div className="col-span-full py-24 border border-dashed rounded-2xl text-center text-muted-foreground bg-muted/5">
+                        <p className="text-lg font-bold opacity-30 uppercase tracking-widest">No active channels registered</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </DashboardLayout>

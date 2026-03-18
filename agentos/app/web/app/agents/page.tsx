@@ -2,8 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Plus, Search, Activity, MessageSquare, Loader2, Trash2, X, Bot, ChevronRight } from 'lucide-react';
+import { Plus, Search, Activity, MessageSquare, Loader2, Trash2, X, Bot, ChevronRight, Wrench } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -22,7 +27,6 @@ interface Agent {
 
 export default function OrchestrationPage() {
   const [searchTerm, setSearchTerm] = useState('');
-
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
@@ -55,118 +59,136 @@ export default function OrchestrationPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'active': return 'bg-green-500';
-      case 'inactive': return 'bg-gray-500';
-      case 'error': return 'bg-red-500';
-      default: return 'bg-gray-500';
+      case 'active': return 'default';
+      case 'inactive': return 'secondary';
+      case 'error': return 'destructive';
+      default: return 'secondary';
     }
   };
 
   return (
     <DashboardLayout>
-      <div className="h-full flex flex-col">
-        {/* Header */}
-        <div className="bg-[#252526] border-b border-[#2d2d30] p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h1 className="text-xl font-semibold text-[#cccccc]">编排中心</h1>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowCreateAgent(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-[#0e639c] hover:bg-[#1177bb] rounded text-white text-sm transition-colors"
-              >
-                <Plus size={16} />
-                New Agent
-              </button>
-            </div>
-          </div>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#858585]" size={16} />
-            <input
-              type="text"
-              placeholder="搜索 Agents..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-[#3c3c3c] border border-[#5a5a5a] rounded px-10 py-2 text-sm text-[#cccccc] placeholder-[#858585] focus:outline-none focus:border-[#007acc]"
-            />
+      <div className="flex-1 space-y-4 p-8 pt-6">
+        <div className="flex items-center justify-between space-y-2">
+          <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
+          <div className="flex items-center space-x-2">
+            <Button onClick={() => setShowCreateAgent(true)} className="gap-2">
+              <Plus size={16} /> New Agent
+            </Button>
           </div>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-auto p-4 space-y-6">
-          {agentsLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="animate-spin text-[#858585]" size={32} />
+        <div className="flex flex-col md:flex-row gap-6 mt-6">
+          {/* Nested Sidebar */}
+          <aside className="w-full md:w-48 lg:w-56 shrink-0">
+            <nav className="flex space-x-2 md:flex-col md:space-x-0 md:space-y-1">
+              <span className="bg-muted hover:bg-muted text-primary font-medium justify-start w-full text-sm px-4 py-2 rounded-md transition-colors cursor-default">
+                Overview
+              </span>
+              <span className="hover:bg-muted text-muted-foreground hover:text-foreground justify-start w-full text-sm px-4 py-2 rounded-md transition-colors cursor-not-allowed opacity-50">
+                Analytics
+              </span>
+            </nav>
+          </aside>
+
+          {/* Main Content Area */}
+          <div className="flex-1 space-y-6">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Agents</CardTitle>
+                  <Bot className="h-5 w-5 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{agents.length}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Sessions</CardTitle>
+                  <MessageSquare className="h-5 w-5 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{agents.reduce((acc, a) => acc + (a.sessionCount || 0), 0)}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Active Tools</CardTitle>
+                  <Wrench className="h-5 w-5 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{agents.reduce((acc, a) => acc + (a.toolCount || 0), 0)}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">System Status</CardTitle>
+                  <Activity className="h-5 w-5 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-green-500">Healthy</div>
+                </CardContent>
+              </Card>
             </div>
-          ) : (
-            <>
-              {/* Agents 区块 */}
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Bot size={18} className="text-[#007acc]" />
-                    <h2 className="text-sm font-semibold text-[#cccccc]">
-                      Agents
-                    </h2>
-                    <span className="text-xs text-[#858585] bg-[#3c3c3c] px-2 py-0.5 rounded-full">
-                      {filteredAgents.length}
-                    </span>
-                  </div>
-                </div>
 
-                {filteredAgents.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-8 text-[#858585]">
-                    <Bot size={36} className="mb-2 opacity-50" />
-                    <p className="text-sm">{searchTerm ? '没有匹配的 Agent' : '暂无 Agent，点击上方按钮创建'}</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {filteredAgents.map((agent) => (
-                      <Link
-                        key={agent.id}
-                        href={`/agents/${agent.id}`}
-                        className="bg-[#252526] border border-[#2d2d30] rounded-lg p-4 hover:border-[#007acc] transition-colors block group"
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${getStatusColor(agent.status)}`} />
-                            <h3 className="font-semibold text-[#cccccc] text-sm">{agent.name}</h3>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {agent.id !== 'default' && (
-                              <button
-                                onClick={(e) => deleteAgent(e, agent.id)}
-                                className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-[#3c3c3c] transition-all"
-                                title="删除 Agent"
-                              >
-                                <Trash2 size={13} className="text-red-400" />
-                              </button>
-                            )}
-                            <ChevronRight size={14} className="text-[#858585] opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
+            <div className="flex items-center justify-between mt-6 mb-4">
+              <div className="relative w-80">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Search Agents..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9 bg-background h-10 text-sm"
+                />
+              </div>
+            </div>
+
+            {agentsLoading ? (
+            <div className="flex items-center justify-center h-64 border rounded-xl bg-card">
+              <Loader2 className="animate-spin text-muted-foreground" size={32} />
+            </div>
+            ) : filteredAgents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center p-12 text-muted-foreground border border-dashed border-border rounded-xl bg-card">
+                <Bot size={48} className="mb-4 opacity-20" />
+                <p className="text-base">{searchTerm ? 'No agents match your search.' : 'No agents found. Click "New Agent" to get started.'}</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredAgents.map((agent) => (
+                  <Link href={`/agents/${agent.id}`} key={agent.id}>
+                    <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full flex flex-col group shadow-sm">
+                      <CardHeader className="p-6 pb-4">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-xl flex items-center gap-2">
+                            {agent.name}
+                          </CardTitle>
+                          <Badge variant={getStatusColor(agent.status) as any} className="text-xs px-2.5 py-0.5">
+                            {agent.status}
+                          </Badge>
                         </div>
-
-                        <p className="text-xs text-[#858585] mb-2 line-clamp-2">{agent.description}</p>
-                        {agent.provider && (
-                          <div className="text-xs text-[#007acc] mb-2">
-                            {agent.provider} / {agent.model}
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-3 text-xs text-[#858585]">
-                          <div className="flex items-center gap-1">
-                            <MessageSquare size={11} />
-                            <span>{agent.sessionCount} sessions</span>
-                          </div>
-                          <span>{agent.toolCount} tools</span>
-                          <span>{agent.skillCount} skills</span>
+                        <CardDescription className="line-clamp-2 min-h-[44px] pt-1.5 text-sm leading-relaxed">
+                          {agent.description || "No description provided."}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="mt-auto p-6 pt-0">
+                        <div className="flex items-center justify-between text-sm text-muted-foreground border-t border-border pt-4">
+                           <div className="flex items-center gap-4">
+                             <span className="flex items-center gap-1.5" title="Sessions"><MessageSquare size={16}/> {agent.sessionCount || 0}</span>
+                             <span className="flex items-center gap-1.5" title="Tools"><Wrench size={16}/> {agent.toolCount || 0}</span>
+                           </div>
+                           <div className="flex items-center gap-2">
+                             <span className="text-xs font-mono uppercase bg-muted text-muted-foreground px-2.5 py-1 rounded-md tracking-wider">{agent.model}</span>
+                           </div>
                         </div>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </>
-          )}
+                      </CardContent>
+                    </Card>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -231,65 +253,58 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-[#252526] border border-[#2d2d30] rounded-lg w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[#2d2d30]">
-          <h2 className="text-sm font-semibold text-[#cccccc]">创建新 Agent</h2>
-          <button onClick={onClose} className="p-1 hover:bg-[#3c3c3c] rounded"><X size={16} className="text-[#858585]" /></button>
-        </div>
-        <div className="p-4 space-y-3 overflow-auto flex-1">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-[#858585] text-xs">ID (唯一标识)</label>
-              <input value={formId} onChange={e => setFormId(e.target.value)} placeholder="research-agent"
-                className="w-full bg-[#1e1e1e] border border-[#2d2d30] rounded px-3 py-1.5 text-sm text-[#cccccc] focus:outline-none focus:border-[#007acc]" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <Card className="w-full max-w-lg mx-4 max-h-[80vh] flex flex-col shadow-lg">
+        <CardHeader className="flex flex-row items-center justify-between pb-3 border-b border-border text-foreground">
+          <CardTitle className="text-lg">创建新 Agent</CardTitle>
+          <button onClick={onClose} className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"><X size={16} /></button>
+        </CardHeader>
+        <CardContent className="p-4 space-y-4 overflow-auto flex-1 text-foreground">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">ID (唯一标识)</label>
+              <Input value={formId} onChange={e => setFormId(e.target.value)} placeholder="research-agent" />
             </div>
-            <div className="space-y-1">
-              <label className="text-[#858585] text-xs">名称</label>
-              <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Research Agent"
-                className="w-full bg-[#1e1e1e] border border-[#2d2d30] rounded px-3 py-1.5 text-sm text-[#cccccc] focus:outline-none focus:border-[#007acc]" />
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">名称</label>
+              <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Research Agent" />
             </div>
           </div>
-          <div className="space-y-1">
-            <label className="text-[#858585] text-xs">描述</label>
-            <input value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="负责搜索和研究的 Agent"
-              className="w-full bg-[#1e1e1e] border border-[#2d2d30] rounded px-3 py-1.5 text-sm text-[#cccccc] focus:outline-none focus:border-[#007acc]" />
+          <div className="space-y-2">
+            <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">描述</label>
+            <Input value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="负责搜索和研究的 Agent" />
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <label className="text-[#858585] text-xs">Provider</label>
-              <input value={formProvider} onChange={e => setFormProvider(e.target.value)}
-                className="w-full bg-[#1e1e1e] border border-[#2d2d30] rounded px-3 py-1.5 text-sm text-[#cccccc] focus:outline-none focus:border-[#007acc]" />
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Provider</label>
+              <Input value={formProvider} onChange={e => setFormProvider(e.target.value)} />
             </div>
-            <div className="space-y-1">
-              <label className="text-[#858585] text-xs">Model</label>
-              <input value={formModel} onChange={e => setFormModel(e.target.value)}
-                className="w-full bg-[#1e1e1e] border border-[#2d2d30] rounded px-3 py-1.5 text-sm text-[#cccccc] focus:outline-none focus:border-[#007acc]" />
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Model</label>
+              <Input value={formModel} onChange={e => setFormModel(e.target.value)} />
             </div>
-            <div className="space-y-1">
-              <label className="text-[#858585] text-xs">Temperature</label>
-              <input type="number" step="any" value={formTemp} onChange={e => setFormTemp(e.target.value)}
-                className="w-full bg-[#1e1e1e] border border-[#2d2d30] rounded px-3 py-1.5 text-sm text-[#cccccc] focus:outline-none focus:border-[#007acc]" />
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Temperature</label>
+              <Input type="number" step="any" value={formTemp} onChange={e => setFormTemp(e.target.value)} />
             </div>
           </div>
-          <div className="space-y-1">
-            <label className="text-[#858585] text-xs">System Prompt</label>
-            <textarea value={formPrompt} onChange={e => setFormPrompt(e.target.value)} rows={3}
+          <div className="space-y-2">
+            <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">System Prompt</label>
+            <textarea value={formPrompt} onChange={e => setFormPrompt(e.target.value)} rows={4}
               placeholder="你是一个有用的AI助手..."
-              className="w-full bg-[#1e1e1e] border border-[#2d2d30] rounded px-3 py-2 text-sm text-[#cccccc] font-mono resize-y focus:outline-none focus:border-[#007acc]"
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-y"
               spellCheck={false} />
           </div>
-          {error && <p className="text-xs text-red-400">{error}</p>}
-        </div>
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-[#2d2d30]">
-          <button onClick={onClose} className="px-4 py-1.5 text-sm text-[#858585] hover:text-[#cccccc] transition-colors">取消</button>
-          <button onClick={handleCreate} disabled={creating}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-[#0e639c] text-white text-sm rounded hover:bg-[#1177bb] disabled:opacity-50">
-            {creating && <Loader2 size={14} className="animate-spin" />}
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </CardContent>
+        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border bg-muted/30">
+          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button onClick={handleCreate} disabled={creating} className="gap-2">
+            {creating && <Loader2 size={16} className="animate-spin" />}
             创建
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }
