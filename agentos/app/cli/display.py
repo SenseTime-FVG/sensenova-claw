@@ -362,7 +362,10 @@ class DisplayEngine:
         """在输入提示符之前显示状态栏"""
         session = self.app.current_session_id or "无"
         agent = self.app.current_agent_id or "default"
-        connected = self.app.ws is not None and self.app.ws.open
+        try:
+            connected = self.app.ws is not None and self.app.ws.state.name == "OPEN"
+        except Exception:
+            connected = self.app.ws is not None
         conn_icon = f"{ANSI_GREEN}●{ANSI_RESET}" if connected else f"\033[31m●{ANSI_RESET}"
         conn_text = "已连接" if connected else "未连接"
 
