@@ -149,6 +149,15 @@ tools:
   serper_search:
     api_key: xxx              # Serper 搜索 API Key
     max_results: 10
+  brave_search:
+    api_key: xxx              # Brave Search API Key
+    max_results: 10
+  baidu_search:
+    api_key: xxx              # Baidu AppBuilder API Key
+    max_results: 10
+  tavily_search:
+    api_key: xxx              # Tavily API Key
+    max_results: 5
 ```
 
 **配置加载优先级**: 环境变量 > `.agentos/config.yaml` > `config.yml` > 默认值
@@ -215,6 +224,9 @@ agent:
 |------|---------|------|
 | `bash_command` | HIGH | 执行 shell 命令 |
 | `serper_search` | LOW | 网络搜索（需 Serper API Key） |
+| `brave_search` | LOW | 网络搜索（需 Brave Search API Key） |
+| `baidu_search` | LOW | 网络搜索（需 Baidu AppBuilder API Key） |
+| `tavily_search` | LOW | 网络搜索（需 Tavily API Key） |
 | `fetch_url` | LOW | 抓取网页内容 |
 | `read_file` | LOW | 读取文件 |
 | `write_file` | MEDIUM | 写入/追加/插入文件 |

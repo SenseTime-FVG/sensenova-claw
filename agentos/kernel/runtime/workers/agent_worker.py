@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -8,6 +9,8 @@ from typing import Any, TYPE_CHECKING
 from agentos.platform.config.config import config
 from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.types import (
+    AGENT_MESSAGE_COMPLETED,
+    AGENT_MESSAGE_FAILED,
     AGENT_STEP_COMPLETED,
     AGENT_STEP_STARTED,
     ERROR_RAISED,
@@ -17,6 +20,7 @@ from agentos.kernel.events.types import (
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
     USER_INPUT,
+    USER_TURN_CANCEL_REQUESTED,
 )
 from agentos.kernel.events.bus import PrivateEventBus
 from agentos.kernel.runtime.state import TurnState
@@ -53,19 +57,27 @@ class AgentSessionWorker(SessionWorker):
     # ── 配置读取辅助 ──────────────────────────────────
 
     def _get_provider(self) -> str:
-        if self.agent_config and self.agent_config.provider:
-            return self.agent_config.provider
-        return config.get("agent.provider", "mock")
+        """解析 provider 名称：从 agent_config.model → llm.models → provider"""
+        model_key = self._get_model_key()
+        provider, _ = config.resolve_model(model_key)
+        return provider
 
     def _get_model(self) -> str:
+        """解析实际 model_id（传给 LLM API 的模型名）"""
+        model_key = self._get_model_key()
+        _, model_id = config.resolve_model(model_key)
+        return model_id
+
+    def _get_model_key(self) -> str:
+        """获取 model key（llm.models 中的 key）"""
         if self.agent_config and self.agent_config.model:
             return self.agent_config.model
-        return config.get("agent.default_model")
+        return config.get("agent.model") or config.get("llm.default_model", "mock")
 
     def _get_temperature(self) -> float:
         if self.agent_config:
             return self.agent_config.temperature
-        return config.get("agent.default_temperature", 0.2)
+        return config.get("agent.temperature", 0.2)
 
     def _get_filtered_tools(self) -> list[dict]:
         """根据 Agent 配置过滤可用工具"""
@@ -73,16 +85,68 @@ class AgentSessionWorker(SessionWorker):
         if not self.agent_config or not self.agent_config.tools:
             return all_tools  # 空列表 = 全部工具
         allowed = set(self.agent_config.tools)
-        # 始终保留 delegate 工具
-        always_keep = {"delegate"}
+        # 始终保留 send_message 工具
+        always_keep = {"send_message"}
         return [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
+
+    # ── 持久化辅助 ─────────────────────────────────────
+
+    async def _persist_message(
+        self,
+        session_id: str,
+        turn_id: str,
+        msg: dict[str, Any],
+    ) -> None:
+        """立即将单条消息写入 SQLite + JSONL（增量持久化）。"""
+        role = msg.get("role", "")
+        if role == "system":
+            return
+        tool_calls_json = None
+        if msg.get("tool_calls"):
+            tool_calls_json = json.dumps(msg["tool_calls"], ensure_ascii=False)
+        await self.rt.repo.save_message(
+            session_id=session_id,
+            turn_id=turn_id,
+            role=role,
+            content=msg.get("content"),
+            tool_calls=tool_calls_json,
+            tool_call_id=msg.get("tool_call_id"),
+            tool_name=msg.get("name"),
+        )
+        await self.rt.repo.increment_message_count(session_id)
+
+        # 同步写入 JSONL 文件（按 agent 分目录）
+        if self.rt.jsonl_writer:
+            try:
+                agent_id = (self.agent_config.id if self.agent_config else "default")
+                self.rt.jsonl_writer.append(agent_id, session_id, turn_id, msg)
+            except Exception:
+                logger.warning("JSONL write failed session=%s", session_id, exc_info=True)
 
     # ── 事件处理 ──────────────────────────────────────
 
     async def _handle(self, event: EventEnvelope) -> None:
         try:
+            if (
+                event.turn_id
+                and event.type not in {USER_INPUT, USER_TURN_CANCEL_REQUESTED}
+                and self.rt.state_store.is_turn_cancelled(event.session_id, event.turn_id)
+            ):
+                logger.info(
+                    "忽略已取消 turn 的事件 session=%s turn=%s type=%s",
+                    event.session_id,
+                    event.turn_id,
+                    event.type,
+                )
+                return
             if event.type == USER_INPUT:
                 await self._handle_user_input(event)
+            elif event.type == USER_TURN_CANCEL_REQUESTED:
+                await self._handle_turn_cancel_requested(event)
+            elif event.type == AGENT_MESSAGE_COMPLETED:
+                await self._handle_agent_message_completed(event)
+            elif event.type == AGENT_MESSAGE_FAILED:
+                await self._handle_agent_message_failed(event)
             elif event.type == LLM_CALL_RESULT:
                 await self._handle_llm_result(event)
             elif event.type == LLM_CALL_COMPLETED:
@@ -107,6 +171,35 @@ class AgentSessionWorker(SessionWorker):
                     },
                 ))
 
+    async def _handle_turn_cancel_requested(self, event: EventEnvelope) -> None:
+        """取消当前活跃轮次，后续同 turn 事件将被忽略。"""
+        latest_turn = self.rt.state_store.latest_turn(self.session_id)
+        turn_id = event.turn_id or (latest_turn.turn_id if latest_turn else None)
+        if not turn_id:
+            logger.info("收到取消请求但当前无活跃 turn session=%s", self.session_id)
+            return
+        if self.rt.state_store.is_turn_cancelled(self.session_id, turn_id):
+            return
+
+        reason = str(event.payload.get("reason", "user_cancel"))
+        self.rt.state_store.mark_turn_cancelled(self.session_id, turn_id)
+        await self.rt.repo.update_turn_status(turn_id, status="cancelled", agent_response=reason)
+        await self.bus.publish(
+            EventEnvelope(
+                type=ERROR_RAISED,
+                session_id=self.session_id,
+                turn_id=turn_id,
+                trace_id=event.trace_id,
+                source="agent",
+                payload={
+                    "error_type": "TurnCancelled",
+                    "error_message": reason,
+                    "context": {"cancelled": True},
+                },
+            )
+        )
+        logger.info("已取消 turn session=%s turn=%s reason=%s", self.session_id, turn_id, reason)
+
     async def _handle_user_input(self, event: EventEnvelope) -> None:
         content = str(event.payload.get("content", ""))
         turn_id = event.turn_id or f"turn_{uuid.uuid4().hex[:12]}"
@@ -115,15 +208,16 @@ class AgentSessionWorker(SessionWorker):
         await self.rt.repo.update_session_activity(self.session_id)
         await self.rt.repo.create_turn(turn_id=turn_id, session_id=self.session_id, user_input=content)
 
-        # v0.5: 首轮加载 workspace 文件
+        # v0.5: 首轮加载 per-agent workspace 文件
         context_files = None
         if self.rt.state_store.is_first_turn(self.session_id):
-            from agentos.platform.config.workspace import load_workspace_files
-            workspace_dir = config.get("system.workspace_dir", "./SenseAssistant/workspace")
-            context_files = await load_workspace_files(workspace_dir)
+            from agentos.platform.config.workspace import load_workspace_files, resolve_agentos_home
+            agentos_home = str(resolve_agentos_home(config))
+            agent_id = self.agent_config.id if self.agent_config else "default"
+            context_files = await load_workspace_files(agentos_home, agent_id=agent_id)
             self.rt.state_store.mark_first_turn_done(self.session_id)
 
-        # 从内存或 SQLite 惰性加载历史消息
+        # 从内存或 SQLite 惰性加载历史消息（必须在 persist_message 之前，避免重复）
         history = await self.rt.state_store.load_session_history(
             self.session_id, self.rt.repo,
         )
@@ -131,7 +225,8 @@ class AgentSessionWorker(SessionWorker):
         # v0.6: 加载 MEMORY.md 注入 system prompt
         memory_context = None
         if self.rt.memory_manager:
-            memory_context = await self.rt.memory_manager.load_memory_md()
+            agent_id = self.agent_config.id if self.agent_config else None
+            memory_context = await self.rt.memory_manager.load_memory_md(agent_id=agent_id)
 
         messages = self.rt.context_builder.build_messages(
             content, history,
@@ -143,6 +238,11 @@ class AgentSessionWorker(SessionWorker):
         # 记录新消息的起始位置：跳过 system prompt(1条) + 旧历史
         state.history_offset = 1 + len(history)
         self.rt.state_store.set_turn(self.session_id, state)
+
+        # 增量持久化：在 history 加载后保存 user 消息，避免重复
+        await self._persist_message(
+            self.session_id, turn_id, {"role": "user", "content": content},
+        )
 
         await self.bus.publish(
             EventEnvelope(
@@ -195,6 +295,9 @@ class AgentSessionWorker(SessionWorker):
                 assistant_msg[extra_key] = response[extra_key]
         state.messages.append(assistant_msg)
 
+        # 增量持久化：立即保存 assistant 消息
+        await self._persist_message(event.session_id, event.turn_id, assistant_msg)
+
     async def _handle_llm_completed(self, event: EventEnvelope) -> None:
         """处理 LLM 调用完成，决定下一步动作"""
         if not event.turn_id:
@@ -219,6 +322,11 @@ class AgentSessionWorker(SessionWorker):
 
         # 如果有工具调用，触发工具执行
         if tool_calls:
+            # 解析 per-agent workdir 注入工具调用事件
+            from agentos.platform.config.workspace import resolve_agent_workdir, resolve_agentos_home
+            agentos_home = str(resolve_agentos_home(config))
+            agent_workdir = resolve_agent_workdir(agentos_home, self.agent_config)
+
             state.pending_tool_calls = {call["id"] for call in tool_calls}
             for call in tool_calls:
                 await self.bus.publish(
@@ -232,6 +340,7 @@ class AgentSessionWorker(SessionWorker):
                             "tool_call_id": call["id"],
                             "tool_name": call["name"],
                             "arguments": call.get("arguments", {}),
+                            "_agent_workdir": agent_workdir,
                         },
                     )
                 )
@@ -241,27 +350,12 @@ class AgentSessionWorker(SessionWorker):
         state.final_response = content
         await self.rt.repo.complete_turn(event.turn_id, agent_response=content)
 
-        # 只保存本轮新消息到历史（跳过 system prompt + 旧历史）
+        # 追加本轮新消息到内存历史（供后续 turn 上下文使用）
         new_messages = state.messages[state.history_offset:]
         self.rt.state_store.append_to_history(event.session_id, new_messages)
 
-        # 持久化新消息到 SQLite
-        for msg in new_messages:
-            role = msg.get("role", "")
-            if role == "system":
-                continue
-            tool_calls_json = None
-            if msg.get("tool_calls"):
-                tool_calls_json = json.dumps(msg["tool_calls"], ensure_ascii=False)
-            await self.rt.repo.save_message(
-                session_id=event.session_id,
-                turn_id=event.turn_id,
-                role=role,
-                content=msg.get("content"),
-                tool_calls=tool_calls_json,
-                tool_call_id=msg.get("tool_call_id"),
-                tool_name=msg.get("name"),
-            )
+        # 注意：消息已在 _handle_user_input / _handle_llm_result / _handle_tool_result
+        # 中增量持久化到 SQLite，此处无需再批量保存
 
         await self.bus.publish(
             EventEnvelope(
@@ -276,6 +370,12 @@ class AgentSessionWorker(SessionWorker):
                 },
             )
         )
+
+        if self.rt.memory_manager and hasattr(self.rt.memory_manager, "summarize_turn"):
+            agent_id = self.agent_config.id if self.agent_config else None
+            asyncio.create_task(
+                self._summarize_turn_safe(state.messages, agent_id=agent_id)
+            )
 
     async def _handle_tool_result(self, event: EventEnvelope) -> None:
         """处理工具返回结果，收集结果并在所有工具完成后触发下一轮 LLM 调用"""
@@ -299,6 +399,16 @@ class AgentSessionWorker(SessionWorker):
             tool_call_id=str(tool_call_id) if tool_call_id else None,
         )
 
+        # 增量持久化：立即保存 tool 结果消息
+        tool_msg: dict[str, Any] = {
+            "role": "tool",
+            "content": result if isinstance(result, str) else json.dumps(result, ensure_ascii=False),
+            "name": tool_name,
+        }
+        if tool_call_id:
+            tool_msg["tool_call_id"] = str(tool_call_id)
+        await self._persist_message(event.session_id, event.turn_id, tool_msg)
+
         if state.pending_tool_calls:
             return
 
@@ -318,5 +428,70 @@ class AgentSessionWorker(SessionWorker):
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
                 },
+            )
+        )
+
+    async def _summarize_turn_safe(
+        self,
+        messages: list[dict[str, Any]],
+        agent_id: str | None = None,
+    ) -> None:
+        """异步执行对话总结，不影响主流程结果返回。"""
+        try:
+            await self.rt.memory_manager.summarize_turn(
+                messages,
+                provider=self._get_provider(),
+                model=self._get_model(),
+                agent_id=agent_id,
+            )
+        except Exception:
+            logger.warning(
+                "对话总结失败 session=%s agent=%s",
+                self.session_id,
+                agent_id,
+                exc_info=True,
+            )
+
+    async def _handle_agent_message_completed(self, event: EventEnvelope) -> None:
+        """将异步子 Agent 结果转成新一轮 USER_INPUT。"""
+        agent_id = str(event.payload.get("agent_id", "unknown-agent"))
+        result = str(event.payload.get("result", ""))
+        record_id = str(event.payload.get("record_id", ""))
+        attempt_count = int(event.payload.get("attempt_count", 1) or 1)
+        max_attempts = int(event.payload.get("max_attempts", 1) or 1)
+        trace_text = f"记录ID: {record_id}\n" if record_id else ""
+        follow_up = (
+            f"来自 {agent_id} 的异步结果如下：\n{trace_text}"
+            f"尝试次数: {attempt_count}/{max_attempts}\n\n{result}\n\n"
+            "请基于这个结果继续处理当前任务。"
+        )
+        await self._handle_user_input(
+            EventEnvelope(
+                type=USER_INPUT,
+                session_id=event.session_id,
+                source="agent_message",
+                payload={"content": follow_up},
+            )
+        )
+
+    async def _handle_agent_message_failed(self, event: EventEnvelope) -> None:
+        """将异步失败结果转成新一轮 USER_INPUT。"""
+        agent_id = str(event.payload.get("agent_id", "unknown-agent"))
+        error = str(event.payload.get("error", "未知错误"))
+        record_id = str(event.payload.get("record_id", ""))
+        attempt_count = int(event.payload.get("attempt_count", 1) or 1)
+        max_attempts = int(event.payload.get("max_attempts", 1) or 1)
+        trace_text = f"记录ID: {record_id}\n" if record_id else ""
+        follow_up = (
+            f"来自 {agent_id} 的异步任务失败：\n{trace_text}"
+            f"尝试次数: {attempt_count}/{max_attempts}\n\n{error}\n\n"
+            "请根据失败原因决定是否重试、改道或直接回复用户。"
+        )
+        await self._handle_user_input(
+            EventEnvelope(
+                type=USER_INPUT,
+                session_id=event.session_id,
+                source="agent_message",
+                payload={"content": follow_up},
             )
         )

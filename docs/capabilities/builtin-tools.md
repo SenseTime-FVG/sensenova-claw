@@ -1,6 +1,6 @@
 # 内置工具
 
-AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、安全授权和多 Agent 协作场景。所有工具定义位于 `agentos/capabilities/tools/` 目录下。
+AgentOS 内置多种工具，覆盖命令执行、信息检索、文件操作、安全授权和多 Agent 协作场景。所有工具定义位于 `agentos/capabilities/tools/` 目录下。
 
 ## 工具总览
 
@@ -8,12 +8,15 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 |------|------|---------|---------|
 | `bash_command` | 执行 shell 命令 | HIGH | builtin.py |
 | `serper_search` | Serper API 网络搜索 | LOW | builtin.py |
+| `brave_search` | Brave Search API 网络搜索 | LOW | builtin.py |
+| `baidu_search` | 百度 AppBuilder AI Search 网页搜索 | LOW | builtin.py |
+| `tavily_search` | Tavily Search API 网络搜索 | LOW | builtin.py |
 | `fetch_url` | HTTP 获取网页内容 | LOW | builtin.py |
 | `read_file` | 读取文本文件 | LOW | builtin.py |
 | `write_file` | 写入文本文件 | MEDIUM | builtin.py |
-| `grant_path` | 授权目录访问权限 | HIGH | builtin.py |
+| `grant_path` | 授权目录访问权限（已定义但未默认注册） | HIGH | builtin.py |
 | `create_agent` | 创建新 Agent 配置 | MEDIUM | orchestration.py |
-| `delegate` | 委托任务给其他 Agent | MEDIUM | delegate_tool.py |
+| `send_message` | 向其他 Agent 发送消息或任务 | MEDIUM | send_message_tool.py |
 
 ## bash_command
 
@@ -88,6 +91,89 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 - `tools.serper_search.max_results`：最大返回结果数，默认 10
 
 **注意**：未配置 `SERPER_API_KEY` 时返回空结果（不报错），附带提示信息。
+
+## brave_search
+
+通过 Brave Search API 执行网页搜索，返回标准化的 `{query, items}` 结构。
+
+**风险等级**：LOW
+
+**参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `q` | string | 是 | 搜索关键词 |
+| `page` | integer | 否 | 页码，默认 1 |
+| `count` | integer | 否 | 返回结果数，默认读取配置 |
+| `freshness` | string | 否 | 时间过滤，如 `pd` / `pw` / `pm` / `py` |
+| `country` | string | 否 | 国家代码，如 `US` / `CN` |
+| `search_lang` | string | 否 | 搜索语言，如 `en` / `zh-hans` |
+| `ui_lang` | string | 否 | 界面语言，如 `en-US` / `zh-CN` |
+
+**配置**：
+- `tools.brave_search.api_key`：Brave Search API 密钥
+- `tools.brave_search.timeout`：请求超时，默认 15 秒
+- `tools.brave_search.max_results`：默认返回结果数，默认 10
+- `tools.brave_search.country/search_lang/ui_lang`：地域和语言偏好
+
+**注意**：未配置 `BRAVE_SEARCH_API_KEY` 时返回空结果（不报错），附带提示信息。
+
+## baidu_search
+
+通过百度 AppBuilder AI Search 的 `web_search` 接口执行网页搜索。
+
+**风险等级**：LOW
+
+**参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `q` | string | 是 | 搜索关键词 |
+| `max_results` | integer | 否 | 返回结果数，默认读取配置 |
+| `search_source` | string | 否 | 搜索源，默认 `baidu_search_v2` |
+| `search_recency_filter` | string | 否 | 时间过滤，如 `day` / `week` / `month` / `year` |
+
+**返回值补充字段**：
+- `date`：结果时间
+- `website`：站点名称
+- `authority_score`：网页权威性分数
+- `rerank_score`：相关性重排分数
+
+**配置**：
+- `tools.baidu_search.api_key`：百度 AppBuilder API 密钥
+- `tools.baidu_search.timeout`：请求超时，默认 15 秒
+- `tools.baidu_search.max_results`：默认返回结果数，默认 10
+- `tools.baidu_search.search_source`：默认搜索源，默认 `baidu_search_v2`
+
+**注意**：未配置 `BAIDU_APPBUILDER_API_KEY` 时返回空结果（不报错），附带提示信息。
+
+## tavily_search
+
+通过 Tavily Search API 执行网页搜索，支持主题和时间范围过滤。
+
+**风险等级**：LOW
+
+**参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `q` | string | 是 | 搜索关键词 |
+| `search_depth` | string | 否 | 搜索深度，如 `basic` / `advanced` / `fast` / `ultra-fast` |
+| `topic` | string | 否 | 搜索主题，如 `general` / `news` / `finance` |
+| `time_range` | string | 否 | 时间范围，如 `day` / `week` / `month` / `year` |
+| `max_results` | integer | 否 | 返回结果数，默认读取配置 |
+
+**返回值补充字段**：
+- 顶层可能包含 `answer`、`response_time`、`request_id`
+- 每条结果可能包含 `score`、`favicon`
+
+**配置**：
+- `tools.tavily_search.api_key`：Tavily API 密钥
+- `tools.tavily_search.timeout`：请求超时，默认 15 秒
+- `tools.tavily_search.max_results`：默认返回结果数，默认 5
+- `tools.tavily_search.search_depth/topic/time_range`：默认搜索策略
+
+**注意**：未配置 `TAVILY_API_KEY` 时返回空结果（不报错），附带提示信息。
 
 ## fetch_url
 
@@ -199,6 +285,8 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 
 ## grant_path
 
+> **注意**：`GrantPathTool` 已在 `builtin.py` 中定义，但未在 `ToolRegistry._register_builtin()` 中注册。如需使用，需手动调用 `registry.register(GrantPathTool())` 注册。
+
 授权 Agent 访问指定目录。因为风险等级为 HIGH，执行前自动触发用户确认流程。
 
 **风险等级**：HIGH
@@ -222,7 +310,7 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 
 ## create_agent
 
-在对话中动态创建新的 Agent 配置。创建后 Agent 立即可用，可在后续对话中通过委托机制调用。
+在对话中动态创建新的 Agent 配置。创建后 Agent 立即可用，可在后续对话中通过 `send_message` 调用。
 
 **风险等级**：MEDIUM
 
@@ -238,7 +326,7 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 | `model` | string | 否 | 模型名称（如 `gpt-4o-mini`），留空继承默认 |
 | `temperature` | number | 否 | 温度参数（0-2），默认 0.2 |
 | `tools` | array[string] | 否 | 允许使用的工具列表，空数组 = 全部 |
-| `can_delegate_to` | array[string] | 否 | 可委托的目标 Agent ID 列表，空数组 = 全部 |
+| `can_send_message_to` | array[string] | 否 | 可发送消息的目标 Agent ID 列表，空数组 = 全部 |
 
 **返回值**：
 
@@ -249,7 +337,7 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
   "name": "研究助手",
   "provider": "openai",
   "model": "gpt-4o-mini",
-  "message": "Agent '研究助手' (id=research-agent) 已创建成功，可在委托或新会话中使用"
+  "message": "Agent '研究助手' (id=research-agent) 已创建成功，可通过 send_message 或新会话使用"
 }
 ```
 
@@ -258,9 +346,9 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 - 创建后同时持久化到 `workspace/agents/{id}.json`
 - 若 `id` 已存在，返回错误
 
-## delegate
+## send_message
 
-将子任务委托给另一个 Agent 处理。对调用方（LLM）表现为同步工具调用，内部通过事件系统异步执行。
+向另一个 Agent 发送消息、任务或追问。支持同步等待结果，也支持异步回传。
 
 **风险等级**：MEDIUM
 
@@ -269,28 +357,30 @@ AgentOS 内置 8 个工具，覆盖命令执行、信息检索、文件操作、
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `target_agent` | string | 是 | 目标 Agent 的 ID |
-| `task` | string | 是 | 要委托的任务描述 |
-| `context` | string | 否 | 传递给目标 Agent 的上下文信息 |
+| `message` | string | 是 | 要发送的消息或任务内容 |
+| `session_id` | string | 否 | 已有子会话 ID，用于继续与目标 Agent 的 ping-pong 对话 |
+| `mode` | string | 否 | `sync` 或 `async`，默认 `sync` |
+| `timeout_seconds` | number | 否 | 整条消息链路的总超时秒数 |
+| `max_retries` | integer | 否 | 自动重试次数 |
 
 **返回值**：
 
 ```json
 {
-  "success": true,
   "result": "目标 Agent 的最终响应内容"
 }
 ```
 
 **内部机制**：
-1. 验证目标 Agent 存在且可委托
-2. 检查委托深度（防止无限递归，默认最大 3 层）
-3. 创建子 session（`delegate_{random_id}`），绑定目标 Agent 配置
-4. 向子 session 发布 `ui.user_input` 事件
-5. 监听子 session 的 `agent.step_completed` 事件
-6. 返回子 Agent 的最终响应
-7. 超时：默认 300 秒
+1. 验证目标 Agent 存在且当前 Agent 允许向其发送消息
+2. 检查消息深度、循环链路和可选的 `session_id` 复用是否合法
+3. 发布 `agent.message_requested` 事件
+4. 由 `AgentMessageCoordinator` 创建或复用子 session
+5. `sync` 模式等待 `agent.message_completed / agent.message_failed`
+6. `async` 模式立即返回，由父 session 后续消费结果
+7. 支持总超时、取消传播和失败自动重试
 
 **错误情况**：
 - 目标 Agent 不存在：`Agent '{id}' not found`
-- 超过最大委托深度：`Maximum delegation depth exceeded`
-- 子 Agent 执行超时：`Delegation timed out after 300s`
+- 超过最大消息深度：`当前已达到最大消息传递深度`
+- 子 Agent 链路超时：`发送失败：{agent} 在 {timeout} 秒内未完成处理`

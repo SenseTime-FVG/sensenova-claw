@@ -1,44 +1,106 @@
 # AgentOS 配置文件
 
 system:
-  workspace_dir: ~/.SenseAssistant/workspace
-  database_path: ~/.SenseAssistant/agentos.db
+  workspace_dir: ~/.agentos/workspace
+  database_path: ~/.agentos/db/agentos.db
   max_concurrent_sessions: 10
 
-# LLM 提供商配置
-llm_providers:
-  anthropic:
-    api_key: 
-    base_url: https://api-claude.codecmd.com
-    default_model: claude-opus-4-6
-    timeout: 60
-    max_retries: 3
-  openai:
-    api_key: 
-    base_url: https://api.openai.com/v1
-    default_model: gpt-4o
-    timeout: 60
-    max_retries: 3
-  gemini:
-    api_key: 
-    base_url: https://genaiapi.cloudsway.net/v1/ai/vEHkTgVnLcrvHENf
-    default_model: MaaS_Ge_3.1_pro_preview_20260219
-    timeout: 120
-    max_retries: 3
+# 安全配置（Jupyter-lab 风格 token 认证）
+security:
+  auth_enabled: true  # 所有 API/WebSocket 需要 token（启动时终端打印）
 
-# Agent 配置
-agent:
-  provider: gemini
-  default_model: MaaS_Ge_3.1_pro_preview_20260219
-  default_temperature: 0.2
-  max_turns_per_session: 50
-  system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
+# ════════════════════════════════════════════════════
+# LLM 配置
+# ════════════════════════════════════════════════════
+llm:
+  # Provider 注册表：只描述如何连接各家模型服务
+  providers:
+    anthropic:
+      api_key: "sk-ant-oat01-4e8a4c54efb87340e0717e7ad743f4b14ef7374ae983397477732375ea39bdc9"
+      base_url: https://api.anthropic.com
+      timeout: 60
+      max_retries: 3
 
+    openai:
+      api_key: "sk-proj-1234567890"
+      base_url: https://api.openai.com/v1
+      timeout: 60
+      max_retries: 3
+
+    gemini:
+      api_key: "NalkM8RX0D7RFrhKCvi1"
+      base_url: https://genaiapi.cloudsway.net/v1/ai/vEHkTgVnLcrvHENf
+      timeout: 120
+      max_retries: 3
+
+  # 模型注册表：统一定义系统中可用的模型
+  models:
+    claude_opus:
+      provider: anthropic
+      model_id: claude-opus-4-6
+      timeout: 60
+      max_output_tokens: 8192
+      capabilities:
+        - chat
+        - tools
+        - reasoning
+
+    claude_sonnet:
+      provider: anthropic
+      model_id: claude-sonnet-4-20250514
+      timeout: 60
+      max_output_tokens: 8192
+      capabilities:
+        - chat
+        - tools
+
+    gpt_4o:
+      provider: openai
+      model_id: gpt-4o
+      timeout: 60
+      max_output_tokens: 8192
+      capabilities:
+        - chat
+        - tools
+        - vision
+
+    gpt_4o_mini:
+      provider: openai
+      model_id: gpt-4o-mini
+      timeout: 60
+      max_output_tokens: 8192
+      capabilities:
+        - chat
+        - tools
+
+    gemini_pro:
+      provider: gemini
+      model_id: gemini-2.5-pro
+      timeout: 120
+      max_output_tokens: 8192
+      capabilities:
+        - chat
+        - tools
+        - reasoning
+
+  # 全局默认模型（引用 models 中的 key）
+  default_model: claude_sonnet
+
+# ════════════════════════════════════════════════════
+# Agents 配置
+# ════════════════════════════════════════════════════
+# 每个 agent 的详细配置放在 ~/.agentos/agents/{id}/config.yml
+# 这里只声明 agent id 列表
+agents:
+  - default
+
+# ════════════════════════════════════════════════════
 # 工具配置
+# ════════════════════════════════════════════════════
 tools:
   serper_search:
     enabled: true
-    api_key: 
+    api_key: ""
     timeout: 15
     max_results: 10
 

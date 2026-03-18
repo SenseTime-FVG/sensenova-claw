@@ -62,9 +62,13 @@ async def ws_server(tmp_path):
     workspace_dir.mkdir()
 
     config_path = tmp_path / "config.yml"
-    config_path.write_text("", encoding="utf-8")
+    config_path.write_text("security:\n  auth_enabled: false\n", encoding="utf-8")
     cfg = Config(config_path=config_path)
     cfg.set("system.workspace_dir", str(workspace_dir))
+
+    # 确保全局 config 也关闭 auth（中间件使用全局 config）
+    from agentos.platform.config.config import config as global_config
+    global_config.set("security.auth_enabled", False)
 
     await ensure_workspace(str(workspace_dir))
 
@@ -128,8 +132,11 @@ async def ws_server(tmp_path):
     )
     title_runtime = TitleRuntime(bus=bus, repo=repo)
 
-    gw = Gateway(publisher=publisher)
-    ws_channel = WebSocketChannel("websocket")
+    from agentos.platform.security.auth import TokenAuthService
+    auth_service = TokenAuthService()
+
+    gw = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
+    ws_channel = WebSocketChannel("websocket", auth_service=auth_service)
     gw.register_channel(ws_channel)
 
     cron_runtime = CronRuntime(bus=bus, repo=repo, gateway=gw)
@@ -160,6 +167,7 @@ async def ws_server(tmp_path):
         ws_channel: WebSocketChannel
         cron_runtime: CronRuntime
         heartbeat_runtime: HeartbeatRuntime
+        auth_service: object
 
     app.state.services = Services(
         repo=repo, bus=bus, publisher=publisher,
@@ -168,6 +176,7 @@ async def ws_server(tmp_path):
         tool_runtime=tool_runtime, title_runtime=title_runtime,
         gateway=gw, ws_channel=ws_channel,
         cron_runtime=cron_runtime, heartbeat_runtime=heartbeat_runtime,
+        auth_service=auth_service,
     )
     app.state.tool_registry = tool_registry
     app.state.skill_registry = skill_registry

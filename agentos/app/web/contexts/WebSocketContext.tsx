@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { WsMessage } from '@/types/websocket';
-import { useAuth } from './AuthContext';
 
 interface WebSocketContextValue {
   isConnected: boolean;
@@ -13,8 +12,15 @@ interface WebSocketContextValue {
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
-const RECONNECT_INTERVAL = 3000; // 3秒后重连
-const MAX_RECONNECT_ATTEMPTS = 10; // 最多重连10次
+const RECONNECT_INTERVAL = 3000;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const COOKIE_NAME = 'agentos_token';
+
+/** 从 document.cookie 读取指定 cookie */
+function getCookie(name: string): string | null {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
@@ -23,17 +29,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(true);
-  const { token, isAuthenticated } = useAuth();
 
   useEffect(() => {
-    // 如果未认证，不建立连接
-    if (!isAuthenticated || !token) {
-      return;
-    }
-
-    // 重置重连标志（cleanup 可能将其设为 false）
-    shouldReconnectRef.current = true;
-
     const connect = () => {
       // 清理之前的连接
       if (wsRef.current) {
@@ -41,9 +38,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        // 在 WebSocket URL 中添加 token 作为查询参数
-        const wsUrlWithToken = `${WS_URL}?token=${encodeURIComponent(token)}`;
-        const ws = new WebSocket(wsUrlWithToken);
+        // 通过 query param 传递 token（WebSocket 不自动带跨端口 cookie）
+        const token = getCookie(COOKIE_NAME);
+        const wsUrl = token
+          ? `${WS_URL}?token=${encodeURIComponent(token)}`
+          : WS_URL;
+        const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -95,7 +95,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         wsRef.current.close();
       }
     };
-  }, [token, isAuthenticated]);
+  }, []);
 
   const value = useMemo<WebSocketContextValue>(
     () => ({

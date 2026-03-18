@@ -1,47 +1,44 @@
 /**
- * 带认证的 fetch 封装
- * 自动添加 Authorization header
+ * 带认证的 fetch 封装（基于 cookie）
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const COOKIE_NAME = 'agentos_token';
 
-export interface AuthFetchOptions extends RequestInit {
-  skipAuth?: boolean; // 跳过认证（用于登录等公开端点）
+/** 从 document.cookie 读取指定 cookie */
+function getCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 /**
- * 带认证的 fetch 请求
+ * 带认证的 fetch 请求（通过 cookie + Authorization header）
  */
 export async function authFetch(
   url: string,
-  options: AuthFetchOptions = {}
+  options: RequestInit = {}
 ): Promise<Response> {
-  const { skipAuth, headers, ...restOptions } = options;
+  const { headers, ...restOptions } = options;
 
-  // 获取 token
-  const token = !skipAuth ? localStorage.getItem('access_token') : null;
-
-  // 构造 headers
+  // 读取 cookie 中的 token，同时放到 Authorization header（跨端口 cookie 可能不携带）
+  const token = getCookie(COOKIE_NAME);
   const authHeaders: HeadersInit = {
     ...headers,
   };
 
-  if (token && !skipAuth) {
-    authHeaders['Authorization'] = `Bearer ${token}`;
+  if (token) {
+    (authHeaders as Record<string, string>)['Authorization'] = `Bearer ${token}`;
   }
 
-  // 发送请求
   const response = await fetch(url, {
     ...restOptions,
     headers: authHeaders,
+    credentials: 'include',
   });
 
-  // 如果返回 401，token 可能过期，跳转到登录页
-  if (response.status === 401 && !skipAuth) {
-    // 清除 token
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    // 跳转到登录页
+  // 401 → 跳转到登录页
+  if (response.status === 401) {
     window.location.href = '/login';
     throw new Error('Authentication expired, redirecting to login');
   }
@@ -52,7 +49,7 @@ export async function authFetch(
 /**
  * GET 请求
  */
-export async function authGet<T = any>(url: string, options?: AuthFetchOptions): Promise<T> {
+export async function authGet<T = any>(url: string, options?: RequestInit): Promise<T> {
   const response = await authFetch(url, { ...options, method: 'GET' });
   return response.json();
 }
@@ -63,7 +60,7 @@ export async function authGet<T = any>(url: string, options?: AuthFetchOptions):
 export async function authPost<T = any>(
   url: string,
   body?: any,
-  options?: AuthFetchOptions
+  options?: RequestInit
 ): Promise<T> {
   const response = await authFetch(url, {
     ...options,

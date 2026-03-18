@@ -135,6 +135,30 @@ tools:
     # 每次搜索最大返回结果数
     max_results: 10
 
+  brave_search:
+    enabled: true
+    api_key: ${BRAVE_SEARCH_API_KEY}
+    timeout: 15
+    max_results: 10
+    country: US
+    search_lang: en
+    ui_lang: en-US
+
+  baidu_search:
+    enabled: true
+    api_key: ${BAIDU_APPBUILDER_API_KEY}
+    timeout: 15
+    max_results: 10
+    search_source: baidu_search_v2
+
+  tavily_search:
+    enabled: true
+    api_key: ${TAVILY_API_KEY}
+    timeout: 15
+    max_results: 5
+    search_depth: basic
+    topic: general
+
   fetch_url:
     enabled: true
     # 请求超时（秒）
@@ -157,6 +181,18 @@ tools:
 | `serper_search` | `api_key` | string | — | Serper API 密钥 |
 | `serper_search` | `timeout` | int | `15` | 搜索请求超时时间（秒） |
 | `serper_search` | `max_results` | int | `10` | 最大搜索结果数 |
+| `brave_search` | `api_key` | string | — | Brave Search API 密钥 |
+| `brave_search` | `timeout` | int | `15` | 搜索请求超时时间（秒） |
+| `brave_search` | `max_results` | int | `10` | 最大搜索结果数 |
+| `brave_search` | `country/search_lang/ui_lang` | string | `US/en/en-US` | Brave 搜索地域与语言偏好 |
+| `baidu_search` | `api_key` | string | — | 百度 AppBuilder API 密钥 |
+| `baidu_search` | `timeout` | int | `15` | 搜索请求超时时间（秒） |
+| `baidu_search` | `max_results` | int | `10` | 最大搜索结果数 |
+| `baidu_search` | `search_source` | string | `baidu_search_v2` | 百度搜索源 |
+| `tavily_search` | `api_key` | string | — | Tavily API 密钥 |
+| `tavily_search` | `timeout` | int | `15` | 搜索请求超时时间（秒） |
+| `tavily_search` | `max_results` | int | `5` | 最大搜索结果数 |
+| `tavily_search` | `search_depth/topic/time_range` | string | `basic/general/""` | Tavily 搜索深度、主题、时间范围 |
 | `fetch_url` | `enabled` | bool | `true` | 是否启用网页抓取 |
 | `fetch_url` | `timeout` | int | `30` | 请求超时时间（秒） |
 | `file_operations` | `enabled` | bool | `true` | 是否启用文件读写 |

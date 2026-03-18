@@ -38,6 +38,7 @@ def _make_plugin_api(config_overrides: dict | None = None) -> PluginApi:
         "log_level": "INFO",
         "render_mode": "card",
         "show_tool_progress": False,
+        "api_tool": {},
     }
     if config_overrides:
         defaults.update(config_overrides)
@@ -103,6 +104,22 @@ class TestRegister:
         await register(api)
         # register_tool 至少被调用一次（MessageTool）
         assert len(registry._pending_tools) >= 1
+
+    async def test_default_registers_doc_wiki_drive(self):
+        """默认配置应注册 MessageTool + DocTool + WikiTool + DriveTool"""
+        api = _make_plugin_api({"enabled": True})
+        registry = api._registry
+        await register(api)
+        # MessageTool + FeishuDocTool + FeishuWikiTool + FeishuDriveTool = 4
+        assert len(registry._pending_tools) == 4
+
+    async def test_perm_tool_disabled_by_default(self):
+        """PermTool 默认禁用，启用后注册 5 个工具"""
+        api = _make_plugin_api({"enabled": True, "tools": {"perm": True}})
+        registry = api._registry
+        await register(api)
+        # MessageTool + DocTool + WikiTool + DriveTool + PermTool = 5
+        assert len(registry._pending_tools) == 5
 
     async def test_channel_config_passthrough(self):
         """Channel 应使用 FeishuConfig 中的配置值"""

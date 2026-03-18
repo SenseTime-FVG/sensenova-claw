@@ -310,6 +310,20 @@ class TestMemoryManager:
         assert "记忆读取" in result  # 包含指引文本
 
     @pytest.mark.asyncio
+    async def test_load_memory_md_includes_agent_memory(self, manager, workspace):
+        (workspace / "MEMORY.md").write_text("全局偏好: 喜欢 Python", encoding="utf-8")
+        memory_dir = workspace / "memory"
+        memory_dir.mkdir()
+        (memory_dir / "planner.md").write_text("上次已经完成接口设计", encoding="utf-8")
+
+        result = await manager.load_memory_md(agent_id="planner")
+
+        assert result is not None
+        assert "全局偏好: 喜欢 Python" in result
+        assert "planner 的历史记忆" in result
+        assert "上次已经完成接口设计" in result
+
+    @pytest.mark.asyncio
     async def test_load_memory_md_truncation(self, manager, workspace):
         # bootstrap_max_chars=200，写入超过 200 字符的内容
         long_content = "A" * 300
@@ -339,6 +353,61 @@ class TestMemoryManager:
         await manager.sync_index()
         mtimes = manager.index.get_indexed_mtimes()
         assert "memory/2026-03-10.md" in mtimes
+
+    @pytest.mark.asyncio
+    async def test_sync_index_auto_embeds_new_chunks(self, manager, workspace, monkeypatch):
+        (workspace / "MEMORY.md").write_text("这是一段需要自动嵌入的记忆", encoding="utf-8")
+
+        embed_calls: list[list[str]] = []
+
+        async def fake_embed(texts: list[str]) -> list[list[float]]:
+            embed_calls.append(list(texts))
+            return [[0.1, 0.2, 0.3] for _ in texts]
+
+        monkeypatch.setattr(manager.embedding_service, "available", lambda: True)
+        monkeypatch.setattr(manager.embedding_service, "embed", fake_embed)
+
+        await manager.sync_index()
+
+        conn = manager.index._conn()
+        rows = conn.execute("SELECT text, embedding FROM memory_chunks").fetchall()
+        conn.close()
+
+        assert len(rows) == 1
+        assert rows[0]["embedding"] is not None
+        assert embed_calls == [[rows[0]["text"]]]
+
+    @pytest.mark.asyncio
+    async def test_sync_index_retries_pending_embeddings_without_file_changes(
+        self, manager, workspace, monkeypatch
+    ):
+        (workspace / "MEMORY.md").write_text("第一次嵌入失败后应在下次 sync 重试", encoding="utf-8")
+
+        attempt = {"count": 0}
+
+        async def flaky_embed(texts: list[str]) -> list[list[float]]:
+            attempt["count"] += 1
+            if attempt["count"] == 1:
+                raise RuntimeError("mock embed error")
+            return [[0.4, 0.5, 0.6] for _ in texts]
+
+        monkeypatch.setattr(manager.embedding_service, "available", lambda: True)
+        monkeypatch.setattr(manager.embedding_service, "embed", flaky_embed)
+
+        await manager.sync_index()
+
+        conn = manager.index._conn()
+        first_row = conn.execute("SELECT embedding FROM memory_chunks").fetchone()
+        conn.close()
+        assert first_row["embedding"] is None
+
+        await manager.sync_index()
+
+        conn = manager.index._conn()
+        second_row = conn.execute("SELECT embedding FROM memory_chunks").fetchone()
+        conn.close()
+        assert second_row["embedding"] is not None
+        assert attempt["count"] == 2
 
     @pytest.mark.asyncio
     async def test_sync_index_incremental(self, manager, workspace):

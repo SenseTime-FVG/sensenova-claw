@@ -2,47 +2,44 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Bot, MessageCircle, MessageSquare, GitBranch, Wrench, Sparkles } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Bot, MessageSquare, GitBranch, Wrench, Sparkles, MessageCircle } from 'lucide-react';
 
-export function DashboardNav() {
+export function DashboardNav({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLElement>) {
   const pathname = usePathname();
 
   const navItems = [
-    { path: '/agents', icon: Bot, label: '编排中心' },
-    { path: '/sessions', icon: MessageSquare, label: 'Sessions' },
-    { path: '/gateway', icon: GitBranch, label: 'Gateway' },
-    { path: '/tools', icon: Wrench, label: 'Tools' },
-    { path: '/skills', icon: Sparkles, label: 'Skills' },
+    { path: '/agents', label: 'Dashboard' }, // Let's rename '编排中心' to Dashboard for the sleek feel
+    { path: '/sessions', label: 'Sessions' },
+    { path: '/gateway', label: 'Gateway' },
+    { path: '/tools', label: 'Tools' },
+    { path: '/skills', label: 'Skills' },
+    { path: '/chat', label: 'Chat' },
   ];
 
   return (
-    <div className="w-12 bg-[#333333] flex flex-col items-center py-2 border-r border-[#2d2d30]">
-      <div className="flex flex-col gap-4">
-        {navItems.map((item) => {
-          const isActive = pathname?.startsWith(item.path);
-          return (
-            <Link
-              key={item.path}
-              href={item.path}
-              className={`p-2 rounded hover:bg-[#2d2d30] transition-colors ${
-                isActive ? 'text-white bg-[#2d2d30]' : 'text-[#858585]'
-              }`}
-              title={item.label}
-            >
-              <item.icon size={24} />
-            </Link>
-          );
-        })}
-      </div>
-      <div className="mt-auto pb-2">
-        <a
-          href="/chat"
-          className="p-2 rounded-full bg-[#0e639c] text-white hover:bg-[#1177bb] transition-colors block"
-          title="Chat"
-        >
-          <MessageCircle size={20} />
-        </a>
-      </div>
-    </div>
+    <nav
+      className={cn("flex items-center space-x-4 lg:space-x-6", className)}
+      {...props}
+    >
+      {navItems.map((item) => {
+        const isActive = pathname?.startsWith(item.path);
+        return (
+          <Link
+            key={item.path}
+            href={item.path}
+            className={cn(
+              "text-sm font-medium transition-colors hover:text-primary",
+              isActive ? "text-primary" : "text-muted-foreground"
+            )}
+          >
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }

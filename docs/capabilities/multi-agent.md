@@ -1,303 +1,268 @@
 # 多 Agent 协作
 
-AgentOS 支持在一个平台中定义和管理多个 Agent，每个 Agent 拥有独立的 LLM 配置、工具权限和系统提示。Agent 之间可以通过委托机制协作完成复杂任务。
+AgentOS 当前的多 Agent 协作入口已经统一为 `send_message`，不再使用旧的 `delegate` / `DelegateTool` 路径。
 
 ## 核心概念
 
-- **AgentConfig**：Agent 的完整配置数据类，定义一个行为剖面（system prompt + tools + skills + model + temperature）
-- **AgentRegistry**：管理 Agent 配置的 CRUD、加载和发现
-- **委托（Delegation）**：一个 Agent 将子任务交给另一个 Agent 处理
+- **AgentConfig**：定义单个 Agent 的模型、工具、系统提示词和可通信范围
+- **AgentRegistry**：管理 Agent 配置的加载、查询、持久化
+- **SendMessageTool**：LLM 可直接调用的 Agent-to-Agent 通信工具
+- **AgentMessageCoordinator**：跨 session 关联、超时、重试、取消传播的薄协调器
 
-## AgentConfig 数据结构
+## AgentConfig
 
-位于 `agentos/capabilities/agents/config.py`：
+位于 `agentos/capabilities/agents/config.py`。
 
 ```python
+from dataclasses import dataclass, field
+
+
 @dataclass
 class AgentConfig:
-    # 标识
-    id: str                      # 唯一标识（slug 格式，如 "research-agent"）
-    name: str                    # 人类可读名称
-    description: str = ""        # 描述（LLM 用于判断委托目标）
+    id: str
+    name: str
+    description: str = ""
 
-    # LLM 配置
-    provider: str = "openai"     # LLM 提供商："openai", "anthropic", "gemini", "mock"
-    model: str = "gpt-4o-mini"   # 模型名称
-    temperature: float = 0.2     # 温度参数
-    max_tokens: int | None = None  # 最大 token 数
+    provider: str = "openai"
+    model: str = "gpt-4o-mini"
+    temperature: float = 0.2
+    max_tokens: int | None = None
 
-    # 行为配置
-    system_prompt: str = ""      # 自定义系统提示词
-    tools: list[str] = []        # 允许使用的工具列表（空 = 全部）
-    skills: list[str] = []       # 允许使用的 Skills 列表（空 = 全部）
+    system_prompt: str = ""
+    tools: list[str] = field(default_factory=list)
+    skills: list[str] = field(default_factory=list)
 
-    # 委托配置
-    can_delegate_to: list[str] = []  # 可委托的目标 Agent ID 列表（空 = 全部）
-    max_delegation_depth: int = 3    # 最大委托深度
-
-    # 元信息
-    enabled: bool = True
-    created_at: float = 0.0
-    updated_at: float = 0.0
+    can_send_message_to: list[str] = field(default_factory=list)
+    max_send_depth: int = 3
+    max_pingpong_turns: int = 10
 ```
 
-**序列化方法**：
-- `to_dict()` → `dict`：序列化为字典（用于 JSON 持久化和 API 响应）
-- `from_dict(data)` → `AgentConfig`：从字典反序列化
-- `create(**kwargs)` → `AgentConfig`：便捷创建，自动填充时间戳
+兼容性说明：
+- 代码里仍兼容读取 `can_delegate_to` / `max_delegation_depth`
+- 新文档和新实现都应优先使用 `can_send_message_to` / `max_send_depth`
 
 ## AgentRegistry
 
-位于 `agentos/capabilities/agents/registry.py`，管理所有 Agent 配置：
+位于 `agentos/capabilities/agents/registry.py`。
 
 ```python
 class AgentRegistry:
-    def __init__(self, config_dir: Path)
-        """config_dir: Agent JSON 文件持久化目录"""
+    def register(self, agent: AgentConfig) -> None:
+        # 注册或更新 Agent 配置
+        pass
 
-    # CRUD
-    def register(agent: AgentConfig) -> None        # 注册或更新
-    def get(agent_id: str) -> AgentConfig | None     # 获取配置
-    def list_all() -> list[AgentConfig]              # 列出所有已启用 Agent
-    def delete(agent_id: str) -> bool                # 删除（default 不可删）
-    def update(agent_id: str, updates: dict) -> AgentConfig | None  # 部分更新
+    def get(self, agent_id: str) -> AgentConfig | None:
+        # 按 ID 获取 Agent
+        pass
 
-    # 委托发现
-    def get_delegatable(from_agent_id: str) -> list[AgentConfig]
-        """获取某个 Agent 可以委托的目标 Agent 列表"""
+    def list_all(self) -> list[AgentConfig]:
+        # 返回所有已启用 Agent
+        pass
 
-    # 加载
-    def load_from_config(config_data: dict) -> None  # 从 config.yml 加载
-    def load_from_dir() -> None                      # 从 JSON 文件加载
-
-    # 持久化
-    def save(agent: AgentConfig) -> None             # 保存到 JSON 文件
+    def get_sendable(self, from_agent_id: str) -> list[AgentConfig]:
+        # 返回当前 Agent 可发送消息的目标 Agent 列表
+        pass
 ```
 
-### 加载流程
+`get_sendable()` 的规则：
+- 若 `can_send_message_to` 为空，则允许向所有其他已启用 Agent 发送消息
+- 若配置了白名单，则只允许向白名单中的 Agent 发送消息
 
-AgentRegistry 从两个来源加载 Agent 配置：
+## send_message 工具
 
-**1. 从 config.yml 加载**
+位于 `agentos/capabilities/tools/send_message_tool.py`。
+
+```python
+class SendMessageTool(Tool):
+    name = "send_message"
+
+    async def execute(
+        self,
+        target_agent: str,
+        message: str,
+        session_id: str | None = None,
+        mode: str = "sync",
+        timeout_seconds: float | None = None,
+        max_retries: int | None = None,
+    ) -> str:
+        # 1. 校验目标 Agent 是否存在
+        # 2. 校验 can_send_message_to / max_send_depth
+        # 3. 若复用 session，校验 session_id 与 target_agent 是否匹配
+        # 4. 发布 agent.message_requested
+        # 5. sync 模式等待结果，async 模式立即返回
+        pass
+```
+
+支持的能力：
+- 新建子 session 执行任务
+- 复用已有子 session 继续追问
+- `sync` 同步等待
+- `async` 异步回传
+- 总超时控制
+- 失败自动重试
+- 取消传播
+
+## 运行时组件
+
+### AgentRuntime
+
+负责启动目标 Agent session，并向指定 session 注入新的 `user.input`。
+
+```python
+class AgentRuntime:
+    async def spawn_agent_session(
+        self,
+        agent_id: str,
+        session_id: str,
+        user_input: str,
+        parent_session_id: str | None = None,
+        meta: dict | None = None,
+        trace_id: str | None = None,
+    ) -> str:
+        # 创建 session 并注入首条输入，返回 turn_id
+        pass
+
+    async def send_user_input(
+        self,
+        session_id: str,
+        user_input: str,
+        extra_payload: dict | None = None,
+        trace_id: str | None = None,
+    ) -> str:
+        # 向已有 session 注入一条新的 user.input，返回 turn_id
+        pass
+```
+
+### AgentMessageCoordinator
+
+负责跨 session 的最小协调能力。
+
+```python
+class AgentMessageCoordinator:
+    async def start(self) -> None:
+        # 订阅 PublicEventBus
+        pass
+
+    async def cancel_message(self, record_id: str, reason: str) -> bool:
+        # 取消 send_message 链路，并向子 session 传播取消事件
+        pass
+
+    async def _handle_message_requested(self, event: EventEnvelope) -> None:
+        # 创建 MessageRecord
+        # 启动或复用子 session
+        # 注册超时 watch
+        pass
+
+    async def _handle_child_failed(self, event: EventEnvelope) -> None:
+        # 根据 max_retries 决定重试或失败
+        pass
+```
+
+它负责：
+- `record_id -> waiter` 映射
+- `child_session_id -> record_id` 映射
+- `agent_messages` 持久化
+- 总超时 watchdog
+- 自动重试调度
+- 父子 session 取消传播
+
+它不负责：
+- LLM 编排
+- 工具执行
+- Bus 路由
+- session Worker 生命周期
+
+### AgentSessionWorker
+
+父 session 会消费：
+- `agent.message_completed`
+- `agent.message_failed`
+
+它会把异步结果转成新的 `user.input`，继续当前任务。
+
+子 session 会消费：
+- `user.turn_cancel_requested`
+
+当父链路取消时，子 session 当前 turn 会被标记为 `cancelled`，后续晚到的 `llm/tool` 结果会被忽略。
+
+## 典型流程
+
+### 同步模式
+
+```text
+Agent A
+  -> send_message(target_agent="helper", message="请分析这段日志")
+  -> 发布 agent.message_requested
+
+AgentMessageCoordinator
+  -> 保存 agent_messages 记录
+  -> AgentRuntime.spawn_agent_session(...)
+
+子 session
+  -> user.input
+  -> llm / tool / agent 正常执行
+  -> agent.step_completed
+
+AgentMessageCoordinator
+  -> 更新记录为 completed
+  -> 唤醒 sync waiter
+
+SendMessageTool
+  -> 返回目标 Agent 的最终结果
+```
+
+### 异步模式
+
+```text
+Agent A
+  -> send_message(..., mode="async")
+  -> 立即返回“结果会自动回传”
+
+子 session 完成
+  -> agent.step_completed
+
+AgentMessageCoordinator
+  -> 发布 agent.message_completed 到父 session
+
+父 AgentSessionWorker
+  -> 将结果整理成新的 user.input
+  -> 进入下一轮处理
+```
+
+### 取消与重试
+
+```text
+父 session 收到 user.turn_cancel_requested
+  -> AgentMessageCoordinator 查找该父 session 下所有活动中的 agent_messages
+  -> 向子 session 发布 user.turn_cancel_requested
+  -> 子 AgentSessionWorker 标记 turn cancelled
+
+子 session 执行失败
+  -> 若 attempt_count < max_attempts，则按 backoff 重试
+  -> 否则发布 agent.message_failed
+```
+
+## 配置示例
 
 ```yaml
-# config.yml
-agent:
-  provider: openai
-  default_model: gpt-4o-mini
-  default_temperature: 0.2
-  system_prompt: "你是一个有用的AI助手"
-
 agents:
-  research-agent:
-    name: 研究助手
-    description: 擅长信息检索和分析的 Agent
-    system_prompt: "你是一个专业的研究助手..."
-    tools: ["serper_search", "fetch_url", "read_file"]
-    can_delegate_to: []
+  orchestrator:
+    name: Orchestrator
+    can_send_message_to: [researcher, writer]
+    max_send_depth: 3
 
-  code-reviewer:
-    name: 代码审查员
-    description: 擅长代码审查和优化建议的 Agent
-    provider: anthropic
-    model: claude-3-haiku
-    tools: ["read_file", "bash_command"]
+  researcher:
+    name: Researcher
+    tools: [serper_search, fetch_url, read_file]
+
+delegation:
+  enabled: true
+  default_timeout: 300
+  retry:
+    max_retries: 0
+    backoff_seconds: [0, 1, 3]
 ```
 
-加载规则：
-- `agent.*` 段始终创建 `id="default"` 的 AgentConfig（向后兼容）
-- `agents.*` 段中的 Agent 未指定的 `provider`/`model`/`temperature` 继承 default Agent 的配置
-
-**2. 从持久化目录加载**
-
-```
-workspace/agents/
-  ├── research-agent.json
-  └── code-reviewer.json
-```
-
-每个 JSON 文件包含完整的 AgentConfig 字段。通过 `create_agent` 工具创建的 Agent 会自动保存到此目录。
-
-### 委托发现
-
-`get_delegatable(from_agent_id)` 的逻辑：
-
-```python
-# 1. 查找来源 Agent 的配置
-source = agents[from_agent_id]
-
-# 2. 如果 can_delegate_to 为空列表 → 可委托给所有其他已启用 Agent
-if not source.can_delegate_to:
-    return [a for a in agents.values() if a.id != from_agent_id and a.enabled]
-
-# 3. 否则只返回显式列出的目标
-return [agents[aid] for aid in source.can_delegate_to if agents[aid].enabled]
-```
-
-## 委托流程
-
-### 整体流程
-
-```
-Agent A（调用方）
-  │
-  ├─ LLM 决定需要委托任务
-  ├─ 调用 delegate 工具
-  │    target_agent: "research-agent"
-  │    task: "搜索 AgentOS 的最新文档"
-  │
-  ├─ DelegateTool 执行：
-  │    ├─ 1. 验证 target 存在
-  │    ├─ 2. 检查委托深度 < max_delegation_depth
-  │    ├─ 3. 创建子 session（delegate_{random_id}）
-  │    │      meta.agent_id = "research-agent"
-  │    │      meta.parent_session_id = 当前 session
-  │    │      meta.delegation_depth = current + 1
-  │    ├─ 4. 订阅子 session 的完成事件
-  │    ├─ 5. 向子 session 发布 ui.user_input
-  │    └─ 6. 等待 agent.step_completed（超时 300s）
-  │
-Agent B（研究助手）
-  │
-  ├─ AgentRuntime 监听到 ui.user_input
-  ├─ 使用 research-agent 的配置（provider, model, tools...）
-  ├─ 执行搜索和分析
-  └─ 发布 agent.step_completed
-        │
-        └─ DelegateTool 收到结果，返回给 Agent A
-```
-
-### 委托深度控制
-
-防止 Agent 间无限递归委托：
-
-```python
-# AgentConfig 默认
-max_delegation_depth: int = 3
-
-# DelegateTool 检查
-current_depth = session_meta.get("delegation_depth", 0)
-if current_depth >= target_config.max_delegation_depth:
-    return {"error": "Maximum delegation depth exceeded"}
-
-# 子 session 的深度 = 当前深度 + 1
-new_depth = current_depth + 1
-```
-
-### 上下文传递
-
-如果委托时提供了 `context` 参数，会与 `task` 合并为用户输入：
-
-```python
-# 有上下文时
-user_input = f"上下文信息：\n{context}\n\n任务：\n{task}"
-
-# 无上下文时
-user_input = task
-```
-
-## Agent 在会话中的使用
-
-### 创建会话时指定 Agent
-
-会话创建时可指定 `agent_id`，存入 session meta：
-
-```json
-{
-  "session_id": "abc123",
-  "meta": {
-    "agent_id": "research-agent",
-    "title": "研究任务"
-  }
-}
-```
-
-### AgentRuntime 的配置解析
-
-AgentRuntime 处理用户输入时：
-
-1. 从 session meta 获取 `agent_id`
-2. 查询 AgentRegistry 获取 `AgentConfig`
-3. 使用 Agent 配置覆盖全局默认值：
-   - `provider` 和 `model` → LLM 调用配置
-   - `system_prompt` → 系统提示词
-   - `tools` → 过滤可用工具列表
-   - `skills` → 过滤可用 Skill 列表
-
-### 动态创建 Agent
-
-除了配置文件定义，还可以在对话中通过 `create_agent` 工具动态创建：
-
-```
-用户: 帮我创建一个专门翻译英文文档的 Agent
-
-Agent 调用 create_agent:
-  id: "translator"
-  name: "翻译助手"
-  description: "专门将英文文档翻译为中文"
-  system_prompt: "你是一个专业的英中翻译..."
-  tools: ["read_file", "write_file"]
-```
-
-创建后：
-- 立即注册到 AgentRegistry 内存
-- 持久化到 `workspace/agents/translator.json`
-- 可在后续会话或委托中使用
-
-## 配置参考
-
-### config.yml 完整示例
-
-```yaml
-agent:
-  provider: openai
-  default_model: gpt-4o-mini
-  default_temperature: 0.2
-  system_prompt: "你是一个有用的AI助手"
-
-agents:
-  research-agent:
-    name: 研究助手
-    description: 擅长信息检索和数据分析
-    system_prompt: |
-      你是一个专业的研究助手，擅长：
-      - 使用搜索工具查找最新信息
-      - 分析和总结搜索结果
-      - 提供有据可依的回答
-    tools: ["serper_search", "fetch_url", "read_file"]
-    can_delegate_to: []
-    max_delegation_depth: 2
-
-  code-reviewer:
-    name: 代码审查员
-    description: 擅长代码审查和优化建议
-    provider: anthropic
-    model: claude-3-haiku
-    temperature: 0.1
-    tools: ["read_file", "bash_command"]
-    can_delegate_to: ["research-agent"]
-    max_delegation_depth: 1
-    enabled: true
-```
-
-### Agent JSON 文件示例
-
-```json
-{
-  "id": "translator",
-  "name": "翻译助手",
-  "description": "专门将英文文档翻译为中文",
-  "provider": "openai",
-  "model": "gpt-4o-mini",
-  "temperature": 0.2,
-  "max_tokens": null,
-  "system_prompt": "你是一个专业的英中翻译...",
-  "tools": ["read_file", "write_file"],
-  "skills": [],
-  "can_delegate_to": [],
-  "max_delegation_depth": 3,
-  "enabled": true,
-  "created_at": 1709625600.0,
-  "updated_at": 1709625600.0
-}
-```
+说明：
+- `delegation.*` 这组配置名目前仍保留，是运行时兼容字段
+- 工具和文档语义已经统一到 `send_message`

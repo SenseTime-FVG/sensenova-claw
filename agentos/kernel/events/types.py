@@ -3,10 +3,13 @@
 # 用户事件（原 ui.* → user.*）
 USER_INPUT = "user.input"
 USER_TURN_CANCEL_REQUESTED = "user.turn_cancel_requested"
+USER_QUESTION_ASKED = "user.question_asked"
+USER_QUESTION_ANSWERED = "user.question_answered"
 
 # Agent 编排事件（两阶段）
 AGENT_STEP_STARTED = "agent.step_started"
 AGENT_STEP_COMPLETED = "agent.step_completed"
+AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
 
 # LLM 执行事件（四阶段：requested → started → result → completed）
 LLM_CALL_REQUESTED = "llm.call_requested"
@@ -44,12 +47,7 @@ HEARTBEAT_WAKE_REQUESTED = "heartbeat.wake_requested"
 HEARTBEAT_CHECK_STARTED = "heartbeat.check_started"
 HEARTBEAT_COMPLETED = "heartbeat.completed"
 
-# v1.0: Agent 委托事件
-AGENT_DELEGATE_REQUESTED = "agent.delegate_requested"
-AGENT_DELEGATE_STARTED = "agent.delegate_started"
-AGENT_DELEGATE_COMPLETED = "agent.delegate_completed"
-AGENT_DELEGATE_FAILED = "agent.delegate_failed"
-
-# 用户问答事件
-USER_QUESTION_ASKED = "user.question_asked"
-USER_QUESTION_ANSWERED = "user.question_answered"
+# v1.1: Agent 消息通信事件
+AGENT_MESSAGE_REQUESTED = "agent.message_requested"
+AGENT_MESSAGE_COMPLETED = "agent.message_completed"
+AGENT_MESSAGE_FAILED = "agent.message_failed"

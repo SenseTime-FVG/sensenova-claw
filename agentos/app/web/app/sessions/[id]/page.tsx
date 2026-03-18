@@ -6,8 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { QuestionDialog } from '@/components/chat/QuestionDialog';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
 interface Message {
@@ -75,8 +74,8 @@ function formatArgs(args: unknown): string {
 function MessageBubble({ msg }: { msg: Message }) {
   if (msg.role === 'system') {
     return (
-      <div className="flex justify-center my-4">
-        <span className="text-[10px] bg-[#1e1e1e] text-[#858585] px-3 py-1 rounded-full border border-[#2d2d30]">
+      <div className="flex justify-center my-8">
+        <span className="text-xs bg-muted text-muted-foreground px-4 py-1.5 rounded-full border border-border">
           System Prompt
         </span>
       </div>
@@ -85,12 +84,12 @@ function MessageBubble({ msg }: { msg: Message }) {
 
   if (msg.role === 'user') {
     return (
-      <div className="flex gap-3 max-w-4xl mx-auto flex-row-reverse my-4">
-        <div className="w-8 h-8 rounded bg-[#3c3c3c] flex items-center justify-center shrink-0">
-          <User size={18} className="text-[#cccccc]" />
+      <div className="flex gap-4 max-w-5xl mx-auto flex-row-reverse my-6">
+        <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center shrink-0 border border-border shadow-sm">
+          <User size={20} className="text-secondary-foreground" />
         </div>
         <div className="flex-1 flex flex-col items-end">
-          <div className="bg-[#0e639c] text-white text-sm p-3 rounded-lg max-w-[80%] whitespace-pre-wrap">
+          <div className="bg-primary text-primary-foreground text-base p-4 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] whitespace-pre-wrap leading-relaxed">
             {msg.content}
           </div>
         </div>
@@ -101,28 +100,28 @@ function MessageBubble({ msg }: { msg: Message }) {
   if (msg.role === 'assistant') {
     const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
     return (
-      <div className="flex gap-3 max-w-4xl mx-auto my-4">
-        <div className="w-8 h-8 rounded bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0">
-          <Bot size={18} className="text-white" />
+      <div className="flex gap-4 max-w-5xl mx-auto my-6 overflow-hidden">
+        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shrink-0 border border-primary/20 shadow-md">
+          <Bot size={22} className="text-primary-foreground" />
         </div>
-        <div className="flex-1 space-y-2">
+        <div className="flex-1 min-w-0 space-y-4">
           {msg.content && (
-            <div className="text-sm text-[#cccccc] bg-[#252526] border border-[#2d2d30] p-4 rounded-lg whitespace-pre-wrap">
+            <div className="text-base text-foreground bg-card border border-border p-5 rounded-2xl rounded-tl-none shadow-sm whitespace-pre-wrap break-words leading-relaxed">
               {msg.content}
             </div>
           )}
           {hasToolCalls && (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {msg.tool_calls!.map((tc) => {
                 const tcName = tc.function?.name || tc.name || 'unknown';
                 const tcArgs = tc.function?.arguments || tc.arguments || '';
                 return (
-                  <div key={tc.id} className="bg-[#1e1e1e] border border-[#2d2d30] rounded-lg overflow-hidden">
-                    <div className="bg-[#2d2d30] px-3 py-1.5 flex items-center gap-2 text-xs">
-                      <Wrench size={12} className="text-yellow-400" />
-                      <span className="text-[#cccccc] font-mono">{tcName}</span>
+                  <div key={tc.id} className="bg-muted/50 border border-border rounded-xl overflow-hidden shadow-sm">
+                    <div className="bg-muted px-4 py-2 flex items-center gap-2 text-sm font-medium border-b border-border">
+                      <Wrench size={14} className="text-yellow-500" />
+                      <span className="text-foreground font-mono">{tcName}</span>
                     </div>
-                    <pre className="p-3 text-xs text-[#858585] font-mono overflow-auto max-h-40">
+                    <pre className="p-4 text-xs text-muted-foreground font-mono overflow-auto max-h-60 bg-background/50 whitespace-pre-wrap break-all">
                       {formatArgs(tcArgs)}
                     </pre>
                   </div>
@@ -137,19 +136,19 @@ function MessageBubble({ msg }: { msg: Message }) {
 
   if (msg.role === 'tool') {
     let displayContent = msg.content || '';
-    if (displayContent.length > 500) {
-      displayContent = displayContent.slice(0, 500) + '\n... (truncated)';
+    if (displayContent.length > 1000) {
+      displayContent = displayContent.slice(0, 1000) + '\n... (truncated)';
     }
     return (
-      <div className="flex gap-3 max-w-4xl mx-auto my-2 pl-11">
-        <div className="flex-1">
-          <div className="bg-[#1e1e1e] border border-[#2d2d30] rounded-lg overflow-hidden">
-            <div className="bg-[#2d2d30] px-3 py-1.5 flex items-center gap-2 text-xs">
-              <Wrench size={12} className="text-green-400" />
-              <span className="text-[#858585]">Tool result</span>
-              {msg.name && <span className="text-[#cccccc] font-mono">{msg.name}</span>}
+      <div className="flex gap-4 max-w-5xl mx-auto my-4 pl-14 overflow-hidden">
+        <div className="flex-1 min-w-0">
+          <div className="bg-muted/30 border border-border rounded-xl overflow-hidden shadow-sm">
+            <div className="bg-muted px-4 py-2 flex items-center gap-2 text-xs font-medium border-b border-border">
+              <Wrench size={14} className="text-green-500" />
+              <span className="text-muted-foreground uppercase tracking-wider">Tool result</span>
+              {msg.name && <span className="text-foreground font-mono ml-auto">{msg.name}</span>}
             </div>
-            <pre className="p-3 text-xs text-[#858585] font-mono overflow-auto max-h-40 whitespace-pre-wrap">
+            <pre className="p-4 text-xs text-muted-foreground font-mono overflow-auto max-h-60 whitespace-pre-wrap break-all bg-background/30">
               {displayContent}
             </pre>
           </div>
@@ -163,14 +162,14 @@ function MessageBubble({ msg }: { msg: Message }) {
 
 function TypingIndicator() {
   return (
-    <div className="flex gap-3 max-w-4xl mx-auto my-4">
-      <div className="w-8 h-8 rounded bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shrink-0">
-        <Bot size={18} className="text-white animate-pulse" />
+    <div className="flex gap-4 max-w-5xl mx-auto my-6">
+      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shrink-0 border border-primary/20 shadow-md">
+        <Bot size={22} className="text-primary-foreground animate-pulse" />
       </div>
-      <div className="bg-[#252526] border border-[#2d2d30] p-3 rounded-lg flex items-center gap-1.5">
-        <div className="w-1.5 h-1.5 bg-[#858585] rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
-        <div className="w-1.5 h-1.5 bg-[#858585] rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-        <div className="w-1.5 h-1.5 bg-[#858585] rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+      <div className="bg-card border border-border p-4 rounded-2xl rounded-tl-none flex items-center gap-2 shadow-sm">
+        <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
+        <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
+        <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
       </div>
     </div>
   );
@@ -286,15 +285,15 @@ export default function SessionDetailPage() {
     };
 
     return () => { ws.close(); };
-  }, []);
+  }, [pendingQuestion]);
 
   // 加载历史消息
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [sessRes, msgRes] = await Promise.all([
-          fetch(`${API_BASE}/api/sessions`),
-          fetch(`${API_BASE}/api/sessions/${sessionId}/messages`),
+          authFetch(`${API_BASE}/api/sessions`),
+          authFetch(`${API_BASE}/api/sessions/${sessionId}/messages`),
         ]);
         const sessData = await sessRes.json();
         const msgData = await msgRes.json();
@@ -367,7 +366,7 @@ export default function SessionDetailPage() {
     setInputValue(e.target.value);
     const ta = e.target;
     ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+    ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
   };
 
   const title = sessionInfo ? parseTitle(sessionInfo.meta) : sessionId;
@@ -375,59 +374,65 @@ export default function SessionDetailPage() {
 
   return (
     <DashboardLayout>
-      <div className="h-full flex flex-col">
+      <div className="h-full flex flex-col bg-background">
         {/* Header */}
-        <div className="bg-[#252526] border-b border-[#2d2d30] p-4 shrink-0">
-          <div className="flex items-center gap-3">
-            <Link href="/sessions" className="p-1.5 hover:bg-[#2d2d30] rounded transition-colors">
-              <ArrowLeft size={18} />
+        <div className="bg-card/50 backdrop-blur-sm border-b border-border p-5 shrink-0 z-10 sticky top-0 shadow-sm">
+          <div className="flex items-center gap-4">
+            <Link href="/sessions" className="p-2 hover:bg-muted rounded-full transition-all border border-transparent hover:border-border shadow-sm">
+              <ArrowLeft size={20} />
             </Link>
             <div className="flex-1 min-w-0">
-              <h1 className="text-base font-semibold text-[#cccccc] truncate">{title}</h1>
-              <div className="flex items-center gap-4 text-xs text-[#858585] mt-1">
-                <span data-testid="current-session-id" className="font-mono">{sessionId}</span>
+              <h1 className="text-xl font-bold text-foreground truncate tracking-tight">{title}</h1>
+              <div className="flex items-center gap-5 text-sm text-muted-foreground mt-1.5 overflow-x-auto no-scrollbar pb-1">
+                <span className="font-mono bg-muted px-2 py-0.5 rounded text-[11px] border border-border/50">{sessionId}</span>
                 {sessionInfo && (
                   <>
-                    <span>{formatTimestamp(sessionInfo.created_at)}</span>
-                    <span className="flex items-center gap-1">
-                      <span className={`w-1.5 h-1.5 rounded-full ${sessionInfo.status === 'active' ? 'bg-green-500' : 'bg-gray-500'}`} />
-                      {sessionInfo.status}
+                    <span className="shrink-0">{formatTimestamp(sessionInfo.created_at)}</span>
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      <span className={`w-2 h-2 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.4)] ${sessionInfo.status === 'active' ? 'bg-green-500' : 'bg-muted-foreground/50'}`} />
+                      <span className="capitalize">{sessionInfo.status}</span>
                     </span>
                   </>
                 )}
-                <span className="flex items-center gap-1">
-                  <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-blue-500' : 'bg-red-500'}`} />
-                  {wsConnected ? '已连接' : '未连接'}
+                <span className="flex items-center gap-1.5 shrink-0">
+                  <span className={`w-2 h-2 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.4)] ${wsConnected ? 'bg-blue-500 border border-blue-400/50' : 'bg-destructive/70 border border-destructive/50'}`} />
+                  {wsConnected ? 'WebSocket Connected' : 'Disconnected'}
                 </span>
               </div>
             </div>
-            <div className="text-xs text-[#858585]">
-              {visibleMessages.length} messages
+            <div className="text-sm font-medium text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full border border-border">
+              {visibleMessages.length} Messages
             </div>
           </div>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-auto p-6">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-8 space-y-4">
           {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="animate-spin text-[#858585]" size={32} />
+            <div className="flex flex-col items-center justify-center h-full gap-4">
+              <Loader2 className="animate-spin text-primary" size={40} />
+              <p className="text-sm text-muted-foreground font-medium">Loading session history...</p>
             </div>
           ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full gap-2 text-[#858585]">
-              <AlertCircle size={32} />
-              <p className="text-sm">{error}</p>
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+              <div className="p-4 bg-destructive/10 rounded-full">
+                <AlertCircle size={40} className="text-destructive" />
+              </div>
+              <p className="text-base font-medium">{error}</p>
             </div>
           ) : visibleMessages.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-[#858585] text-sm">
-              No messages in this session
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-4">
+              <div className="p-5 bg-muted rounded-full">
+                <Bot size={48} className="opacity-30" />
+              </div>
+              <p className="text-base font-medium">No messages in this session. Start by typing below!</p>
             </div>
           ) : (
-            <div className="space-y-1">
+            <div className="pb-8">
               {sessionInfo && (
-                <div className="flex justify-center mb-6">
-                  <span className="text-[10px] bg-[#1e1e1e] text-[#858585] px-3 py-1 rounded-full border border-[#2d2d30]">
-                    会话开始：{formatTimestamp(sessionInfo.created_at)}
+                <div className="flex justify-center mb-10">
+                  <span className="text-xs bg-muted/80 backdrop-blur-sm text-muted-foreground px-4 py-2 rounded-full border border-border shadow-sm font-medium">
+                    Session started on {formatTimestamp(sessionInfo.created_at)}
                   </span>
                 </div>
               )}
@@ -441,30 +446,37 @@ export default function SessionDetailPage() {
         </div>
 
         {/* Input area */}
-        <div className="border-t border-[#2d2d30] bg-[#1e1e1e] p-4 shrink-0">
-          <div className="max-w-4xl mx-auto flex gap-3 items-end">
-            <div className="flex-1 relative">
-              <textarea
-                ref={textareaRef}
-                data-testid="chat-input"
-                value={inputValue}
-                onChange={handleTextareaInput}
-                onKeyDown={handleKeyDown}
-                placeholder={wsConnected ? '输入消息... (Enter 发送, Shift+Enter 换行)' : '等待连接...'}
-                disabled={!wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
-                rows={1}
-                className="w-full bg-[#3c3c3c] border border-[#5a5a5a] rounded-lg px-4 py-2.5 text-sm text-[#cccccc] placeholder-[#858585] focus:outline-none focus:border-[#007acc] resize-none disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ minHeight: '40px', maxHeight: '120px' }}
-              />
+        <div className="border-t border-border bg-card/80 backdrop-blur-md p-6 shrink-0 shadow-[0_-4px_12px_rgba(0,0,0,0.03)] dark:shadow-[0_-4px_12px_rgba(0,0,0,0.2)]">
+          <div className="max-w-5xl mx-auto">
+            <div className="flex gap-4 items-end bg-background/50 border border-border rounded-2xl p-2 pr-3 focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/5 transition-all shadow-sm">
+              <div className="flex-1 relative">
+                <textarea
+                  ref={textareaRef}
+                  data-testid="chat-input"
+                  value={inputValue}
+                  onChange={handleTextareaInput}
+                  onKeyDown={handleKeyDown}
+                  placeholder={wsConnected ? 'Type a message... (Enter to send, Shift+Enter for newline)' : 'Waiting for connection...'}
+                  disabled={!wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
+                  rows={1}
+                  className="w-full bg-transparent border-none focus:ring-0 px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 resize-none disabled:opacity-50 disabled:cursor-not-allowed selection:bg-primary/20"
+                  style={{ minHeight: '48px', maxHeight: '160px' }}
+                />
+              </div>
+              <button
+                data-testid="send-button"
+                onClick={sendMessage}
+                disabled={!inputValue.trim() || !wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
+                className="p-3 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shadow-lg active:scale-95 shrink-0"
+              >
+                <Send size={20} />
+              </button>
             </div>
-            <button
-              data-testid="send-button"
-              onClick={sendMessage}
-              disabled={!inputValue.trim() || !wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
-              className="px-4 py-2.5 bg-[#0e639c] text-white rounded-lg hover:bg-[#1177bb] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 shrink-0"
-            >
-              <Send size={16} />
-            </button>
+            <div className="mt-3 text-center">
+              <p className="text-[11px] text-muted-foreground/60 font-medium">
+                {isTyping ? 'Assistant is producing a response...' : wsConnected ? 'Press Enter to send' : 'Disconnected from WebSocket'}
+              </p>
+            </div>
           </div>
         </div>
       </div>

@@ -8,8 +8,8 @@
 MemoryManager（记忆管理器）
   ├── load_memory_md()       → 读取 MEMORY.md 注入系统提示
   ├── search()               → 混合搜索记忆内容
-  ├── sync_index()           → 增量同步文件索引
-  └── embed_pending_chunks() → 异步生成嵌入向量
+  ├── sync_index()           → 增量同步文件索引，并自动补齐待嵌入向量
+  └── embed_pending_chunks() → 为 `embedding=NULL` 的 chunk 生成向量
 
 MemoryIndex（索引引擎）
   ├── SQLite 存储（memory_chunks 表）
@@ -86,6 +86,7 @@ class MemoryManager:
 ```python
 async def search(query, max_results=5):
     # 1. 懒同步：确保索引是最新的
+    # sync_index() 会自动补齐待嵌入 chunk，并重试历史 embedding=NULL 记录
     await self.sync_index()
 
     # 2. 获取查询向量（如果嵌入服务可用）
@@ -118,6 +119,10 @@ async def search(query, max_results=5):
 
 4. 写入索引
    └── MemoryIndex.upsert_chunks(path, chunks, mtime)
+
+5. 自动补齐待嵌入向量
+   ├── sync_index() 完成后调用 embed_pending_chunks()
+   └── 即使本次没有文件变化，也会重试历史遗留的 `embedding=NULL` chunks
 ```
 
 ## MemoryIndex
@@ -311,7 +316,7 @@ class MemorySearchTool(Tool):
    │    └── 用 write_file 追加到 memory/{日期}.md（日常笔记）
    │
    └── 索引自动更新
-        └── 下次 search() 调用时 lazy sync 更新索引
+        └── 下次 search() 调用时 lazy sync 更新索引，并自动重试待嵌入 chunks
 ```
 
 ## 配置参考

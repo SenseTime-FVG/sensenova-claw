@@ -1,11 +1,24 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from agentos.kernel.events.envelope import EventEnvelope
 
+if TYPE_CHECKING:
+    from agentos.interfaces.ws.gateway import Gateway
+
 
 class Channel(ABC):
-    """Channel 抽象基类"""
+    """Channel 抽象基类
+
+    Channel 负责协议适配和各自的认证，Gateway 通过 register_channel() 注入自身引用。
+    """
+
+    gateway: Gateway | None
+
+    def __init__(self):
+        self.gateway = None
 
     @abstractmethod
     def get_channel_id(self) -> str:

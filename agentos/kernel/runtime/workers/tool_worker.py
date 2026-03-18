@@ -18,6 +18,7 @@ from agentos.kernel.events.types import (
     TOOL_CALL_STARTED,
     TOOL_CONFIRMATION_REQUESTED,
     TOOL_CONFIRMATION_RESPONSE,
+    USER_QUESTION_ASKED,
     USER_QUESTION_ANSWERED,
 )
 from agentos.capabilities.tools.base import Tool
@@ -35,8 +36,11 @@ class ToolSessionWorker(SessionWorker):
     def __init__(self, session_id: str, private_bus: PrivateEventBus, runtime: ToolRuntime):
         super().__init__(session_id, private_bus)
         self.rt = runtime
+        # 挂起中的确认请求：tool_call_id → asyncio.Event
         self._pending_confirmations: dict[str, asyncio.Event] = {}
+        # 确认结果缓存：tool_call_id → bool
         self._confirmation_results: dict[str, bool] = {}
+        # ask_user：question_id → asyncio.Future
         self._pending_questions: dict[str, asyncio.Future] = {}
 
     async def _handle(self, event: EventEnvelope) -> None:
@@ -45,7 +49,7 @@ class ToolSessionWorker(SessionWorker):
         elif event.type == TOOL_CONFIRMATION_RESPONSE:
             await self._handle_confirmation_response(event)
         elif event.type == USER_QUESTION_ANSWERED:
-            await self._handle_question_answered(event)
+            self._resolve_question(event)
 
     def _truncate_result(self, result: any, tool_call_id: str) -> any:
         """Token 截断：统一控制传给 LLM 的结果长度"""
@@ -58,9 +62,10 @@ class ToolSessionWorker(SessionWorker):
             return result
 
         save_dir = config.get("tools.result_truncation.save_dir", "workspace")
-        workspace_dir = Path(config.get("system.workspace_dir", "./SenseAssistant/workspace"))
+        from agentos.platform.config.workspace import resolve_agentos_home
+        home = resolve_agentos_home(config)
         if save_dir == "workspace":
-            base_dir = workspace_dir
+            base_dir = home
         else:
             base_dir = Path(save_dir)
         session_dir = base_dir / self.session_id
@@ -116,6 +121,64 @@ class ToolSessionWorker(SessionWorker):
             return False
         finally:
             self._pending_confirmations.pop(tool_call_id, None)
+
+    # ── ask_user 支持 ──────────────────────────────────
+
+    def _make_ask_user_handler(self):
+        """创建注入到 AskUserTool 的回调函数，封装事件发布和等待逻辑"""
+        worker = self
+
+        async def handler(
+            question: str, options: list | None, multi_select: bool,
+            session_id: str, turn_id: str, tool_call_id: str,
+        ) -> dict:
+            if worker._pending_questions:
+                return {"success": False, "error": "已有待回答问题，请先回答当前问题"}
+
+            question_id = f"q_{uuid.uuid4().hex[:8]}"
+            future: asyncio.Future = asyncio.get_event_loop().create_future()
+            worker._pending_questions[question_id] = future
+
+            timeout = float(config.get("tools.ask_user.timeout", 300))
+
+            await worker.bus.publish(EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=session_id, turn_id=turn_id, trace_id=tool_call_id,
+                source="tool",
+                payload={
+                    "question_id": question_id, "question": question,
+                    "options": options, "multi_select": multi_select, "timeout": timeout,
+                },
+            ))
+
+            try:
+                result = await asyncio.wait_for(future, timeout=timeout)
+                return result
+            except asyncio.TimeoutError:
+                return {"success": False, "error": "用户未在规定时间内回答"}
+            finally:
+                worker._pending_questions.pop(question_id, None)
+
+        return handler
+
+    def _resolve_question(self, event: EventEnvelope) -> None:
+        """处理用户回答，唤醒挂起的 Future"""
+        question_id = event.payload.get("question_id")
+        future = self._pending_questions.get(question_id)
+        if future and not future.done():
+            cancelled = event.payload.get("cancelled", False)
+            if cancelled:
+                future.set_result({"success": False, "error": "用户取消了回答"})
+            else:
+                future.set_result({"success": True, "answer": event.payload.get("answer", "")})
+
+    async def stop(self) -> None:
+        """停止时取消所有挂起的问题"""
+        for future in self._pending_questions.values():
+            if not future.done():
+                future.cancel()
+        self._pending_questions.clear()
+        await super().stop()
 
     async def _handle_confirmation_response(self, event: EventEnvelope) -> None:
         """处理用户确认响应，唤醒挂起的任务"""
@@ -223,9 +286,10 @@ class ToolSessionWorker(SessionWorker):
                 await self._publish_tool_result(event, result="用户拒绝执行该工具", success=False)
                 return
 
-        timeout = float(config.get(f"tools.{tool_name}.timeout", 15))
+        default_timeout = 600 if tool_name == "send_message" else 15
+        timeout = float(config.get(f"tools.{tool_name}.timeout", default_timeout))
         if timeout <= 0:
-            timeout = 15
+            timeout = default_timeout
 
         success = True
         error = ""
@@ -236,16 +300,22 @@ class ToolSessionWorker(SessionWorker):
             exec_kwargs["_path_policy"] = self.rt.path_policy
         if self.rt.agent_registry:
             exec_kwargs["_agent_registry"] = self.rt.agent_registry
+        agent_workdir = event.payload.get("_agent_workdir")
+        if agent_workdir:
+            exec_kwargs["_agent_workdir"] = agent_workdir
+        if event.turn_id:
+            exec_kwargs["_turn_id"] = event.turn_id
+        if tool_call_id:
+            exec_kwargs["_tool_call_id"] = tool_call_id
+        # 注入 ask_user 回调（AskUserTool 内部调用）
+        exec_kwargs["_ask_user_handler"] = self._make_ask_user_handler()
 
         try:
             result = await asyncio.wait_for(
                 tool.execute(**exec_kwargs, _session_id=event.session_id),
                 timeout=timeout,
             )
-            if isinstance(result, dict) and result.get("_ask_user"):
-                result = await self._handle_ask_user(result, tool_call_id, event)
-            else:
-                result = self._truncate_result(result, tool_call_id)
+            result = self._truncate_result(result, tool_call_id)
         except Exception as exc:  # noqa: BLE001
             success = False
             error = str(exc) or f"{type(exc).__name__}"
@@ -299,58 +369,3 @@ class ToolSessionWorker(SessionWorker):
                 },
             )
         )
-
-    async def _handle_ask_user(self, params: dict, tool_call_id: str, event: EventEnvelope) -> dict:
-        from agentos.kernel.events.types import USER_QUESTION_ASKED
-
-        question_id = str(uuid.uuid4())
-        timeout = config.get("tools.ask_user.timeout", 300)
-
-        if self._pending_questions:
-            return {"success": False, "error": "已有待回答问题"}
-
-        future = asyncio.Future()
-        self._pending_questions[question_id] = future
-
-        await self.bus.publish(
-            EventEnvelope(
-                type=USER_QUESTION_ASKED,
-                session_id=event.session_id,
-                turn_id=event.turn_id,
-                trace_id=tool_call_id,
-                source="tool_runtime",
-                payload={
-                    "question_id": question_id,
-                    "question": params["question"],
-                    "options": params.get("options"),
-                    "multi_select": params.get("multi_select", False),
-                    "timeout": timeout,
-                },
-            )
-        )
-
-        try:
-            return await asyncio.wait_for(future, timeout)
-        except asyncio.TimeoutError:
-            return {"success": False, "error": f"用户未在 {timeout} 秒内回答"}
-        finally:
-            self._pending_questions.pop(question_id, None)
-
-    async def _handle_question_answered(self, event: EventEnvelope) -> None:
-        question_id = event.payload.get("question_id")
-        future = self._pending_questions.get(question_id)
-
-        if not future or future.done():
-            return
-
-        if event.payload.get("cancelled"):
-            future.set_result({"success": False, "error": "用户取消了回答"})
-        else:
-            future.set_result({"success": True, "answer": event.payload.get("answer")})
-
-    async def stop(self) -> None:
-        for future in self._pending_questions.values():
-            if not future.done():
-                future.cancel()
-        self._pending_questions.clear()
-        await super().stop()

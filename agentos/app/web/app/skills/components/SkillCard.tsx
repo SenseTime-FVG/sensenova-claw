@@ -1,6 +1,9 @@
 'use client';
 
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Search, Loader2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 
 interface SkillCardProps {
   name: string;
@@ -23,13 +26,13 @@ interface SkillCardProps {
   onClick?: () => void;
 }
 
-const categoryConfig: Record<string, { label: string; color: string }> = {
-  builtin:   { label: '内置',     color: 'bg-emerald-600' },
-  workspace: { label: '工作区',   color: 'bg-blue-600' },
-  installed: { label: '已安装',   color: 'bg-purple-600' },
-  clawhub:   { label: 'ClawHub',  color: 'bg-violet-600' },
-  anthropic: { label: 'Anthropic', color: 'bg-orange-600' },
-  git:       { label: 'Git',      color: 'bg-gray-600' },
+const categoryConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  builtin:   { label: 'Built-in', variant: 'default' },
+  workspace: { label: 'Workspace', variant: 'secondary' },
+  installed: { label: 'Installed', variant: 'outline' },
+  clawhub:   { label: 'ClawHub', variant: 'default' },
+  anthropic: { label: 'Anthropic', variant: 'secondary' },
+  git:       { label: 'Git', variant: 'outline' },
 };
 
 export function SkillCard({
@@ -37,83 +40,78 @@ export function SkillCard({
   downloads, author, installed, installing, dependencies, allDepsMet,
   onToggle, onUninstall, onUpdate, onInstall, onClick,
 }: SkillCardProps) {
-  // 优先使用 category 确定标签，回退到 source
   const displayCategory = category || source || 'local';
-  const config = categoryConfig[displayCategory] || { label: displayCategory, color: 'bg-gray-600' };
+  const config = categoryConfig[displayCategory] || { label: displayCategory, variant: 'secondary' };
 
   return (
-    <div
-      className="bg-[#252526] border border-[#2d2d30] rounded p-3 hover:border-[#3e3e42] transition-colors cursor-pointer"
+    <Card 
+      className="hover:border-primary/50 transition-colors cursor-pointer shadow-sm group"
       onClick={onClick}
     >
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
+      <CardContent className="p-4 flex items-start gap-4">
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-[#cccccc] font-medium truncate">{name}</span>
-            <span className={`text-[10px] text-white px-1.5 py-0.5 rounded ${config.color}`}>
-              {config.label}
-            </span>
+            <span className="font-semibold text-foreground truncate">{name}</span>
+            <Badge variant={config.variant as any} className="text-[10px] h-5 uppercase px-1.5">{config.label}</Badge>
             {version && (
-              <span className="text-[10px] text-[#858585]">v{version}</span>
+              <span className="text-[10px] text-muted-foreground font-mono bg-muted px-1 rounded">v{version}</span>
             )}
             {dependencies && allDepsMet === false && (
-              <span className="text-[10px] text-yellow-400 flex items-center gap-0.5" title="部分依赖缺失">
-                <AlertTriangle size={10} /> 缺依赖
+              <span className="text-[10px] text-destructive flex items-center gap-0.5 font-medium ml-1" title="Missing dependencies">
+                <AlertTriangle size={12} /> Missing Deps
               </span>
             )}
+            {hasUpdate && (
+              <Badge variant="default" className="text-[10px] h-5 bg-blue-500 hover:bg-blue-600">Update Available</Badge>
+            )}
           </div>
-          <p className="text-sm text-[#858585] line-clamp-2">{description}</p>
+          <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{description}</p>
           {(author || downloads != null) && (
-            <div className="flex items-center gap-3 mt-1 text-xs text-[#6b6b6b]">
-              {author && <span>by {author}</span>}
+            <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground/80">
+              {author && <span className="font-medium">by {author}</span>}
               {downloads != null && <span>{downloads.toLocaleString()} downloads</span>}
             </div>
           )}
         </div>
+        
         <div className="flex items-center gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
           {onToggle && (
-            <button
-              className={`text-xs px-2 py-1 rounded ${enabled ? 'bg-green-700 text-green-100' : 'bg-[#3c3c3c] text-[#858585]'}`}
-              onClick={() => onToggle(!enabled)}
-            >
-              {enabled ? '启用' : '禁用'}
-            </button>
+            <label className="relative inline-flex items-center cursor-pointer ml-2">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={() => onToggle(!enabled)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary pointer-events-none shadow-inner" />
+            </label>
           )}
           {hasUpdate && onUpdate && (
-            <button
-              className="text-xs px-2 py-1 rounded bg-[#0e639c] text-white hover:bg-[#1177bb]"
-              onClick={onUpdate}
-            >
-              更新
-            </button>
-          )}
-          {onUninstall && displayCategory === 'installed' && (
-            <button
-              className="text-xs px-2 py-1 rounded bg-[#3c3c3c] text-[#858585] hover:bg-red-800 hover:text-red-100"
-              onClick={onUninstall}
-            >
-              卸载
-            </button>
+            <Button size="sm" variant="default" onClick={onUpdate} className="h-7 text-xs px-2">
+              Update
+            </Button>
           )}
           {installing && (
-            <span className="text-xs text-[#007acc] flex items-center gap-1">
-              <span className="w-3 h-3 border-2 border-[#007acc] border-t-transparent rounded-full animate-spin" />
-              安装中...
+            <span className="text-xs text-primary flex items-center gap-1 font-medium bg-primary/10 px-2 py-1 rounded">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Installing...
             </span>
           )}
           {onInstall && !installed && !installing && (
-            <button
-              className="text-xs px-2 py-1 rounded bg-[#0e639c] text-white hover:bg-[#1177bb]"
-              onClick={onInstall}
-            >
-              安装
-            </button>
+            <Button size="sm" onClick={onInstall} className="h-7 text-xs px-3">
+              Install
+            </Button>
           )}
           {installed && !installing && !onToggle && (
-            <span className="text-xs text-green-400">已安装</span>
+            <Badge variant="outline" className="text-green-500 border-green-500/30 bg-green-500/10">Installed</Badge>
+          )}
+          {onUninstall && displayCategory === 'installed' && (
+            <Button size="sm" variant="destructive" onClick={onUninstall} className="h-7 text-xs px-2 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+              Uninstall
+            </Button>
           )}
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }

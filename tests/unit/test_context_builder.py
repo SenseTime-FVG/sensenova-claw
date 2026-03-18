@@ -37,7 +37,7 @@ class TestContextBuilder:
         sys_prompt = msgs[0]["content"]
         assert "read_file" in sys_prompt
         # bash_command 不应出现（除非被允许）
-        # 注意 delegate/run_workflow 也会被自动加入
+        # 注意 send_message 等保留工具也可能被自动加入
 
     def test_build_messages_with_agent_system_prompt(self):
         agent = AgentConfig(id="custom", name="C", system_prompt="你是代码助手")

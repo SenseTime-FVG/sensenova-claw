@@ -179,9 +179,9 @@ class TestExecuteSuccess:
         assert created.tools == ["bash_command", "read_file"]
         assert created.can_delegate_to == ["agent1"]
 
-    async def test_strips_internal_kwargs(self, tool, agent_registry):
+    async def test_strips_internal_kwargs(self, tool, agent_registry, tmp_path):
         """内部参数 (_path_policy, _session_id) 被正确移除"""
-        workspace = Path("/tmp/test_workspace")
+        workspace = tmp_path / "workspace"
         workspace.mkdir(exist_ok=True)
         path_policy = PathPolicy(workspace=workspace)
 
@@ -194,3 +194,17 @@ class TestExecuteSuccess:
         )
 
         assert result["success"] is True
+
+    async def test_supports_send_message_alias(self, tool, agent_registry):
+        """兼容 can_send_message_to 别名。"""
+        result = await tool.execute(
+            id="agent4",
+            name="Agent 4",
+            can_send_message_to=["helper"],
+            _agent_registry=agent_registry,
+        )
+
+        assert result["success"] is True
+        created = agent_registry.get("agent4")
+        assert created is not None
+        assert created.can_send_message_to == ["helper"]

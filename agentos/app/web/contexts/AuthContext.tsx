@@ -1,176 +1,131 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
-interface User {
-  user_id: string;
-  username: string;
-  email: string | null;
-  is_active: boolean;
-  is_admin: boolean;
-  created_at: number;
-  last_login: number | null;
-}
+const COOKIE_NAME = 'agentos_token';
 
 interface AuthContextType {
-  user: User | null;
-  token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  verifyToken: (token: string) => Promise<boolean>;
   logout: () => void;
-  refreshToken: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** 从 document.cookie 读取指定 cookie */
+function getCookie(name: string): string | null {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/** 设置 cookie（30 天） */
+function setCookie(name: string, value: string, maxAgeDays = 30) {
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAgeDays * 86400}; samesite=lax`;
+}
+
+/** 删除 cookie */
+function deleteCookie(name: string) {
+  document.cookie = `${name}=; path=/; max-age=0`;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [refreshTokenValue, setRefreshTokenValue] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 从 localStorage 加载 token
-  useEffect(() => {
-    const storedToken = localStorage.getItem('access_token');
-    const storedRefreshToken = localStorage.getItem('refresh_token');
+  /** 调用后端验证 token 并设置 cookie */
+  const verifyToken = useCallback(async (token: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/verify-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ token }),
+      });
 
-    if (storedToken) {
-      setToken(storedToken);
-      setRefreshTokenValue(storedRefreshToken);
-      // 验证 token 并获取用户信息
-      fetchUserInfo(storedToken);
-    } else {
-      setIsLoading(false);
+      if (!response.ok) return false;
+
+      const data = await response.json();
+      if (data.authenticated) {
+        // 同时在前端设置 cookie（确保跨端口场景可用）
+        setCookie(COOKIE_NAME, token);
+        setIsAuthenticated(true);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Token verification failed:', error);
+      return false;
     }
   }, []);
 
-  // 获取用户信息
-  const fetchUserInfo = async (accessToken: string) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-        },
-      });
+  /** 登出 */
+  const logout = useCallback(() => {
+    deleteCookie(COOKIE_NAME);
+    setIsAuthenticated(false);
+    // 调用后端清除 cookie
+    fetch(`${API_BASE}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(() => {});
+  }, []);
 
-      if (response.ok) {
-        const userData = await response.json();
-        setUser(userData);
-      } else {
-        // Token 无效，清除存储
-        logout();
-      }
-    } catch (error) {
-      console.error('Failed to fetch user info:', error);
-      logout();
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // 登录
-  const login = async (username: string, password: string) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Login failed');
-      }
-
-      const data = await response.json();
-      const { access_token, refresh_token } = data;
-
-      // 存储 token
-      localStorage.setItem('access_token', access_token);
-      localStorage.setItem('refresh_token', refresh_token);
-
-      setToken(access_token);
-      setRefreshTokenValue(refresh_token);
-
-      // 获取用户信息
-      await fetchUserInfo(access_token);
-    } catch (error) {
-      console.error('Login error:', error);
-      throw error;
-    }
-  };
-
-  // 登出
-  const logout = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    setToken(null);
-    setRefreshTokenValue(null);
-    setUser(null);
-  };
-
-  // 刷新 token
-  const refreshToken = async () => {
-    if (!refreshTokenValue) {
-      logout();
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API_BASE}/api/auth/refresh`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ refresh_token: refreshTokenValue }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const { access_token, refresh_token: new_refresh_token } = data;
-
-        localStorage.setItem('access_token', access_token);
-        setToken(access_token);
-
-        // 保存新的 refresh token（支持 token 轮换）
-        if (new_refresh_token) {
-          localStorage.setItem('refresh_token', new_refresh_token);
-          setRefreshTokenValue(new_refresh_token);
-        }
-      } else {
-        // Refresh token 无效，需要重新登录
-        logout();
-      }
-    } catch (error) {
-      console.error('Token refresh error:', error);
-      logout();
-    }
-  };
-
-  // 自动刷新 token（每 50 分钟，access token 60 分钟过期）
+  /** 初始化：检查 URL ?token= 或已有 cookie */
   useEffect(() => {
-    if (!token) return;
+    const init = async () => {
+      // 1. 检查 URL 中的 ?token= 参数
+      const params = new URLSearchParams(window.location.search);
+      const urlToken = params.get('token');
 
-    const interval = setInterval(() => {
-      refreshToken();
-    }, 50 * 60 * 1000); // 50 分钟
+      if (urlToken) {
+        const valid = await verifyToken(urlToken);
+        if (valid) {
+          // 清除 URL 中的 token 参数
+          params.delete('token');
+          const newUrl = params.toString()
+            ? `${window.location.pathname}?${params.toString()}`
+            : window.location.pathname;
+          window.history.replaceState({}, '', newUrl);
+          setIsLoading(false);
+          return;
+        }
+      }
 
-    return () => clearInterval(interval);
-  }, [token, refreshTokenValue]);
+      // 2. 检查已有 cookie
+      const existingToken = getCookie(COOKIE_NAME);
+      if (existingToken) {
+        try {
+          const response = await fetch(`${API_BASE}/api/auth/status`, {
+            credentials: 'include',
+            headers: existingToken ? { 'Authorization': `Bearer ${existingToken}` } : {},
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data.authenticated) {
+              setIsAuthenticated(true);
+              setIsLoading(false);
+              return;
+            }
+          }
+        } catch (error) {
+          console.error('Auth status check failed:', error);
+        }
+      }
+
+      // 3. 未认证
+      setIsAuthenticated(false);
+      setIsLoading(false);
+    };
+
+    init();
+  }, [verifyToken]);
 
   const value: AuthContextType = {
-    user,
-    token,
-    isAuthenticated: !!user,
+    isAuthenticated,
     isLoading,
-    login,
+    verifyToken,
     logout,
-    refreshToken,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

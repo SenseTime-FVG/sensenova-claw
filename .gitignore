@@ -9,7 +9,7 @@ Thumbs.db
 
 # ========== Claude Code ==========
 .claude/
-# docs/superpowers/
+docs/superpowers/
 
 # ========== Python ==========
 __pycache__/
@@ -40,7 +40,6 @@ agentos/app/web/playwright-report/
 .SenseAssistant/
 SenseAssistant/
 archived/
-
 # workspace 中忽略运行时产物和 skills
 workspace/memory/
 workspace/skills/

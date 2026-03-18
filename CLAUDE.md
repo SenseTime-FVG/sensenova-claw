@@ -16,18 +16,24 @@ AgentOS 是基于事件驱动架构的 AI Agent 平台，支持 Web、CLI、TUI 
 ### 开发启动
 
 ```bash
-# 一键启动前后端（推荐）
-npm run dev
+# 一键启动后端 + 前端 dashboard（推荐）
+agentos run
+# 或: npm run dev  /  python3 -m agentos.app.main run
 
-# 单独启动后端
-npm run dev:server
-# 或: python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8000
+# 仅启动后端
+agentos run --no-frontend
+# 或: npm run dev:server
 
 # 单独启动前端
 npm run dev:web
 
-# 启动 TUI 客户端（需后端已运行）
-python3 -m agentos.app.cli.cli_client --port 8000
+# 启动 CLI 客户端（需后端已运行）
+agentos cli
+# 或: python3 -m agentos.app.main cli --port 8000
+
+# 自定义端口
+agentos run --port 9000 --frontend-port 3001
+agentos cli --port 9000
 ```
 
 ### 测试
@@ -79,21 +85,21 @@ class EventEnvelope:
 
 **事件流**:
 ```
-ui.user_input → agent.step_started → llm.call_requested → llm.call_completed
+user.input → agent.step_started → llm.call_requested → llm.call_completed
 → tool.call_requested → tool.call_completed → agent.step_completed
 ```
 
 ### Gateway 与 Channel
 
 - **Gateway**: 管理多个 Channel，在 Channel 和 PublicEventBus 之间路由事件
-- **Channel**: 用户接入抽象（WebSocketChannel、TUIChannel、CLIChannel）
+- **Channel**: 用户接入抽象（WebSocketChannel、FeishuChannel）
 - 每个 Channel 独立管理会话，通过 `session_id` 隔离
 
 ### 核心 Runtime 模块
 
 所有 Runtime 订阅 PublicEventBus，通过 `session_id` 过滤事件：
 
-- **AgentRuntime**: 对话流程编排，监听 `ui.user_input`，发布 `agent.step_*`
+- **AgentRuntime**: 对话流程编排，监听 `user.input`，发布 `agent.step_*`
 - **LLMRuntime**: LLM 调用管理，监听 `llm.call_requested`，发布 `llm.call_completed`
 - **ToolRuntime**: 工具执行，监听 `tool.call_requested`，发布 `tool.call_completed`
 - **TitleRuntime**: 自动生成会话标题
@@ -101,24 +107,25 @@ ui.user_input → agent.step_started → llm.call_requested → llm.call_complet
 ### 状态管理
 
 - **SessionStateStore**: 内存状态管理（Turn、Message、工具调用状态）
-- **SQLite**: 持久化存储（sessions、turns、messages、events 表）
+- **SQLite**: 持久化存储（sessions、turns、messages、events、agent_messages、cron_jobs、cron_runs 表）
 
 ### 工具系统
 
-内置 11 个工具：
+启动时注册 10 个工具（9 个在 `_register_builtin()` + 1 个在 Gateway 启动时注册）：
 - `bash_command`: 执行 shell 命令
 - `serper_search`: 网络搜索（需 SERPER_API_KEY）
+- `brave_search`: 网络搜索（需 BRAVE_SEARCH_API_KEY）
+- `baidu_search`: 网络搜索（需 BAIDU_APPBUILDER_API_KEY）
+- `tavily_search`: 网络搜索（需 TAVILY_API_KEY）
 - `fetch_url`: 获取网页内容
 - `read_file`: 读取文件
 - `write_file`: 写入文件
-- `send_email`: 发送邮件（需配置邮箱）
-- `list_emails`: 列出邮件
-- `read_email`: 读取邮件详情
-- `download_attachment`: 下载附件
-- `mark_email`: 标记邮件状态
-- `search_emails`: 搜索邮件
+- `create_agent`: 动态创建新 Agent 配置
+- `send_message`: 向其他 Agent 发送消息（Gateway 启动时注册）
 
-工具注册在 `ToolRegistry`，通过 `@tool_registry.register()` 装饰器自动注册。
+邮件工具（`send_email`、`list_emails` 等 6 个）定义在 `email.py` 中但未默认注册，需配置后手动启用。
+
+工具注册在 `ToolRegistry`，搜索工具在未配置对应 API key 时不暴露给 LLM。
 
 #### 邮件工具配置
 
@@ -168,20 +175,27 @@ Skills 通过 YAML 配置定义，支持多步骤编排和条件分支。
 根目录 `config.yml`（不入库）：
 
 ```yaml
-OPENAI_BASE_URL: https://api.openai.com/v1
-OPENAI_API_KEY: sk-xxx
-SERPER_API_KEY: xxx
+llm:
+  providers:
+    openai:
+      api_key: ${OPENAI_API_KEY}
+      base_url: ${OPENAI_BASE_URL}
+  default_model: gpt_4o_mini    # 引用 llm.models 中的 key
 
 agent:
-  provider: openai
-  default_model: gpt-4o-mini
-  system_prompt: "你是一个有用的AI助手"
+  model: gpt_4o_mini            # 引用 llm.models 中的 key
+  temperature: 0.2
+  system_prompt: "你是一个有工具能力的AI助手，请在必要时调用工具。"
 
 tools:
   serper_search:
     api_key: ${SERPER_API_KEY}
     timeout: 15
     max_results: 10
+  brave_search:
+    api_key: ${BRAVE_API_KEY}
+  tavily_search:
+    api_key: ${TAVILY_API_KEY}
 ```
 
 配置加载优先级: 环境变量 > config.yml > 默认值
