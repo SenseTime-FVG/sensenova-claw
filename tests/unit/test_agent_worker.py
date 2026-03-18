@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from unittest.mock import AsyncMock
 
@@ -30,6 +31,7 @@ from agentos.kernel.events.types import (
 from agentos.kernel.runtime.context_builder import ContextBuilder
 from agentos.kernel.runtime.state import SessionStateStore, TurnState
 from agentos.kernel.runtime.workers.agent_worker import AgentSessionWorker
+from agentos.platform.config.config import config
 
 
 # ── 真实 AgentRuntime 替身 ────────────────────────────────
@@ -149,6 +151,17 @@ class TestConfigHelpers:
         worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=None)
         temp = worker._get_temperature()
         assert isinstance(temp, (int, float))
+
+    def test_get_model_key_fallback_to_legacy_agent_default_model(self, private_bus, runtime):
+        original = copy.deepcopy(config.data)
+        try:
+            config.data["agent"]["model"] = ""
+            config.data["agent"]["default_model"] = "mock-agent-v1"
+            worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=None)
+            assert worker._get_model() == "mock-agent-v1"
+            assert worker._get_provider() == "mock"
+        finally:
+            config.data = original
 
     def test_get_filtered_tools_no_config(self, private_bus, runtime):
         """无 agent_config 时返回全部工具"""

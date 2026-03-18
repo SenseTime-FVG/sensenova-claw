@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from agentos.capabilities.tools.ask_user_tool import AskUserTool
 from agentos.capabilities.tools.base import Tool
 from agentos.capabilities.tools.builtin import (
     BaiduSearchTool,
@@ -31,6 +32,7 @@ class ToolRegistry:
             ReadFileTool(),
             WriteFileTool(),
             CreateAgentTool(),
+            AskUserTool(),
         ]:
             self.register(tool)
 
