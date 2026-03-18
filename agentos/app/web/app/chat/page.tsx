@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, ChevronDown, Check } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
+import { useNotification } from '@/hooks/useNotification';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
@@ -141,6 +142,15 @@ function rebuildMessagesFromEvents(events: Record<string, unknown>[]): ChatMessa
         String(((payload.result as Record<string, unknown> | undefined)?.content) || '');
       if (response) {
         rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+      }
+      continue;
+    }
+
+    if (eventType === 'notification.session') {
+      const metadata = (payload.metadata || {}) as Record<string, unknown>;
+      const body = String(payload.body || payload.text || '');
+      if (body && metadata.append_to_chat !== false) {
+        rebuilt.push({ id: makeId(), role: 'system', content: body, timestamp: Date.now() });
       }
     }
   }
@@ -326,6 +336,7 @@ function TargetSelector({
 function ChatPageInner() {
   const searchParams = useSearchParams();
   const initialAgent = searchParams.get('agent') || 'default';
+  const { pushNotification } = useNotification();
 
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -492,8 +503,28 @@ function ChatPageInner() {
         setIsTyping(false);
         break;
       case 'notification': {
-        const text = String(payload.text || '');
-        if (text) addMsg('system', text);
+        const title = String(payload.title || 'Notification');
+        const body = String(payload.body || payload.text || '');
+        const metadata = (payload.metadata || {}) as Record<string, unknown>;
+        const shouldShowToast = metadata.show_toast !== false;
+        const shouldShowBrowser = metadata.show_browser === true;
+        if (body) {
+          pushNotification({
+            title,
+            body,
+            level: String(payload.level || 'info') as 'info' | 'warning' | 'error' | 'success',
+            source: String(payload.source || 'system'),
+            createdAtMs: Number(payload.created_at_ms || Date.now()),
+          }, {
+            toast: shouldShowToast,
+            browser: shouldShowBrowser,
+          });
+        }
+        const targetSessionId = typeof data.session_id === 'string' ? data.session_id : null;
+        const shouldAppendToChat = Boolean(metadata.append_to_chat);
+        if (body && shouldAppendToChat && (!targetSessionId || targetSessionId === sessionIdRef.current)) {
+          addMsg('system', body);
+        }
         break;
       }
     }

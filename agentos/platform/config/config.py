@@ -193,6 +193,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "timezone": "local",
         },
     },
+    "notification": {
+        "enabled": True,
+        "channels": ["browser", "session"],
+        "native": {"enabled": False},
+        "browser": {"enabled": True},
+        "electron": {"enabled": False},
+        "session": {"enabled": True},
+    },
     "plugins": {
         "feishu": {
             "enabled": False,

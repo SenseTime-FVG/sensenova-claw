@@ -177,3 +177,43 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `switchSession` 只做 HTTP 拉历史不能恢复事件投递；后端真正的 session-to-websocket 绑定发生在 `create_session`/`load_session` 这类 WS 消息里，不补这一层前端看起来“打开了会话”，实际收不到后续事件。
 - 当前前端全量构建仍存在与本次改动无关的既有类型错误：`agentos/app/web/components/ThemeProvider.tsx` 依赖 `next-themes/dist/types`，`npm run build` 会在该文件失败，因此不能把这次任务表述为“整个前端构建通过”。
+
+### 2026-03-19 Cron 通知扩展补充
+
+成功经验：
+- 对“聊天会话消息”“浏览器 Notification API”“后端桌面原生通知”三种提醒方式，复用统一的 `NotificationService` 和 `Notification.metadata` 最稳，不需要为 cron 单独再造一套路由协议。
+- `delivery.mode="none"` 与 `delivery.session_id` 可以拆开理解：前者控制“是否写回聊天消息”，后者可继续作为浏览器通知的会话路由范围，这样从聊天里创建的 cron 能精准回到原会话标签页。
+- 浏览器 toast 和浏览器原生 Notification API 必须分离控制；否则所有 websocket 通知都会误触发系统级浏览器提醒，无法体现“browser channel 是显式选择”的语义。
+
+失败/风险经验：
+- `CronRuntime.update_job()` 如果漏掉 `delivery` 字段赋值，API 层构造出的提醒配置会悄悄丢失，表现成“创建能用、编辑失效”的隐蔽 bug。
+- `exclude_unset=True` 下前端显式发送的 `null` 与“字段未传”是两种语义；定时任务提醒配置更新时，必须用哨兵值区分“保留原 session”与“明确清空 session”。
+
+### 2026-03-19 Cron 面板与手动触发补充
+
+成功经验：
+- `DialogContent` 基础组件自带 `sm:max-w-sm`，业务页如果只追加 `max-w-3xl` 并不能稳定覆盖响应式宽度；需要显式使用 `sm:max-w-*`/`lg:max-w-*` 才能真正修复大屏弹窗过窄的问题。
+- 手动触发 cron 不能只是简单复用 `_execute_job()`；还要在运行后重新 `arm_timer`，否则启用状态任务的下一次调度可能不会按新的 `next_run_at_ms` 重新挂表。
+- 禁用状态下的手动执行要单独处理 `next_run_at_ms`，否则任务会因为一次“Run Now”被意外重新排入自动调度。
+
+失败/风险经验：
+- 如果“Run Now”复用历史面板逻辑但不拆出独立的 `fetchRuns()`，触发成功后刷新展开行很容易误走“toggle 后收起”的分支，表现成用户刚手动执行，历史面板反而消失。
+
+### 2026-03-19 Cron 原生通知开关补充
+
+成功经验：
+- “任务级显式通知渠道”和“全局默认通知渠道”要分开处理；像 cron job 上勾选 `native`/`browser` 这种明确请求，不应该再被默认配置里的 `notification.native.enabled=false` 静默拦截。
+
+失败/风险经验：
+- 如果 `NotificationService.resolve_channels()` 对显式 `channels=[...]` 仍套用全局子开关过滤，用户界面会表现成“明明勾选了 native，但什么都没发生”，而且排查时容易误以为是 `notify-send` 或系统桌面环境本身有问题。
+
+### 2026-03-18 Cron/通知/API Key 面板补充
+
+成功经验：
+- 将 `config.yml` 持久化逻辑抽到 `agentos/interfaces/http/config_store.py` 后，`config_api`、`tools` API key 管理和 `notification_api` 都能复用同一套“保留未知顶层字段 + 热重载”的写回路径，避免多处手写 YAML 合并逻辑。
+- 通知系统最稳的落点是事件总线：`NotificationService -> notification.push / notification.session -> WebSocketChannel -> 前端 NotificationProvider`，这样浏览器 toast、浏览器原生通知和会话内系统消息可以共享同一份 payload。
+- Cron UI 若直接复用 `CronRuntime` + `Repository.list_cron_runs()`，后端不需要新增第二套调度业务逻辑；前端只需要围绕 `/api/cron/jobs` 与 `/api/cron/jobs/{id}/runs` 做 CRUD 和历史面板即可。
+
+失败/风险经验：
+- 当前环境里 `python3 -m pytest` 仍不可用，验证新后端接口时要继续使用 `UV_CACHE_DIR=/tmp/uv_cache uv run python -m pytest ...`。
+- 当前前端类型检查仍会先卡在既有问题 `agentos/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为“本次改动失败”的依据。

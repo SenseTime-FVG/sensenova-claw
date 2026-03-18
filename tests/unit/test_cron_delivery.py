@@ -310,6 +310,20 @@ class OutboundCollectorChannel(Channel):
         return {"success": True, "message_id": "mock_001"}
 
 
+class SpyNotificationService:
+    """记录通知发送请求的简易替身。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def send(self, notification, channels=None):
+        self.calls.append({
+            "notification": notification,
+            "channels": list(channels or []),
+        })
+        return {channel: True for channel in channels or []}
+
+
 @pytest.mark.asyncio
 async def test_deliver_text_uses_outbound_when_to_is_set(repo):
     """当 delivery.to 有值时，优先走 send_outbound 而非 deliver_to_channel"""
@@ -372,3 +386,155 @@ async def test_deliver_text_falls_back_to_event_when_no_to(repo):
     # 应走 deliver_to_channel
     assert len(ch.received_events) == 1
     assert ch.received_events[0].type == CRON_DELIVERY_REQUESTED
+
+
+@pytest.mark.asyncio
+async def test_deliver_text_routes_websocket_session_to_session_notification(repo):
+    """WebSocket 会话提醒应转成会话内通知，而不是直接走 Channel 事件。"""
+    from agentos.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
+    from agentos.kernel.scheduler.runtime import CronRuntime
+
+    bus = PublicEventBus()
+    publisher = EventPublisher(bus=bus)
+    gateway = Gateway(publisher=publisher)
+
+    ch_ws = CollectorChannel("websocket")
+    gateway.register_channel(ch_ws)
+    gateway.bind_session("sess_cron_chat", "websocket")
+
+    notification_service = SpyNotificationService()
+    runtime = CronRuntime(
+        bus=bus,
+        repo=repo,
+        gateway=gateway,
+        notification_service=notification_service,
+    )
+
+    job = CronJob(
+        id="test_ws_session_delivery",
+        name="聊天提醒",
+        session_target="main",
+        payload=SystemEventPayload(text="在聊天里提醒我"),
+        delivery=CronDelivery(mode="announce", channel_id="websocket", session_id="sess_cron_chat"),
+    )
+
+    await runtime._deliver_text(job, "在聊天里提醒我")
+
+    assert ch_ws.received == []
+    assert len(notification_service.calls) == 1
+    assert notification_service.calls[0]["channels"] == ["session"]
+    notification = notification_service.calls[0]["notification"]
+    assert notification.session_id == "sess_cron_chat"
+    assert notification.metadata["append_to_chat"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_delivery_notifications_filters_supported_channels(repo):
+    """Cron 文本通知只向 browser/native 渠道发送。"""
+    from agentos.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
+    from agentos.kernel.scheduler.runtime import CronRuntime
+
+    bus = PublicEventBus()
+    notification_service = SpyNotificationService()
+    runtime = CronRuntime(
+        bus=bus,
+        repo=repo,
+        gateway=None,
+        notification_service=notification_service,
+    )
+
+    job = CronJob(
+        id="test_notification_channels",
+        name="提醒",
+        session_target="main",
+        payload=SystemEventPayload(text="通知文本"),
+        delivery=CronDelivery(
+            mode="none",
+            session_id="sess_browser_only",
+            notification_channels=["browser", "native", "session"],
+        ),
+    )
+
+    await runtime._send_delivery_notifications(job, "通知文本")
+
+    assert len(notification_service.calls) == 1
+    assert notification_service.calls[0]["channels"] == ["browser", "native"]
+    notification = notification_service.calls[0]["notification"]
+    assert notification.session_id == "sess_browser_only"
+
+
+@pytest.mark.asyncio
+async def test_notify_job_failure_does_not_append_to_chat_when_only_browser_delivery(repo):
+    """仅配置 browser/native 时，失败通知不应额外写回聊天会话。"""
+    from agentos.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
+    from agentos.kernel.scheduler.runtime import CronRuntime
+
+    bus = PublicEventBus()
+    notification_service = SpyNotificationService()
+    runtime = CronRuntime(
+        bus=bus,
+        repo=repo,
+        gateway=None,
+        notification_service=notification_service,
+    )
+
+    job = CronJob(
+        id="test_failure_notification_scope",
+        name="失败提醒",
+        session_target="main",
+        payload=SystemEventPayload(text="失败"),
+        delivery=CronDelivery(
+            mode="none",
+            session_id="sess_browser_only",
+            notification_channels=["browser"],
+        ),
+    )
+
+    await runtime._notify_job_result(
+        job=job,
+        run_id=7,
+        success=False,
+        duration_ms=123,
+        error="boom",
+    )
+
+    assert len(notification_service.calls) == 1
+    assert notification_service.calls[0]["channels"] == ["browser"]
+    notification = notification_service.calls[0]["notification"]
+    assert notification.session_id == "sess_browser_only"
+
+
+@pytest.mark.asyncio
+async def test_cron_tool_add_with_notification_channels_keeps_session_scope(repo):
+    """仅开启浏览器/原生通知时，仍保留当前 session 作为通知路由范围。"""
+    from agentos.kernel.scheduler.runtime import CronRuntime
+    from agentos.kernel.scheduler.tool import CronTool
+
+    bus = PublicEventBus()
+    publisher = EventPublisher(bus=bus)
+    gateway = Gateway(publisher=publisher)
+
+    runtime = CronRuntime(bus=bus, repo=repo, gateway=gateway)
+    tool = CronTool(runtime)
+
+    result = await tool.execute(
+        action="add",
+        schedule_type="every",
+        schedule_value="60000",
+        text="浏览器提醒",
+        name="浏览器提醒任务",
+        send_to_current_session=False,
+        notification_channels=["browser"],
+        _session_id="sess_browser_scope",
+    )
+
+    assert result["success"] is True
+    assert result["delivery_session_id"] == "sess_browser_scope"
+    assert result["delivery_channel"] is None
+    assert result["notification_channels"] == ["browser"]
+
+    jobs = await runtime.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].delivery is not None
+    assert jobs[0].delivery.mode == "none"
+    assert jobs[0].delivery.session_id == "sess_browser_scope"
