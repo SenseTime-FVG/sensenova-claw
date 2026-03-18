@@ -25,7 +25,7 @@ class TestConfig:
         yml = tmp_path / "config.yml"
         yml.write_text(
             "OPENAI_API_KEY: ${TEST_AGENTOS_KEY}\n"
-            "agent:\n  model: gpt_4o\n",
+            "agent:\n  model: gpt-5.4\n",
             encoding="utf-8",
         )
         os.environ["TEST_AGENTOS_KEY"] = "sk-test-123"
@@ -38,16 +38,16 @@ class TestConfig:
     def test_deep_merge(self, tmp_path):
         yml = tmp_path / "config.yml"
         yml.write_text(
-            "agent:\n  model: gpt_4o\n",
+            "agent:\n  model: gpt-5.4\n",
             encoding="utf-8",
         )
         cfg = Config(config_path=yml)
         # 用户覆盖的值
-        assert cfg.get("agent.model") == "gpt_4o"
+        assert cfg.get("agent.model") == "gpt-5.4"
         # 默认值保留
         assert cfg.get("agent.temperature") == 0.2
 
     def test_set_runtime(self, tmp_path):
         cfg = Config(config_path=tmp_path / "nonexist.yml")
-        cfg.set("agent.model", "claude_opus")
-        assert cfg.get("agent.model") == "claude_opus"
+        cfg.set("agent.model", "claude-opus")
+        assert cfg.get("agent.model") == "claude-opus"

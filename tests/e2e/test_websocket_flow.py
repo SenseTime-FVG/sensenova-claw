@@ -36,8 +36,8 @@ def _apply_provider_config(provider_name: str) -> None:
         config.data["tools"]["serper_search"]["api_key"] = ""
     else:
         gemini_cfg = load_gemini_config()
-        config.data["agent"]["model"] = "gemini_pro"
-        config.data["llm"]["default_model"] = "gemini_pro"
+        config.data["agent"]["model"] = "gemini-pro"
+        config.data["llm"]["default_model"] = "gemini-pro"
         config.data["agent"]["temperature"] = 0.2
         config.data["llm"]["providers"]["gemini"] = {
             **config.data["llm"]["providers"].get("gemini", {}),

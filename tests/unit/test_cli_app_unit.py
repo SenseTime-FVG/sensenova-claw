@@ -72,8 +72,8 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
     # 配置 provider
     if provider_name == "gemini":
         gemini_cfg = load_gemini_config()
-        cfg.set("agent.model", "gemini_pro")
-        cfg.set("llm.default_model", "gemini_pro")
+        cfg.set("agent.model", "gemini-pro")
+        cfg.set("llm.default_model", "gemini-pro")
         cfg.data["llm"]["providers"]["gemini"] = {
             **cfg.data["llm"]["providers"].get("gemini", {}),
             **gemini_cfg,
