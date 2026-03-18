@@ -11,13 +11,15 @@ AgentOS 使用 SQLite 作为持久化存储，数据库文件位于 `var/data/ag
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `session_id` | TEXT PRIMARY KEY | 会话唯一标识（UUID） |
-| `created_at` | TEXT | 创建时间（ISO 8601） |
-| `last_active` | TEXT | 最后活跃时间 |
+| `created_at` | REAL NOT NULL | 创建时间（Unix 时间戳） |
+| `last_active` | REAL NOT NULL | 最后活跃时间（Unix 时间戳） |
 | `meta` | TEXT | JSON 元数据（见下方结构） |
-| `status` | TEXT | 会话状态 |
-| `channel` | TEXT | 接入渠道标识 |
-| `model` | TEXT | 使用的 LLM 模型 |
-| `message_count` | INTEGER | 消息总数 |
+| `status` | TEXT | 会话状态，默认 `active` |
+| `channel` | TEXT | 接入渠道标识（迁移添加） |
+| `model` | TEXT | 使用的 LLM 模型（迁移添加） |
+| `message_count` | INTEGER | 消息总数，默认 0（迁移添加） |
+
+> `channel`、`model`、`message_count` 三列通过 ALTER TABLE 迁移添加，旧数据库首次启动时自动升级。
 
 **meta JSON 结构**：
 
@@ -91,6 +93,32 @@ AgentOS 使用 SQLite 作为持久化存储，数据库文件位于 `var/data/ag
 
 > events 表是完整的审计日志，记录了系统内所有事件的流转。前端会话重放功能通过 `GET /api/sessions/{id}/events` 查询此表来重建消息历史。
 
+### agent_messages 表
+
+多 Agent 消息通信记录，用于 `send_message` 工具的状态追踪。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | TEXT PRIMARY KEY | 消息记录 ID |
+| `parent_session_id` | TEXT NOT NULL | 父会话 ID |
+| `parent_turn_id` | TEXT | 父轮次 ID |
+| `parent_tool_call_id` | TEXT | 父工具调用 ID |
+| `child_session_id` | TEXT NOT NULL | 子会话 ID |
+| `target_id` | TEXT NOT NULL | 目标 Agent ID |
+| `status` | TEXT NOT NULL | 消息状态 |
+| `mode` | TEXT NOT NULL | 模式（sync / async） |
+| `message` | TEXT NOT NULL | 消息内容 |
+| `result` | TEXT | 执行结果 |
+| `error` | TEXT | 错误信息 |
+| `depth` | INTEGER NOT NULL | 消息深度，默认 0 |
+| `pingpong_count` | INTEGER NOT NULL | 乒乓轮数，默认 0 |
+| `active_turn_id` | TEXT | 当前活跃轮次 |
+| `attempt_count` | INTEGER NOT NULL | 当前尝试次数，默认 1 |
+| `max_attempts` | INTEGER NOT NULL | 最大尝试次数，默认 1 |
+| `timeout_seconds` | REAL | 超时秒数 |
+| `created_at` | REAL NOT NULL | 创建时间 |
+| `completed_at` | REAL | 完成时间 |
+
 ### cron_jobs 表
 
 定时任务定义。
@@ -99,13 +127,23 @@ AgentOS 使用 SQLite 作为持久化存储，数据库文件位于 `var/data/ag
 |------|------|------|
 | `id` | TEXT PRIMARY KEY | 任务 ID |
 | `name` | TEXT | 任务名称 |
-| `schedule_json` | TEXT | 调度配置 JSON |
-| `session_target` | TEXT | 目标 session |
-| `wake_mode` | TEXT | 唤醒方式 |
-| `payload_json` | TEXT | 任务数据 |
-| `enabled` | INTEGER | 是否启用 |
+| `description` | TEXT | 任务描述 |
+| `schedule_json` | TEXT NOT NULL | 调度配置 JSON |
+| `session_target` | TEXT NOT NULL | 目标 session，默认 `isolated` |
+| `wake_mode` | TEXT NOT NULL | 唤醒方式，默认 `now` |
+| `payload_json` | TEXT NOT NULL | 任务数据 |
+| `delivery_json` | TEXT | 投递配置 JSON |
+| `enabled` | INTEGER NOT NULL | 是否启用，默认 1 |
+| `delete_after_run` | INTEGER | 执行后是否删除 |
+| `created_at_ms` | INTEGER NOT NULL | 创建时间（毫秒） |
+| `updated_at_ms` | INTEGER NOT NULL | 更新时间（毫秒） |
 | `next_run_at_ms` | INTEGER | 下次执行时间（毫秒） |
 | `running_at_ms` | INTEGER | 当前执行开始时间 |
+| `last_run_at_ms` | INTEGER | 上次执行时间 |
+| `last_run_status` | TEXT | 上次执行状态 |
+| `last_error` | TEXT | 上次执行错误 |
+| `last_duration_ms` | INTEGER | 上次执行耗时 |
+| `consecutive_errors` | INTEGER NOT NULL | 连续错误次数，默认 0 |
 
 ### cron_runs 表
 
@@ -113,7 +151,7 @@ AgentOS 使用 SQLite 作为持久化存储，数据库文件位于 `var/data/ag
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `id` | TEXT PRIMARY KEY | 执行记录 ID |
+| `id` | INTEGER PRIMARY KEY | 自增执行记录 ID |
 | `job_id` | TEXT | 外键 → cron_jobs |
 | `started_at_ms` | INTEGER | 执行开始时间 |
 | `status` | TEXT | 状态 |
@@ -127,6 +165,8 @@ AgentOS 使用 SQLite 作为持久化存储，数据库文件位于 `var/data/ag
 sessions (1) ──→ (N) turns
 sessions (1) ──→ (N) messages
 sessions (1) ──→ (N) events
+sessions (1) ──→ (N) agent_messages (parent_session_id)
+sessions (1) ──→ (N) agent_messages (child_session_id)
 turns    (1) ──→ (N) messages
 cron_jobs(1) ──→ (N) cron_runs
 ```
@@ -139,6 +179,7 @@ cron_jobs(1) ──→ (N) cron_runs
 | 每轮对话开始/结束 | turns | AgentSessionWorker |
 | LLM 上下文中的每条消息 | messages | AgentSessionWorker |
 | 所有事件流转 | events | EventPersister |
+| 多 Agent 消息通信 | agent_messages | AgentMessageCoordinator |
 | 创建/执行定时任务 | cron_jobs / cron_runs | CronRuntime |
 
 ## 注意事项
