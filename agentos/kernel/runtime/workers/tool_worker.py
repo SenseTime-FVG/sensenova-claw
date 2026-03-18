@@ -18,6 +18,8 @@ from agentos.kernel.events.types import (
     TOOL_CALL_STARTED,
     TOOL_CONFIRMATION_REQUESTED,
     TOOL_CONFIRMATION_RESPONSE,
+    USER_QUESTION_ASKED,
+    USER_QUESTION_ANSWERED,
 )
 from agentos.capabilities.tools.base import Tool
 from agentos.kernel.runtime.workers.base import SessionWorker
@@ -38,13 +40,16 @@ class ToolSessionWorker(SessionWorker):
         self._pending_confirmations: dict[str, asyncio.Event] = {}
         # 确认结果缓存：tool_call_id → bool
         self._confirmation_results: dict[str, bool] = {}
+        # ask_user：question_id → asyncio.Future
+        self._pending_questions: dict[str, asyncio.Future] = {}
 
     async def _handle(self, event: EventEnvelope) -> None:
         if event.type == TOOL_CALL_REQUESTED:
-            # 保留并发执行：每个工具调用独立 task
             asyncio.create_task(self._handle_tool_requested(event))
         elif event.type == TOOL_CONFIRMATION_RESPONSE:
             await self._handle_confirmation_response(event)
+        elif event.type == USER_QUESTION_ANSWERED:
+            self._resolve_question(event)
 
     def _truncate_result(self, result: any, tool_call_id: str) -> any:
         """Token 截断：统一控制传给 LLM 的结果长度"""
@@ -116,6 +121,64 @@ class ToolSessionWorker(SessionWorker):
             return False
         finally:
             self._pending_confirmations.pop(tool_call_id, None)
+
+    # ── ask_user 支持 ──────────────────────────────────
+
+    def _make_ask_user_handler(self):
+        """创建注入到 AskUserTool 的回调函数，封装事件发布和等待逻辑"""
+        worker = self
+
+        async def handler(
+            question: str, options: list | None, multi_select: bool,
+            session_id: str, turn_id: str, tool_call_id: str,
+        ) -> dict:
+            if worker._pending_questions:
+                return {"success": False, "error": "已有待回答问题，请先回答当前问题"}
+
+            question_id = f"q_{uuid.uuid4().hex[:8]}"
+            future: asyncio.Future = asyncio.get_event_loop().create_future()
+            worker._pending_questions[question_id] = future
+
+            timeout = float(config.get("tools.ask_user.timeout", 300))
+
+            await worker.bus.publish(EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=session_id, turn_id=turn_id, trace_id=tool_call_id,
+                source="tool",
+                payload={
+                    "question_id": question_id, "question": question,
+                    "options": options, "multi_select": multi_select, "timeout": timeout,
+                },
+            ))
+
+            try:
+                result = await asyncio.wait_for(future, timeout=timeout)
+                return result
+            except asyncio.TimeoutError:
+                return {"success": False, "error": "用户未在规定时间内回答"}
+            finally:
+                worker._pending_questions.pop(question_id, None)
+
+        return handler
+
+    def _resolve_question(self, event: EventEnvelope) -> None:
+        """处理用户回答，唤醒挂起的 Future"""
+        question_id = event.payload.get("question_id")
+        future = self._pending_questions.get(question_id)
+        if future and not future.done():
+            cancelled = event.payload.get("cancelled", False)
+            if cancelled:
+                future.set_result({"success": False, "error": "用户取消了回答"})
+            else:
+                future.set_result({"success": True, "answer": event.payload.get("answer", "")})
+
+    async def stop(self) -> None:
+        """停止时取消所有挂起的问题"""
+        for future in self._pending_questions.values():
+            if not future.done():
+                future.cancel()
+        self._pending_questions.clear()
+        await super().stop()
 
     async def _handle_confirmation_response(self, event: EventEnvelope) -> None:
         """处理用户确认响应，唤醒挂起的任务"""
@@ -244,6 +307,8 @@ class ToolSessionWorker(SessionWorker):
             exec_kwargs["_turn_id"] = event.turn_id
         if tool_call_id:
             exec_kwargs["_tool_call_id"] = tool_call_id
+        # 注入 ask_user 回调（AskUserTool 内部调用）
+        exec_kwargs["_ask_user_handler"] = self._make_ask_user_handler()
 
         try:
             result = await asyncio.wait_for(

@@ -3,6 +3,8 @@
 # 用户事件（原 ui.* → user.*）
 USER_INPUT = "user.input"
 USER_TURN_CANCEL_REQUESTED = "user.turn_cancel_requested"
+USER_QUESTION_ASKED = "user.question_asked"
+USER_QUESTION_ANSWERED = "user.question_answered"
 
 # Agent 编排事件（两阶段）
 AGENT_STEP_STARTED = "agent.step_started"
