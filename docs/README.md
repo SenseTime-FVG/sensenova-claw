@@ -95,6 +95,9 @@ ui.user_input
 |--------|------|
 | `bash_command` | 执行 Shell 命令 |
 | `serper_search` | 网络搜索（需要 SERPER_API_KEY） |
+| `brave_search` | 网络搜索（需要 BRAVE_SEARCH_API_KEY） |
+| `baidu_search` | 网络搜索（需要 BAIDU_APPBUILDER_API_KEY） |
+| `tavily_search` | 网络搜索（需要 TAVILY_API_KEY） |
 | `fetch_url` | 获取网页内容 |
 | `read_file` | 读取文件内容 |
 | `write_file` | 写入文件内容 |

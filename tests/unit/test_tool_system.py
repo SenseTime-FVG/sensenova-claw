@@ -27,10 +27,13 @@ from agentos.kernel.runtime.tool_runtime import ToolRuntime
 from agentos.kernel.events.router import BusRouter
 from agentos.capabilities.tools.base import Tool, ToolRiskLevel
 from agentos.capabilities.tools.builtin import (
+    BaiduSearchTool,
     BashCommandTool,
+    BraveSearchTool,
     FetchUrlTool,
     ReadFileTool,
     SerperSearchTool,
+    TavilySearchTool,
     WriteFileTool,
 )
 from agentos.capabilities.tools.registry import ToolRegistry
@@ -57,6 +60,18 @@ class TestToolRiskLevel:
 
     def test_serper_search_is_low_risk(self):
         tool = SerperSearchTool()
+        assert tool.risk_level == ToolRiskLevel.LOW
+
+    def test_brave_search_is_low_risk(self):
+        tool = BraveSearchTool()
+        assert tool.risk_level == ToolRiskLevel.LOW
+
+    def test_baidu_search_is_low_risk(self):
+        tool = BaiduSearchTool()
+        assert tool.risk_level == ToolRiskLevel.LOW
+
+    def test_tavily_search_is_low_risk(self):
+        tool = TavilySearchTool()
         assert tool.risk_level == ToolRiskLevel.LOW
 
     def test_fetch_url_is_low_risk(self):

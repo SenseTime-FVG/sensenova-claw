@@ -54,6 +54,9 @@ OPENAI_API_KEY: sk-your-api-key-here
 
 # 网络搜索工具（可选）
 SERPER_API_KEY: your-serper-api-key-here
+BRAVE_SEARCH_API_KEY: your-brave-search-api-key-here
+BAIDU_APPBUILDER_API_KEY: your-baidu-appbuilder-api-key-here
+TAVILY_API_KEY: your-tavily-api-key-here
 
 # Agent 配置
 agent:
@@ -67,6 +70,18 @@ tools:
     api_key: ${SERPER_API_KEY}
     timeout: 15
     max_results: 10
+  brave_search:
+    api_key: ${BRAVE_SEARCH_API_KEY}
+    timeout: 15
+    max_results: 10
+  baidu_search:
+    api_key: ${BAIDU_APPBUILDER_API_KEY}
+    timeout: 15
+    max_results: 10
+  tavily_search:
+    api_key: ${TAVILY_API_KEY}
+    timeout: 15
+    max_results: 5
 ```
 
 **配置项说明：**
@@ -76,6 +91,9 @@ tools:
 | `OPENAI_API_KEY` | 是 | OpenAI API 密钥（或兼容接口的密钥） |
 | `OPENAI_BASE_URL` | 否 | API 基础地址，默认 `https://api.openai.com/v1` |
 | `SERPER_API_KEY` | 否 | Serper 搜索 API 密钥，启用网络搜索工具需要 |
+| `BRAVE_SEARCH_API_KEY` | 否 | Brave Search API 密钥，启用 `brave_search` 需要 |
+| `BAIDU_APPBUILDER_API_KEY` | 否 | 百度 AppBuilder API 密钥，启用 `baidu_search` 需要 |
+| `TAVILY_API_KEY` | 否 | Tavily API 密钥，启用 `tavily_search` 需要 |
 | `agent.provider` | 否 | LLM 提供商，可选 `openai` / `anthropic` / `gemini` / `mock` |
 | `agent.default_model` | 否 | 默认模型，如 `gpt-4o-mini`、`claude-3-sonnet` 等 |
 

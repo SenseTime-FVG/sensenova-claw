@@ -48,13 +48,13 @@ export function SlashCommandMenu({ inputValue, onSelect, visible }: SlashCommand
   return (
     <div
       ref={menuRef}
-      className="absolute bottom-full left-0 mb-1 w-80 max-h-48 overflow-auto bg-[#252526] border border-[#2d2d30] rounded shadow-lg z-50"
+      className="absolute bottom-full left-0 mb-1 w-80 max-h-48 overflow-auto bg-popover border border-border rounded-md shadow-md z-50 text-popover-foreground"
     >
       {filtered.map((skill, i) => (
         <div
           key={skill.name}
           className={`px-3 py-2 cursor-pointer ${
-            i === selectedIndex ? 'bg-[#0e639c] text-white' : 'text-[#cccccc] hover:bg-[#3c3c3c]'
+            i === selectedIndex ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
           }`}
           onClick={() => onSelect(skill.name)}
           onMouseEnter={() => setSelectedIndex(i)}

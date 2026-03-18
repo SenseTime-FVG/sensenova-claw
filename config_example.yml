@@ -41,6 +41,27 @@ tools:
     api_key: 
     timeout: 15
     max_results: 10
+  brave_search:
+    enabled: true
+    api_key: 
+    timeout: 15
+    max_results: 10
+    country: US
+    search_lang: en
+    ui_lang: en-US
+  baidu_search:
+    enabled: true
+    api_key: 
+    timeout: 15
+    max_results: 10
+    search_source: baidu_search_v2
+  tavily_search:
+    enabled: true
+    api_key: 
+    timeout: 15
+    max_results: 5
+    search_depth: basic
+    topic: general
 
 # Skills 配置
 skills:

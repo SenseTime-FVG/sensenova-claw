@@ -67,6 +67,34 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "tools": {
         "bash_command": {"enabled": True, "timeout": 15},
         "serper_search": {"enabled": True, "api_key": "${SERPER_API_KEY}", "timeout": 15, "max_results": 10},
+        "brave_search": {
+            "enabled": True,
+            "api_key": "${BRAVE_SEARCH_API_KEY}",
+            "timeout": 15,
+            "max_results": 10,
+            "country": "US",
+            "search_lang": "en",
+            "ui_lang": "en-US",
+            "extra_snippets": False,
+        },
+        "baidu_search": {
+            "enabled": True,
+            "api_key": "${BAIDU_APPBUILDER_API_KEY}",
+            "timeout": 15,
+            "max_results": 10,
+            "search_source": "baidu_search_v2",
+            "search_recency_filter": "",
+        },
+        "tavily_search": {
+            "enabled": True,
+            "api_key": "${TAVILY_API_KEY}",
+            "timeout": 15,
+            "max_results": 5,
+            "search_depth": "basic",
+            "topic": "general",
+            "time_range": "",
+            "project_id": "",
+        },
         "fetch_url": {"enabled": True, "timeout": 15, "max_response_mb": 10},
         "file_operations": {
             "enabled": True,
@@ -280,6 +308,18 @@ class Config:
         # SERPER_API_KEY -> tools.serper_search.api_key
         if "SERPER_API_KEY" in legacy and legacy["SERPER_API_KEY"]:
             result["tools"]["serper_search"]["api_key"] = legacy["SERPER_API_KEY"]
+
+        # BRAVE_SEARCH_API_KEY -> tools.brave_search.api_key
+        if "BRAVE_SEARCH_API_KEY" in legacy and legacy["BRAVE_SEARCH_API_KEY"]:
+            result["tools"]["brave_search"]["api_key"] = legacy["BRAVE_SEARCH_API_KEY"]
+
+        # BAIDU_APPBUILDER_API_KEY -> tools.baidu_search.api_key
+        if "BAIDU_APPBUILDER_API_KEY" in legacy and legacy["BAIDU_APPBUILDER_API_KEY"]:
+            result["tools"]["baidu_search"]["api_key"] = legacy["BAIDU_APPBUILDER_API_KEY"]
+
+        # TAVILY_API_KEY -> tools.tavily_search.api_key
+        if "TAVILY_API_KEY" in legacy and legacy["TAVILY_API_KEY"]:
+            result["tools"]["tavily_search"]["api_key"] = legacy["TAVILY_API_KEY"]
 
         # MODEL -> agent.default_model 以及 llm_providers.openai.default_model
         if "MODEL" in legacy and legacy["MODEL"]:

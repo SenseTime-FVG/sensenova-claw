@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Settings, Loader2, Save, Plus, FileText, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Settings, Loader2, Save, Plus, FileText, Trash2, ChevronDown, ChevronRight, Wrench, Bot } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -218,10 +218,10 @@ export default function AgentDetailPage() {
   };
 
   if (loading) {
-    return <DashboardLayout><div className="flex items-center justify-center h-full"><Loader2 className="animate-spin text-[#858585]" size={32} /></div></DashboardLayout>;
+    return <DashboardLayout><div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground"><Loader2 className="animate-spin text-primary" size={40} /><p className="text-sm font-medium">Loading agent details...</p></div></DashboardLayout>;
   }
   if (!agent) {
-    return <DashboardLayout><div className="flex items-center justify-center h-full text-[#858585]">Agent not found</div></DashboardLayout>;
+    return <DashboardLayout><div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground"><Trash2 size={40} className="opacity-20" /><p className="text-lg font-medium">Agent not found</p></div></DashboardLayout>;
   }
 
   const enabledToolCount = Object.values(toolStates).filter(Boolean).length;
@@ -229,260 +229,384 @@ export default function AgentDetailPage() {
 
   return (
     <DashboardLayout>
-      <div className="h-full flex flex-col">
+      <div className="h-full flex flex-col bg-background">
         {/* Header */}
-        <div className="bg-[#252526] border-b border-[#2d2d30] p-4">
-          <div className="flex items-center gap-4 mb-4">
-            <Link href="/agents" className="p-2 hover:bg-[#2d2d30] rounded transition-colors">
-              <ArrowLeft size={20} />
+        <div className="bg-card/50 backdrop-blur-sm border-b border-border p-6 sticky top-0 z-20 shadow-sm">
+          <div className="flex items-center gap-6 mb-6">
+            <Link href="/agents" className="p-2.5 hover:bg-muted rounded-full transition-all border border-transparent hover:border-border shadow-sm">
+              <ArrowLeft size={22} />
             </Link>
-            <div className="flex-1">
-              <h1 className="text-xl font-semibold text-[#cccccc]">{agent.name}</h1>
-              <p className="text-sm text-[#858585] mt-1">{agent.description}</p>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-2xl font-bold text-foreground tracking-tight">{agent.name}</h1>
+              <p className="text-base text-muted-foreground mt-1.5 line-clamp-1">{agent.description}</p>
             </div>
-            <button className="p-2 hover:bg-[#2d2d30] rounded transition-colors" title="Configure">
-              <Settings size={20} />
+            <button className="p-2.5 hover:bg-muted rounded-full transition-all border border-transparent hover:border-border shadow-sm" title="Configure">
+              <Settings size={22} className="text-muted-foreground" />
             </button>
           </div>
-          <div className="flex gap-6 text-sm">
-            <div><span className="text-[#858585]">Status: </span><span className="text-green-400">{agent.status}</span></div>
-            <div><span className="text-[#858585]">Provider: </span><span className="text-[#cccccc]">{agent.provider}</span></div>
-            <div><span className="text-[#858585]">Model: </span><span className="text-[#cccccc]">{agent.model}</span></div>
-            <div><span className="text-[#858585]">Sessions: </span><span className="text-[#cccccc]">{agent.sessionCount}</span></div>
+          <div className="flex flex-wrap gap-x-8 gap-y-3 text-sm font-medium">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Status:</span>
+              <span className="flex items-center gap-1.5 text-green-600 dark:text-green-400 capitalize bg-green-500/10 px-2.5 py-0.5 rounded-full border border-green-500/20 shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
+                {agent.status}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Provider:</span>
+              <span className="text-foreground bg-muted/60 px-2.5 py-0.5 rounded-full border border-border/50">{agent.provider}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Model:</span>
+              <span className="text-foreground bg-muted/60 px-2.5 py-0.5 rounded-full border border-border/50">{agent.model}</span>
+            </div>
+            <div className="flex items-center gap-2 lg:ml-auto">
+              <span className="text-muted-foreground">Sessions:</span>
+              <span className="text-foreground font-bold text-base">{agent.sessionCount}</span>
+            </div>
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="bg-[#252526] border-b border-[#2d2d30] px-4">
-          <div className="flex gap-1">
+        {/* Tabs Bar */}
+        <div className="bg-muted/30 border-b border-border px-8 overflow-x-auto no-scrollbar">
+          <div className="flex gap-2">
             {(['config', 'files', 'tools', 'skills', 'sessions'] as const).map((tab) => (
               <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 text-sm capitalize transition-colors ${activeTab === tab ? 'text-[#cccccc] border-b-2 border-[#007acc]' : 'text-[#858585] hover:text-[#cccccc]'}`}>
-                {tab === 'files' ? 'Files' : tab}
+                className={`relative px-6 py-4 text-base font-semibold capitalize transition-all whitespace-nowrap ${
+                  activeTab === tab 
+                    ? 'text-primary' 
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}>
+                {tab === 'files' ? 'Workspace Files' : tab}
+                {activeTab === tab && (
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-primary rounded-t-full shadow-[0_-2px_8px_rgba(59,130,246,0.3)]" />
+                )}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-auto p-4">
-          {/* Config Tab — per-agent */}
-          {activeTab === 'config' && (
-            <div className="space-y-4 max-w-3xl">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-[#cccccc]">Agent 配置</h2>
-                  <p className="text-xs text-[#858585] mt-0.5">修改此 Agent 的独立配置</p>
+        {/* Content Area */}
+        <div className="flex-1 overflow-auto p-8 lg:p-10">
+          <div className="max-w-6xl mx-auto">
+            {/* Config Tab */}
+            {activeTab === 'config' && (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between pb-2">
+                  <div>
+                    <h2 className="text-xl font-bold text-foreground tracking-tight">Agent Configuration</h2>
+                    <p className="text-base text-muted-foreground mt-1">Modify independent settings for this tactical agent.</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    {cfgSaveMsg && (
+                      <span className={`text-sm font-semibold px-3 py-1.5 rounded-full border shadow-sm ${
+                        cfgSaveMsg.includes('失败') 
+                          ? 'text-destructive bg-destructive/10 border-destructive/20 shadow-destructive/5' 
+                          : 'text-green-600 bg-green-500/10 border-green-500/20 shadow-green-500/5 dark:text-green-400'
+                      }`}>
+                        {cfgSaveMsg}
+                      </span>
+                    )}
+                    <button onClick={saveAgentConfig} disabled={cfgSaving}
+                      className="flex items-center gap-2.5 px-6 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-primary/90 disabled:opacity-50 shadow-lg active:scale-95 transition-all">
+                      {cfgSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                      Save Configuration
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {cfgSaveMsg && <span className={`text-xs ${cfgSaveMsg.includes('失败') ? 'text-red-400' : 'text-green-400'}`}>{cfgSaveMsg}</span>}
-                  <button onClick={saveAgentConfig} disabled={cfgSaving}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0e639c] text-white text-xs rounded hover:bg-[#1177bb] disabled:opacity-50">
-                    {cfgSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                    保存配置
-                  </button>
+
+                <div className="space-y-6">
+                  <ConfigSection title="Identity" desc="Basic agent identity used for identification" expanded={expandedSections.basic}
+                    onToggle={() => setExpandedSections(p => ({ ...p, basic: !p.basic }))}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <CfgInput label="Name" value={editName} onChange={setEditName} />
+                      <CfgInput label="Agent ID" value={agent.id} onChange={() => {}} readonly />
+                    </div>
+                    <div className="mt-6">
+                      <label className="text-muted-foreground text-sm font-semibold block mb-2">Description</label>
+                      <input value={editDesc} onChange={e => setEditDesc(e.target.value)}
+                        className="w-full bg-background border border-input rounded-xl px-4 py-3 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm" />
+                    </div>
+                  </ConfigSection>
+
+                  <ConfigSection title="LLM Backend" desc="Model provider and generation parameters" expanded={expandedSections.llm}
+                    onToggle={() => setExpandedSections(p => ({ ...p, llm: !p.llm }))}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <CfgInput label="Provider" value={editProvider} onChange={setEditProvider} />
+                      <CfgInput label="Model" value={editModel} onChange={setEditModel} />
+                      <CfgInput label="Temperature" type="number" value={editTemp} onChange={setEditTemp} />
+                      <CfgInput label="Max Tokens" type="number" value={editMaxTokens} onChange={setEditMaxTokens} />
+                    </div>
+                  </ConfigSection>
+
+                  <ConfigSection title="System Instructions" desc="Core behavioral prompts and mission definition" expanded={expandedSections.prompt}
+                    onToggle={() => setExpandedSections(p => ({ ...p, prompt: !p.prompt }))}>
+                    <textarea value={editPrompt} onChange={e => setEditPrompt(e.target.value)} rows={8}
+                      className="w-full bg-background border border-input rounded-xl px-5 py-4 text-base text-foreground font-mono leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm bg-muted/5 selection:bg-primary/20"
+                      spellCheck={false} placeholder="You are a helpful AI assistant specialized in..." />
+                    <p className="mt-3 text-xs text-muted-foreground font-medium italic">Supports markdown and persona templates.</p>
+                  </ConfigSection>
+
+                  <ConfigSection title="Delegation Logic" desc="Rules for multi-agent cooperation and handoff" expanded={expandedSections.delegation}
+                    onToggle={() => setExpandedSections(p => ({ ...p, delegation: !p.delegation }))}>
+                    <div className="mb-6 max-w-sm">
+                      <CfgInput label="Maximum Handoff Depth" type="number" value={editMaxDepth} onChange={setEditMaxDepth} />
+                    </div>
+                    <div>
+                      <label className="text-muted-foreground text-sm font-bold block mb-4 uppercase tracking-wider">Authorized Delegate Targets (Leave empty for all)</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {allAgents.filter(a => a.id !== agentId).map(a => (
+                          <label key={a.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all cursor-pointer shadow-sm ${
+                            editDelegateTo.includes(a.id) 
+                              ? 'bg-primary/5 border-primary shadow-primary/5' 
+                              : 'bg-card border-border hover:bg-muted/50 hover:border-muted-foreground/30'
+                          }`}>
+                            <input type="checkbox" checked={editDelegateTo.includes(a.id)}
+                              onChange={e => {
+                                if (e.target.checked) setEditDelegateTo(prev => [...prev, a.id]);
+                                else setEditDelegateTo(prev => prev.filter(id => id !== a.id));
+                              }}
+                              className="w-5 h-5 rounded-md border-input bg-background accent-primary transition-all ring-offset-background focus:ring-2 focus:ring-ring" />
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold truncate">{a.name}</p>
+                              <p className="text-[10px] text-muted-foreground font-mono truncate">{a.id}</p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                      {allAgents.filter(a => a.id !== agentId).length === 0 && (
+                        <div className="text-center py-8 bg-muted/20 border border-dashed rounded-xl">
+                          <p className="text-sm text-muted-foreground">No other active agents found in the system registry.</p>
+                        </div>
+                      )}
+                    </div>
+                  </ConfigSection>
                 </div>
               </div>
+            )}
 
-              <ConfigSection title="基本信息" desc="名称和描述" expanded={expandedSections.basic}
-                onToggle={() => setExpandedSections(p => ({ ...p, basic: !p.basic }))}>
-                <div className="grid grid-cols-2 gap-3">
-                  <CfgInput label="名称" value={editName} onChange={setEditName} />
-                  <CfgInput label="ID" value={agent.id} onChange={() => {}} />
-                </div>
-                <div className="mt-3">
-                  <label className="text-[#858585] text-xs block mb-1">描述</label>
-                  <input value={editDesc} onChange={e => setEditDesc(e.target.value)}
-                    className="w-full bg-[#1e1e1e] border border-[#2d2d30] rounded px-3 py-1.5 text-sm text-[#cccccc] focus:outline-none focus:border-[#007acc]" />
-                </div>
-              </ConfigSection>
-
-              <ConfigSection title="LLM 配置" desc="模型提供商和参数" expanded={expandedSections.llm}
-                onToggle={() => setExpandedSections(p => ({ ...p, llm: !p.llm }))}>
-                <div className="grid grid-cols-2 gap-3">
-                  <CfgInput label="Provider" value={editProvider} onChange={setEditProvider} />
-                  <CfgInput label="Model" value={editModel} onChange={setEditModel} />
-                  <CfgInput label="Temperature" type="number" value={editTemp} onChange={setEditTemp} />
-                  <CfgInput label="Max Tokens" type="number" value={editMaxTokens} onChange={setEditMaxTokens} />
-                </div>
-              </ConfigSection>
-
-              <ConfigSection title="系统提示词" desc="Agent 角色设定" expanded={expandedSections.prompt}
-                onToggle={() => setExpandedSections(p => ({ ...p, prompt: !p.prompt }))}>
-                <textarea value={editPrompt} onChange={e => setEditPrompt(e.target.value)} rows={6}
-                  className="w-full bg-[#1e1e1e] border border-[#2d2d30] rounded px-3 py-2 text-sm text-[#cccccc] font-mono resize-y focus:outline-none focus:border-[#007acc]"
-                  spellCheck={false} placeholder="你是一个有用的AI助手..." />
-              </ConfigSection>
-
-              <ConfigSection title="委托配置" desc="Agent 间任务委托设置" expanded={expandedSections.delegation}
-                onToggle={() => setExpandedSections(p => ({ ...p, delegation: !p.delegation }))}>
-                <div className="mb-3">
-                  <CfgInput label="最大委托深度" type="number" value={editMaxDepth} onChange={setEditMaxDepth} />
-                </div>
-                <div>
-                  <label className="text-[#858585] text-xs block mb-2">可委托目标 (空 = 全部)</label>
-                  <div className="space-y-1.5 max-h-48 overflow-auto">
-                    {allAgents.filter(a => a.id !== agentId).map(a => (
-                      <label key={a.id} className="flex items-center gap-2 text-sm text-[#cccccc] cursor-pointer hover:bg-[#2d2d30] px-2 py-1 rounded">
-                        <input type="checkbox" checked={editDelegateTo.includes(a.id)}
-                          onChange={e => {
-                            if (e.target.checked) setEditDelegateTo(prev => [...prev, a.id]);
-                            else setEditDelegateTo(prev => prev.filter(id => id !== a.id));
-                          }}
-                          className="accent-[#007acc]" />
-                        <span>{a.name}</span>
-                        <span className="text-xs text-[#858585]">({a.id})</span>
-                      </label>
+            {/* Files Tab */}
+            {activeTab === 'files' && (
+              <div className="flex flex-col lg:flex-row gap-8 h-[calc(100vh-320px)]">
+                <div className="w-full lg:w-72 shrink-0 flex flex-col gap-4">
+                  <div className="flex items-center justify-between px-2">
+                    <h2 className="text-lg font-bold text-foreground tracking-tight">File Explorer</h2>
+                    <button onClick={() => setShowNewFile(!showNewFile)} className="p-2 hover:bg-primary/10 text-primary rounded-full transition-all border border-transparent hover:border-primary/20 shadow-sm" title="New file">
+                      <Plus size={20} />
+                    </button>
+                  </div>
+                  {showNewFile && (
+                    <div className="flex gap-2 p-1 bg-muted/30 rounded-xl border border-border shadow-sm">
+                      <input type="text" value={newFileName} onChange={e => setNewFileName(e.target.value)} placeholder="filename.md"
+                        className="flex-1 bg-background border-none rounded-lg px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-primary/20 transition-all"
+                        onKeyDown={e => e.key === 'Enter' && createFile()} autoFocus />
+                      <button onClick={createFile} className="px-3 py-2 bg-primary text-primary-foreground text-xs font-bold rounded-lg hover:bg-primary/90 shadow-sm">Add</button>
+                    </div>
+                  )}
+                  <div className="flex-1 overflow-auto space-y-1.5 p-1 no-scrollbar">
+                    {wsFiles.map(f => (
+                      <div key={f.name} onClick={() => loadFile(f.name)}
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer text-sm font-semibold transition-all group border shadow-sm ${
+                          selectedFile === f.name 
+                            ? 'bg-primary border-transparent text-primary-foreground shadow-primary/20' 
+                            : 'bg-card border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                        }`}>
+                        <FileText size={18} className={`shrink-0 ${selectedFile === f.name ? 'text-primary-foreground' : 'text-primary'}`} />
+                        <span className="flex-1 truncate">{f.name}</span>
+                        {!['AGENTS.md', 'USER.md'].includes(f.name) && (
+                          <button onClick={e => { e.stopPropagation(); deleteFile(f.name); }} 
+                            className={`opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all ${
+                              selectedFile === f.name ? 'hover:bg-white/20 text-white/80' : 'hover:bg-destructive/10 text-destructive/40 hover:text-destructive'
+                            }`}>
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
                     ))}
-                    {allAgents.filter(a => a.id !== agentId).length === 0 && (
-                      <p className="text-xs text-[#858585]">暂无其他 Agent</p>
+                    {wsFiles.length === 0 && (
+                      <div className="text-center py-10 opacity-40">
+                        <FileText size={40} className="mx-auto mb-2" />
+                        <p className="text-xs font-medium">No files present</p>
+                      </div>
                     )}
                   </div>
                 </div>
-              </ConfigSection>
-            </div>
-          )}
-
-          {/* Files Tab */}
-          {activeTab === 'files' && (
-            <div className="flex gap-4 h-full">
-              <div className="w-48 shrink-0 space-y-2">
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-sm font-semibold text-[#cccccc]">Workspace Files</h2>
-                  <button onClick={() => setShowNewFile(!showNewFile)} className="p-1 hover:bg-[#2d2d30] rounded transition-colors" title="新建文件">
-                    <Plus size={14} className="text-[#007acc]" />
-                  </button>
+                <div className="flex-1 flex flex-col bg-card border border-border rounded-2xl overflow-hidden shadow-lg">
+                  {selectedFile ? (
+                    <>
+                      <div className="flex items-center justify-between px-6 py-4 bg-muted/20 border-b border-border">
+                        <div className="flex items-center gap-3">
+                           <FileText size={20} className="text-primary" />
+                           <h3 className="text-base font-bold text-foreground tracking-tight">{selectedFile}</h3>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          {fileSaveMsg && <span className="text-sm font-bold text-green-600 dark:text-green-400">{fileSaveMsg}</span>}
+                          <button onClick={saveFile} disabled={fileSaving}
+                            className="flex items-center gap-2 px-5 py-2 bg-primary text-primary-foreground font-bold text-sm rounded-xl hover:bg-primary/90 disabled:opacity-50 shadow-md active:scale-95 transition-all">
+                            {fileSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                            Save File
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex-1 p-0 relative">
+                        {fileLoading ? (
+                          <div className="flex flex-col items-center justify-center h-full gap-3 bg-muted/10">
+                            <Loader2 className="animate-spin text-primary" size={32} />
+                            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Hydrating editor...</p>
+                          </div>
+                        ) : (
+                          <textarea value={fileContent} onChange={e => setFileContent(e.target.value)}
+                            className="absolute inset-0 w-full h-full bg-transparent p-8 text-base text-foreground font-mono leading-relaxed resize-none focus:outline-none selection:bg-primary/20 dark:selection:bg-primary/40 no-scrollbar"
+                            spellCheck={false} />
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-6 opacity-30">
+                      <div className="p-8 bg-muted rounded-full">
+                        <FileText size={64} />
+                      </div>
+                      <p className="text-lg font-bold uppercase tracking-widest">Select a file to inspect or edit</p>
+                    </div>
+                  )}
                 </div>
-                {showNewFile && (
-                  <div className="flex gap-1 mb-2">
-                    <input type="text" value={newFileName} onChange={e => setNewFileName(e.target.value)} placeholder="文件名.md"
-                      className="flex-1 bg-[#3c3c3c] border border-[#5a5a5a] rounded px-2 py-1 text-xs text-[#cccccc] focus:outline-none focus:border-[#007acc]"
-                      onKeyDown={e => e.key === 'Enter' && createFile()} />
-                    <button onClick={createFile} className="px-2 py-1 bg-[#0e639c] text-white text-xs rounded hover:bg-[#1177bb]">创建</button>
-                  </div>
-                )}
-                {wsFiles.map(f => (
-                  <div key={f.name} onClick={() => loadFile(f.name)}
-                    className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm transition-colors group ${selectedFile === f.name ? 'bg-[#37373d] text-[#cccccc]' : 'text-[#858585] hover:bg-[#2d2d30]'}`}>
-                    <FileText size={14} className="shrink-0" />
-                    <span className="flex-1 truncate">{f.name}</span>
-                    {!['AGENTS.md', 'USER.md'].includes(f.name) && (
-                      <button onClick={e => { e.stopPropagation(); deleteFile(f.name); }} className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#3c3c3c] rounded">
-                        <Trash2 size={12} className="text-red-400" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                {wsFiles.length === 0 && <p className="text-xs text-[#858585]">暂无文件</p>}
               </div>
-              <div className="flex-1 flex flex-col">
-                {selectedFile ? (
-                  <>
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-sm font-medium text-[#cccccc]">{selectedFile}</h3>
-                      <div className="flex items-center gap-2">
-                        {fileSaveMsg && <span className="text-xs text-green-400">{fileSaveMsg}</span>}
-                        <button onClick={saveFile} disabled={fileSaving}
-                          className="flex items-center gap-1 px-3 py-1 bg-[#0e639c] text-white text-xs rounded hover:bg-[#1177bb] disabled:opacity-50">
-                          {fileSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                          保存
-                        </button>
+            )}
+
+            {/* Tools Tab */}
+            {activeTab === 'tools' && (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-bold text-foreground tracking-tight">Enabled Toolset</h2>
+                    <p className="text-base text-muted-foreground mt-1">Configure which utilities this agent can invoke during runtime.</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    {saveMsg && <span className="text-sm font-bold text-green-600 dark:text-green-400 bg-green-500/10 px-3 py-1 rounded-full border border-green-500/20">{saveMsg}</span>}
+                    <button onClick={savePreferences} disabled={saving}
+                      className="flex items-center gap-2.5 px-6 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-primary/90 disabled:opacity-50 shadow-lg transition-all active:scale-95">
+                      {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                      Save Preferences
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {(agent.toolsDetail || []).map((tool) => (
+                    <div key={tool.name} className={`bg-card border rounded-2xl p-6 flex items-start gap-4 transition-all hover:shadow-md ${
+                      toolStates[tool.name] ? 'border-primary/20' : 'border-border/60 opacity-80'
+                    }`}>
+                      <div className={`p-3 rounded-xl shrink-0 border ${
+                        toolStates[tool.name] ? 'bg-primary/10 border-primary/20 text-primary' : 'bg-muted border-border text-muted-foreground'
+                      }`}>
+                         <Wrench size={24} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-base font-bold text-foreground truncate">{tool.name}</span>
+                          <ToggleSwitch checked={toolStates[tool.name] ?? true} onChange={v => setToolStates(prev => ({ ...prev, [tool.name]: v }))} />
+                        </div>
+                        {tool.description && <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">{tool.description}</p>}
                       </div>
                     </div>
-                    {fileLoading ? (
-                      <div className="flex items-center justify-center h-32"><Loader2 className="animate-spin text-[#858585]" size={24} /></div>
-                    ) : (
-                      <textarea value={fileContent} onChange={e => setFileContent(e.target.value)}
-                        className="flex-1 w-full bg-[#1e1e1e] border border-[#2d2d30] rounded p-3 text-sm text-[#cccccc] font-mono resize-none focus:outline-none focus:border-[#007acc]"
-                        spellCheck={false} />
-                    )}
-                  </>
-                ) : (
-                  <div className="flex items-center justify-center h-full text-[#858585] text-sm">选择一个文件进行编辑</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Tools Tab */}
-          {activeTab === 'tools' && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-[#cccccc]">Tools ({enabledToolCount}/{agent.toolsDetail?.length || 0} 已启用)</h2>
-                <div className="flex items-center gap-2">
-                  {saveMsg && <span className="text-xs text-green-400">{saveMsg}</span>}
-                  <button onClick={savePreferences} disabled={saving}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0e639c] text-white text-xs rounded hover:bg-[#1177bb] disabled:opacity-50">
-                    {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                    保存设置
-                  </button>
+                  ))}
+                  {(!agent.toolsDetail || agent.toolsDetail.length === 0) && (
+                    <div className="col-span-2 text-center py-20 bg-muted/10 border border-dashed rounded-2xl text-muted-foreground">
+                      <p className="text-lg font-bold">No functional tools registered for this agent.</p>
+                    </div>
+                  )}
                 </div>
               </div>
-              {(agent.toolsDetail || []).map((tool) => (
-                <div key={tool.name} className="bg-[#252526] border border-[#2d2d30] rounded p-3 flex items-center justify-between hover:border-[#3e3e42] transition-colors">
-                  <div className="flex items-center gap-3 flex-1">
-                    <div className={`w-2 h-2 rounded-full ${toolStates[tool.name] ? 'bg-green-500' : 'bg-gray-500'}`} />
-                    <div>
-                      <span className="text-[#cccccc] text-sm">{tool.name}</span>
-                      {tool.description && <p className="text-xs text-[#858585] mt-0.5">{tool.description}</p>}
-                    </div>
-                  </div>
-                  <ToggleSwitch checked={toolStates[tool.name] ?? true} onChange={v => setToolStates(prev => ({ ...prev, [tool.name]: v }))} />
-                </div>
-              ))}
-              {(!agent.toolsDetail || agent.toolsDetail.length === 0) && <p className="text-sm text-[#858585]">No tools registered</p>}
-            </div>
-          )}
+            )}
 
-          {/* Skills Tab */}
-          {activeTab === 'skills' && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-[#cccccc]">Skills ({enabledSkillCount}/{agent.skillsDetail?.length || 0} 已启用)</h2>
-                <div className="flex items-center gap-2">
-                  {saveMsg && <span className="text-xs text-green-400">{saveMsg}</span>}
-                  <button onClick={savePreferences} disabled={saving}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0e639c] text-white text-xs rounded hover:bg-[#1177bb] disabled:opacity-50">
-                    {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                    保存设置
-                  </button>
+            {/* Skills Tab */}
+            {activeTab === 'skills' && (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-bold text-foreground tracking-tight">Operational Skills</h2>
+                    <p className="text-base text-muted-foreground mt-1">High-level procedural capabilities granted to this agent.</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    {saveMsg && <span className="text-sm font-bold text-green-600 dark:text-green-400 bg-green-500/10 px-3 py-1 rounded-full border border-green-500/20">{saveMsg}</span>}
+                    <button onClick={savePreferences} disabled={saving}
+                      className="flex items-center gap-2.5 px-6 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-primary/90 disabled:opacity-50 shadow-lg transition-all active:scale-95">
+                      {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                      Save Preferences
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {(agent.skillsDetail || []).map((skill) => (
+                    <div key={skill.name} className={`bg-card border rounded-2xl p-6 flex items-start gap-4 transition-all hover:shadow-md ${
+                      skillStates[skill.name] ? 'border-primary/20' : 'border-border/60 opacity-80'
+                    }`}>
+                      <div className={`p-3 rounded-xl shrink-0 border ${
+                        skillStates[skill.name] ? 'bg-primary/10 border-primary/20 text-primary' : 'bg-muted border-border text-muted-foreground'
+                      }`}>
+                         <Bot size={24} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-base font-bold text-foreground truncate">{skill.name}</span>
+                          <ToggleSwitch checked={skillStates[skill.name] ?? true} onChange={v => setSkillStates(prev => ({ ...prev, [skill.name]: v }))} />
+                        </div>
+                        {skill.description && <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">{skill.description}</p>}
+                      </div>
+                    </div>
+                  ))}
+                  {(!agent.skillsDetail || agent.skillsDetail.length === 0) && (
+                    <div className="col-span-2 text-center py-20 bg-muted/10 border border-dashed rounded-2xl text-muted-foreground">
+                      <p className="text-lg font-bold">No tactical skills loaded into this agent's brain.</p>
+                    </div>
+                  )}
                 </div>
               </div>
-              {(agent.skillsDetail || []).map((skill) => (
-                <div key={skill.name} className="bg-[#252526] border border-[#2d2d30] rounded p-3 flex items-center justify-between hover:border-[#3e3e42] transition-colors">
-                  <div className="flex items-center gap-3 flex-1">
-                    <div className={`w-2 h-2 rounded-full ${skillStates[skill.name] ? 'bg-blue-500' : 'bg-gray-500'}`} />
-                    <div>
-                      <span className="text-[#cccccc] text-sm">{skill.name}</span>
-                      {skill.description && <p className="text-xs text-[#858585] mt-0.5 line-clamp-2">{skill.description}</p>}
-                    </div>
-                  </div>
-                  <ToggleSwitch checked={skillStates[skill.name] ?? true} onChange={v => setSkillStates(prev => ({ ...prev, [skill.name]: v }))} />
-                </div>
-              ))}
-              {(!agent.skillsDetail || agent.skillsDetail.length === 0) && <p className="text-sm text-[#858585]">No skills loaded</p>}
-            </div>
-          )}
+            )}
 
-          {/* Sessions Tab */}
-          {activeTab === 'sessions' && (
-            <div className="space-y-2">
-              <h2 className="text-lg font-semibold text-[#cccccc] mb-4">Sessions ({agent.sessions?.length || 0})</h2>
-              {(agent.sessions || []).map((session) => (
-                <Link key={session.id} href={`/sessions/${session.id}`}
-                  className="bg-[#252526] border border-[#2d2d30] rounded p-3 hover:border-[#007acc] transition-colors block">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full ${session.status === 'active' ? 'bg-green-500' : 'bg-gray-500'}`} />
-                      <span className="text-sm text-[#cccccc] font-mono">{session.id}</span>
-                    </div>
-                    <span className="text-xs text-[#858585]">{session.channel}</span>
+            {/* Sessions Tab */}
+            {activeTab === 'sessions' && (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-bold text-foreground tracking-tight">Historical Sessions</h2>
+                    <p className="text-base text-muted-foreground mt-1">Review past interaction logs where this agent was the primary actor.</p>
                   </div>
-                </Link>
-              ))}
-              {(!agent.sessions || agent.sessions.length === 0) && <p className="text-sm text-[#858585]">No sessions</p>}
-            </div>
-          )}
+                  <div className="text-base font-bold text-muted-foreground bg-muted/50 px-4 py-2 rounded-full border border-border">
+                    {agent.sessions?.length || 0} Total Sessions
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {(agent.sessions || []).map((session) => (
+                    <Link key={session.id} href={`/sessions/${session.id}`}
+                      className="group bg-card border border-border rounded-2xl p-5 hover:border-primary hover:shadow-lg transition-all shadow-sm">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${session.status === 'active' ? 'bg-green-500 shadow-green-500/40' : 'bg-muted-foreground/40'}`} />
+                          <span className="text-sm text-foreground font-mono font-bold tracking-tight">{session.id}</span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest bg-muted px-2 py-1 rounded border border-border group-hover:bg-primary/5 group-hover:text-primary transition-colors">{session.channel || 'generic'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                         <div className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+                            {session.messageCount || 0} Messages
+                         </div>
+                         <ArrowLeft size={16} className="rotate-180 text-muted-foreground opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-1" />
+                      </div>
+                    </Link>
+                  ))}
+                  {(!agent.sessions || agent.sessions.length === 0) && (
+                    <div className="col-span-2 text-center py-20 bg-muted/10 border border-dashed rounded-2xl text-muted-foreground">
+                      <p className="text-lg font-bold">No historical data available for this agent.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </DashboardLayout>
@@ -495,36 +619,40 @@ function ConfigSection({ title, desc, expanded, onToggle, children }: {
   title: string; desc: string; expanded: boolean; onToggle: () => void; children: React.ReactNode;
 }) {
   return (
-    <div className="bg-[#252526] border border-[#2d2d30] rounded">
-      <button onClick={onToggle} className="w-full flex items-center gap-2 px-4 py-3 hover:bg-[#2d2d30] transition-colors">
-        {expanded ? <ChevronDown size={16} className="text-[#858585]" /> : <ChevronRight size={16} className="text-[#858585]" />}
-        <div className="text-left">
-          <span className="text-sm font-semibold text-[#cccccc]">{title}</span>
-          <span className="text-xs text-[#858585] ml-2">{desc}</span>
+    <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm shadow-black/5">
+      <button onClick={onToggle} className="w-full flex items-center gap-4 px-6 py-5 hover:bg-muted/30 transition-all text-left group">
+        <div className={`p-1.5 rounded-lg transition-all ${expanded ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:bg-muted-foreground/10'}`}>
+          {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+        </div>
+        <div className="flex-1">
+          <span className="text-base font-bold text-foreground tracking-tight">{title}</span>
+          <p className="text-xs text-muted-foreground mt-0.5 font-medium">{desc}</p>
         </div>
       </button>
-      {expanded && <div className="px-4 pb-4">{children}</div>}
+      {expanded && <div className="px-6 pb-6 pt-2 border-t border-border/40 space-y-2">{children}</div>}
     </div>
   );
 }
 
-function CfgInput({ label, value, onChange, type = 'text', fullWidth = false }: {
-  label: string; value: string; onChange: (v: string) => void; type?: string; fullWidth?: boolean;
+function CfgInput({ label, value, onChange, type = 'text', fullWidth = false, readonly = false }: {
+  label: string; value: string; onChange: (v: string) => void; type?: string; fullWidth?: boolean; readonly?: boolean;
 }) {
   return (
-    <div className={`space-y-1 ${fullWidth ? 'col-span-2' : ''}`}>
-      <label className="text-[#858585] text-xs">{label}</label>
+    <div className={`space-y-1.5 ${fullWidth ? 'col-span-2' : ''}`}>
+      <label className="text-muted-foreground text-sm font-semibold">{label}</label>
       <input type={type} value={value} onChange={e => onChange(e.target.value)} step={type === 'number' ? 'any' : undefined}
-        className="w-full bg-[#1e1e1e] border border-[#2d2d30] rounded px-3 py-1.5 text-sm text-[#cccccc] focus:outline-none focus:border-[#007acc]" />
+        readOnly={readonly}
+        className={`w-full bg-background border border-input rounded-xl px-4 py-2.5 text-base text-foreground focus:outline-none transition-all shadow-sm ${
+          readonly ? 'opacity-60 cursor-not-allowed bg-muted/30' : 'focus:ring-2 focus:ring-primary/20 focus:border-primary'
+        }`} />
     </div>
   );
 }
-
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="relative inline-flex items-center cursor-pointer">
       <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="sr-only peer" />
-      <div className="w-9 h-5 bg-[#3c3c3c] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#858585] after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0e639c] peer-checked:after:bg-white pointer-events-none" />
+      <div className="w-10 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-[16px] peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-muted-foreground/50 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:after:bg-white shadow-inner active:after:w-5" />
     </label>
   );
 }
