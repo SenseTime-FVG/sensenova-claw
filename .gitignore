@@ -41,11 +41,6 @@ agentos/app/web/playwright-report/
 SenseAssistant/
 archived/
 
-# workspace 运行时目录（已迁移到 ~/.agentos/）
-workspace/
-
-# var/ 运行时数据（已废弃，迁移到 ~/.agentos/data/）
-var/
 
 *.db
 *.sqlite

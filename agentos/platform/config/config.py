@@ -200,17 +200,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
     },
-    # v0.6: 安全与认证配置
+    # 安全与认证配置（Jupyter-lab 风格 token）
     "security": {
-        "auth_enabled": False,
-        "public_registration": False,
-        "allow_init_admin": False,
-        "jwt": {
-            "secret_key": "",
-            "algorithm": "HS256",
-            "access_token_expire_minutes": 60,
-            "refresh_token_expire_days": 30,
-        },
+        "auth_enabled": False,  # 启用后所有 API/WebSocket 需要 token 认证
     },
     # v1.0: 多 Agent 配置
     "agents": {},
