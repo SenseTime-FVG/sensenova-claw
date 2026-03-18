@@ -1,4 +1,5 @@
 # AgentOS 配置文件
+# 默认路径: ~/.agentos/config.yml
 
 system:
   workspace_dir: ~/.agentos/workspace
@@ -16,20 +17,20 @@ llm:
   # Provider 注册表：只描述如何连接各家模型服务
   providers:
     anthropic:
-      api_key: "sk-ant-oat01-4e8a4c54efb87340e0717e7ad743f4b14ef7374ae983397477732375ea39bdc9"
+      api_key: ""
       base_url: https://api.anthropic.com
       timeout: 60
       max_retries: 3
 
     openai:
-      api_key: "sk-proj-1234567890"
+      api_key: ""
       base_url: https://api.openai.com/v1
       timeout: 60
       max_retries: 3
 
     gemini:
-      api_key: "NalkM8RX0D7RFrhKCvi1"
-      base_url: https://genaiapi.cloudsway.net/v1/ai/vEHkTgVnLcrvHENf
+      api_key: ""
+      base_url: https://generativelanguage.googleapis.com
       timeout: 120
       max_retries: 3
 
@@ -40,48 +41,30 @@ llm:
       model_id: claude-opus-4-6
       timeout: 60
       max_output_tokens: 8192
-      capabilities:
-        - chat
-        - tools
-        - reasoning
 
     claude_sonnet:
       provider: anthropic
       model_id: claude-sonnet-4-20250514
       timeout: 60
       max_output_tokens: 8192
-      capabilities:
-        - chat
-        - tools
 
     gpt_4o:
       provider: openai
       model_id: gpt-4o
       timeout: 60
       max_output_tokens: 8192
-      capabilities:
-        - chat
-        - tools
-        - vision
 
     gpt_4o_mini:
       provider: openai
       model_id: gpt-4o-mini
       timeout: 60
       max_output_tokens: 8192
-      capabilities:
-        - chat
-        - tools
 
     gemini_pro:
       provider: gemini
       model_id: gemini-2.5-pro
       timeout: 120
       max_output_tokens: 8192
-      capabilities:
-        - chat
-        - tools
-        - reasoning
 
   # 全局默认模型（引用 models 中的 key）
   default_model: claude_sonnet
@@ -89,10 +72,15 @@ llm:
 # ════════════════════════════════════════════════════
 # Agents 配置
 # ════════════════════════════════════════════════════
-# 每个 agent 的详细配置放在 ~/.agentos/agents/{id}/config.yml
-# 这里只声明 agent id 列表
 agents:
-  - default
+  default:
+    name: Default Agent
+    description: 默认 AI Agent
+    model: claude_sonnet      # 引用 llm.models 中的 key
+    temperature: 0.2
+    system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
+    tools: []                 # 允许使用的工具（空 = 全部）
+    skills: []                # 允许使用的 Skills（空 = 全部）
 
 # ════════════════════════════════════════════════════
 # 工具配置
@@ -106,17 +94,8 @@ tools:
 
 # Skills 配置
 skills:
-  extra_dirs:
-    - ./backend/app/skills/feishu
-  entries:
-    feishu-doc:
-      enabled: true
-    feishu-wiki:
-      enabled: true
-    feishu-drive:
-      enabled: true
-    feishu-perm:
-      enabled: true
+  extra_dirs: []
+  entries: {}
 
 # 插件配置
 plugins:
