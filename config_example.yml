@@ -1,8 +1,8 @@
 # AgentOS 配置文件
 
 system:
-  workspace_dir: ~/.SenseAssistant/workspace
-  database_path: ~/.SenseAssistant/agentos.db
+  workspace_dir: ~/.agentos/workspace
+  database_path: ~/.agentos/db/agentos.db
   max_concurrent_sessions: 10
 
 # LLM 提供商配置
@@ -33,6 +33,10 @@ agent:
   default_temperature: 0.2
   max_turns_per_session: 50
   system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
+
+# 安全配置（Jupyter-lab 风格 token 认证）
+security:
+  auth_enabled: true  # 所有 API/WebSocket 需要 token（启动时终端打印）
 
 # 工具配置
 tools:

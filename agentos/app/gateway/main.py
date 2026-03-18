@@ -250,6 +250,7 @@ async def lifespan(app: FastAPI):
     app.state.config = config
     app.state.market_service = market_service
     logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled)")
+    logger.info("AgentOS backend started (dual-bus architecture, multi-agent enabled)")
 
     try:
         yield

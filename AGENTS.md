@@ -165,3 +165,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境下真实 `gemini` 进程内 e2e 仍不稳定：`serper_search` 返回 `403 Forbidden` 后，模型会回退到多次 `bash_command` 探测，最终超时，说明“真实 provider 回归”不能只看工具注册是否成功，还要验证外部 key 的真实性和可用性。
 - 新增的 `tests/e2e/test_live_search_tools.py` 只有在对应 `BRAVE_SEARCH_API_KEY`、`BAIDU_APPBUILDER_API_KEY`、`TAVILY_API_KEY` 配置后才会真正执行；无 key 场景下会全部 skip，不能误判为真实回归已完成。
+
+### 2026-03-18 合并冲突处理补充
+
+成功经验：
+- 面对 `UU/DU/UD` 混合冲突时，先用 `git status --short` + `rg '^(<<<<<<<|=======|>>>>>>>)'` 定位显式冲突，再用 `git show :2:path` / `:3:path` 对比“保留当前主路径”还是“保留对方文件但暂不接线”，效率最高。
+- 对当前正在使用的新 UI / 新后端入口，优先保留主分支实现；对旧 auth/login 文件，如果删除会放大风险，可以先保留文件但不强行接入主流程，再通过补一个最小 `AuthProvider` 包装保证 `next build` 可过。
+- `var/.gitignore` 这类位于被忽略目录中的已跟踪文件，在冲突解决后需要 `git add -f var/.gitignore` 才能真正标记为 resolved。
+
+失败/风险经验：
+- 仅“清掉冲突标记”还不够；保留下来的非主路径页面（如 `/login`）如果缺少 Provider 包装，会在 `next build` 的 prerender 阶段直接炸掉，因此冲突解决后必须至少做一次构建验证。
+- 这次合并保留了 token auth 相关文件，但当前主聊天页和主 WebSocket 链路仍未切到 token 流程；若后续真的开启 `security.auth_enabled`，还需要继续把当前新 UI 与 auth 流程完整接通。

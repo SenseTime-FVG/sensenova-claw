@@ -190,6 +190,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
     },
+    # 安全与认证配置（Jupyter-lab 风格 token）
+    "security": {
+        "auth_enabled": False,  # 启用后所有 API/WebSocket 需要 token 认证
+    },
     # v1.0: 多 Agent 配置
     "agents": {},
     "delegation": {

@@ -1,8 +1,8 @@
 'use client';
 
 import { ReactNode } from 'react';
-import { DashboardNav } from './DashboardNav';
 import { Search } from 'lucide-react';
+import { DashboardNav } from './DashboardNav';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
@@ -21,9 +21,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
             <span className="text-lg font-bold tracking-tight">AgentOS</span>
           </div>
-          
+
           <DashboardNav className="hidden md:flex mx-6" />
-          
+
           <div className="ml-auto flex items-center space-x-4">
             <div className="hidden lg:block">
               <div className="relative">

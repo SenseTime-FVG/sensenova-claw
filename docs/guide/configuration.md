@@ -34,10 +34,10 @@ agentos/
 ```yaml
 system:
   # 工作区目录，用于存放 Skills、Workflows 等运行时文件
-  workspace_dir: workspace
+  workspace_dir: ~/.agentos/workspace
 
   # SQLite 数据库路径
-  database_path: var/data/agentos.db
+  database_path: ~/.agentos/db/agentos.db
 
   # 日志级别: DEBUG / INFO / WARNING / ERROR
   log_level: DEBUG
@@ -50,8 +50,8 @@ system:
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `workspace_dir` | string | `workspace` | 工作区目录路径 |
-| `database_path` | string | `var/data/agentos.db` | SQLite 数据库文件路径 |
+| `workspace_dir` | string | `~/.agentos/workspace` | 工作区目录路径 |
+| `database_path` | string | `~/.agentos/db/agentos.db` | SQLite 数据库文件路径 |
 | `log_level` | string | `DEBUG` | 日志输出级别 |
 | `granted_paths` | list | `[]` | 授权访问的文件系统路径列表 |
 
@@ -364,8 +364,8 @@ SERPER_API_KEY: your-serper-api-key
 
 # --- 系统配置 ---
 system:
-  workspace_dir: workspace
-  database_path: var/data/agentos.db
+  workspace_dir: ~/.agentos/workspace
+  database_path: ~/.agentos/db/agentos.db
   log_level: DEBUG
   granted_paths:
     - /home/user/projects
