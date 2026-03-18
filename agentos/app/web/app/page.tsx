@@ -1,13 +1,16 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 export default function Page() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialQueryRef = useRef(searchParams.toString());
 
   useEffect(() => {
-    router.replace('/chat');
+    const query = initialQueryRef.current;
+    router.replace(query ? `/chat?${query}` : '/chat');
   }, [router]);
 
   return (

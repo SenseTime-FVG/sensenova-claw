@@ -77,6 +77,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // 1. 检查 URL 中的 ?token= 参数
       const params = new URLSearchParams(window.location.search);
       const urlToken = params.get('token');
+      const pathname = window.location.pathname;
+
+      // 根路径统一跳转到 /chat，让 /chat?token=... 成为唯一带 token 入口。
+      if (pathname === '/' && urlToken) {
+        const targetUrl = params.toString() ? `/chat?${params.toString()}` : '/chat';
+        window.location.replace(targetUrl);
+        return;
+      }
 
       if (urlToken) {
         const valid = await verifyToken(urlToken);
