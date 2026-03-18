@@ -98,9 +98,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   if (msg.role === 'tool' && msg.toolInfo) {
     const ti = msg.toolInfo;
     return (
-      <div className="flex gap-3 max-w-3xl mx-auto my-2">
+      <div className="flex gap-3 max-w-3xl mx-auto my-2 overflow-hidden">
         <div className="w-8 h-8 shrink-0" />
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
             <div className="bg-muted px-4 py-2 flex items-center justify-between text-xs border-b">
               <div className="flex items-center gap-2">
@@ -116,7 +116,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
                 <ChevronDown size={14} className={`transition-transform duration-200 ${showArgs ? 'rotate-180' : ''}`} /> Payload
               </button>
               {showArgs && (
-                <pre className="text-[11px] text-muted-foreground font-mono bg-muted/50 p-3 rounded-md overflow-auto border max-h-32">{formatArgs(ti.arguments)}</pre>
+                <pre className="text-[11px] text-muted-foreground font-mono bg-muted/50 p-3 rounded-md overflow-auto border max-h-32 whitespace-pre-wrap break-all">{formatArgs(ti.arguments)}</pre>
               )}
               {ti.status === 'completed' && (
                 <>
@@ -124,7 +124,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
                     <ChevronDown size={14} className={`transition-transform duration-200 ${showResult ? 'rotate-180' : ''}`} /> Output
                   </button>
                   {showResult && (
-                    <pre className="text-[11px] text-foreground font-mono bg-muted/50 p-3 rounded-md overflow-auto border max-h-40 whitespace-pre-wrap">
+                    <pre className="text-[11px] text-foreground font-mono bg-muted/50 p-3 rounded-md overflow-auto border max-h-40 whitespace-pre-wrap break-all">
                       {ti.error || formatArgs(ti.result)}
                     </pre>
                   )}
@@ -139,12 +139,12 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   // assistant
   return (
-    <div className="flex gap-4 max-w-4xl mx-auto my-8 group">
+    <div className="flex gap-4 max-w-4xl mx-auto my-8 group overflow-hidden">
       <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center shrink-0 shadow-lg mt-1 group-hover:scale-105 transition-transform">
         <Bot size={20} className="text-primary-foreground" />
       </div>
-      <div className="flex-1">
-        <div className="text-base md:text-lg text-foreground whitespace-pre-wrap leading-relaxed font-medium">{msg.content}</div>
+      <div className="flex-1 min-w-0">
+        <div className="text-base md:text-lg text-foreground whitespace-pre-wrap break-words leading-relaxed font-medium">{msg.content}</div>
       </div>
     </div>
   );
@@ -554,7 +554,7 @@ function ChatPageInner() {
         {/* Chat area */}
         <div className="flex-1 flex flex-col min-w-0 bg-background h-full">
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 md:p-8">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-5 text-muted-foreground max-w-md mx-auto text-center">
                 <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2 shadow-sm">
