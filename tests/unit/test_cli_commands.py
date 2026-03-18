@@ -59,6 +59,19 @@ class TestCommandDispatcher:
         await d.dispatch("/new helper")
         assert app.current_agent_id == "helper"
 
+    async def test_switch_top_level_alias(self):
+        app = MockCLIApp()
+        d = CommandDispatcher(app)
+        await d.dispatch("/switch s123")
+        assert app.current_session_id == "s123"
+
+    async def test_cancel_top_level_alias(self):
+        app = MockCLIApp()
+        app.current_session_id = "s1"
+        d = CommandDispatcher(app)
+        await d.dispatch("/cancel")
+        assert any(m.get("type") == "cancel_turn" for m in app._sent)
+
     # ── /session 命令 ──────────────────────────
 
     async def test_session_list(self):

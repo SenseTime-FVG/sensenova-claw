@@ -37,7 +37,7 @@ async def test_completed_turn_appends_summary_to_memory_file(tmp_path: Path) -> 
             timeout=10,
         )
 
-        memory_path = workspace / "memory.md"
+        memory_path = workspace / "MEMORY.md"
         for _ in range(20):
             if memory_path.exists():
                 break
