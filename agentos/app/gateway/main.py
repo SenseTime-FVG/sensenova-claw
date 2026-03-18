@@ -138,6 +138,7 @@ async def lifespan(app: FastAPI):
         tool_registry=tool_registry,
         agentos_home=agentos_home_str,
     )
+    llm_factory = LLMFactory()
 
     # v1.0: 初始化 AgentRegistry
     agent_config_dir = agentos_home / "agents"
@@ -167,6 +168,7 @@ async def lifespan(app: FastAPI):
             workspace_dir=agentos_home_str,
             config=mem_config,
             db_path=mem_db_path,
+            llm_factory=llm_factory,
         )
         await memory_manager.sync_index()
 
@@ -188,7 +190,7 @@ async def lifespan(app: FastAPI):
         agent_registry=agent_registry,
         memory_manager=memory_manager,
     )
-    llm_runtime = LLMRuntime(bus_router=bus_router, factory=LLMFactory())
+    llm_runtime = LLMRuntime(bus_router=bus_router, factory=llm_factory)
     tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry,
                                path_policy=path_policy,
                                agent_registry=agent_registry)

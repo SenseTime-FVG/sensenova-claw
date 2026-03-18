@@ -27,6 +27,7 @@ class TelegramChannel(Channel):
         plugin_api,
         runtime: TelegramRuntime | None = None,
     ):
+        super().__init__()
         self._config = config
         self._plugin_api = plugin_api
         self._runtime = runtime or TelegramRuntime(config)

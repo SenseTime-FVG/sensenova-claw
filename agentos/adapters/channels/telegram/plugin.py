@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from agentos.adapters.plugins.base import PluginApi, PluginDefinition
+
+logger = logging.getLogger(__name__)
 
 definition = PluginDefinition(
     id="telegram",
@@ -14,10 +18,14 @@ definition = PluginDefinition(
 
 async def register(api: PluginApi) -> None:
     """注册 Telegram Channel 和通用 MessageTool。"""
-    from agentos.capabilities.tools.message_tool import MessageTool
+    try:
+        from .channel import TelegramChannel
+        from .config import TelegramConfig
+    except ImportError:
+        logger.info("Telegram 插件跳过：缺少 python-telegram-bot 依赖（pip install python-telegram-bot）")
+        return
 
-    from .channel import TelegramChannel
-    from .config import TelegramConfig
+    from agentos.capabilities.tools.message_tool import MessageTool
 
     cfg = TelegramConfig.from_plugin_api(api)
     if not cfg.enabled:

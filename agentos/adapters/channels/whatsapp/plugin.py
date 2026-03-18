@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from agentos.adapters.plugins.base import PluginApi, PluginDefinition
+
+logger = logging.getLogger(__name__)
 
 definition = PluginDefinition(
     id="whatsapp",
@@ -14,10 +18,14 @@ definition = PluginDefinition(
 
 async def register(api: PluginApi) -> None:
     """注册 WhatsApp Channel 和通用 MessageTool。"""
-    from agentos.capabilities.tools.message_tool import MessageTool
+    try:
+        from .channel import WhatsAppChannel
+        from .config import WhatsAppConfig
+    except ImportError:
+        logger.info("WhatsApp 插件跳过：缺少依赖")
+        return
 
-    from .channel import WhatsAppChannel
-    from .config import WhatsAppConfig
+    from agentos.capabilities.tools.message_tool import MessageTool
 
     cfg = WhatsAppConfig.from_plugin_api(api)
     if not cfg.enabled:

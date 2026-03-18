@@ -30,6 +30,7 @@ class WecomChannel(Channel):
     """企业微信 Channel 第一版骨架。"""
 
     def __init__(self, config: WecomConfig, plugin_api, client: WecomToolClient | None = None):
+        super().__init__()
         self._config = config
         self._plugin_api = plugin_api
         self._client = client or WecomToolClient(

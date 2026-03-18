@@ -6,6 +6,8 @@ import asyncio
 
 import pytest
 
+telegram = pytest.importorskip("telegram", reason="python-telegram-bot not installed")
+
 from agentos.adapters.channels.telegram.channel import TelegramChannel
 from agentos.adapters.channels.telegram.config import TelegramConfig
 from agentos.adapters.channels.telegram.models import TelegramInboundMessage

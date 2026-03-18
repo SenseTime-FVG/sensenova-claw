@@ -29,6 +29,12 @@ dev = [
   "pytest>=8.3.0",
   "pytest-asyncio>=0.24.0",
 ]
+telegram = [
+  "python-telegram-bot>=21.0",
+]
+wecom = [
+  "wechatpy>=1.8.0",
+]
 
 [project.scripts]
 agentos = "agentos.app.main:main"

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+telegram = pytest.importorskip("telegram", reason="python-telegram-bot not installed")
+
 from unittest.mock import MagicMock
 
 from agentos.adapters.channels.telegram.config import TelegramConfig

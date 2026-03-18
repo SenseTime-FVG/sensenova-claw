@@ -23,9 +23,9 @@ logger = logging.getLogger(__name__)
 def _iter_builtin_plugin_modules() -> list[tuple[str, str]]:
     """收集内置插件模块名。
 
-    当前仓库的 channel 插件实现放在 `agentos.adapters.channels.<name>.plugin`，
-    历史上的通用插件目录是 `agentos.adapters.plugins.<name>.plugin`。
-    这里同时扫描两处，避免插件被遗漏。
+    同时扫描两处目录：
+    - agentos/adapters/plugins/<name>/plugin.py（通用插件）
+    - agentos/adapters/channels/<name>/plugin.py（Channel 插件）
     """
     modules: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -78,7 +78,7 @@ class PluginRegistry:
 
         from agentos.adapters.plugins.base import PluginApi
 
-        # 扫描内置插件目录
+        # 扫描内置插件目录（plugins/ + channels/）
         for name, module_name in _iter_builtin_plugin_modules():
             try:
                 module = importlib.import_module(module_name)

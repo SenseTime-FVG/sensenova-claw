@@ -56,6 +56,16 @@ def _normalize_search_item(
     return item
 
 
+def _resolve_with_workdir(raw_path: str, agent_workdir: str | None) -> Path:
+    """相对路径优先基于 agent workdir 解析，绝对路径直接返回。"""
+    p = Path(raw_path).expanduser()
+    if p.is_absolute():
+        return p.resolve()
+    if agent_workdir:
+        return (Path(agent_workdir) / p).resolve()
+    return p
+
+
 class BashCommandTool(Tool):
     name = "bash_command"
     description = "执行 shell 命令"
@@ -441,10 +451,14 @@ class ReadFileTool(Tool):
         from agentos.platform.security.path_policy import PathPolicy, PathVerdict
 
         policy: PathPolicy | None = kwargs.pop("_path_policy", None)
+        agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         raw_path = str(kwargs["file_path"])
 
+        # 相对路径优先基于 agent workdir 解析
+        resolved_path = _resolve_with_workdir(raw_path, agent_workdir)
+
         if policy:
-            verdict = policy.check_read(raw_path)
+            verdict = policy.check_read(str(resolved_path))
             if verdict == PathVerdict.DENY:
                 return {"success": False, "error": f"系统目录禁止读取: {raw_path}"}
             if verdict == PathVerdict.NEED_GRANT:
@@ -453,9 +467,9 @@ class ReadFileTool(Tool):
                     "error": f"该目录未授权，请先获得用户许可: {raw_path}",
                     "action": "need_grant", "path": raw_path,
                 }
-            file_path = policy.safe_resolve(raw_path)
+            file_path = resolved_path
         else:
-            file_path = Path(raw_path)
+            file_path = resolved_path
 
         if not file_path.exists():
             return {"success": False, "error": f"文件不存在: {file_path}"}
@@ -503,10 +517,14 @@ class WriteFileTool(Tool):
         from agentos.platform.security.path_policy import PathPolicy, PathVerdict
 
         policy: PathPolicy | None = kwargs.pop("_path_policy", None)
+        agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         raw_path = str(kwargs["file_path"])
 
+        # 相对路径优先基于 agent workdir 解析
+        resolved_path = _resolve_with_workdir(raw_path, agent_workdir)
+
         if policy:
-            verdict = policy.check_write(raw_path)
+            verdict = policy.check_write(str(resolved_path))
             if verdict == PathVerdict.DENY:
                 return {"success": False, "error": f"系统目录禁止写入: {raw_path}"}
             if verdict == PathVerdict.NEED_GRANT:
@@ -515,9 +533,9 @@ class WriteFileTool(Tool):
                     "error": f"该目录未授权，请先获得用户许可: {raw_path}",
                     "action": "need_grant", "path": raw_path,
                 }
-            file_path = policy.safe_resolve(raw_path)
+            file_path = resolved_path
         else:
-            file_path = Path(raw_path)
+            file_path = resolved_path
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         content = str(kwargs.get("content", ""))
