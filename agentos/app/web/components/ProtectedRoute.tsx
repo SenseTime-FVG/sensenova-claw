@@ -19,18 +19,25 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   // 加载中显示骨架屏
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">验证中...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-muted-foreground">验证中...</p>
         </div>
       </div>
     );
   }
 
-  // 未认证且不在登录页，不渲染内容（等待重定向）
+  // 未认证且不在登录页，显示加载（等待重定向到登录页）
   if (!isAuthenticated && pathname !== '/login') {
-    return null;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-muted-foreground">跳转中...</p>
+        </div>
+      </div>
+    );
   }
 
   return <>{children}</>;

@@ -346,31 +346,16 @@ llm:
 
   default_model: ${modelKey}
 
-agent:
-  model: ${modelKey}
-  temperature: 0.2
-  system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
-
 agents:
-  - default
+  default:
+    name: Default Agent
+    description: 默认 AI Agent
+    model: ${modelKey}
+    temperature: 0.2
+    system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
+    tools: []
+    skills: []
 "@ | Set-Content $configFile -Encoding UTF8
-
-    # 写入 default agent 配置
-    $agentConfigDir = "$AGENTOS_HOME\agents\default"
-    $agentConfigFile = "$agentConfigDir\config.yml"
-    New-Item -ItemType Directory -Force -Path $agentConfigDir | Out-Null
-    if (-not (Test-Path $agentConfigFile)) {
-        @"
-name: Default Agent
-description: 默认 AI Agent
-model: ${modelKey}
-temperature: 0.2
-system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
-tools: []
-skills: []
-"@ | Set-Content $agentConfigFile -Encoding UTF8
-        Log "Agent 配置已写入 $agentConfigFile"
-    }
 
     Log "配置已写入 $configFile"
 }
