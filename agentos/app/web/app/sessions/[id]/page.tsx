@@ -35,6 +35,9 @@ interface SessionInfo {
 
 interface PendingQuestion {
   questionId: string;
+  sourceSessionId: string;
+  sourceAgentId: string;
+  sourceAgentName: string;
   question: string;
   options: string[] | null;
   multiSelect: boolean;
@@ -190,6 +193,11 @@ export default function SessionDetailPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pendingQuestionRef = useRef<PendingQuestion | null>(null);
+
+  useEffect(() => {
+    pendingQuestionRef.current = pendingQuestion;
+  }, [pendingQuestion]);
 
   // WebSocket 连接
   useEffect(() => {
@@ -203,7 +211,13 @@ export default function SessionDetailPage() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        switch (data.type) {
+        const eventType = String(data.type || '');
+        const incomingSessionId = typeof data.session_id === 'string' ? data.session_id : null;
+        const isAskUserEvent = eventType === 'user_question_asked' || eventType === 'user_question_answered_event';
+        if (incomingSessionId && incomingSessionId !== sessionId && !isAskUserEvent) {
+          return;
+        }
+        switch (eventType) {
           case 'agent_thinking':
             setIsTyping(true);
             break;
@@ -254,7 +268,7 @@ export default function SessionDetailPage() {
           case 'error': {
             setMessages((prev) => [
               ...prev,
-              { role: 'assistant', content: `错误: ${data.payload?.message || '未知错误'}` },
+              { role: 'assistant', content: `错误: ${data.payload?.message || data.payload?.error_type || '未知错误'}` },
             ]);
             setPendingQuestion(null);
             setQuestionSubmitting(false);
@@ -262,7 +276,14 @@ export default function SessionDetailPage() {
             break;
           }
           case 'user_question_asked': {
-            if (pendingQuestion) {
+            const questionId = String(data.payload?.question_id || '');
+            if (!questionId) break;
+            const sourceSessionId = incomingSessionId || '';
+            if (!sourceSessionId) break;
+            const sourceAgentId = String(data.payload?.source_agent_id || 'default').trim() || 'default';
+            const sourceAgentName = String(data.payload?.source_agent_name || sourceAgentId).trim() || sourceAgentId;
+
+            if (pendingQuestionRef.current) {
               setMessages((prev) => [
                 ...prev,
                 { role: 'assistant', content: '检测到新的问题请求，但当前已有待回答问题。' },
@@ -270,7 +291,10 @@ export default function SessionDetailPage() {
               break;
             }
             setPendingQuestion({
-              questionId: String(data.payload?.question_id || ''),
+              questionId,
+              sourceSessionId,
+              sourceAgentId,
+              sourceAgentName,
               question: String(data.payload?.question || ''),
               options: Array.isArray(data.payload?.options) ? data.payload.options.map(String) : null,
               multiSelect: Boolean(data.payload?.multi_select),
@@ -280,12 +304,21 @@ export default function SessionDetailPage() {
             setIsTyping(true);
             break;
           }
+          case 'user_question_answered_event': {
+            const questionId = String(data.payload?.question_id || '');
+            if (!questionId) break;
+            if (pendingQuestionRef.current?.questionId === questionId) {
+              setPendingQuestion(null);
+              setQuestionSubmitting(false);
+            }
+            break;
+          }
         }
       } catch { /* ignore */ }
     };
 
     return () => { ws.close(); };
-  }, [pendingQuestion]);
+  }, [sessionId]);
 
   // 加载历史消息
   useEffect(() => {
@@ -339,11 +372,12 @@ export default function SessionDetailPage() {
   const sendQuestionAnswer = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     if (!pendingQuestion) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!pendingQuestion.sourceSessionId) return;
 
     setQuestionSubmitting(true);
     wsRef.current.send(JSON.stringify({
       type: 'user_question_answered',
-      session_id: sessionId,
+      session_id: pendingQuestion.sourceSessionId,
       payload: {
         question_id: pendingQuestion.questionId,
         answer,
@@ -353,7 +387,7 @@ export default function SessionDetailPage() {
     }));
     setPendingQuestion(null);
     setQuestionSubmitting(false);
-  }, [pendingQuestion, sessionId]);
+  }, [pendingQuestion]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -483,6 +517,9 @@ export default function SessionDetailPage() {
       <QuestionDialog
         open={!!pendingQuestion}
         questionId={pendingQuestion?.questionId || ''}
+        sourceSessionId={pendingQuestion?.sourceSessionId || ''}
+        sourceAgentId={pendingQuestion?.sourceAgentId || 'default'}
+        sourceAgentName={pendingQuestion?.sourceAgentName || (pendingQuestion?.sourceAgentId || 'default')}
         question={pendingQuestion?.question || ''}
         options={pendingQuestion?.options || null}
         multiSelect={pendingQuestion?.multiSelect || false}

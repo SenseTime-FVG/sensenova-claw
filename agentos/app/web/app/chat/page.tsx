@@ -36,6 +36,9 @@ interface SessionItem {
 
 interface PendingQuestion {
   questionId: string;
+  sourceSessionId: string;
+  sourceAgentId: string;
+  sourceAgentName: string;
   question: string;
   options: string[] | null;
   multiSelect: boolean;
@@ -264,7 +267,7 @@ function ChatPageInner() {
   const [inputValue, setInputValue] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
-  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
+  const [activeQuestion, setActiveQuestion] = useState<PendingQuestion | null>(null);
   const [questionSubmitting, setQuestionSubmitting] = useState(false);
 
   const [selectedAgent, setSelectedAgent] = useState(initialAgent);
@@ -274,6 +277,8 @@ function ChatPageInner() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
   const pendingInputRef = useRef<string | null>(null);
+  const questionQueueRef = useRef<PendingQuestion[]>([]);
+  const activeQuestionRef = useRef<PendingQuestion | null>(null);
 
   const handleSelectAgent = (id: string) => {
     setSelectedAgent(id);
@@ -296,11 +301,57 @@ function ChatPageInner() {
     inputValue, setInputValue, handleSkillInvoke,
   );
 
+  const enqueueQuestion = (question: PendingQuestion) => {
+    const active = activeQuestionRef.current;
+    const queue = questionQueueRef.current;
+    const exists = (active && active.questionId === question.questionId)
+      || queue.some((item) => item.questionId === question.questionId);
+    if (exists) return;
+
+    if (!active) {
+      activeQuestionRef.current = question;
+      setActiveQuestion(question);
+      return;
+    }
+
+    questionQueueRef.current = [...queue, question];
+  };
+
+  const resolveQuestion = (questionId: string) => {
+    const active = activeQuestionRef.current;
+    const queue = questionQueueRef.current;
+
+    if (active && active.questionId === questionId) {
+      if (queue.length > 0) {
+        const [next, ...rest] = queue;
+        questionQueueRef.current = rest;
+        activeQuestionRef.current = next;
+        setActiveQuestion(next);
+      } else {
+        activeQuestionRef.current = null;
+        setActiveQuestion(null);
+      }
+      setQuestionSubmitting(false);
+      return;
+    }
+
+    const filtered = queue.filter((item) => item.questionId !== questionId);
+    if (filtered.length !== queue.length) {
+      questionQueueRef.current = filtered;
+    }
+  };
+
   // ── WebSocket ──
 
   const handleWsMessage = (data: Record<string, unknown>) => {
     const payload = (data.payload || {}) as Record<string, unknown>;
-    switch (data.type) {
+    const eventType = String(data.type || '');
+    const incomingSessionId = typeof data.session_id === 'string' ? data.session_id : null;
+    const isGlobalAskUserEvent = eventType === 'user_question_asked' || eventType === 'user_question_answered_event';
+    if (incomingSessionId && sessionId && incomingSessionId !== sessionId && !isGlobalAskUserEvent) {
+      return;
+    }
+    switch (eventType) {
       case 'session_created': {
         const newSid = data.session_id as string;
         setSessionId(newSid);
@@ -343,8 +394,6 @@ function ChatPageInner() {
       case 'turn_completed': {
         const final = String(payload.final_response || '');
         if (final) addMsg('assistant', final);
-        setPendingQuestion(null);
-        setQuestionSubmitting(false);
         setIsTyping(false);
         break;
       }
@@ -358,9 +407,7 @@ function ChatPageInner() {
         break;
       }
       case 'error':
-        addMsg('system', `Error: ${payload.message || 'Unknown Error'}`);
-        setPendingQuestion(null);
-        setQuestionSubmitting(false);
+        addMsg('system', `Error: ${payload.message || payload.error_type || 'Unknown Error'}`);
         setIsTyping(false);
         break;
       case 'notification': {
@@ -369,12 +416,21 @@ function ChatPageInner() {
         break;
       }
       case 'user_question_asked': {
-        if (pendingQuestion) {
-          addMsg('system', 'A pending question already exists, ignore the new one.');
+        const questionId = String(payload.question_id || '');
+        if (!questionId) {
           break;
         }
-        setPendingQuestion({
-          questionId: String(payload.question_id || ''),
+        const sourceSessionId = incomingSessionId || '';
+        if (!sourceSessionId) {
+          break;
+        }
+        const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
+        const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
+        enqueueQuestion({
+          questionId,
+          sourceSessionId,
+          sourceAgentId,
+          sourceAgentName,
           question: String(payload.question || ''),
           options: Array.isArray(payload.options) ? payload.options.map(String) : null,
           multiSelect: Boolean(payload.multi_select),
@@ -382,6 +438,12 @@ function ChatPageInner() {
           createdAt: Date.now(),
         });
         setIsTyping(true);
+        break;
+      }
+      case 'user_question_answered_event': {
+        const questionId = String(payload.question_id || '');
+        if (!questionId) break;
+        resolveQuestion(questionId);
         break;
       }
     }
@@ -431,23 +493,23 @@ function ChatPageInner() {
   }
 
   const sendQuestionAnswer = (answer: string | string[] | null, cancelled: boolean) => {
-    if (!pendingQuestion) return;
-    if (!sessionId) {
-      addMsg('system', 'Current session not found, cannot submit answer.');
+    if (!activeQuestion) return;
+    if (!activeQuestion.sourceSessionId) {
+      addMsg('system', 'Question source session not found, cannot submit answer.');
       return;
     }
     setQuestionSubmitting(true);
     wsSend({
       type: 'user_question_answered',
-      session_id: sessionId,
+      session_id: activeQuestion.sourceSessionId,
       payload: {
-        question_id: pendingQuestion.questionId,
+        question_id: activeQuestion.questionId,
         answer,
         cancelled,
       },
       timestamp: Date.now() / 1000,
     });
-    setPendingQuestion(null);
+    resolveQuestion(activeQuestion.questionId);
   };
 
   // ── Sessions ──
@@ -468,8 +530,6 @@ function ChatPageInner() {
     setSessionId(sid);
     setMessages([]);
     setIsTyping(false);
-    setPendingQuestion(null);
-    setQuestionSubmitting(false);
     toolCallMapRef.current.clear();
     try {
       const res = await authFetch(`${API_BASE}/api/sessions/${sid}/events`);
@@ -509,8 +569,6 @@ function ChatPageInner() {
     setSessionId(null);
     setMessages([]);
     setIsTyping(false);
-    setPendingQuestion(null);
-    setQuestionSubmitting(false);
     toolCallMapRef.current.clear();
     pendingInputRef.current = null;
   };
@@ -519,7 +577,7 @@ function ChatPageInner() {
 
   const sendMessage = () => {
     const content = inputValue.trim();
-    if (!content || !wsConnected || pendingQuestion || questionSubmitting) return;
+    if (!content || !wsConnected || activeQuestion || questionSubmitting) return;
 
     // 斜杠命令拦截
     if (handleSlashSubmit(content)) {
@@ -665,7 +723,7 @@ function ChatPageInner() {
                         ? 'Message AgentOS... (Enter to send, Shift+Enter for new line)'
                         : 'Waiting for connection...'
                     }
-                    disabled={!wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
+                    disabled={!wsConnected || isTyping || !!activeQuestion || questionSubmitting}
                     rows={1}
                     className="w-full bg-transparent border-none px-5 py-4 text-lg text-foreground placeholder-muted-foreground/50 focus:outline-none focus:ring-0 resize-none disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
                     style={{ minHeight: '56px', maxHeight: '300px' }}
@@ -673,7 +731,7 @@ function ChatPageInner() {
                 </div>
                 <button
                   onClick={sendMessage}
-                  disabled={!inputValue.trim() || !wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
+                  disabled={!inputValue.trim() || !wsConnected || isTyping || !!activeQuestion || questionSubmitting}
                   className="w-14 h-14 mb-1 mr-1 rounded-2xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
                 >
                   <Send size={24} className="ml-1" />
@@ -687,13 +745,16 @@ function ChatPageInner() {
         </div>
       </div>
       <QuestionDialog
-        open={!!pendingQuestion}
-        questionId={pendingQuestion?.questionId || ''}
-        question={pendingQuestion?.question || ''}
-        options={pendingQuestion?.options || null}
-        multiSelect={pendingQuestion?.multiSelect || false}
-        timeout={pendingQuestion?.timeout || 300}
-        createdAt={pendingQuestion?.createdAt || Date.now()}
+        open={!!activeQuestion}
+        questionId={activeQuestion?.questionId || ''}
+        sourceSessionId={activeQuestion?.sourceSessionId || ''}
+        sourceAgentId={activeQuestion?.sourceAgentId || 'default'}
+        sourceAgentName={activeQuestion?.sourceAgentName || (activeQuestion?.sourceAgentId || 'default')}
+        question={activeQuestion?.question || ''}
+        options={activeQuestion?.options || null}
+        multiSelect={activeQuestion?.multiSelect || false}
+        timeout={activeQuestion?.timeout || 300}
+        createdAt={activeQuestion?.createdAt || Date.now()}
         submitting={questionSubmitting}
         wsConnected={wsConnected}
         onSubmit={(answer) => sendQuestionAnswer(answer, false)}

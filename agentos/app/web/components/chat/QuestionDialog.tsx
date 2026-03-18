@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 
 export interface QuestionDialogProps {
   open: boolean;
   questionId: string;
+  sourceSessionId: string;
+  sourceAgentId: string;
+  sourceAgentName: string;
   question: string;
   options: string[] | null;
   multiSelect: boolean;
@@ -19,6 +22,9 @@ export interface QuestionDialogProps {
 export function QuestionDialog({
   open,
   questionId,
+  sourceSessionId,
+  sourceAgentId,
+  sourceAgentName,
   question,
   options,
   multiSelect,
@@ -67,6 +73,7 @@ export function QuestionDialog({
   }, [customInput, options, multiChoices, multiSelect, singleChoice]);
 
   const confirmDisabled = !normalizedAnswer || submitting || !wsConnected || remainingSeconds <= 0;
+  const displaySourceAgent = String(sourceAgentName || sourceAgentId || 'default').trim() || 'default';
 
   const toggleMultiChoice = (opt: string) => {
     setMultiChoices((prev) => {
@@ -75,6 +82,18 @@ export function QuestionDialog({
       }
       return [...prev, opt];
     });
+  };
+
+  const submitAnswer = () => {
+    if (!normalizedAnswer || confirmDisabled) return;
+    onSubmit(normalizedAnswer);
+  };
+
+  const handleCustomInputKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Enter') return;
+    if (e.shiftKey) return;
+    e.preventDefault();
+    submitAnswer();
   };
 
   if (!open) return null;
@@ -93,6 +112,18 @@ export function QuestionDialog({
         </div>
 
         <div className="p-4 space-y-4">
+          <div className="text-xs text-[#9cdcfe]">
+            来源 Agent:
+            {' '}
+            <span data-testid="ask-user-source-agent" className="font-mono">{displaySourceAgent}</span>
+          </div>
+          {sourceSessionId && (
+            <div className="text-xs text-[#9cdcfe]">
+              来源会话:
+              {' '}
+              <span data-testid="ask-user-source-session" className="font-mono">{sourceSessionId}</span>
+            </div>
+          )}
           <p className="text-sm text-[#cccccc] whitespace-pre-wrap">{question}</p>
 
           {options && options.length > 0 && (
@@ -141,8 +172,10 @@ export function QuestionDialog({
               placeholder="输入你的补充说明..."
               className="w-full bg-[#252526] border border-[#3c3c3c] rounded-lg px-3 py-2 text-sm text-[#cccccc] placeholder-[#858585] focus:outline-none focus:border-[#0e639c] resize-none"
               rows={3}
+              onKeyDown={handleCustomInputKeyDown}
               disabled={submitting || !wsConnected || remainingSeconds <= 0}
             />
+            <div className="text-xs text-[#858585]">提示：Enter 确认，Shift+Enter 换行</div>
           </div>
 
           {!wsConnected && (
@@ -161,7 +194,7 @@ export function QuestionDialog({
           </button>
           <button
             data-testid="ask-user-confirm"
-            onClick={() => normalizedAnswer && onSubmit(normalizedAnswer)}
+            onClick={submitAnswer}
             disabled={confirmDisabled}
             className="px-3 py-1.5 text-sm rounded bg-[#0e639c] text-white hover:bg-[#1177bb] disabled:opacity-50 disabled:cursor-not-allowed"
           >

@@ -341,6 +341,7 @@ class AgentSessionWorker(SessionWorker):
                             "tool_name": call["name"],
                             "arguments": call.get("arguments", {}),
                             "_agent_workdir": agent_workdir,
+                            "_source_agent_id": self.agent_config.id if self.agent_config else "default",
                         },
                     )
                 )

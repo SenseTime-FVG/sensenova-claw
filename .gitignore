@@ -78,3 +78,4 @@ config.yml
 *.tmp
 *.bak
 *.orig
+pytest_tmp/

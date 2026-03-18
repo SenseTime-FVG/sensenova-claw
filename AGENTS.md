@@ -176,3 +176,38 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境下真实 `gemini` 进程内 e2e 仍不稳定：`serper_search` 返回 `403 Forbidden` 后，模型会回退到多次 `bash_command` 探测，最终超时，说明“真实 provider 回归”不能只看工具注册是否成功，还要验证外部 key 的真实性和可用性。
 - 新增的 `tests/e2e/test_live_search_tools.py` 只有在对应 `BRAVE_SEARCH_API_KEY`、`BAIDU_APPBUILDER_API_KEY`、`TAVILY_API_KEY` 配置后才会真正执行；无 key 场景下会全部 skip，不能误判为真实回归已完成。
+
+### 2026-03-18 ask_user 超时稳态修复补充
+
+成功经验：
+- `ask_user` 需要区分“工具外层超时”和“ask_user 内层等待超时”：仅在 `ToolSessionWorker` 中把 `ask_user` 默认超时提升到 `300s`，才能避免用户输入过程中被 15 秒通用超时提前打断。
+- `TimeoutError` 常见空字符串，错误链路统一采用 `str(exc).strip() or type(exc).__name__` 后，前端错误提示可稳定显示为 `TimeoutError`，不再退回 `Unknown Error`。
+- 在 `chat/session` 两个页面都加 `session_id` 过滤，可以避免其他会话的 `turn_completed/error` 事件误关闭当前 `ask_user` 弹窗。
+
+失败/风险经验：
+- 前端 Playwright 在当前环境仍受系统库限制（缺 `libnspr4.so`），即使越权运行也无法启动 Chromium；`npx playwright install --with-deps chromium` 需要 sudo 密码，未授权时无法完成浏览器级回归。
+- `tests/e2e/run_e2e.py` 的 `setup_services(provider=\"mock\")` 仍存在被本地 `config.yml` 实际 provider 覆盖的风险；ask_user 进程内 e2e 需在用例中显式固定 `agent.model`/`llm.default_model` 为 `mock` 才稳定。
+
+### 2026-03-18 chat 跨窗口 ask_user 修复补充
+
+成功经验：
+- `WebSocketChannel.send_event` 对 `USER_QUESTION_ASKED/USER_QUESTION_ANSWERED` 做连接级广播后，前端无需先切换会话也能收到跨 session 的 `ask_user` 事件。
+- 为 `USER_QUESTION_ANSWERED` 增加下行映射事件（`user_question_answered_event`）后，多窗口可用 `question_id` 做状态收敛，避免“一个窗口已回答、另一个窗口仍挂弹窗”。
+- `user_input` 在携带已有 `session_id` 时补做 `gateway.bind_session + channel.bind_session`，能稳定修复“旧会话发消息后收不到后续事件”的问题；对应 `tests/unit/test_gateway_ws_endpoint_ask_user.py` 可直接回归。
+
+失败/风险经验：
+- 当前环境 `next build` 仅返回泛化的 “Build failed because of webpack errors”，无具体堆栈；前端编译问题排查应优先结合本地 IDE/CI 日志而非仅依赖该环境终端输出。
+- Playwright 仍受系统库缺失影响（`libnspr4.so`），即使越权执行测试命令也无法启动 Chromium，浏览器级 e2e 结果不能在本机作为通过依据。
+- `tests/e2e/test_gateway_integration.py` 在默认 `AGENTOS_HOME` 下会写到只读路径（`/home/languilin/.agentos/logs`）导致失败；需要显式设置可写 `AGENTOS_HOME` 后再跑。
+
+### 2026-03-18 子会话继承 channel 绑定补充
+
+成功经验：
+- 在 `Gateway._dispatch_event` 中做“按 `parent_session_id` 递归查找已绑定祖先 + 命中后缓存绑定”，可以最小改动修复 `send_message` 子会话事件无法路由到前端的问题，且不会影响已绑定会话的常规路径。
+- `/sessions/[id]` 页面处理 ask_user 时，必须保存 `sourceSessionId` 并在 `user_question_answered` 回传时使用来源 session；否则跨会话提问场景会持续超时。
+- WebSocket 监听 effect 去除 `pendingQuestion` 依赖后，避免了问答状态变更导致的重复重连和潜在丢事件。
+
+失败/风险经验：
+- 当前环境缺少 `pytest` 运行时（`python3 -m pytest` 报 `No module named pytest`），后端新增测试只能先做静态校验，需在完整依赖环境复跑。
+- 当前环境执行 Playwright 仍缺浏览器二进制（`chrome-headless-shell` 不存在），即使越权可启动流程也无法完成浏览器级断言。
+- `next build` 在本机会停在 `Linting and checking validity of types ...` 且无进一步堆栈，需在 CI 或本地完整 Node 环境结合日志排查。

@@ -185,6 +185,49 @@ class Gateway:
         async for event in self.publisher.bus.subscribe():
             await self._dispatch_event(event)
 
+    async def _resolve_channel_by_parent_chain(
+        self,
+        session_id: str,
+    ) -> tuple[str | None, str | None, list[str], bool]:
+        """按 parent_session_id 向上查找可继承的 channel，并缓存绑定。"""
+        if not self.repo or not hasattr(self.repo, "get_session_meta"):
+            return None, None, [session_id], False
+
+        visited: set[str] = set()
+        chain: list[str] = [session_id]
+        current = session_id
+        immediate_parent: str | None = None
+        inherited_channel: str | None = None
+        cache_hit = False
+
+        while current and current not in visited:
+            visited.add(current)
+            try:
+                meta = await self.repo.get_session_meta(current)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("resolve parent chain failed session=%s error=%s", current, exc)
+                break
+            if not isinstance(meta, dict):
+                break
+
+            parent_session_id = str(meta.get("parent_session_id", "")).strip()
+            if current == session_id:
+                immediate_parent = parent_session_id or None
+            if not parent_session_id:
+                break
+
+            chain.append(parent_session_id)
+            inherited_channel = self._session_bindings.get(parent_session_id)
+            if inherited_channel:
+                for sid in chain[:-1]:
+                    if self._session_bindings.get(sid) != inherited_channel:
+                        self.bind_session(sid, inherited_channel)
+                        cache_hit = True
+                break
+            current = parent_session_id
+
+        return inherited_channel, immediate_parent, chain, cache_hit
+
     async def _dispatch_event(self, event: EventEnvelope) -> None:
         """将事件分发到对应的 Channel（支持事件过滤）"""
         if not event.session_id:
@@ -192,7 +235,22 @@ class Gateway:
 
         channel_id = self._session_bindings.get(event.session_id)
         if not channel_id:
-            return
+            (
+                channel_id,
+                immediate_parent,
+                parent_chain,
+                cache_hit,
+            ) = await self._resolve_channel_by_parent_chain(event.session_id)
+            logger.debug(
+                "gateway route resolve session=%s parent_session_id=%s chain=%s channel=%s cache_hit=%s",
+                event.session_id,
+                immediate_parent,
+                " -> ".join(parent_chain),
+                channel_id or "none",
+                cache_hit,
+            )
+            if not channel_id:
+                return
 
         channel = self._channels.get(channel_id)
         if not channel:
