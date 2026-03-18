@@ -46,6 +46,7 @@ class FeishuChannel(Channel):
     """
 
     def __init__(self, config: FeishuConfig, plugin_api: PluginApi):
+        super().__init__()
         self._config = config
         self._plugin_api = plugin_api
         self._client: lark.Client | None = None

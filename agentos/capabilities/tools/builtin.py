@@ -12,6 +12,50 @@ from agentos.platform.config.config import config
 from agentos.capabilities.tools.base import Tool, ToolRiskLevel
 
 
+def _empty_search_response(provider: str, query: str, note: str) -> dict[str, Any]:
+    return {
+        "provider": provider,
+        "query": query,
+        "items": [],
+        "note": note,
+    }
+
+
+def _clamp_search_limit(raw: Any, *, default: int, upper: int = 20) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(value, upper))
+
+
+def _merge_snippets(primary: Any, extra_snippets: Any = None) -> str | None:
+    parts: list[str] = []
+    if primary:
+        parts.append(str(primary))
+    if isinstance(extra_snippets, list):
+        parts.extend(str(item) for item in extra_snippets if item)
+    return "\n".join(parts) if parts else None
+
+
+def _normalize_search_item(
+    *,
+    title: Any,
+    link: Any,
+    snippet: Any,
+    **extra: Any,
+) -> dict[str, Any]:
+    item = {
+        "title": title,
+        "link": link,
+        "snippet": snippet,
+    }
+    for key, value in extra.items():
+        if value not in (None, "", [], {}):
+            item[key] = value
+    return item
+
+
 class BashCommandTool(Tool):
     name = "bash_command"
     description = "执行 shell 命令"
@@ -29,7 +73,6 @@ class BashCommandTool(Tool):
         from agentos.platform.security.path_policy import PathPolicy, PathVerdict
 
         policy: PathPolicy | None = kwargs.pop("_path_policy", None)
-        agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         command = str(kwargs.get("command", ""))
         cwd_raw = kwargs.get("working_dir")
 
@@ -46,10 +89,9 @@ class BashCommandTool(Tool):
                     }
                 cwd = str(policy.safe_resolve(cwd_raw))
             else:
-                # 优先使用 per-agent workdir，否则回退到全局 workspace
-                cwd = agent_workdir or str(policy.workspace)
+                cwd = str(policy.workspace)    # 默认在 workspace 执行
         else:
-            cwd = cwd_raw or agent_workdir or "."
+            cwd = cwd_raw or "."
 
         def _run() -> dict[str, Any]:
             proc = subprocess.run(
@@ -86,9 +128,13 @@ class SerperSearchTool(Tool):
         q = str(kwargs.get("q", ""))
         page = int(kwargs.get("page", 1))
         tbs = kwargs.get("tbs")
+        limit = _clamp_search_limit(
+            kwargs.get("max_results", config.get("tools.serper_search.max_results", 10)),
+            default=int(config.get("tools.serper_search.max_results", 10)),
+        )
 
         if not api_key:
-            return {"items": [], "note": "SERPER_API_KEY 未配置，返回空结果"}
+            return _empty_search_response("serper", q, "SERPER_API_KEY 未配置，返回空结果")
 
         payload: dict[str, Any] = {"q": q, "gl": "cn", "hl": "zh-cn", "page": page}
         if tbs:
@@ -100,18 +146,254 @@ class SerperSearchTool(Tool):
             resp.raise_for_status()
             data = resp.json()
 
-        organic = data.get("organic", [])[: config.get("tools.serper_search.max_results", 10)]
+        organic = data.get("organic", [])[:limit]
         return {
+            "provider": "serper",
             "query": q,
+            "page": page,
             "items": [
-                {
-                    "title": item.get("title"),
-                    "link": item.get("link"),
-                    "snippet": item.get("snippet"),
-                }
+                _normalize_search_item(
+                    title=item.get("title"),
+                    link=item.get("link"),
+                    snippet=item.get("snippet"),
+                )
                 for item in organic
             ],
         }
+
+
+class BraveSearchTool(Tool):
+    name = "brave_search"
+    description = "使用 Brave Search API 搜索网络信息"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "q": {"type": "string", "description": "搜索关键词"},
+            "page": {"type": "integer", "description": "页码，默认1"},
+            "count": {"type": "integer", "description": "返回结果数，默认使用配置"},
+            "freshness": {"type": "string", "description": "时间过滤，如 pd/pw/pm/py"},
+            "country": {"type": "string", "description": "国家代码，如 US/CN"},
+            "search_lang": {"type": "string", "description": "搜索语言，如 en/zh-hans"},
+            "ui_lang": {"type": "string", "description": "界面语言，如 en-US/zh-CN"},
+            "extra_snippets": {"type": "boolean", "description": "是否返回额外摘要"},
+        },
+        "required": ["q"],
+    }
+
+    async def execute(self, **kwargs: Any) -> Any:
+        api_key = config.get("tools.brave_search.api_key", "")
+        q = str(kwargs.get("q", ""))
+        page = _clamp_search_limit(kwargs.get("page", 1), default=1, upper=10)
+        count = _clamp_search_limit(
+            kwargs.get("count", config.get("tools.brave_search.max_results", 10)),
+            default=int(config.get("tools.brave_search.max_results", 10)),
+        )
+
+        if not api_key:
+            return _empty_search_response("brave", q, "BRAVE_SEARCH_API_KEY 未配置，返回空结果")
+
+        params: dict[str, Any] = {
+            "q": q,
+            "count": count,
+            "offset": page - 1,
+            "country": kwargs.get("country") or config.get("tools.brave_search.country", "US"),
+            "search_lang": kwargs.get("search_lang") or config.get("tools.brave_search.search_lang", "en"),
+            "ui_lang": kwargs.get("ui_lang") or config.get("tools.brave_search.ui_lang", "en-US"),
+        }
+        freshness = kwargs.get("freshness")
+        if freshness:
+            params["freshness"] = str(freshness)
+
+        if bool(kwargs.get("extra_snippets", config.get("tools.brave_search.extra_snippets", False))):
+            params["extra_snippets"] = "true"
+
+        headers = {
+            "X-Subscription-Token": api_key,
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=config.get("tools.brave_search.timeout", 15)) as client:
+            resp = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                headers=headers,
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        query_meta = data.get("query", {})
+        results = data.get("web", {}).get("results", [])[:count]
+        return {
+            "provider": "brave",
+            "query": query_meta.get("original", q),
+            "page": page,
+            "more_results_available": bool(query_meta.get("more_results_available", False)),
+            "items": [
+                _normalize_search_item(
+                    title=item.get("title"),
+                    link=item.get("url"),
+                    snippet=_merge_snippets(item.get("description"), item.get("extra_snippets")),
+                    language=item.get("language"),
+                    age=item.get("age"),
+                )
+                for item in results
+            ],
+        }
+
+
+class BaiduSearchTool(Tool):
+    name = "baidu_search"
+    description = "使用百度 AppBuilder AI Search 搜索网页信息"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "q": {"type": "string", "description": "搜索关键词"},
+            "max_results": {"type": "integer", "description": "返回结果数，默认使用配置"},
+            "search_source": {"type": "string", "description": "搜索源，默认 baidu_search_v2"},
+            "search_recency_filter": {"type": "string", "description": "时间过滤，如 day/week/month/year"},
+        },
+        "required": ["q"],
+    }
+
+    async def execute(self, **kwargs: Any) -> Any:
+        api_key = config.get("tools.baidu_search.api_key", "")
+        q = str(kwargs.get("q", ""))
+        limit = _clamp_search_limit(
+            kwargs.get("max_results", config.get("tools.baidu_search.max_results", 10)),
+            default=int(config.get("tools.baidu_search.max_results", 10)),
+            upper=50,
+        )
+
+        if not api_key:
+            return _empty_search_response("baidu", q, "BAIDU_APPBUILDER_API_KEY 未配置，返回空结果")
+
+        payload: dict[str, Any] = {
+            "messages": [{"role": "user", "content": q}],
+            "search_source": kwargs.get("search_source") or config.get("tools.baidu_search.search_source", "baidu_search_v2"),
+            "resource_type_filter": [{"type": "web", "top_k": limit}],
+        }
+        search_recency_filter = kwargs.get("search_recency_filter") or config.get(
+            "tools.baidu_search.search_recency_filter",
+            "",
+        )
+        if search_recency_filter:
+            payload["search_recency_filter"] = str(search_recency_filter)
+
+        headers = {
+            "X-Appbuilder-Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=config.get("tools.baidu_search.timeout", 15)) as client:
+            resp = await client.post(
+                "https://qianfan.baidubce.com/v2/ai_search/web_search",
+                headers=headers,
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        if data.get("code"):
+            return {
+                "provider": "baidu",
+                "query": q,
+                "items": [],
+                "request_id": data.get("request_id"),
+                "error_code": data.get("code"),
+                "error": data.get("message", "百度搜索请求失败"),
+            }
+
+        references = data.get("references", [])
+        web_results = [item for item in references if item.get("type") in (None, "web")]
+        return {
+            "provider": "baidu",
+            "query": q,
+            "request_id": data.get("request_id"),
+            "items": [
+                _normalize_search_item(
+                    title=item.get("title"),
+                    link=item.get("url"),
+                    snippet=item.get("content"),
+                    date=item.get("date"),
+                    website=item.get("website"),
+                    authority_score=item.get("authority_score"),
+                    rerank_score=item.get("rerank_score"),
+                )
+                for item in web_results[:limit]
+            ],
+        }
+
+
+class TavilySearchTool(Tool):
+    name = "tavily_search"
+    description = "使用 Tavily Search API 搜索网络信息"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "q": {"type": "string", "description": "搜索关键词"},
+            "search_depth": {"type": "string", "description": "搜索深度，如 basic/advanced/fast/ultra-fast"},
+            "topic": {"type": "string", "description": "主题，如 general/news/finance"},
+            "time_range": {"type": "string", "description": "时间范围，如 day/week/month/year"},
+            "max_results": {"type": "integer", "description": "返回结果数，默认使用配置"},
+        },
+        "required": ["q"],
+    }
+
+    async def execute(self, **kwargs: Any) -> Any:
+        api_key = config.get("tools.tavily_search.api_key", "")
+        q = str(kwargs.get("q", ""))
+        limit = _clamp_search_limit(
+            kwargs.get("max_results", config.get("tools.tavily_search.max_results", 5)),
+            default=int(config.get("tools.tavily_search.max_results", 5)),
+        )
+
+        if not api_key:
+            return _empty_search_response("tavily", q, "TAVILY_API_KEY 未配置，返回空结果")
+
+        payload: dict[str, Any] = {
+            "query": q,
+            "search_depth": kwargs.get("search_depth") or config.get("tools.tavily_search.search_depth", "basic"),
+            "topic": kwargs.get("topic") or config.get("tools.tavily_search.topic", "general"),
+            "max_results": limit,
+        }
+        time_range = kwargs.get("time_range") or config.get("tools.tavily_search.time_range", "")
+        if time_range:
+            payload["time_range"] = str(time_range)
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        project_id = config.get("tools.tavily_search.project_id", "")
+        if project_id:
+            headers["X-Project-ID"] = project_id
+
+        async with httpx.AsyncClient(timeout=config.get("tools.tavily_search.timeout", 15)) as client:
+            resp = await client.post(
+                "https://api.tavily.com/search",
+                headers=headers,
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        result: dict[str, Any] = {
+            "provider": "tavily",
+            "query": data.get("query", q),
+            "response_time": data.get("response_time"),
+            "request_id": data.get("request_id"),
+            "items": [
+                _normalize_search_item(
+                    title=item.get("title"),
+                    link=item.get("url"),
+                    snippet=item.get("content"),
+                    score=item.get("score"),
+                    favicon=item.get("favicon"),
+                )
+                for item in data.get("results", [])[:limit]
+            ],
+        }
+        if data.get("answer"):
+            result["answer"] = data.get("answer")
+        return result
 
 
 class FetchUrlTool(Tool):
@@ -305,101 +587,3 @@ class GrantPathTool(Tool):
         except ValueError as e:
             return {"success": False, "error": str(e)}
 
-
-class ImageSearchTool(Tool):
-    name = "image_search"
-    description = "搜索图片，返回候选图片列表（使用 Serper Images API）"
-    parameters = {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "图片搜索关键词，使用简短的主题词"}
-        },
-        "required": ["query"]
-    }
-
-    async def execute(self, **kwargs: Any) -> Any:
-        from urllib.parse import urlparse
-
-        query = str(kwargs.get("query", "")).strip()
-        if not query:
-            return {"success": False, "error": "query 不能为空"}
-
-        api_key = config.get("tools.image_search.api_key") or config.get("tools.serper_search.api_key", "")
-        if not api_key:
-            return {"success": False, "error": "SERPER_API_KEY 未配置"}
-
-        top_k = config.get("tools.image_search.top_k", 10)
-        timeout = config.get("tools.image_search.timeout", 30)
-
-        # 构建请求 payload
-        payload: dict[str, Any] = {"q": query}
-        if any("\u4E00" <= char <= "\u9FFF" for char in query):
-            payload.update({"gl": "cn", "hl": "zh-cn"})
-        else:
-            payload.update({"gl": "us", "hl": "en"})
-
-        headers = {"X-API-KEY": api_key, "Content-Type": "application/json"}
-
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post("https://google.serper.dev/images", headers=headers, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-
-            raw_items = data.get("images", [])
-            results = []
-            for item in raw_items[:top_k]:
-                if not isinstance(item, dict):
-                    continue
-                image_url = item.get("imageUrl") or item.get("image_url") or item.get("original")
-                if not image_url:
-                    continue
-                source_page = item.get("link") or item.get("sourceUrl") or ""
-                domain = urlparse(source_page).netloc if source_page else ""
-                results.append({
-                    "title": item.get("title", ""),
-                    "image_url": image_url,
-                    "source_page": source_page,
-                    "source_domain": domain,
-                    "thumbnail_url": item.get("thumbnailUrl", ""),
-                    "width": item.get("imageWidth"),
-                    "height": item.get("imageHeight")
-                })
-
-            return {"success": True, "query": query, "top_k": top_k, "results": results}
-        except Exception as e:
-            return {"success": False, "error": f"图片搜索失败: {str(e)}"}
-
-
-class DocSourceTool(Tool):
-    """文档来源工具，自动识别并获取文档内容"""
-
-    name = "doc_source_tool"
-    description = "获取文档内容，自动识别来源（本地文件、飞书、Notion等）"
-    risk_level = ToolRiskLevel.LOW
-    parameters = {
-        "type": "object",
-        "properties": {
-            "url": {"type": "string", "description": "文档路径或链接"},
-        },
-        "required": ["url"],
-    }
-
-    async def execute(self, **kwargs: Any) -> Any:
-        from agentos.adapters.doc_sources import DocSourceRegistry
-
-        url = str(kwargs["url"])
-        adapter = DocSourceRegistry.get_adapter(url)
-
-        if not adapter:
-            return {"success": False, "error": f"不支持的文档来源: {url}"}
-
-        try:
-            content = adapter.fetch(url)
-            return {
-                "success": True,
-                "content": content,
-                "source": adapter.__class__.__name__,
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}

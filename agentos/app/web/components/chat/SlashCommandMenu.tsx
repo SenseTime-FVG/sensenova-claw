@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface SkillItem {
   name: string;
@@ -22,7 +21,7 @@ export function SlashCommandMenu({ inputValue, onSelect, visible }: SlashCommand
 
   // 加载已启用的 skills
   useEffect(() => {
-    fetch(`${API_BASE}/api/skills`)
+    authFetch(`${API_BASE}/api/skills`)
       .then(r => r.json())
       .then((data: any[]) => {
         setSkills(
@@ -48,13 +47,13 @@ export function SlashCommandMenu({ inputValue, onSelect, visible }: SlashCommand
   return (
     <div
       ref={menuRef}
-      className="absolute bottom-full left-0 mb-1 w-80 max-h-48 overflow-auto bg-[#252526] border border-[#2d2d30] rounded shadow-lg z-50"
+      className="absolute bottom-full left-0 mb-1 w-80 max-h-48 overflow-auto bg-popover border border-border rounded-md shadow-md z-50 text-popover-foreground"
     >
       {filtered.map((skill, i) => (
         <div
           key={skill.name}
           className={`px-3 py-2 cursor-pointer ${
-            i === selectedIndex ? 'bg-[#0e639c] text-white' : 'text-[#cccccc] hover:bg-[#3c3c3c]'
+            i === selectedIndex ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
           }`}
           onClick={() => onSelect(skill.name)}
           onMouseEnter={() => setSelectedIndex(i)}

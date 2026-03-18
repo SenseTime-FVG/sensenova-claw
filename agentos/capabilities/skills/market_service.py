@@ -81,10 +81,45 @@ class SkillMarketService:
         return await adapter.search(query, page, page_size)
 
     async def get_detail(self, source: str, skill_id: str) -> SkillDetail:
+        # 本地 skill 直接从 registry 读取，不走 market adapter
+        if source in ("local", "builtin"):
+            return self._get_local_detail(skill_id)
+
         adapter = self._get_adapter(source)
         detail = await adapter.get_detail(skill_id)
         detail.installed = self._registry.get(detail.name) is not None
         return detail
+
+    def _get_local_detail(self, skill_id: str) -> SkillDetail:
+        """从 SkillRegistry 构造本地 skill 详情"""
+        skill = self._registry.get(skill_id)
+        if not skill:
+            raise ValueError(f"本地 Skill 未找到: {skill_id}")
+
+        # 读取 SKILL.md 内容作为预览
+        skill_md = skill.path / "SKILL.md"
+        preview = ""
+        if skill_md.exists():
+            preview = skill_md.read_text(encoding="utf-8")
+
+        # 列出 skill 目录下的文件
+        files: list[str] = []
+        if skill.path.exists():
+            files = [
+                str(f.relative_to(skill.path))
+                for f in skill.path.rglob("*")
+                if f.is_file() and f.name != ".install.json"
+            ]
+
+        return SkillDetail(
+            id=skill_id,
+            name=skill.name,
+            description=skill.description,
+            version=skill.version,
+            skill_md_preview=preview,
+            files=files,
+            installed=True,
+        )
 
     async def install(self, source: str, skill_id: str, repo_url: str | None = None) -> dict:
         self._check_shutting_down()

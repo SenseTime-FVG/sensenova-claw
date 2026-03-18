@@ -18,5 +18,6 @@ class LLMFactory:
         }
 
     def get_provider(self, provider_name: str | None = None) -> LLMProvider:
-        name = provider_name or config.get("agent.provider", "mock")
-        return self._providers.get(name, self._providers["mock"])
+        if not provider_name:
+            provider_name, _ = config.resolve_model()
+        return self._providers.get(provider_name, self._providers["mock"])

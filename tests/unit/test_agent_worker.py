@@ -113,7 +113,8 @@ class TestConfigHelpers:
     """配置读取辅助方法测试"""
 
     def test_get_provider_from_agent_config(self, private_bus, runtime):
-        agent_cfg = AgentConfig(id="test", name="test", provider="anthropic")
+        # model key "claude_sonnet" → provider 应为 "anthropic"
+        agent_cfg = AgentConfig(id="test", name="test", model="claude_sonnet")
         worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
         assert worker._get_provider() == "anthropic"
 
@@ -123,9 +124,10 @@ class TestConfigHelpers:
         assert isinstance(provider, str)
 
     def test_get_model_from_agent_config(self, private_bus, runtime):
-        agent_cfg = AgentConfig(id="test", name="test", model="claude-3")
+        # model key "claude_opus" → model_id 应为 "claude-opus-4-6"
+        agent_cfg = AgentConfig(id="test", name="test", model="claude_opus")
         worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
-        assert worker._get_model() == "claude-3"
+        assert worker._get_model() == "claude-opus-4-6"
 
     def test_get_temperature_from_agent_config(self, private_bus, runtime):
         agent_cfg = AgentConfig(id="test", name="test", temperature=0.8)

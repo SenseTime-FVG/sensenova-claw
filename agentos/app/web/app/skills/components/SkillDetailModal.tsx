@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { X, FileText, Folder, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface SkillDetailModalProps {
   source: string;
@@ -41,7 +40,7 @@ export function SkillDetailModal({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/skills/market/detail?source=${source}&id=${encodeURIComponent(skillId)}`)
+    authFetch(`${API_BASE}/api/skills/market/detail?source=${source}&id=${encodeURIComponent(skillId)}`)
       .then(r => r.json())
       .then(setDetail)
       .catch(() => setDetail(null))

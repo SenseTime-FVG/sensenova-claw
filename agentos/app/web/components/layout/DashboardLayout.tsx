@@ -1,48 +1,49 @@
 'use client';
 
 import { ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
-import { LogOut } from 'lucide-react';
 import { DashboardNav } from './DashboardNav';
-import { useAuth } from '@/contexts/AuthContext';
+import { Search } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 interface DashboardLayoutProps {
   children: ReactNode;
 }
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
-  const { logout } = useAuth();
-  const router = useRouter();
-
-  const handleLogout = () => {
-    logout();
-    router.push('/login');
-  };
-
   return (
-    <div className="flex h-screen bg-[#1e1e1e] text-[#cccccc]">
-      <DashboardNav />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="h-9 bg-[#323233] border-b border-[#2d2d30] flex items-center px-4">
-          <span className="text-sm font-semibold text-[#cccccc]">AgentOS Dashboard</span>
-          <div className="ml-auto flex items-center gap-3">
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-1 text-xs hover:text-white transition-colors"
-              title="退出登录"
-            >
-              <LogOut size={14} />
-              <span>登出</span>
-            </button>
+    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
+      <div className="border-b border-border flex-shrink-0">
+        <div className="flex h-16 items-center px-4">
+          <div className="flex items-center gap-2 mr-4">
+            <div className="w-8 h-8 bg-primary text-primary-foreground rounded-lg flex items-center justify-center font-bold">
+              AO
+            </div>
+            <span className="text-lg font-bold tracking-tight">AgentOS</span>
+          </div>
+          
+          <DashboardNav className="hidden md:flex mx-6" />
+          
+          <div className="ml-auto flex items-center space-x-4">
+            <div className="hidden lg:block">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="search"
+                  placeholder="Search..."
+                  className="w-64 pl-8 bg-muted/50 focus-visible:ring-1"
+                />
+              </div>
+            </div>
+            <Avatar className="h-8 w-8 cursor-pointer">
+              <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
+              <AvatarFallback>AO</AvatarFallback>
+            </Avatar>
           </div>
         </div>
-        <div className="flex-1 overflow-auto">
-          {children}
-        </div>
-        <div className="h-6 bg-[#007acc] flex items-center px-4 text-xs text-white">
-          <span>AgentOS v1.0.0</span>
-          <span className="ml-auto">Ready</span>
-        </div>
+      </div>
+      <div className="flex-1 overflow-auto bg-muted/10">
+        {children}
       </div>
     </div>
   );

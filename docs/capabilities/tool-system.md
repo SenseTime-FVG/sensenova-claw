@@ -7,9 +7,9 @@
 ```
 ToolRegistry（工具注册表）
     ├── Tool 基类（定义工具接口）
-    ├── 内置工具（BashCommand, SerperSearch, FetchUrl, ReadFile, WriteFile）
+    ├── 内置工具（BashCommand, SerperSearch, BraveSearch, BaiduSearch, TavilySearch, FetchUrl, ReadFile, WriteFile）
     ├── 编排工具（CreateAgent）
-    └── 多 Agent 通信工具（SendMessage）
+    └── 多 Agent 通信工具（SendMessage，Gateway 启动时注册）
 
 ToolRuntime（工具运行时）
     └── ToolSessionWorker（会话级 Worker，每个 session 一个实例）
@@ -64,8 +64,9 @@ class ToolRegistry:
 
 **初始化流程**：
 1. `ToolRegistry.__init__()` 时自动调用 `_register_builtin()`
-2. 内置注册 6 个工具：`BashCommandTool`、`SerperSearchTool`、`FetchUrlTool`、`ReadFileTool`、`WriteFileTool`、`CreateAgentTool`
+2. 内置注册 9 个工具：`BashCommandTool`、`SerperSearchTool`、`BraveSearchTool`、`BaiduSearchTool`、`TavilySearchTool`、`FetchUrlTool`、`ReadFileTool`、`WriteFileTool`、`CreateAgentTool`
 3. `SendMessageTool` 因依赖注入需要，在 Gateway 启动时单独注册
+4. 搜索工具（serper/brave/baidu/tavily）在未配置对应 API key 时不暴露给 LLM
 
 **`as_llm_tools()` 输出格式**：
 

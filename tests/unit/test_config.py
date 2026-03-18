@@ -8,7 +8,8 @@ class TestConfig:
     def test_default_values(self, tmp_path):
         """无 config.yml 时使用默认值"""
         cfg = Config(config_path=tmp_path / "nonexist.yml")
-        assert cfg.get("agent.provider") == "mock"
+        assert cfg.get("agent.model") == "mock"
+        assert cfg.get("llm.default_model") == "mock"
         assert cfg.get("server.port") == 8000
 
     def test_get_nested(self, tmp_path):
@@ -24,7 +25,7 @@ class TestConfig:
         yml = tmp_path / "config.yml"
         yml.write_text(
             "OPENAI_API_KEY: ${TEST_AGENTOS_KEY}\n"
-            "agent:\n  provider: openai\n",
+            "agent:\n  model: gpt_4o\n",
             encoding="utf-8",
         )
         os.environ["TEST_AGENTOS_KEY"] = "sk-test-123"
@@ -37,16 +38,16 @@ class TestConfig:
     def test_deep_merge(self, tmp_path):
         yml = tmp_path / "config.yml"
         yml.write_text(
-            "agent:\n  default_model: gpt-4o\n",
+            "agent:\n  model: gpt_4o\n",
             encoding="utf-8",
         )
         cfg = Config(config_path=yml)
         # 用户覆盖的值
-        assert cfg.get("agent.default_model") == "gpt-4o"
+        assert cfg.get("agent.model") == "gpt_4o"
         # 默认值保留
-        assert cfg.get("agent.default_temperature") == 0.2
+        assert cfg.get("agent.temperature") == 0.2
 
     def test_set_runtime(self, tmp_path):
         cfg = Config(config_path=tmp_path / "nonexist.yml")
-        cfg.set("agent.provider", "anthropic")
-        assert cfg.get("agent.provider") == "anthropic"
+        cfg.set("agent.model", "claude_opus")
+        assert cfg.get("agent.model") == "claude_opus"

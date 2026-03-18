@@ -39,7 +39,7 @@ class GeminiProvider(LLMProvider):
     """Gemini via Cloudsway（OpenAI 兼容网关），支持 thought signature 透传"""
 
     def __init__(self):
-        provider_cfg = config.get("llm_providers.gemini", {})
+        provider_cfg = config.get("llm.providers.gemini", {})
         self.client = AsyncOpenAI(
             api_key=provider_cfg.get("api_key"),
             base_url=provider_cfg.get("base_url") or None,
