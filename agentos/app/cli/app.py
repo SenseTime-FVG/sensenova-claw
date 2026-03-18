@@ -278,6 +278,7 @@ class CLIApp:
         self.display.show_welcome(agent_name=agent_name, workdir=workdir)
 
         while True:
+            self.display.show_status_bar()
             try:
                 raw = await asyncio.to_thread(read_user_input)
             except (KeyboardInterrupt, EOFError):

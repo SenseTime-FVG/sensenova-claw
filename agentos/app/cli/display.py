@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import threading
 import time
@@ -20,6 +21,8 @@ ANSI_GREEN = "\033[32m"
 ANSI_CYAN = "\033[36m"
 ANSI_YELLOW = "\033[33m"
 ANSI_DIM = "\033[2m"
+ANSI_BG_DARK = "\033[48;5;236m"  # 深灰背景
+ANSI_WHITE = "\033[37m"
 
 # 跨平台 termios 导入
 HAS_TERMIOS = False
@@ -354,6 +357,30 @@ class DisplayEngine:
         with terminal_guard.cooked():
             sys.stdout.write("\r\033[K")
             self.console.print(f"[dim]  [DEBUG] {msg_type}  {payload_str}[/dim]")
+
+    def show_status_bar(self) -> None:
+        """在输入提示符之前显示状态栏"""
+        session = self.app.current_session_id or "无"
+        agent = self.app.current_agent_id or "default"
+        connected = self.app.ws is not None and self.app.ws.open
+        conn_icon = f"{ANSI_GREEN}●{ANSI_RESET}" if connected else f"\033[31m●{ANSI_RESET}"
+        conn_text = "已连接" if connected else "未连接"
+
+        # 获取终端宽度
+        try:
+            cols = os.get_terminal_size().columns
+        except OSError:
+            cols = 80
+
+        # 构建状态栏内容
+        left = f" {conn_icon} {conn_text}  │  Agent: {agent}  │  Session: {session[:20]}"
+        # 用背景色填满整行
+        visible_len = len(conn_text) + len(agent) + len(session[:20]) + 22  # 估算可见字符长度
+        padding = max(0, cols - visible_len)
+        bar = f"{ANSI_BG_DARK}{ANSI_WHITE}{left}{' ' * padding}{ANSI_RESET}"
+
+        sys.stdout.write(f"{bar}\n")
+        sys.stdout.flush()
 
     def show_welcome(self, agent_name: str = "", workdir: str = "") -> None:
         """显示欢迎信息，包含 Agent 名称和工作目录"""
