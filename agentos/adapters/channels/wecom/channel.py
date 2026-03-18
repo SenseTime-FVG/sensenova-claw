@@ -32,7 +32,10 @@ class WecomChannel(Channel):
     def __init__(self, config: WecomConfig, plugin_api, client: WecomToolClient | None = None):
         self._config = config
         self._plugin_api = plugin_api
-        self._client = client or WecomToolClient(config)
+        self._client = client or WecomToolClient(
+            config=config,
+            on_text_message=self._on_client_text_message,
+        )
         self._chat_sessions: dict[str, str] = {}
         self._session_meta: dict[str, WecomSessionMeta] = {}
 
@@ -59,6 +62,15 @@ class WecomChannel(Channel):
             tool_name = event.payload.get("tool_name", "")
             if tool_name:
                 await self._send_reply(event.session_id, f"正在执行 {tool_name}...")
+
+    async def _on_client_text_message(self, message) -> None:
+        await self.handle_incoming_text(
+            text=message.text,
+            chat_id=message.chat_id,
+            chat_type=message.chat_type,
+            sender_id=message.sender_id,
+            message_id=message.message_id,
+        )
 
     async def handle_incoming_text(
         self,

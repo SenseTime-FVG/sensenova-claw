@@ -59,6 +59,7 @@ async def test_wecom_channel_end_to_end_flow(tmp_path: Path) -> None:
     db_path = tmp_path / "agentos.db"
     workspace = tmp_path / "workspace"
 
+    config.data["system"]["agentos_home"] = str(tmp_path)
     config.data["system"]["database_path"] = str(db_path)
     config.data["system"]["workspace_dir"] = str(workspace)
     config.data["system"]["log_level"] = "DEBUG"
