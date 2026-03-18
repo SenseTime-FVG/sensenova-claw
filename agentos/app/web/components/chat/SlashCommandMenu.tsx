@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface SkillItem {
   name: string;
@@ -22,7 +21,7 @@ export function SlashCommandMenu({ inputValue, onSelect, visible }: SlashCommand
 
   // 加载已启用的 skills
   useEffect(() => {
-    fetch(`${API_BASE}/api/skills`)
+    authFetch(`${API_BASE}/api/skills`)
       .then(r => r.json())
       .then((data: any[]) => {
         setSkills(

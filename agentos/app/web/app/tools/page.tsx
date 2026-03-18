@@ -6,8 +6,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface Tool {
   id: string;
@@ -36,7 +35,7 @@ export default function ToolsPage() {
   }, []);
 
   const fetchTools = () => {
-    fetch(`${API_BASE}/api/tools`)
+    authFetch(`${API_BASE}/api/tools`)
       .then(res => res.json())
       .then(data => setTools(data))
       .catch(() => setTools([]))
@@ -47,7 +46,7 @@ export default function ToolsPage() {
     const newEnabled = !currentEnabled;
     setTools(prev => prev.map(t => t.name === toolName ? { ...t, enabled: newEnabled } : t));
     try {
-      await fetch(`${API_BASE}/api/tools/${toolName}/enabled`, {
+      await authFetch(`${API_BASE}/api/tools/${toolName}/enabled`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: newEnabled }),

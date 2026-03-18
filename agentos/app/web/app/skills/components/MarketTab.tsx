@@ -6,8 +6,7 @@ import { SkillCard } from './SkillCard';
 import { SkillDetailModal } from './SkillDetailModal';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface MarketSkill {
   id: string;
@@ -179,7 +178,7 @@ export function MarketTab({
     const tid = addToast('loading', `正在安装 ${id}，下载中...`);
 
     try {
-      const res = await fetch(`${API_BASE}/api/skills/install`, {
+      const res = await authFetch(`${API_BASE}/api/skills/install`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source, id }),
@@ -223,7 +222,7 @@ export function MarketTab({
     setGitInstalling(true);
     const tid = addToast('loading', `正在从 Git 安装，克隆中...`);
     try {
-      const res = await fetch(`${API_BASE}/api/skills/install`, {
+      const res = await authFetch(`${API_BASE}/api/skills/install`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: 'git', repo_url: gitUrl }),

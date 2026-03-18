@@ -5,8 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, ChevronDown, Check } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
 interface ToolInfo {
@@ -182,7 +181,7 @@ function TargetSelector({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/agents`).then(r => r.json()).catch(() => []).then(a => setAgents(a));
+    authFetch(`${API_BASE}/api/agents`).then(r => r.json()).catch(() => []).then(a => setAgents(a));
   }, []);
 
   useEffect(() => {
@@ -272,7 +271,7 @@ function ChatPageInner() {
 
   const handleSkillInvoke = async (skillName: string, args: string) => {
     if (!sessionId) return;
-    await fetch(`${API_BASE}/api/sessions/${sessionId}/skill-invoke`, {
+    await authFetch(`${API_BASE}/api/sessions/${sessionId}/skill-invoke`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ skill_name: skillName, arguments: args }),
@@ -286,31 +285,6 @@ function ChatPageInner() {
   );
 
   // ── WebSocket ──
-
-  // 用 ref 保持 handleWsMessage 始终指向最新版本，避免 stale closure
-  const handleWsMessageRef = useRef(handleWsMessage);
-  handleWsMessageRef.current = handleWsMessage;
-
-  useEffect(() => {
-    // 从 cookie 读取 token（Jupyter-lab 风格认证）
-    const cookieMatch = document.cookie.match(/(?:^|; )agentos_token=([^;]*)/);
-    const token = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
-    const wsUrl = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    ws.onopen = () => setWsConnected(true);
-    ws.onclose = () => setWsConnected(false);
-    ws.onerror = () => setWsConnected(false);
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        handleWsMessageRef.current(data);
-      } catch { /* ignore */ }
-    };
-
-    return () => { ws.close(); };
-  }, []);
 
   const handleWsMessage = (data: Record<string, unknown>) => {
     const payload = (data.payload || {}) as Record<string, unknown>;
@@ -381,6 +355,41 @@ function ChatPageInner() {
     }
   };
 
+  // 用 ref 保持 handleWsMessage 始终指向最新版本，避免 stale closure
+  const handleWsMessageRef = useRef(handleWsMessage);
+  handleWsMessageRef.current = handleWsMessage;
+
+  useEffect(() => {
+    // 从 cookie 读取 token（Jupyter-lab 风格认证）
+    const cookieMatch = document.cookie.match(/(?:^|; )agentos_token=([^;]*)/);
+    const token = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
+    const wsUrl = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
+
+    let ws: WebSocket | null = null;
+    let cancelled = false;
+
+    // 延迟连接，避免 React Strict Mode 双重执行时第一个连接被立即关闭
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+      ws.onopen = () => setWsConnected(true);
+      ws.onclose = () => setWsConnected(false);
+      ws.onerror = () => setWsConnected(false);
+      ws.onmessage = (event) => {
+        try {
+          handleWsMessageRef.current(JSON.parse(event.data));
+        } catch { /* ignore */ }
+      };
+    }, 50);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      if (ws) ws.close();
+    };
+  }, []);
+
   function addMsg(role: ChatMessage['role'], content: string) {
     setMessages(prev => [...prev, { id: makeId(), role, content, timestamp: Date.now() }]);
   }
@@ -394,7 +403,7 @@ function ChatPageInner() {
   const loadSessionList = async () => {
     setLoadingSessions(true);
     try {
-      const res = await fetch(`${API_BASE}/api/sessions`);
+      const res = await authFetch(`${API_BASE}/api/sessions`);
       const d = await res.json();
       setSessions(d.sessions || []);
     } catch { /* ignore */ }
@@ -409,7 +418,7 @@ function ChatPageInner() {
     setIsTyping(false);
     toolCallMapRef.current.clear();
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/${sid}/events`);
+      const res = await authFetch(`${API_BASE}/api/sessions/${sid}/events`);
       const d = await res.json();
       const events = (d.events || []) as Record<string, unknown>[];
       const rebuilt: ChatMessage[] = [];
@@ -433,7 +442,8 @@ function ChatPageInner() {
             }
           }
         } else if (et === 'agent.step_completed') {
-          const resp = p.final_response || '';
+          // 兼容两种格式：raw payload {result: {content}} 和映射后的 {final_response}
+          const resp = p.final_response || (p.result && p.result.content) || '';
           if (resp) rebuilt.push({ id: makeId(), role: 'assistant', content: resp, timestamp: Date.now() });
         }
       }

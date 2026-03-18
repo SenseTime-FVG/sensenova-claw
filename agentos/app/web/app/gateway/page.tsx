@@ -5,8 +5,7 @@ import { Loader2, Globe, Settings } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface GatewayStats {
   totalChannels: number;
@@ -30,8 +29,8 @@ export default function GatewayPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API_BASE}/api/gateway/stats`).then(r => r.json()),
-      fetch(`${API_BASE}/api/gateway/channels`).then(r => r.json()),
+      authFetch(`${API_BASE}/api/gateway/stats`).then(r => r.json()),
+      authFetch(`${API_BASE}/api/gateway/channels`).then(r => r.json()),
     ])
       .then(([statsData, channelsData]) => {
         setStats(statsData);

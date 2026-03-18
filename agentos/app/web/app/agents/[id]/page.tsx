@@ -5,8 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Settings, Loader2, Save, Plus, FileText, Trash2, ChevronDown, ChevronRight, Wrench, Bot } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface ToolDetail { name: string; description: string; enabled: boolean; }
 interface SkillDetail { name: string; description: string; enabled: boolean; }
@@ -76,7 +75,7 @@ export default function AgentDetailPage() {
   });
 
   const loadAgent = useCallback(() => {
-    fetch(`${API_BASE}/api/agents/${agentId}`)
+    authFetch(`${API_BASE}/api/agents/${agentId}`)
       .then(res => res.json())
       .then(data => {
         setAgent(data);
@@ -107,7 +106,7 @@ export default function AgentDetailPage() {
   // 加载所有 agent 列表（用于委托配置）
   useEffect(() => {
     if (activeTab === 'config') {
-      fetch(`${API_BASE}/api/agents`)
+      authFetch(`${API_BASE}/api/agents`)
         .then(res => res.json())
         .then(data => setAllAgents(data.map((a: AgentSummary) => ({ id: a.id, name: a.name }))))
         .catch(() => setAllAgents([]));
@@ -130,7 +129,7 @@ export default function AgentDetailPage() {
         max_delegation_depth: parseInt(editMaxDepth) || 3,
       };
       if (editMaxTokens) body.max_tokens = parseInt(editMaxTokens) || undefined;
-      const res = await fetch(`${API_BASE}/api/agents/${agentId}/config`, {
+      const res = await authFetch(`${API_BASE}/api/agents/${agentId}/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -152,7 +151,7 @@ export default function AgentDetailPage() {
 
   // Workspace 文件操作
   const loadWsFiles = useCallback(() => {
-    fetch(`${API_BASE}/api/workspace/files`)
+    authFetch(`${API_BASE}/api/workspace/files`)
       .then(res => res.json())
       .then(data => setWsFiles(data))
       .catch(() => setWsFiles([]));
@@ -163,7 +162,7 @@ export default function AgentDetailPage() {
   const loadFile = async (name: string) => {
     setSelectedFile(name); setFileLoading(true); setFileSaveMsg('');
     try {
-      const res = await fetch(`${API_BASE}/api/workspace/files/${name}`);
+      const res = await authFetch(`${API_BASE}/api/workspace/files/${name}`);
       const data = await res.json();
       setFileContent(data.content || '');
     } catch { setFileContent(''); }
@@ -174,7 +173,7 @@ export default function AgentDetailPage() {
     if (!selectedFile) return;
     setFileSaving(true); setFileSaveMsg('');
     try {
-      await fetch(`${API_BASE}/api/workspace/files/${selectedFile}`, {
+      await authFetch(`${API_BASE}/api/workspace/files/${selectedFile}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: fileContent }),
       });
@@ -186,7 +185,7 @@ export default function AgentDetailPage() {
   const deleteFile = async (name: string) => {
     if (!confirm(`确定要删除 ${name} 吗?`)) return;
     try {
-      const res = await fetch(`${API_BASE}/api/workspace/files/${name}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE}/api/workspace/files/${name}`, { method: 'DELETE' });
       if (res.ok) { if (selectedFile === name) { setSelectedFile(null); setFileContent(''); } loadWsFiles(); }
     } catch { /* ignore */ }
   };
@@ -196,7 +195,7 @@ export default function AgentDetailPage() {
     if (!fname) return;
     if (!fname.endsWith('.md')) fname += '.md';
     try {
-      await fetch(`${API_BASE}/api/workspace/files/${fname}`, {
+      await authFetch(`${API_BASE}/api/workspace/files/${fname}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: `# ${fname.replace('.md', '')}\n\n` }),
       });
@@ -208,7 +207,7 @@ export default function AgentDetailPage() {
   const savePreferences = async () => {
     setSaving(true); setSaveMsg('');
     try {
-      await fetch(`${API_BASE}/api/agents/${agentId}/preferences`, {
+      await authFetch(`${API_BASE}/api/agents/${agentId}/preferences`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tools: toolStates, skills: skillStates }),
       });
