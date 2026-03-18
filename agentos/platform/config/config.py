@@ -126,6 +126,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "max_attachment_size_mb": 10,
             "timeout": 30,
         },
+        "ask_user": {"enabled": True, "timeout": 300},
         "result_truncation": {
             "max_tokens": 8000,
             "save_dir": "workspace",

@@ -1,10 +1,10 @@
 # Default Agent 配置
-# model 引用 config.yml 中 llm.models 的 key
+# model 引用根 config.yml 中 llm.models 的 key
 
 name: Default Agent
 description: 默认 AI Agent
 
-model: claude_sonnet
+model: gemini_maas_pro_20260219
 temperature: 0.2
 max_turns_per_session: 50
 system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
@@ -19,3 +19,4 @@ skills: []
 can_send_message_to: []
 max_send_depth: 3
 max_pingpong_turns: 10
+enabled: true
