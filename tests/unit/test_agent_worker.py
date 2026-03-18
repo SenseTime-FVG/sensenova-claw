@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -84,6 +85,16 @@ def context_builder():
 @pytest.fixture
 def runtime(repo, state_store, context_builder, tool_registry):
     return _SimpleAgentRuntime(repo, state_store, context_builder, tool_registry)
+
+
+@pytest.fixture
+def fake_memory_manager():
+    class _FakeMemoryManager:
+        def __init__(self):
+            self.load_memory_md = AsyncMock(return_value="记忆上下文")
+            self.summarize_turn = AsyncMock()
+
+    return _FakeMemoryManager()
 
 
 async def _collect_from_bus(public_bus, target_type=None, count=None, timeout=5.0):
@@ -252,6 +263,25 @@ class TestHandleUserInput:
         assert isinstance(state, TurnState)
         assert state.user_input == "test"
 
+    async def test_user_input_loads_agent_memory(self, private_bus, repo, state_store, context_builder, tool_registry, fake_memory_manager):
+        runtime = _SimpleAgentRuntime(
+            repo,
+            state_store,
+            context_builder,
+            tool_registry,
+            memory_manager=fake_memory_manager,
+        )
+        agent_cfg = AgentConfig(id="planner", name="planner")
+        worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
+
+        event = EventEnvelope(
+            type=USER_INPUT, session_id="s1", turn_id="t1",
+            payload={"content": "加载记忆"},
+        )
+        await worker._handle(event)
+
+        fake_memory_manager.load_memory_md.assert_awaited_once_with(agent_id="planner")
+
 
 # ── LLM_CALL_RESULT 处理测试 ─────────────────────────────
 
@@ -385,6 +415,62 @@ class TestHandleLLMCompleted:
             type=LLM_CALL_COMPLETED, session_id="s1", turn_id="t1", payload={},
         )
         await worker._handle(event)
+
+    async def test_no_tool_calls_triggers_memory_summary(self, private_bus, public_bus, repo, state_store, context_builder, tool_registry, fake_memory_manager, monkeypatch):
+        runtime = _SimpleAgentRuntime(
+            repo,
+            state_store,
+            context_builder,
+            tool_registry,
+            memory_manager=fake_memory_manager,
+        )
+        agent_cfg = AgentConfig(id="planner", name="planner", provider="openai", model="gpt-4o-mini")
+        worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
+
+        await repo.create_session("s1", meta={"agent_id": "planner"})
+        await repo.create_turn(turn_id="t1", session_id="s1", user_input="hi")
+
+        state = TurnState(
+            turn_id="t1", user_input="hi",
+            messages=[
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "你好！"},
+            ],
+        )
+        state.history_offset = 1
+        state_store.set_turn("s1", state)
+
+        created_tasks = []
+        original_create_task = asyncio.create_task
+
+        def capture_task(coro):
+            task = original_create_task(coro)
+            created_tasks.append(task)
+            return task
+
+        monkeypatch.setattr(
+            "agentos.kernel.runtime.workers.agent_worker.asyncio.create_task",
+            capture_task,
+        )
+
+        collected, done, task = await _collect_from_bus(public_bus, target_type=AGENT_STEP_COMPLETED)
+
+        event = EventEnvelope(
+            type=LLM_CALL_COMPLETED, session_id="s1", turn_id="t1", payload={},
+        )
+        await worker._handle(event)
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+        await asyncio.gather(*created_tasks)
+
+        assert any(evt.type == AGENT_STEP_COMPLETED for evt in collected)
+        fake_memory_manager.summarize_turn.assert_awaited_once_with(
+            state.messages,
+            provider="openai",
+            model="gpt-4o-mini",
+            agent_id="planner",
+        )
 
 
 # ── TOOL_CALL_RESULT 处理测试 ─────────────────────────────

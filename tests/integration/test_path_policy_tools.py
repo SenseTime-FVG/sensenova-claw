@@ -66,3 +66,62 @@ class TestPathPolicyTools:
         r = await BashCommandTool().execute(command=cmd, working_dir=str(d), _path_policy=p)
         # 应返回 need_grant 或错误
         assert r.get("action") == "need_grant" or r.get("success") is False
+
+
+class TestWorkdirRelativePath:
+    """相对路径应基于 agent workdir 解析，而非 workspace。"""
+
+    async def test_write_relative_path_uses_workdir(self, tmp_workspace):
+        """write_file 使用相对路径时，文件应写入 agent workdir 而非 workspace。"""
+        workdir = tmp_workspace / "workdir" / "agent1"
+        workdir.mkdir(parents=True)
+        p = PathPolicy(workspace=tmp_workspace)
+        r = await WriteFileTool().execute(
+            file_path="sub/output.txt",
+            content="hello",
+            _path_policy=p,
+            _agent_workdir=str(workdir),
+        )
+        assert r.get("success") is True
+        written = workdir / "sub" / "output.txt"
+        assert written.exists()
+        assert written.read_text(encoding="utf-8") == "hello"
+        # 不应写到 workspace 根目录
+        assert not (tmp_workspace / "sub" / "output.txt").exists()
+
+    async def test_read_relative_path_uses_workdir(self, tmp_workspace):
+        """read_file 使用相对路径时，应从 agent workdir 读取。"""
+        workdir = tmp_workspace / "workdir" / "agent1"
+        workdir.mkdir(parents=True)
+        (workdir / "data.txt").write_text("workdir content", encoding="utf-8")
+        p = PathPolicy(workspace=tmp_workspace)
+        r = await ReadFileTool().execute(
+            file_path="data.txt",
+            _path_policy=p,
+            _agent_workdir=str(workdir),
+        )
+        assert r.get("content") == "workdir content"
+
+    async def test_absolute_path_ignores_workdir(self, tmp_workspace):
+        """绝对路径不受 workdir 影响。"""
+        workdir = tmp_workspace / "workdir" / "agent1"
+        workdir.mkdir(parents=True)
+        target = tmp_workspace / "abs.txt"
+        target.write_text("absolute", encoding="utf-8")
+        p = PathPolicy(workspace=tmp_workspace)
+        r = await ReadFileTool().execute(
+            file_path=str(target),
+            _path_policy=p,
+            _agent_workdir=str(workdir),
+        )
+        assert r.get("content") == "absolute"
+
+    async def test_no_workdir_falls_back(self, tmp_workspace):
+        """不传 _agent_workdir 时，相对路径仍可正常工作（回退到当前目录）。"""
+        p = PathPolicy(workspace=tmp_workspace)
+        r = await WriteFileTool().execute(
+            file_path=str(tmp_workspace / "fallback.txt"),
+            content="ok",
+            _path_policy=p,
+        )
+        assert r.get("success") is True

@@ -25,14 +25,14 @@ exit /b 0
 
 :main
 echo ----------------------------------------
-if not exist "%USERPROFILE%\.SenseAssistant\config.yaml" (
-    if exist "%ROOT_DIR%\config.yaml" (
-        echo config.yaml not found, copying from repo root...
+if not exist "%USERPROFILE%\.SenseAssistant\config.yml" (
+    if exist "%ROOT_DIR%\config.yml" (
+        echo config.yml not found, copying from repo root...
         mkdir "%USERPROFILE%\.SenseAssistant" >nul 2>&1
-        copy /Y "%ROOT_DIR%\config.yaml" "%USERPROFILE%\.SenseAssistant\config.yaml" >nul
-        echo Done: config.yaml copied to %USERPROFILE%\.SenseAssistant\config.yaml
+        copy /Y "%ROOT_DIR%\config.yml" "%USERPROFILE%\.SenseAssistant\config.yml" >nul
+        echo Done: config.yml copied to %USERPROFILE%\.SenseAssistant\config.yml
     ) else (
-        echo [WARN] No config.yaml or config.yaml found, using defaults.
+        echo [WARN] No config.yml or config.yml found, using defaults.
     )
 )
 
