@@ -12,8 +12,9 @@ from agentos.adapters.llm.factory import LLMFactory
 
 logger = logging.getLogger(__name__)
 
+from agentos.kernel.events.types import AGENT_UPDATE_TITLE_COMPLETED
+
 AGENT_UPDATE_TITLE_STARTED = "agent.update_title_started"
-AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
 
 
 class TitleRuntime:

@@ -11,6 +11,7 @@ from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     AGENT_STEP_STARTED,
+    AGENT_UPDATE_TITLE_COMPLETED,
     CRON_DELIVERY_REQUESTED,
     ERROR_RAISED,
     LLM_CALL_COMPLETED,
@@ -20,8 +21,6 @@ from agentos.kernel.events.types import (
     TOOL_CONFIRMATION_REQUESTED,
 )
 from agentos.adapters.channels.base import Channel
-
-AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +77,7 @@ class WebSocketChannel(Channel):
         if auth_enabled and self._auth_service:
             if not verify_websocket(websocket, self._auth_service):
                 logger.warning("WebSocket connection rejected: invalid or missing token")
+                await websocket.accept()
                 await websocket.close(code=1008, reason="Invalid or missing token")
                 return
 
@@ -92,7 +92,6 @@ class WebSocketChannel(Channel):
             self.disconnect(websocket)
         except Exception as exc:
             logger.exception("WebSocket connection error")
-            self.disconnect(websocket)
             try:
                 await self.send_json(websocket, {
                     "type": "error",
@@ -105,6 +104,8 @@ class WebSocketChannel(Channel):
                 })
             except Exception:
                 pass
+            finally:
+                self.disconnect(websocket)
 
     async def _handle_message(self, websocket: WebSocket, message: dict) -> None:
         """将 WS 消息翻译为 Gateway 方法调用"""
@@ -112,6 +113,12 @@ class WebSocketChannel(Channel):
         payload = message.get("payload", {})
         session_id = message.get("session_id")
         gw = self.gateway
+        if not gw:
+            await self.send_json(websocket, {
+                "type": "error", "payload": {"message": "Channel not registered with Gateway"},
+                "timestamp": time.time(),
+            })
+            return
 
         logger.info("Received WS message: %s", msg_type)
 
