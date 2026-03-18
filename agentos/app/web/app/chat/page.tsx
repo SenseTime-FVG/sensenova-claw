@@ -5,8 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, ChevronDown, Check } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
 interface ToolInfo {
@@ -182,7 +181,7 @@ function TargetSelector({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/agents`).then(r => r.json()).catch(() => []).then(a => setAgents(a));
+    authFetch(`${API_BASE}/api/agents`).then(r => r.json()).catch(() => []).then(a => setAgents(a));
   }, []);
 
   useEffect(() => {
@@ -272,7 +271,7 @@ function ChatPageInner() {
 
   const handleSkillInvoke = async (skillName: string, args: string) => {
     if (!sessionId) return;
-    await fetch(`${API_BASE}/api/sessions/${sessionId}/skill-invoke`, {
+    await authFetch(`${API_BASE}/api/sessions/${sessionId}/skill-invoke`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ skill_name: skillName, arguments: args }),
@@ -394,7 +393,7 @@ function ChatPageInner() {
   const loadSessionList = async () => {
     setLoadingSessions(true);
     try {
-      const res = await fetch(`${API_BASE}/api/sessions`);
+      const res = await authFetch(`${API_BASE}/api/sessions`);
       const d = await res.json();
       setSessions(d.sessions || []);
     } catch { /* ignore */ }
@@ -409,7 +408,7 @@ function ChatPageInner() {
     setIsTyping(false);
     toolCallMapRef.current.clear();
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/${sid}/events`);
+      const res = await authFetch(`${API_BASE}/api/sessions/${sid}/events`);
       const d = await res.json();
       const events = (d.events || []) as Record<string, unknown>[];
       const rebuilt: ChatMessage[] = [];

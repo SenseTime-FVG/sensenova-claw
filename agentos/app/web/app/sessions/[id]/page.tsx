@@ -5,8 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
 interface Message {
@@ -258,8 +257,8 @@ export default function SessionDetailPage() {
     const fetchData = async () => {
       try {
         const [sessRes, msgRes] = await Promise.all([
-          fetch(`${API_BASE}/api/sessions`),
-          fetch(`${API_BASE}/api/sessions/${sessionId}/messages`),
+          authFetch(`${API_BASE}/api/sessions`),
+          authFetch(`${API_BASE}/api/sessions/${sessionId}/messages`),
         ]);
         const sessData = await sessRes.json();
         const msgData = await msgRes.json();

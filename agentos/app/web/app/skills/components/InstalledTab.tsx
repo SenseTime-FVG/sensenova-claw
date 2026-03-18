@@ -5,8 +5,7 @@ import { Search, Loader2 } from 'lucide-react';
 import { SkillCard } from './SkillCard';
 import { SkillDetailModal } from './SkillDetailModal';
 import { Input } from '@/components/ui/input';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface InstalledSkill {
   id: string;
@@ -42,7 +41,7 @@ export function InstalledTab({ categoryFilter }: InstalledTabProps) {
 
   const fetchSkills = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/skills`);
+      const res = await authFetch(`${API_BASE}/api/skills`);
       const data = await res.json();
       setSkills(data);
     } catch {
@@ -56,7 +55,7 @@ export function InstalledTab({ categoryFilter }: InstalledTabProps) {
 
   // 检查更新
   useEffect(() => {
-    fetch(`${API_BASE}/api/skills/check-updates`, { method: 'POST' })
+    authFetch(`${API_BASE}/api/skills/check-updates`, { method: 'POST' })
       .then(r => r.json())
       .then(data => {
         const updateMap = new Map(
@@ -73,7 +72,7 @@ export function InstalledTab({ categoryFilter }: InstalledTabProps) {
   }, []);
 
   const handleToggle = async (name: string, enabled: boolean) => {
-    await fetch(`${API_BASE}/api/skills/${name}`, {
+    await authFetch(`${API_BASE}/api/skills/${name}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
@@ -83,12 +82,12 @@ export function InstalledTab({ categoryFilter }: InstalledTabProps) {
 
   const handleUninstall = async (name: string) => {
     if (!confirm(`确定卸载 ${name}？`)) return;
-    await fetch(`${API_BASE}/api/skills/${name}`, { method: 'DELETE' });
+    await authFetch(`${API_BASE}/api/skills/${name}`, { method: 'DELETE' });
     fetchSkills();
   };
 
   const handleUpdate = async (name: string) => {
-    await fetch(`${API_BASE}/api/skills/${name}/update`, { method: 'POST' });
+    await authFetch(`${API_BASE}/api/skills/${name}/update`, { method: 'POST' });
     fetchSkills();
   };
 

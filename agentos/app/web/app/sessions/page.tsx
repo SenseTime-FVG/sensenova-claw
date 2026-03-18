@@ -16,8 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface Session {
   session_id: string;
@@ -67,7 +66,7 @@ export default function SessionsPage() {
   const [showNewChat, setShowNewChat] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/sessions`)
+    authFetch(`${API_BASE}/api/sessions`)
       .then(res => res.json())
       .then(data => setSessions(data.sessions || []))
       .catch(() => setSessions([]))
@@ -263,7 +262,7 @@ function NewChatModal({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/agents`).then(r => r.json()).catch(() => []).then(a => {
+    authFetch(`${API_BASE}/api/agents`).then(r => r.json()).catch(() => []).then(a => {
       setAgents(a);
     }).finally(() => setLoading(false));
   }, []);

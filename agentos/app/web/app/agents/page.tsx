@@ -9,8 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface Agent {
   id: string;
@@ -33,7 +32,7 @@ export default function OrchestrationPage() {
 
   const loadAgents = () => {
     setAgentsLoading(true);
-    fetch(`${API_BASE}/api/agents`)
+    authFetch(`${API_BASE}/api/agents`)
       .then(res => res.json())
       .then(data => setAgents(data))
       .catch(() => setAgents([]))
@@ -52,7 +51,7 @@ export default function OrchestrationPage() {
     e.stopPropagation();
     if (!confirm(`确定要删除 Agent "${agentId}" 吗？`)) return;
     try {
-      const res = await fetch(`${API_BASE}/api/agents/${agentId}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE}/api/agents/${agentId}`, { method: 'DELETE' });
       if (res.ok) loadAgents();
     } catch { /* ignore */ }
   };
@@ -221,7 +220,7 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
     setCreating(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/api/agents`, {
+      const res = await authFetch(`${API_BASE}/api/agents`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

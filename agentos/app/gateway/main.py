@@ -339,9 +339,20 @@ async def token_auth_middleware(request: Request, call_next):
     if request.url.path in AUTH_WHITELIST:
         return await call_next(request)
 
+    # CORS 预检请求放行（OPTIONS 由 CORSMiddleware 处理）
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     # 验证 token
     if not hasattr(app.state, "services") or not verify_request(request, app.state.services.auth_service):
-        return JSONResponse(status_code=401, content={"detail": "Invalid or missing token"})
+        # 401 响应需要带 CORS 头，否则浏览器会拦截
+        origin = request.headers.get("origin", "")
+        headers = {}
+        allowed_origins = config.get("server.cors_origins", [])
+        if origin in allowed_origins:
+            headers["access-control-allow-origin"] = origin
+            headers["access-control-allow-credentials"] = "true"
+        return JSONResponse(status_code=401, content={"detail": "Invalid or missing token"}, headers=headers)
 
     return await call_next(request)
 
