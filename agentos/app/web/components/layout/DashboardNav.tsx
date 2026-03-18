@@ -17,6 +17,7 @@ export function DashboardNav({
     { path: '/gateway', label: 'Gateway' },
     { path: '/tools', label: 'Tools' },
     { path: '/skills', label: 'Skills' },
+    { path: '/settings', label: 'Settings' },
     { path: '/chat', label: 'Chat' },
   ];
 
