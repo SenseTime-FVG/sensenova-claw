@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 # agentos/platform/config/config.py -> 往上 3 层到项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
+# 默认配置文件路径：~/.agentos/config.yml
+DEFAULT_CONFIG_PATH = Path.home() / ".agentos" / "config.yml"
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "system": {
         "log_level": "DEBUG",
@@ -255,8 +258,8 @@ class Config:
             self._config_path = None  # 新方式不使用单一路径
             self.data = self._load_config_from_project_root()
         else:
-            # 兼容旧方式：单一 config_path
-            self._config_path = config_path or PROJECT_ROOT / "config.yml"
+            # 默认配置路径：~/.agentos/config.yml
+            self._config_path = config_path or DEFAULT_CONFIG_PATH
             self._project_root = None
             self._user_config_dir = None
             self.data = self._load_config()
@@ -312,45 +315,22 @@ class Config:
         return config
 
     def _apply_legacy_keys(self, config: dict[str, Any], legacy: dict[str, Any]) -> dict[str, Any]:
-        """将遗留 config.yml 中的顶层 key 映射到新结构。"""
+        """将遗留 config.yml 中的顶层环境变量 key 映射到新结构。旧格式直接报错。"""
+        self._validate_config_format(legacy)
         result = deepcopy(config)
 
-        # OPENAI_BASE_URL -> llm.providers.openai.base_url
+        # 顶层环境变量快捷 key（非旧格式，保留支持）
         if "OPENAI_BASE_URL" in legacy and legacy["OPENAI_BASE_URL"]:
             result["llm"]["providers"]["openai"]["base_url"] = legacy["OPENAI_BASE_URL"]
 
-        # OPENAI_API_KEY -> llm.providers.openai.api_key
         if "OPENAI_API_KEY" in legacy and legacy["OPENAI_API_KEY"]:
             result["llm"]["providers"]["openai"]["api_key"] = legacy["OPENAI_API_KEY"]
-            # 仍为默认 mock 时，自动切换到 openai 的模型
             if result["llm"]["default_model"] == DEFAULT_CONFIG["llm"]["default_model"]:
                 result["llm"]["default_model"] = "gpt_4o_mini"
                 result["agent"]["model"] = "gpt_4o_mini"
 
-        # SERPER_API_KEY -> tools.serper_search.api_key
         if "SERPER_API_KEY" in legacy and legacy["SERPER_API_KEY"]:
             result["tools"]["serper_search"]["api_key"] = legacy["SERPER_API_KEY"]
-
-        # 兼容旧 llm_providers 格式 → 映射到 llm.providers
-        if "llm_providers" in legacy and isinstance(legacy["llm_providers"], dict):
-            for pname, pcfg in legacy["llm_providers"].items():
-                if isinstance(pcfg, dict):
-                    if pname not in result["llm"]["providers"]:
-                        result["llm"]["providers"][pname] = {}
-                    for k, v in pcfg.items():
-                        if k != "default_model":  # default_model 不再放 provider 里
-                            result["llm"]["providers"][pname][k] = v
-
-        # 兼容旧 agent.provider + agent.default_model
-        if "agent" in legacy and isinstance(legacy["agent"], dict):
-            old_agent = legacy["agent"]
-            if "provider" in old_agent and "default_model" in old_agent:
-                # 尝试在 models 里找到匹配的 key，否则原样传递
-                result["agent"]["model"] = old_agent["default_model"]
-            if "default_temperature" in old_agent:
-                result["agent"]["temperature"] = old_agent["default_temperature"]
-            if "system_prompt" in old_agent:
-                result["agent"]["system_prompt"] = old_agent["system_prompt"]
 
         return result
 
@@ -361,8 +341,7 @@ class Config:
             with self._config_path.open("r", encoding="utf-8") as f:
                 user_config = yaml.safe_load(f) or {}
             if isinstance(user_config, dict):
-                # 兼容旧格式 llm_providers → llm.providers
-                self._migrate_legacy_config(user_config)
+                self._validate_config_format(user_config)
                 config = self._deep_merge(config, user_config)
                 logger.info("Loaded config from %s", self._config_path)
             else:
@@ -374,26 +353,35 @@ class Config:
         return config
 
     @staticmethod
-    def _migrate_legacy_config(user_config: dict[str, Any]) -> None:
-        """将旧格式配置原地迁移到新格式（不修改文件，只影响内存）"""
-        # llm_providers → llm.providers
-        if "llm_providers" in user_config and "llm" not in user_config:
-            old_providers = user_config.pop("llm_providers")
-            user_config["llm"] = {"providers": {}}
-            for pname, pcfg in old_providers.items():
-                if isinstance(pcfg, dict):
-                    new_pcfg = {k: v for k, v in pcfg.items() if k != "default_model"}
-                    user_config["llm"]["providers"][pname] = new_pcfg
+    def _validate_config_format(user_config: dict[str, Any]) -> None:
+        """检查配置格式是否为新格式，旧格式直接报错"""
+        errors: list[str] = []
 
-        # agent.provider + agent.default_model → agent.model
-        if "agent" in user_config and isinstance(user_config["agent"], dict):
-            agent = user_config["agent"]
-            if "provider" in agent and "default_model" in agent and "model" not in agent:
-                # 尝试从 model_id 反查 model key，否则原样保留
-                agent["model"] = agent.pop("default_model")
-                agent.pop("provider", None)
-            if "default_temperature" in agent and "temperature" not in agent:
-                agent["temperature"] = agent.pop("default_temperature")
+        if "llm_providers" in user_config:
+            errors.append(
+                "'llm_providers' 已废弃，请改为 'llm.providers'。"
+                "参考 config_example.yml 中的新格式。"
+            )
+
+        agent = user_config.get("agent", {})
+        if isinstance(agent, dict):
+            if "provider" in agent:
+                errors.append(
+                    "'agent.provider' 已废弃。"
+                    "请使用 'agent.model' 引用 llm.models 中的 key，provider 由系统自动解析。"
+                )
+            if "default_model" in agent:
+                errors.append(
+                    "'agent.default_model' 已废弃，请改为 'agent.model'。"
+                )
+            if "default_temperature" in agent:
+                errors.append(
+                    "'agent.default_temperature' 已废弃，请改为 'agent.temperature'。"
+                )
+
+        if errors:
+            msg = "配置文件格式不兼容:\n" + "\n".join(f"  - {e}" for e in errors)
+            raise ValueError(msg)
 
     def _deep_merge(self, base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
         result = deepcopy(base)

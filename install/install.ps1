@@ -280,7 +280,14 @@ function Setup-HomeDir {
 # ── 步骤 6: 交互式配置 ──
 
 function Setup-Config {
-    $configFile = "$APP_DIR\config.yml"
+    $configFile = "$AGENTOS_HOME\config.yml"
+
+    # 如果没有配置文件，从示例文件复制
+    $exampleFile = "$APP_DIR\config_example.yml"
+    if ((-not (Test-Path $configFile)) -and (Test-Path $exampleFile)) {
+        Copy-Item $exampleFile $configFile
+        Log "已从 config_example.yml 复制默认配置"
+    }
 
     if (Test-Path $configFile) {
         Info "检测到已有配置文件"

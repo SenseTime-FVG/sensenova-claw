@@ -331,7 +331,13 @@ setup_home_dir() {
 # ── 步骤 6: 交互式配置 ──
 
 setup_config() {
-  local config_file="$APP_DIR/config.yml"
+  local config_file="$AGENTOS_HOME/config.yml"
+
+  # 如果没有配置文件，从示例文件复制
+  if [ ! -f "$config_file" ] && [ -f "$APP_DIR/config_example.yml" ]; then
+    cp "$APP_DIR/config_example.yml" "$config_file"
+    log "已从 config_example.yml 复制默认配置"
+  fi
 
   if [ -f "$config_file" ]; then
     info "检测到已有配置文件"
