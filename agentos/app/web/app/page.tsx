@@ -1,24 +1,41 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { WorkbenchShell } from '@/components/workbench/WorkbenchShell';
+import { MainStage } from '@/components/workbench/MainStage';
+import { useWorkbenchSession } from '@/hooks/useWorkbenchSession';
 
 export default function Page() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const initialQueryRef = useRef(searchParams.toString());
+  const {
+    wsConnected,
+    taskState,
+    currentTask,
+    steps,
+    taskProgress,
+    result,
+    sendTask,
+  } = useWorkbenchSession();
 
-  useEffect(() => {
-    const query = initialQueryRef.current;
-    router.replace(query ? `/chat?${query}` : '/chat');
-  }, [router]);
+  const isRightCollapsed = taskState === 'empty';
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-        <p className="mt-4 text-muted-foreground">加载中...</p>
-      </div>
-    </div>
+    <DashboardLayout>
+      <WorkbenchShell
+        steps={steps}
+        taskProgress={taskProgress}
+        isRightCollapsed={isRightCollapsed}
+        onSubmit={sendTask}
+        inputDisabled={taskState === 'processing'}
+        wsConnected={wsConnected}
+      >
+        <MainStage
+          state={taskState}
+          currentTask={currentTask}
+          steps={steps}
+          result={result}
+          onQuickTask={sendTask}
+        />
+      </WorkbenchShell>
+    </DashboardLayout>
   );
 }
