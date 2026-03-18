@@ -121,14 +121,14 @@ skills:
 # 插件配置
 plugins:
   feishu:
-    enabled: true
+    enabled: false
     app_id: ""
     app_secret: ""
     dm_policy: "open"
     group_policy: "mention"
     log_level: "INFO"
   wecom:
-    enabled: true
+    enabled: false
     bot_id: ""
     secret: ""
     websocket_url: "wss://openws.work.weixin.qq.com"
@@ -137,6 +137,24 @@ plugins:
     allowlist: []
     group_allowlist: []
     show_tool_progress: false
+  telegram:
+    enabled: false
+    bot_token: ""
+    mode: "polling"  # polling | webhook
+    dm_policy: "open"  # open | allowlist | disabled
+    group_policy: "allowlist"  # open | allowlist | disabled
+    allowlist: [ ]
+    group_allowlist: [ ]
+    group_chat_allowlist: [ ]
+    require_mention: true
+    show_tool_progress: false
+    reply_to_message: true
+    polling_timeout_seconds: 30
+    webhook_url: ""
+    webhook_secret: ""
+    webhook_path: "/telegram-webhook"
+    webhook_host: "127.0.0.1"
+    webhook_port: 8787
   whatsapp:
     enabled: false
     auth_dir: ".agentos/data/channels/whatsapp/auth"
