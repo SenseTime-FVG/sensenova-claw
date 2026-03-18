@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+
+telegram_mod = pytest.importorskip("telegram", reason="python-telegram-bot not installed")
 from telegram import Update
 from unittest.mock import AsyncMock, patch
 

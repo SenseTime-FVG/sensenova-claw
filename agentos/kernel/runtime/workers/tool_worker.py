@@ -136,7 +136,7 @@ class ToolSessionWorker(SessionWorker):
                 return {"success": False, "error": "已有待回答问题，请先回答当前问题"}
 
             question_id = f"q_{uuid.uuid4().hex[:8]}"
-            future: asyncio.Future = asyncio.get_event_loop().create_future()
+            future: asyncio.Future = asyncio.get_running_loop().create_future()
             worker._pending_questions[question_id] = future
 
             timeout = float(config.get("tools.ask_user.timeout", 300))
