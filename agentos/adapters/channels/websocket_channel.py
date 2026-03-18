@@ -290,7 +290,12 @@ class WebSocketChannel(Channel):
             return
 
         # 部分事件为连接级广播（不依赖 session 绑定）
-        if event.type in {CRON_DELIVERY_REQUESTED, USER_QUESTION_ASKED, USER_QUESTION_ANSWERED}:
+        if event.type in {
+            CRON_DELIVERY_REQUESTED,
+            TOOL_CONFIRMATION_REQUESTED,
+            USER_QUESTION_ASKED,
+            USER_QUESTION_ANSWERED,
+        }:
             for ws in list(self._connections):
                 try:
                     await ws.send_json(mapped)

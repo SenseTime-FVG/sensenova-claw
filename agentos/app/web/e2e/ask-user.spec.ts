@@ -278,6 +278,102 @@ test.describe('ask_user UI（mock websocket）', () => {
     await expect(page.getByText('第二个问题')).toBeVisible();
   });
 
+  test('chat 页面可处理 tool_confirmation_requested 并回传批准结果', async ({ page }) => {
+    await page.goto('/chat');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'tool_confirmation_requested',
+        session_id: 'sess_confirm_1',
+        payload: {
+          tool_call_id: 'tc_confirm_1',
+          tool_name: 'bash_command',
+          risk_level: 'high',
+          arguments: { command: 'ls -la' },
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByTestId('tool-confirmation-dialog')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('tool-confirm-name')).toHaveText('bash_command');
+    await expect(page.getByTestId('tool-confirm-risk')).toHaveText('high');
+    await expect(page.getByTestId('tool-confirm-source-session')).toHaveText('sess_confirm_1');
+    await page.getByTestId('tool-confirm-approve').click();
+    await expect(page.getByTestId('tool-confirmation-dialog')).not.toBeVisible({ timeout: 10000 });
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'tool_confirmation_response'
+          && msg.payload?.tool_call_id === 'tc_confirm_1'
+          && msg.payload?.approved === true
+          && msg.session_id === 'sess_confirm_1'
+      )
+    ).toBeTruthy();
+  });
+
+  test('chat 页面审批与问答混合事件应按 FIFO 顺序处理', async ({ page }) => {
+    await page.goto('/chat');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'tool_confirmation_requested',
+        session_id: 'sess_mix_a',
+        payload: {
+          tool_call_id: 'tc_mix_1',
+          tool_name: 'bash_command',
+          risk_level: 'high',
+          arguments: { command: 'rm -rf /tmp/demo' },
+        },
+        timestamp: Date.now() / 1000,
+      });
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_mix_b',
+        payload: {
+          question_id: 'q_mix_2',
+          question: '请确认目标环境',
+          options: ['dev', 'prod'],
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByTestId('tool-confirmation-dialog')).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('tool-confirm-reject').click();
+    await expect(page.getByTestId('tool-confirmation-dialog')).not.toBeVisible({ timeout: 10000 });
+
+    await expect(page.getByTestId('ask-user-dialog')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('请确认目标环境')).toBeVisible();
+  });
+
+  test('chat 页面交互超时后应自动关闭当前弹窗', async ({ page }) => {
+    await page.goto('/chat');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'tool_confirmation_requested',
+        session_id: 'sess_timeout_1',
+        payload: {
+          tool_call_id: 'tc_timeout_1',
+          tool_name: 'bash_command',
+          risk_level: 'high',
+          arguments: { command: 'sleep 10' },
+          timeout: 1,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByTestId('tool-confirmation-dialog')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('tool-confirmation-dialog')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('工具审批已超时，系统将按后端策略拒绝。')).toBeVisible({ timeout: 10000 });
+  });
+
   test('收到 user_question_answered_event 后应关闭对应问题弹窗', async ({ page }) => {
     await page.goto('/chat');
 

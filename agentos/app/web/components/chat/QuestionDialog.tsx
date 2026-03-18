@@ -1,51 +1,70 @@
 'use client';
 
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 
-export interface QuestionDialogProps {
-  open: boolean;
-  questionId: string;
+type InteractionKind = 'question' | 'confirmation';
+
+interface PendingInteractionBase {
+  kind: InteractionKind;
+  interactionId: string;
   sourceSessionId: string;
+  timeout: number;
+  createdAt: number;
+}
+
+export interface PendingQuestionInteraction extends PendingInteractionBase {
+  kind: 'question';
   sourceAgentId: string;
   sourceAgentName: string;
   question: string;
   options: string[] | null;
   multiSelect: boolean;
-  timeout: number;
-  createdAt: number;
-  submitting: boolean;
-  wsConnected: boolean;
-  onSubmit: (answer: string | string[]) => void;
-  onCancel: () => void;
 }
 
-export function QuestionDialog({
+export interface PendingConfirmationInteraction extends PendingInteractionBase {
+  kind: 'confirmation';
+  toolName: string;
+  riskLevel: string;
+  arguments: Record<string, unknown>;
+}
+
+export type PendingInteraction =
+  | PendingQuestionInteraction
+  | PendingConfirmationInteraction;
+
+export interface InteractionDialogProps {
+  open: boolean;
+  interaction: PendingInteraction | null;
+  submitting: boolean;
+  wsConnected: boolean;
+  onQuestionSubmit: (answer: string | string[]) => void;
+  onQuestionCancel: () => void;
+  onConfirmationSubmit: (approved: boolean) => void;
+  onTimeout: () => void;
+}
+
+export function InteractionDialog({
   open,
-  questionId,
-  sourceSessionId,
-  sourceAgentId,
-  sourceAgentName,
-  question,
-  options,
-  multiSelect,
-  timeout,
-  createdAt,
+  interaction,
   submitting,
   wsConnected,
-  onSubmit,
-  onCancel,
-}: QuestionDialogProps) {
+  onQuestionSubmit,
+  onQuestionCancel,
+  onConfirmationSubmit,
+  onTimeout,
+}: InteractionDialogProps) {
   const [customInput, setCustomInput] = useState('');
   const [singleChoice, setSingleChoice] = useState('');
   const [multiChoices, setMultiChoices] = useState<string[]>([]);
   const [nowTs, setNowTs] = useState(Date.now());
+  const timeoutNotifiedRef = useRef<string>('');
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !interaction || interaction.kind !== 'question') return;
     setCustomInput('');
     setSingleChoice('');
     setMultiChoices([]);
-  }, [open, questionId]);
+  }, [open, interaction?.kind, interaction?.interactionId]);
 
   useEffect(() => {
     if (!open) return;
@@ -54,26 +73,40 @@ export function QuestionDialog({
   }, [open]);
 
   const remainingSeconds = useMemo(() => {
-    const elapsed = Math.floor((nowTs - createdAt) / 1000);
-    return Math.max(0, timeout - elapsed);
-  }, [createdAt, nowTs, timeout]);
+    if (!interaction) return 0;
+    const elapsed = Math.floor((nowTs - interaction.createdAt) / 1000);
+    return Math.max(0, interaction.timeout - elapsed);
+  }, [interaction, nowTs]);
+
+  useEffect(() => {
+    if (!open || !interaction) return;
+    if (remainingSeconds > 0) return;
+    const timeoutKey = `${interaction.kind}:${interaction.interactionId}`;
+    if (timeoutNotifiedRef.current == timeoutKey) return;
+    timeoutNotifiedRef.current = timeoutKey;
+    onTimeout();
+  }, [open, interaction, remainingSeconds, onTimeout]);
 
   const normalizedAnswer = useMemo(() => {
+    if (!interaction || interaction.kind !== 'question') return null;
     const custom = customInput.trim();
     if (custom) return custom;
 
-    if (options && options.length > 0) {
-      if (multiSelect) {
+    if (interaction.options && interaction.options.length > 0) {
+      if (interaction.multiSelect) {
         return multiChoices.length > 0 ? multiChoices : null;
       }
       return singleChoice || null;
     }
 
     return null;
-  }, [customInput, options, multiChoices, multiSelect, singleChoice]);
+  }, [customInput, interaction, multiChoices, singleChoice]);
 
-  const confirmDisabled = !normalizedAnswer || submitting || !wsConnected || remainingSeconds <= 0;
-  const displaySourceAgent = String(sourceAgentName || sourceAgentId || 'default').trim() || 'default';
+  const questionConfirmDisabled = !normalizedAnswer
+    || submitting
+    || !wsConnected
+    || remainingSeconds <= 0;
+  const confirmationDisabled = submitting || !wsConnected || remainingSeconds <= 0;
 
   const toggleMultiChoice = (opt: string) => {
     setMultiChoices((prev) => {
@@ -85,8 +118,8 @@ export function QuestionDialog({
   };
 
   const submitAnswer = () => {
-    if (!normalizedAnswer || confirmDisabled) return;
-    onSubmit(normalizedAnswer);
+    if (!normalizedAnswer || questionConfirmDisabled) return;
+    onQuestionSubmit(normalizedAnswer);
   };
 
   const handleCustomInputKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -96,7 +129,79 @@ export function QuestionDialog({
     submitAnswer();
   };
 
-  if (!open) return null;
+  if (!open || !interaction) return null;
+
+  if (interaction.kind === 'confirmation') {
+    return (
+      <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4">
+        <div
+          data-testid="tool-confirmation-dialog"
+          className="w-full max-w-xl bg-[#1e1e1e] border border-[#2d2d30] rounded-xl shadow-2xl"
+        >
+          <div className="px-4 py-3 border-b border-[#2d2d30] flex items-center justify-between">
+            <div className="text-sm font-semibold text-[#cccccc]">工具执行审批</div>
+            <div className="text-xs text-[#858585]">
+              剩余 {remainingSeconds}s
+            </div>
+          </div>
+          <div className="p-4 space-y-4">
+            <div className="text-xs text-[#9cdcfe]">
+              来源会话:
+              {' '}
+              <span data-testid="tool-confirm-source-session" className="font-mono">
+                {interaction.sourceSessionId}
+              </span>
+            </div>
+            <div className="text-sm text-[#cccccc]">
+              工具:
+              {' '}
+              <span data-testid="tool-confirm-name" className="font-mono">{interaction.toolName}</span>
+            </div>
+            <div className="text-sm text-[#cccccc]">
+              风险等级:
+              {' '}
+              <span data-testid="tool-confirm-risk" className="font-mono">{interaction.riskLevel}</span>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs text-[#858585]">参数</div>
+              <pre
+                data-testid="tool-confirm-arguments"
+                className="text-[11px] text-[#cccccc] font-mono bg-[#252526] border border-[#3c3c3c] rounded-md p-3 overflow-auto max-h-44 whitespace-pre-wrap break-all"
+              >
+                {JSON.stringify(interaction.arguments || {}, null, 2)}
+              </pre>
+            </div>
+            {!wsConnected && (
+              <div className="text-xs text-red-400">连接已断开，暂时无法提交审批结果</div>
+            )}
+          </div>
+
+          <div className="px-4 py-3 border-t border-[#2d2d30] flex justify-end gap-2">
+            <button
+              data-testid="tool-confirm-reject"
+              onClick={() => onConfirmationSubmit(false)}
+              disabled={confirmationDisabled}
+              className="px-3 py-1.5 text-sm rounded border border-[#3c3c3c] text-[#cccccc] hover:bg-[#2d2d30] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              拒绝
+            </button>
+            <button
+              data-testid="tool-confirm-approve"
+              onClick={() => onConfirmationSubmit(true)}
+              disabled={confirmationDisabled}
+              className="px-3 py-1.5 text-sm rounded bg-[#0e639c] text-white hover:bg-[#1177bb] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              批准
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const displaySourceAgent = String(
+    interaction.sourceAgentName || interaction.sourceAgentId || 'default'
+  ).trim() || 'default';
 
   return (
     <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4">
@@ -117,28 +222,30 @@ export function QuestionDialog({
             {' '}
             <span data-testid="ask-user-source-agent" className="font-mono">{displaySourceAgent}</span>
           </div>
-          {sourceSessionId && (
+          {interaction.sourceSessionId && (
             <div className="text-xs text-[#9cdcfe]">
               来源会话:
               {' '}
-              <span data-testid="ask-user-source-session" className="font-mono">{sourceSessionId}</span>
+              <span data-testid="ask-user-source-session" className="font-mono">
+                {interaction.sourceSessionId}
+              </span>
             </div>
           )}
-          <p className="text-sm text-[#cccccc] whitespace-pre-wrap">{question}</p>
+          <p className="text-sm text-[#cccccc] whitespace-pre-wrap">{interaction.question}</p>
 
-          {options && options.length > 0 && (
+          {interaction.options && interaction.options.length > 0 && (
             <div className="space-y-2">
               <div className="text-xs text-[#858585]">
-                {multiSelect ? '可多选（也可直接输入自定义内容）' : '可单选（也可直接输入自定义内容）'}
+                {interaction.multiSelect ? '可多选（也可直接输入自定义内容）' : '可单选（也可直接输入自定义内容）'}
               </div>
               <div className="space-y-2">
-                {options.map((opt, idx) => (
+                {interaction.options.map((opt, idx) => (
                   <label
                     key={`${opt}_${idx}`}
                     className="flex items-center gap-2 text-sm text-[#cccccc]"
                     data-testid={`ask-user-option-${idx}`}
                   >
-                    {multiSelect ? (
+                    {interaction.multiSelect ? (
                       <input
                         type="checkbox"
                         checked={multiChoices.includes(opt)}
@@ -150,7 +257,7 @@ export function QuestionDialog({
                       <input
                         type="radio"
                         name="ask-user-single-choice"
-                        checked={singleChoice === opt}
+                        checked={singleChoice == opt}
                         onChange={() => setSingleChoice(opt)}
                         className="accent-[#0e639c]"
                         disabled={submitting || !wsConnected || remainingSeconds <= 0}
@@ -186,7 +293,7 @@ export function QuestionDialog({
         <div className="px-4 py-3 border-t border-[#2d2d30] flex justify-end gap-2">
           <button
             data-testid="ask-user-cancel"
-            onClick={onCancel}
+            onClick={onQuestionCancel}
             disabled={submitting}
             className="px-3 py-1.5 text-sm rounded border border-[#3c3c3c] text-[#cccccc] hover:bg-[#2d2d30] disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -195,7 +302,7 @@ export function QuestionDialog({
           <button
             data-testid="ask-user-confirm"
             onClick={submitAnswer}
-            disabled={confirmDisabled}
+            disabled={questionConfirmDisabled}
             className="px-3 py-1.5 text-sm rounded bg-[#0e639c] text-white hover:bg-[#1177bb] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             确认

@@ -11,7 +11,12 @@ from fastapi import WebSocketDisconnect
 from agentos.app.gateway import main as gateway_main
 from agentos.adapters.channels.websocket_channel import WebSocketChannel
 from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import USER_INPUT, USER_QUESTION_ANSWERED, USER_QUESTION_ASKED
+from agentos.kernel.events.types import (
+    TOOL_CONFIRMATION_REQUESTED,
+    USER_INPUT,
+    USER_QUESTION_ANSWERED,
+    USER_QUESTION_ASKED,
+)
 
 
 class _FakeGateway:
@@ -269,3 +274,31 @@ async def test_user_question_answered_event_broadcasts_to_all_connections(ws_env
     assert ws2.sent_json[0]["type"] == "user_question_answered_event"
     assert ws1.sent_json[0]["payload"]["question_id"] == "q_done_1"
     assert ws2.sent_json[0]["payload"]["question_id"] == "q_done_1"
+
+
+@pytest.mark.asyncio
+async def test_tool_confirmation_requested_broadcasts_to_all_connections(ws_env):
+    ws1 = _FakeWebSocket(messages=[])
+    ws2 = _FakeWebSocket(messages=[])
+    await ws_env.ws_channel.connect(ws1)
+    await ws_env.ws_channel.connect(ws2)
+
+    event = EventEnvelope(
+        type=TOOL_CONFIRMATION_REQUESTED,
+        session_id="sess_child_confirm",
+        source="test",
+        payload={
+            "tool_call_id": "tc_child_1",
+            "tool_name": "bash_command",
+            "arguments": {"command": "ls"},
+            "risk_level": "high",
+        },
+    )
+    await ws_env.ws_channel.send_event(event)
+
+    assert len(ws1.sent_json) == 1
+    assert len(ws2.sent_json) == 1
+    assert ws1.sent_json[0]["type"] == "tool_confirmation_requested"
+    assert ws2.sent_json[0]["type"] == "tool_confirmation_requested"
+    assert ws1.sent_json[0]["payload"]["tool_call_id"] == "tc_child_1"
+    assert ws2.sent_json[0]["payload"]["tool_call_id"] == "tc_child_1"

@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { QuestionDialog } from '@/components/chat/QuestionDialog';
+import { InteractionDialog, type PendingInteraction } from '@/components/chat/QuestionDialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
@@ -31,18 +31,6 @@ interface SessionInfo {
   last_active: number;
   status: string;
   meta: string;
-}
-
-interface PendingQuestion {
-  questionId: string;
-  sourceSessionId: string;
-  sourceAgentId: string;
-  sourceAgentName: string;
-  question: string;
-  options: string[] | null;
-  multiSelect: boolean;
-  timeout: number;
-  createdAt: number;
 }
 
 function parseTitle(meta: string): string {
@@ -188,16 +176,67 @@ export default function SessionDetailPage() {
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
-  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
-  const [questionSubmitting, setQuestionSubmitting] = useState(false);
+  const [activeInteraction, setActiveInteraction] = useState<PendingInteraction | null>(null);
+  const [interactionSubmitting, setInteractionSubmitting] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const pendingQuestionRef = useRef<PendingQuestion | null>(null);
+  const activeInteractionRef = useRef<PendingInteraction | null>(null);
+  const interactionQueueRef = useRef<PendingInteraction[]>([]);
 
   useEffect(() => {
-    pendingQuestionRef.current = pendingQuestion;
-  }, [pendingQuestion]);
+    activeInteractionRef.current = activeInteraction;
+  }, [activeInteraction]);
+
+  const interactionKey = (interaction: PendingInteraction) => `${interaction.kind}:${interaction.interactionId}`;
+
+  const enqueueInteraction = useCallback((interaction: PendingInteraction) => {
+    const active = activeInteractionRef.current;
+    const queue = interactionQueueRef.current;
+    const nextKey = interactionKey(interaction);
+    const exists = (active && interactionKey(active) === nextKey)
+      || queue.some((item) => interactionKey(item) === nextKey);
+    if (exists) return;
+
+    if (!active) {
+      activeInteractionRef.current = interaction;
+      setActiveInteraction(interaction);
+      return;
+    }
+    interactionQueueRef.current = [...queue, interaction];
+  }, []);
+
+  const resolveInteraction = useCallback((kind: PendingInteraction['kind'], interactionId: string) => {
+    const active = activeInteractionRef.current;
+    const queue = interactionQueueRef.current;
+
+    if (active && active.kind === kind && active.interactionId === interactionId) {
+      if (queue.length > 0) {
+        const [next, ...rest] = queue;
+        interactionQueueRef.current = rest;
+        activeInteractionRef.current = next;
+        setActiveInteraction(next);
+      } else {
+        interactionQueueRef.current = [];
+        activeInteractionRef.current = null;
+        setActiveInteraction(null);
+      }
+      setInteractionSubmitting(false);
+      return;
+    }
+
+    const filtered = queue.filter((item) => !(item.kind === kind && item.interactionId === interactionId));
+    if (filtered.length !== queue.length) {
+      interactionQueueRef.current = filtered;
+    }
+  }, []);
+
+  const clearInteractions = useCallback(() => {
+    interactionQueueRef.current = [];
+    activeInteractionRef.current = null;
+    setActiveInteraction(null);
+    setInteractionSubmitting(false);
+  }, []);
 
   // WebSocket 连接
   useEffect(() => {
@@ -213,8 +252,11 @@ export default function SessionDetailPage() {
         const data = JSON.parse(event.data);
         const eventType = String(data.type || '');
         const incomingSessionId = typeof data.session_id === 'string' ? data.session_id : null;
-        const isAskUserEvent = eventType === 'user_question_asked' || eventType === 'user_question_answered_event';
-        if (incomingSessionId && incomingSessionId !== sessionId && !isAskUserEvent) {
+        const payload = (data.payload || {}) as Record<string, unknown>;
+        const isInteractionEvent = eventType === 'tool_confirmation_requested'
+          || eventType === 'user_question_asked'
+          || eventType === 'user_question_answered_event';
+        if (incomingSessionId && incomingSessionId !== sessionId && !isInteractionEvent) {
           return;
         }
         switch (eventType) {
@@ -222,22 +264,22 @@ export default function SessionDetailPage() {
             setIsTyping(true);
             break;
           case 'llm_result': {
-            const content = String(data.payload?.content || '');
+            const content = String(payload.content || '');
             if (content) {
               setMessages((prev) => [...prev, { role: 'assistant', content }]);
             }
             break;
           }
           case 'tool_execution': {
-            const toolName = String(data.payload?.tool_name || '');
-            const args = data.payload?.arguments || {};
+            const toolName = String(payload.tool_name || '');
+            const args = payload.arguments || {};
             setMessages((prev) => [
               ...prev,
               {
                 role: 'assistant',
                 content: '',
                 tool_calls: [{
-                  id: data.payload?.tool_call_id || `tc_${Date.now()}`,
+                  id: payload.tool_call_id ? String(payload.tool_call_id) : `tc_${Date.now()}`,
                   name: toolName,
                   arguments: JSON.stringify(args),
                 }],
@@ -246,8 +288,8 @@ export default function SessionDetailPage() {
             break;
           }
           case 'tool_result': {
-            const toolName = String(data.payload?.tool_name || '');
-            const result = data.payload?.result;
+            const toolName = String(payload.tool_name || '');
+            const result = payload.result;
             const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
             setMessages((prev) => [
               ...prev,
@@ -256,69 +298,82 @@ export default function SessionDetailPage() {
             break;
           }
           case 'turn_completed': {
-            const finalResponse = String(data.payload?.final_response || '');
+            const finalResponse = String(payload.final_response || '');
             if (finalResponse) {
               setMessages((prev) => [...prev, { role: 'assistant', content: finalResponse }]);
             }
-            setPendingQuestion(null);
-            setQuestionSubmitting(false);
+            clearInteractions();
             setIsTyping(false);
             break;
           }
+          case 'turn_cancelled':
+            clearInteractions();
+            setIsTyping(false);
+            break;
           case 'error': {
             setMessages((prev) => [
               ...prev,
-              { role: 'assistant', content: `错误: ${data.payload?.message || data.payload?.error_type || '未知错误'}` },
+              { role: 'assistant', content: `错误: ${payload.message || payload.error_type || '未知错误'}` },
             ]);
-            setPendingQuestion(null);
-            setQuestionSubmitting(false);
+            clearInteractions();
             setIsTyping(false);
             break;
           }
+          case 'tool_confirmation_requested': {
+            const toolCallId = String(payload.tool_call_id || '');
+            if (!toolCallId) break;
+            const sourceSessionId = incomingSessionId || '';
+            if (!sourceSessionId) break;
+            enqueueInteraction({
+              kind: 'confirmation',
+              interactionId: toolCallId,
+              sourceSessionId,
+              timeout: Number(payload.timeout || 300),
+              createdAt: Date.now(),
+              toolName: String(payload.tool_name || ''),
+              riskLevel: String(payload.risk_level || 'high'),
+              arguments: (payload.arguments || {}) as Record<string, unknown>,
+            });
+            setIsTyping(true);
+            break;
+          }
           case 'user_question_asked': {
-            const questionId = String(data.payload?.question_id || '');
+            const questionId = String(payload.question_id || '');
             if (!questionId) break;
             const sourceSessionId = incomingSessionId || '';
             if (!sourceSessionId) break;
-            const sourceAgentId = String(data.payload?.source_agent_id || 'default').trim() || 'default';
-            const sourceAgentName = String(data.payload?.source_agent_name || sourceAgentId).trim() || sourceAgentId;
-
-            if (pendingQuestionRef.current) {
-              setMessages((prev) => [
-                ...prev,
-                { role: 'assistant', content: '检测到新的问题请求，但当前已有待回答问题。' },
-              ]);
-              break;
-            }
-            setPendingQuestion({
-              questionId,
+            const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
+            const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
+            enqueueInteraction({
+              kind: 'question',
+              interactionId: questionId,
               sourceSessionId,
               sourceAgentId,
               sourceAgentName,
-              question: String(data.payload?.question || ''),
-              options: Array.isArray(data.payload?.options) ? data.payload.options.map(String) : null,
-              multiSelect: Boolean(data.payload?.multi_select),
-              timeout: Number(data.payload?.timeout || 300),
+              question: String(payload.question || ''),
+              options: Array.isArray(payload.options) ? payload.options.map(String) : null,
+              multiSelect: Boolean(payload.multi_select),
+              timeout: Number(payload.timeout || 300),
               createdAt: Date.now(),
             });
             setIsTyping(true);
             break;
           }
           case 'user_question_answered_event': {
-            const questionId = String(data.payload?.question_id || '');
+            const questionId = String(payload.question_id || '');
             if (!questionId) break;
-            if (pendingQuestionRef.current?.questionId === questionId) {
-              setPendingQuestion(null);
-              setQuestionSubmitting(false);
-            }
+            resolveInteraction('question', questionId);
             break;
           }
         }
       } catch { /* ignore */ }
     };
 
-    return () => { ws.close(); };
-  }, [sessionId]);
+    return () => {
+      clearInteractions();
+      ws.close();
+    };
+  }, [clearInteractions, enqueueInteraction, resolveInteraction, sessionId]);
 
   // 加载历史消息
   useEffect(() => {
@@ -352,7 +407,7 @@ export default function SessionDetailPage() {
 
   const sendMessage = useCallback(() => {
     const content = inputValue.trim();
-    if (!content || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || pendingQuestion || questionSubmitting) return;
+    if (!content || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || activeInteraction || interactionSubmitting) return;
 
     setMessages((prev) => [...prev, { role: 'user', content }]);
     wsRef.current.send(JSON.stringify({
@@ -367,27 +422,55 @@ export default function SessionDetailPage() {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [inputValue, sessionId, pendingQuestion, questionSubmitting]);
+  }, [activeInteraction, inputValue, interactionSubmitting, sessionId]);
 
   const sendQuestionAnswer = useCallback((answer: string | string[] | null, cancelled: boolean) => {
-    if (!pendingQuestion) return;
+    if (!activeInteraction || activeInteraction.kind !== 'question') return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    if (!pendingQuestion.sourceSessionId) return;
+    if (!activeInteraction.sourceSessionId) return;
 
-    setQuestionSubmitting(true);
+    setInteractionSubmitting(true);
     wsRef.current.send(JSON.stringify({
       type: 'user_question_answered',
-      session_id: pendingQuestion.sourceSessionId,
+      session_id: activeInteraction.sourceSessionId,
       payload: {
-        question_id: pendingQuestion.questionId,
+        question_id: activeInteraction.interactionId,
         answer,
         cancelled,
       },
       timestamp: Date.now() / 1000,
     }));
-    setPendingQuestion(null);
-    setQuestionSubmitting(false);
-  }, [pendingQuestion]);
+    resolveInteraction('question', activeInteraction.interactionId);
+  }, [activeInteraction, resolveInteraction]);
+
+  const sendConfirmationResponse = useCallback((approved: boolean) => {
+    if (!activeInteraction || activeInteraction.kind !== 'confirmation') return;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!activeInteraction.sourceSessionId) return;
+
+    setInteractionSubmitting(true);
+    wsRef.current.send(JSON.stringify({
+      type: 'tool_confirmation_response',
+      session_id: activeInteraction.sourceSessionId,
+      payload: {
+        tool_call_id: activeInteraction.interactionId,
+        approved,
+      },
+      timestamp: Date.now() / 1000,
+    }));
+    resolveInteraction('confirmation', activeInteraction.interactionId);
+  }, [activeInteraction, resolveInteraction]);
+
+  const handleInteractionTimeout = useCallback(() => {
+    if (!activeInteraction) return;
+    if (activeInteraction.kind === 'confirmation') {
+      setMessages((prev) => [...prev, { role: 'assistant', content: '工具审批已超时，系统将按后端策略拒绝。' }]);
+      resolveInteraction('confirmation', activeInteraction.interactionId);
+      return;
+    }
+    setMessages((prev) => [...prev, { role: 'assistant', content: '问题已超时，已取消等待。' }]);
+    resolveInteraction('question', activeInteraction.interactionId);
+  }, [activeInteraction, resolveInteraction]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -418,7 +501,7 @@ export default function SessionDetailPage() {
             <div className="flex-1 min-w-0">
               <h1 className="text-xl font-bold text-foreground truncate tracking-tight">{title}</h1>
               <div className="flex items-center gap-5 text-sm text-muted-foreground mt-1.5 overflow-x-auto no-scrollbar pb-1">
-                <span className="font-mono bg-muted px-2 py-0.5 rounded text-[11px] border border-border/50">{sessionId}</span>
+                <span data-testid="current-session-id" className="font-mono bg-muted px-2 py-0.5 rounded text-[11px] border border-border/50">{sessionId}</span>
                 {sessionInfo && (
                   <>
                     <span className="shrink-0">{formatTimestamp(sessionInfo.created_at)}</span>
@@ -491,7 +574,7 @@ export default function SessionDetailPage() {
                   onChange={handleTextareaInput}
                   onKeyDown={handleKeyDown}
                   placeholder={wsConnected ? 'Type a message... (Enter to send, Shift+Enter for newline)' : 'Waiting for connection...'}
-                  disabled={!wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
+                  disabled={!wsConnected || isTyping || !!activeInteraction || interactionSubmitting}
                   rows={1}
                   className="w-full bg-transparent border-none focus:ring-0 px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 resize-none disabled:opacity-50 disabled:cursor-not-allowed selection:bg-primary/20"
                   style={{ minHeight: '48px', maxHeight: '160px' }}
@@ -500,7 +583,7 @@ export default function SessionDetailPage() {
               <button
                 data-testid="send-button"
                 onClick={sendMessage}
-                disabled={!inputValue.trim() || !wsConnected || isTyping || !!pendingQuestion || questionSubmitting}
+                disabled={!inputValue.trim() || !wsConnected || isTyping || !!activeInteraction || interactionSubmitting}
                 className="p-3 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shadow-lg active:scale-95 shrink-0"
               >
                 <Send size={20} />
@@ -514,21 +597,15 @@ export default function SessionDetailPage() {
           </div>
         </div>
       </div>
-      <QuestionDialog
-        open={!!pendingQuestion}
-        questionId={pendingQuestion?.questionId || ''}
-        sourceSessionId={pendingQuestion?.sourceSessionId || ''}
-        sourceAgentId={pendingQuestion?.sourceAgentId || 'default'}
-        sourceAgentName={pendingQuestion?.sourceAgentName || (pendingQuestion?.sourceAgentId || 'default')}
-        question={pendingQuestion?.question || ''}
-        options={pendingQuestion?.options || null}
-        multiSelect={pendingQuestion?.multiSelect || false}
-        timeout={pendingQuestion?.timeout || 300}
-        createdAt={pendingQuestion?.createdAt || Date.now()}
-        submitting={questionSubmitting}
+      <InteractionDialog
+        open={!!activeInteraction}
+        interaction={activeInteraction}
+        submitting={interactionSubmitting}
         wsConnected={wsConnected}
-        onSubmit={(answer) => sendQuestionAnswer(answer, false)}
-        onCancel={() => sendQuestionAnswer(null, true)}
+        onQuestionSubmit={(answer) => sendQuestionAnswer(answer, false)}
+        onQuestionCancel={() => sendQuestionAnswer(null, true)}
+        onConfirmationSubmit={sendConfirmationResponse}
+        onTimeout={handleInteractionTimeout}
       />
     </DashboardLayout>
   );

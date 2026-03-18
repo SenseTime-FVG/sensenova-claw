@@ -42,8 +42,7 @@ class CLIApp:
 
         self._waiting = asyncio.Event()
         self._query_event = asyncio.Event()  # 查询命令响应完成信号
-        self._confirm_queue: asyncio.Queue[dict] = asyncio.Queue()
-        self._question_queue: asyncio.Queue[dict] = asyncio.Queue()
+        self._interaction_queue: asyncio.Queue[dict] = asyncio.Queue()
         self._last_response: str = ""
         self._turn_cancelled = False
         self._turn_terminal = False
@@ -91,24 +90,25 @@ class CLIApp:
                 self.display.show_debug(data)
 
             if msg_type == "tool_confirmation_requested":
-                await self._confirm_queue.put(data)
+                await self._interaction_queue.put({"kind": "confirmation", "data": data})
                 self._waiting.set()
                 continue
 
             if msg_type == "user_question_asked":
-                await self._question_queue.put(data)
+                await self._interaction_queue.put({"kind": "question", "data": data})
                 self._waiting.set()
                 continue
 
-            if msg_type in ("turn_completed", "error"):
+            if msg_type in ("turn_completed", "error", "turn_cancelled"):
                 self._turn_terminal = True
                 if msg_type == "turn_completed":
                     self._last_response = data.get("payload", {}).get("final_response", "")
                     self.display.show_response(self._last_response)
-                else:
+                elif msg_type == "error":
                     # 用户主动取消时，静默吞掉后端的 cancel error
                     if not self._turn_cancelled:
                         self.display.show_error(data)
+                self._drain_interaction_queue()
                 self._waiting.set()
                 continue
 
@@ -131,37 +131,47 @@ class CLIApp:
                 self._waiting.clear()
                 await self._waiting.wait()
 
-                while not self._confirm_queue.empty():
-                    confirm_data = await self._confirm_queue.get()
+                while not self._interaction_queue.empty():
+                    item = await self._interaction_queue.get()
+                    kind = item.get("kind")
+                    interaction_data = item.get("data", {})
                     self.display.spinner.stop()
-                    if self.execute:
-                        approved = False
+                    if kind == "confirmation":
+                        if self.execute:
+                            approved = False
+                        else:
+                            approved = await self.display.prompt_confirmation(interaction_data)
+                        await self._send_confirmation_response(interaction_data, approved)
+                    elif kind == "question":
+                        if self.execute:
+                            answer = None
+                            cancelled = True
+                        else:
+                            answer, cancelled = await self._prompt_question(interaction_data)
+                        await self._send_question_response(interaction_data, answer, cancelled)
                     else:
-                        approved = await self.display.prompt_confirmation(confirm_data)
-                    await self._send_confirmation_response(confirm_data, approved)
+                        self.console.print(f"[yellow]Unknown interaction kind: {kind}[/yellow]")
                     self.display.spinner.start()
                     continue
 
-                while not self._question_queue.empty():
-                    question_data = await self._question_queue.get()
-                    self.display.spinner.stop()
-                    if self.execute:
-                        answer = None
-                        cancelled = True
-                    else:
-                        answer, cancelled = await self._prompt_question(question_data)
-                    await self._send_question_response(question_data, answer, cancelled)
-                    self.display.spinner.start()
-                    continue
-
-                if self._turn_terminal and self._confirm_queue.empty() and self._question_queue.empty():
+                if self._turn_terminal and self._interaction_queue.empty():
                     break
         finally:
             self.display.spinner.stop()
 
+    def _drain_interaction_queue(self) -> None:
+        """清空交互队列，避免 turn 结束后遗留交互。"""
+        while not self._interaction_queue.empty():
+            try:
+                self._interaction_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
     async def _cancel_current_turn(self) -> None:
         """发送取消请求并中止当前等待"""
         self._turn_cancelled = True
+        self._turn_terminal = True
+        self._drain_interaction_queue()
         await self._send({
             "type": "cancel_turn",
             "session_id": self.current_session_id,
@@ -267,9 +277,10 @@ class CLIApp:
     async def _send_confirmation_response(self, data: dict, approved: bool) -> None:
         """发送工具确认响应"""
         payload = data.get("payload", {})
+        target_session_id = data.get("session_id") or self.current_session_id
         await self._send({
             "type": "tool_confirmation_response",
-            "session_id": self.current_session_id,
+            "session_id": target_session_id,
             "payload": {
                 "tool_call_id": payload.get("tool_call_id"),
                 "approved": approved,
@@ -324,9 +335,10 @@ class CLIApp:
     async def _send_question_response(self, data: dict, answer: str | list[str] | None, cancelled: bool) -> None:
         """发送问答响应"""
         payload = data.get("payload", {})
+        target_session_id = data.get("session_id") or self.current_session_id
         await self._send({
             "type": "user_question_answered",
-            "session_id": self.current_session_id,
+            "session_id": target_session_id,
             "payload": {
                 "question_id": payload.get("question_id"),
                 "answer": answer,
