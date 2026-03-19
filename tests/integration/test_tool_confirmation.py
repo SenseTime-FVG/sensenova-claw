@@ -1,7 +1,7 @@
 """T05: 工具确认流程 (HIGH risk)"""
 import pytest
 from agentos.capabilities.tools.base import ToolRiskLevel
-from agentos.capabilities.tools.builtin import BashCommandTool, ReadFileTool, WriteFileTool, GrantPathTool
+from agentos.capabilities.tools.builtin import BashCommandTool, ReadFileTool, WriteFileTool
 
 
 class TestToolConfirmation:
@@ -13,9 +13,6 @@ class TestToolConfirmation:
 
     def test_write_is_medium_risk(self):
         assert WriteFileTool.risk_level == ToolRiskLevel.MEDIUM
-
-    def test_grant_is_high_risk(self):
-        assert GrantPathTool.risk_level == ToolRiskLevel.HIGH
 
     def test_risk_level_values(self):
         assert ToolRiskLevel.LOW.value == "low"

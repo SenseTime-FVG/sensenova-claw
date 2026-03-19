@@ -12,7 +12,6 @@ from agentos.capabilities.tools.orchestration import CreateAgentTool
 from agentos.capabilities.tools.base import ToolRiskLevel
 from agentos.capabilities.agents.config import AgentConfig
 from agentos.capabilities.agents.registry import AgentRegistry
-from agentos.platform.security.path_policy import PathPolicy
 
 
 @pytest.fixture
@@ -180,16 +179,11 @@ class TestExecuteSuccess:
         assert created.can_delegate_to == ["agent1"]
 
     async def test_strips_internal_kwargs(self, tool, agent_registry, tmp_path):
-        """内部参数 (_path_policy, _session_id) 被正确移除"""
-        workspace = tmp_path / "workspace"
-        workspace.mkdir(exist_ok=True)
-        path_policy = PathPolicy(workspace=workspace)
-
+        """内部参数 (_session_id 等) 被正确移除"""
         result = await tool.execute(
             id="agent3",
             name="Agent 3",
             _agent_registry=agent_registry,
-            _path_policy=path_policy,
             _session_id="s-123",
         )
 

@@ -36,7 +36,6 @@ from agentos.capabilities.tools.builtin import (
 from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.capabilities.agents.registry import AgentRegistry
 from agentos.platform.config.config import Config
-from agentos.platform.security.path_policy import PathPolicy
 
 
 # ---------- 工具风险等级 ----------
@@ -189,19 +188,15 @@ def _make_worker(
     private = PrivateEventBus(session_id=session_id, public_bus=public)
     registry = ToolRegistry()
 
-    # 真实 PathPolicy 和 AgentRegistry
-    path_policy = PathPolicy(workspace=workspace_dir)
     agent_config_dir = tmp_path / "agents"
     agent_config_dir.mkdir(exist_ok=True)
     agent_registry = AgentRegistry(config_dir=agent_config_dir)
     agent_registry.load_from_config(cfg.data)
 
-    # 创建真实 BusRouter 和 ToolRuntime（仅用于持有 registry/path_policy/agent_registry）
     bus_router = BusRouter(public_bus=public)
     rt = ToolRuntime(
         bus_router=bus_router,
         registry=registry,
-        path_policy=path_policy,
         agent_registry=agent_registry,
     )
 
@@ -377,18 +372,18 @@ class TestPermissionManagement:
         assert wait_event.is_set()
 
 
-# ---------- PathPolicy/AgentRegistry 注入不污染 arguments ----------
+# ---------- AgentRegistry 注入不污染 arguments ----------
 
 
 class TestContextInjectionIsolation:
-    """验证 _path_policy 和 _agent_registry 注入不会污染原始 arguments，
-    防止 JSON 序列化失败（如 'Object of type PathPolicy is not JSON serializable'）。
+    """验证 _agent_registry 注入不会污染原始 arguments，
+    防止 JSON 序列化失败。
 
-    使用真实 ToolRuntime + PathPolicy + AgentRegistry，无 mock。
+    使用真实 ToolRuntime + AgentRegistry，无 mock。
     """
 
     async def test_arguments_not_polluted_on_success(self, tmp_path):
-        """工具执行成功后，原始 arguments 不应包含 _path_policy/_agent_registry"""
+        """工具执行成功后，原始 arguments 不应包含 _agent_registry"""
         worker, cfg = _make_worker(session_id="test_inject", tmp_path=tmp_path, config_overrides={
             "tools.permission.enabled": False,
         })
@@ -430,7 +425,6 @@ class TestContextInjectionIsolation:
 
         # 原始 event payload 中的 arguments 不应被污染
         original_args = event.payload["arguments"]
-        assert "_path_policy" not in original_args
         assert "_agent_registry" not in original_args
 
     async def test_arguments_not_polluted_on_failure(self, tmp_path):
@@ -479,7 +473,6 @@ class TestContextInjectionIsolation:
 
         # 原始 arguments 不应包含不可序列化的内部对象
         original_args = event.payload["arguments"]
-        assert "_path_policy" not in original_args
         assert "_agent_registry" not in original_args
 
     async def test_event_payload_serializable_for_persistence(self, tmp_path):
