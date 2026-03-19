@@ -14,7 +14,19 @@
 2. **任务分组导航**：左侧统一导航栏，用户第一条消息自动成为任务标题，同一任务下可创建多个 session
 3. **文件区**：左侧 Tab 切换（任务 | 文件），文件区上下分两个 panel（用户文件夹 + agent workdir），文件可拖拽到 chat 输入区
 
-## 2. 整体布局
+## 2. 页面定位与区别
+
+| 页面 | 路由 | 默认 Agent | 空状态 |
+|------|------|-----------|--------|
+| 主页（工作台） | `/` | 办公主助手 (`default`) | 显示快捷任务模板卡片（回复邮件、准备周会等）+ 最近任务列表 |
+| Chat | `/chat` | 办公主助手 (`default`) | 简洁的 "How can I help you?" 空状态 |
+| 深度研究 | `/research` | 深度调研 (`deep_research`) | 简洁的 "开始一个新的调研任务" 空状态 |
+| PPT | `/ppt` | PPT生成助手 (`ppt_generator`) | 简洁的 "创建一个新的演示文稿" 空状态 |
+| 自动化 | `/automation` | 办公主助手 (`default`) | 简洁的 "创建一个新的自动化任务" 空状态 |
+
+**主页与 Chat 的区别**：主页保留快捷任务模板功能（从现有 `MainStage` 的 empty state 迁移），作为任务入口；Chat 是纯对话界面。两者共享 `ChatPanel`，但主页在无 session 时显示 `TaskTemplates` 组件替代 ChatPanel 的空状态。一旦用户选中某个 session 或发送消息，主页也切换为 ChatPanel 视图。
+
+## 3. 整体布局
 
 ```
 ┌─ DashboardLayout TopBar ─────────────────────────────────────┐
@@ -40,17 +52,7 @@
 └──────────┴───────────────────────────────┴────────────────────┘
 ```
 
-### 页面默认 Agent 映射
-
-| 页面 | 路由 | 默认 Agent |
-|------|------|-----------|
-| 主页（工作台） | `/` | 办公主助手 (`default`) |
-| Chat | `/chat` | 办公主助手 (`default`) |
-| 深度研究 | `/research` | 深度调研 (`deep_research`) |
-| PPT | `/ppt` | PPT生成助手 (`ppt_generator`) |
-| 自动化 | `/automation` | 办公主助手 (`default`) |
-
-## 3. 任务分组导航（LeftNav 任务 Tab）
+## 4. 任务分组导航（LeftNav 任务 Tab）
 
 ### 数据模型（纯前端）
 
@@ -68,8 +70,25 @@ interface TaskGroup {
 ### 分组规则
 
 - 每个 session 默认独立对应一个任务（1:1 映射）
-- 用户在某个任务上下文中"新建对话"时，新 session 的 `meta` 中携带 `taskId` 字段关联到父任务
+- 用户在某个任务上下文中"新建对话"时，新 session 的 `meta` 中携带 `task_id` 字段关联到父任务
 - 按 `lastActive` 降序排列
+
+### Meta Schema 约定
+
+Session `meta` JSON 中用于任务分组的字段：
+
+```json
+{
+  "title": "回复重要邮件",
+  "agent_id": "default",
+  "task_id": "parent_session_id_here"   // 可选，仅子 session 携带
+}
+```
+
+- `task_id` 缺失或为空 → 该 session 自身就是一个独立任务
+- `task_id` 有值 → 该 session 归入以 `task_id` 对应的 session 为首的任务组
+- 后端 `create_session` handler 会原样保存 `meta` 中的所有字段（已验证），无需后端改动
+- 前端加载 session 列表后，先按 `task_id` 分组，再按 `lastActive` 排序
 
 ### UI 交互
 
@@ -119,8 +138,8 @@ interface TaskGroup {
 
 ### 交互
 
-1. **「选择」按钮**：用户指定本地文件夹路径，保存在 localStorage
-2. **Agent 工作区**：展示 `workspace/` 目录下的文件
+1. **「选择」按钮**：用户输入**服务端文件系统路径**（非浏览器本地文件），前端通过文本输入框让用户指定路径（如 `/home/user/documents`），保存在 localStorage，通过 `GET /api/files` 列出该目录内容
+2. **Agent 工作区**：展示 `workspace/` 目录下的文件（服务端路径）
 3. **拖拽**：使用 `react-dnd`，文件可拖到 ChatPanel 输入区
 4. **拖入效果**：输入区高亮 + 文件 Badge 标签（可移除），发送时附带 `context_files`
 5. **按需加载**：只返回一层目录，展开子文件夹时再请求
@@ -160,7 +179,13 @@ ChatPanel
 │   ├── DroppableTextarea（支持文件拖入）
 │   │   └── 拖入文件显示为 Badge 标签
 │   ├── SendButton
-│   └── SlashCommandMenu（/skill 自动补全）
+│   └── SlashCommandMenu（/skill 自动补全，复用现有 useSlashCommand hook）
+│
+├── InteractionDialog（交互对话框，复用现有 QuestionDialog.tsx）
+│   ├── 工具确认对话框（tool_confirmation_requested）
+│   ├── 用户问题对话框（user_question_asked）
+│   ├── 交互队列管理（多个确认/问题排队处理）
+│   └── 超时处理
 │
 └── WebSocket 事件处理（通过 useChatSession hook）
 ```
@@ -192,15 +217,45 @@ export default function ResearchPage() {
 
 ### WebSocket 连接策略
 
-单连接共享：在 `WorkbenchShell` 层管理唯一 WebSocket 连接，所有页面共享。
+单连接共享：通过 React Context Provider 在 `app/layout.tsx` 层管理唯一 WebSocket 连接。
 
 ```
-WorkbenchShell
-├── WebSocket 单例连接
-├── 当前 sessionId 状态
-├── LeftNav（读取任务列表，切换 sessionId）
-├── ChatPanel（使用当前 sessionId 收发消息）
-└── RightContext（订阅当前 session 的执行步骤）
+app/layout.tsx
+└── ChatSessionProvider（Context Provider，管理 WebSocket 单例）
+    └── DashboardLayout
+        └── WorkbenchShell
+            ├── LeftNav（通过 context 读取任务列表）
+            ├── ChatPanel（通过 context 收发消息）
+            └── RightContext（通过 context 订阅执行步骤）
+```
+
+将 WebSocket 连接放在 layout 级的 Context Provider 中，确保页面路由切换时（Next.js unmount/remount page 组件）连接不会断开。`ChatSessionProvider` 包含：
+- WebSocket 连接管理（连接、重连、心跳）
+- 当前 sessionId 状态
+- 消息列表和 typing 状态
+- 任务列表
+- 步骤和进度数据
+
+### DndProvider 位置
+
+`react-dnd` 的 `<DndProvider backend={HTML5Backend}>` 需要包裹拖拽源（LeftNav 文件树）和放置目标（ChatInput）的共同祖先。放在 `WorkbenchShell` 组件中：
+
+```tsx
+// WorkbenchShell.tsx
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
+
+export function WorkbenchShell({ children }: Props) {
+  return (
+    <DndProvider backend={HTML5Backend}>
+      <div className="flex flex-1 overflow-hidden">
+        <LeftNav />
+        <div className="flex-1 flex flex-col">{children}</div>
+        <RightContext />
+      </div>
+    </DndProvider>
+  );
+}
 ```
 
 ### 统一 Hook
@@ -219,7 +274,7 @@ interface UseChatSessionReturn {
   // 消息
   messages: ChatMessage[];
   isTyping: boolean;
-  sendMessage: (content: string, attachments?: FileAttachment[]) => void;
+  sendMessage: (content: string, contextFiles?: ContextFileRef[]) => void;
 
   // 任务列表
   taskGroups: TaskGroup[];
@@ -228,10 +283,40 @@ interface UseChatSessionReturn {
   // 执行步骤
   steps: StepItem[];
   taskProgress: TaskProgressItem[];
+
+  // 交互对话框（来自现有 chat/page.tsx 的 interaction 逻辑）
+  pendingInteraction: PendingInteraction | null;
+  interactionSubmitting: boolean;
+  submitQuestionAnswer: (answer: string | string[]) => void;
+  cancelQuestion: () => void;
+  submitConfirmation: (approved: boolean) => void;
+
+  // 通知
+  notifications: NotificationItem[];
 }
 ```
 
-替代现有的 `useWorkbenchSession.ts`（合并其逻辑）。
+### 类型定义
+
+```typescript
+// 文件拖拽时传递的引用（发送时转换为 context_files 字段）
+interface ContextFileRef {
+  name: string;
+  path: string;  // 服务端文件系统路径
+}
+
+// 发送 user_input 时的 context_files payload 格式
+// 后端 websocket_channel.py 将其作为 list[str] 传给 gateway.send_user_input()
+// context_builder.py 再将路径转换为 ContextFile(name, content) 读取文件内容
+// 因此前端只需发送路径字符串数组：
+// payload.context_files = ["/path/to/file1", "/path/to/file2"]
+```
+
+### 替代 useWorkbenchSession
+
+现有 `useWorkbenchSession.ts` 中的 `TaskState`（empty/processing/completed）、`CurrentTask`、`result`、`reset` 等概念不再需要。这些是为了 `MainStage` 的状态机设计的，而 `MainStage` 将被 `ChatPanel` 替代。ChatPanel 通过消息列表自然展示对话状态，不需要显式的 task 状态机。
+
+`useWorkbenchSession.ts` 将被删除，其中的 WebSocket 管理和事件处理逻辑合并入 `useChatSession.ts`。
 
 ### 页面切换行为
 
@@ -242,14 +327,32 @@ interface UseChatSessionReturn {
 ### 文件拖拽数据流
 
 ```
-LeftNav 文件 Tab → react-dnd type="FILE" item={name,path,type}
+LeftNav 文件 Tab → react-dnd type="FILE" item={name, path, type}
     ↓
-ChatInput (DroppableTextarea) → useDrop 接收 → Badge 标签
+ChatInput (DroppableTextarea) → useDrop 接收 → Badge 标签显示文件名
     ↓
-发送 → WebSocket user_input payload.context_files = ["/path/to/file"]
+发送 → WebSocket user_input:
+  {
+    type: "user_input",
+    session_id: "...",
+    payload: {
+      content: "分析这个文件",
+      context_files: ["/server/path/to/file.xlsx"]  // 字符串数组
+    }
+  }
+    ↓
+后端 websocket_channel.py → gateway.send_user_input(context_files=[...])
+    ↓
+context_builder.py → 将路径转为 ContextFile(name, content) 读取文件内容注入 prompt
 ```
 
-现有后端 `user_input` 已支持 `context_files` 字段，无需后端改动。
+后端已支持此流程，无需改动。
+
+### 错误处理
+
+- **文件列表 API 失败**（403/404）→ 文件区显示错误提示 + 重试按钮
+- **WebSocket 断开**→ ChatInput 禁用 + 状态指示器显示红色 + 自动重连（复用现有逻辑）
+- **Session 列表加载失败**→ 任务 Tab 显示错误提示 + 刷新按钮
 
 ## 7. 后端改动：文件列表 API
 
@@ -280,17 +383,22 @@ GET /api/files?path=<dir_path>
 
 ### 实现位置
 
-`agentos/interfaces/http/routes.py` 新增路由。
+新建 `agentos/interfaces/http/files.py` 作为独立路由模块（与现有 `workspace.py`、`agents.py` 等同级）。
+
+注意：已有 `GET /api/workspace/files` 端点（在 `workspace.py` 中，仅列出 workspace 下的 `.md` 文件）。新 API 功能不同：
+- `/api/workspace/files` → 只列 workspace 下的 markdown 文件（保留不动）
+- `/api/files` → 通用目录浏览，支持任意允许的路径，返回所有文件类型
 
 ## 8. 改动清单
 
 | 层面 | 改动 |
 |------|------|
-| **新增组件** | `ChatPanel.tsx`, `ChatInput.tsx`, `MessageBubble.tsx`(独立文件), `useChatSession.ts` |
-| **重构组件** | `LeftNav.tsx`（任务分组 + 文件区 Tab + react-dnd）, `WorkbenchShell.tsx`（WebSocket 提升） |
+| **新增组件** | `ChatPanel.tsx`, `ChatInput.tsx`, `MessageBubble.tsx`(独立文件), `useChatSession.ts`, `ChatSessionProvider`(Context) |
+| **重构组件** | `LeftNav.tsx`（任务分组 + 文件区 Tab + react-dnd）, `WorkbenchShell.tsx`（DndProvider + 简化布局） |
 | **简化页面** | `/`, `/chat`, `/research`, `/ppt`, `/automation` → 薄页面 + ChatPanel |
-| **删除/替代** | `useWorkbenchSession.ts`（合并入 useChatSession）, `MainStage.tsx`（被 ChatPanel 替代）, `BottomInput.tsx`（被 ChatInput 替代）, chat/page.tsx 内联逻辑 |
-| **后端新增** | `GET /api/files` 文件列表 API |
+| **删除/替代** | `useWorkbenchSession.ts`（合并入 useChatSession）, `MainStage.tsx`（主页空状态迁移为 TaskTemplates，其余被 ChatPanel 替代）, `BottomInput.tsx`（被 ChatInput 替代）, chat/page.tsx 内联逻辑 |
+| **保留复用** | `QuestionDialog.tsx`（InteractionDialog，迁移到 ChatPanel 内使用）, `SlashCommandMenu.tsx` + `useSlashCommand`（迁移到 ChatInput 内使用） |
+| **后端新增** | `agentos/interfaces/http/files.py`：`GET /api/files` 文件列表 API |
 | **依赖新增** | `react-dnd`, `react-dnd-html5-backend` |
 
 ## 9. 不改动的部分
