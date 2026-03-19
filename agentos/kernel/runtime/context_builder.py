@@ -132,10 +132,21 @@ class ContextBuilder:
             skills = [s for s in skills if s.name in allowed]
         if not skills:
             return None
-        lines = ["<available_skills>"]
+        lines = [
+            "## Skill Usage",
+            "If the user's request matches a skill by name or description, first read the corresponding `SKILL.md` at `<location>` before continuing.",
+            "",
+            "<available_skills>",
+        ]
         for skill in skills:
             skill_md = skill.path / "SKILL.md"
-            lines.append(f"- {skill.name}: {skill.description} <location>{skill_md}</location>")
+            lines.extend([
+                "<skill>",
+                f"<name>{skill.name}</name>",
+                f"<description>{skill.description}</description>",
+                f"<location>{skill_md}</location>",
+                "</skill>",
+            ])
         lines.append("</available_skills>")
         return "\n".join(lines)
 

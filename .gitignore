@@ -45,6 +45,7 @@ workspace/memory/
 workspace/skills/
 workspace/*.json
 my_workspace/
+.agentos/workdir/
 
 # var/ 运行时数据（数据库等）默认忽略，但保留内置 skills
 var/
