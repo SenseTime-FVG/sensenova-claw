@@ -132,7 +132,14 @@ class ContextBuilder:
             skills = [s for s in skills if s.name in allowed]
         if not skills:
             return None
-        lines = ["<available_skills>"]
+        lines = [
+            "## Skill Usage",
+            "技能不是 Agent，也不是 Tool 调用名。",
+            "当某个 skill 适用时，先用 read_file 读取下面 <location> 指向的 SKILL.md，再按其中步骤执行。",
+            "不要对 skill 名称使用 send_message 或 create_agent。",
+            "如果系统提示或用户明确要求使用某个 skill，必须先读取对应的 SKILL.md，再决定后续工具调用。",
+            "<available_skills>",
+        ]
         for skill in skills:
             skill_md = skill.path / "SKILL.md"
             lines.append(f"- {skill.name}: {skill.description} <location>{skill_md}</location>")
