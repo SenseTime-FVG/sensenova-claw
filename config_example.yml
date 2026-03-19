@@ -136,7 +136,7 @@ plugins:
     webhook_port: 8787
   whatsapp:
     enabled: false
-    auth_dir: ".agentos/data/channels/whatsapp/auth"
+    auth_dir: "~/.agentos/data/channels/whatsapp/auth"
     dm_policy: "open"
     group_policy: "open"
     allowlist: []
