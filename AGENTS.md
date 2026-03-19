@@ -144,6 +144,38 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `termios` 仅适用于类 Unix 终端；非 TTY/不支持环境需保留按行读取降级路径，避免脚本不可用。
 
+### 2026-03-07 CLI 交互修复补充
+
+成功经验：
+- `asyncio` 场景下仅在 `Prompt.ask` 外层捕获 `KeyboardInterrupt` 不够，需额外注册 `SIGINT` 处理器并在主循环兜底捕获，才能避免连续 `Ctrl+C` 直接退出。
+- 将命令输入统一做 `strip()` 后再分派，可稳定识别 ` / ` 与 `/quit`，避免因为前后空白导致命令失效。
+- 将输入分派提炼为纯函数（`parse_user_input`）后，可用轻量单测快速覆盖 `/` 菜单、`/quit` 退出和未知命令行为。
+
+失败/风险经验：
+- 当前环境运行 `uv` 默认缓存目录 `~/.cache/uv` 可能无权限，需要显式设置 `UV_CACHE_DIR=/tmp/uv_cache`。
+- 若本地未同步 dev 依赖，`uv run python -m pytest` 会报 `No module named pytest`，需先执行 `uv sync --extra dev`。
+
+### 2026-03-07 CLI 即时命令菜单补充
+
+成功经验：
+- 终端若使用按行读取（如 `Prompt.ask`），`/` 命令天然需要回车；要实现“按下 `/` 立即弹菜单”，需要切到逐字符读取（raw mode）。
+- 通过 `termios + tty.setraw` 在“输入缓冲为空且按下 `/`”时直接返回命令动作，可实现无需回车的命令菜单触发。
+- 将“是否触发即时菜单”抽成纯函数（`should_trigger_menu_on_keypress`）后，能用单测稳定覆盖该交互规则。
+
+失败/风险经验：
+- `termios` 仅适用于类 Unix 终端；非 TTY/不支持环境需保留按行读取降级路径，避免脚本不可用。
+
+### 2026-03-14 测试审查补充
+
+成功经验：
+- `tests/` 已是当前唯一有效的 pytest 根目录；对外脚本若继续引用旧 `test/`/`backend/` 结构，会直接造成“脚本存在但不覆盖真实测试”的假象，需尽快收敛到 `tests/`。
+- 为 agent 核心链路单独补一个进程内 e2e 用例最有效：验证“首轮 `llm.call_requested` -> `tool.call_requested/result` -> 二轮 `llm.call_requested` -> `agent.step_completed`”，同时断言第二轮消息里确实带有 assistant `tool_calls` 与 tool 结果消息。
+- 在当前受限环境下，测试脚本默认优先使用 `python3 -m pytest` 比自动走 `uv run` 更稳；若确实需要 `uv`，应显式开启并设置 `UV_CACHE_DIR=/tmp/uv_cache`。
+
+失败/风险经验：
+- `tests/e2e/run_e2e.py` 虽能做真实 API 回归，但它是手动脚本，不会被 `pytest tests/e2e/` 自动覆盖；核心链路断言不能只放在这个脚本里。
+- 真实 API 回归仍依赖网络与 API key；当前本机只能稳定验证 mock provider 的完整编排链路，不能在无密钥/无网络条件下宣称真实 provider 已回归。
+
 ### 2026-03-14 测试审查补充
 
 成功经验：
@@ -177,17 +209,6 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 即使 `npm install` 成功、`start/status/stop` 自检通过，也只能说明 Baileys 能被加载并初始化 socket，不能替代真实扫码与消息收发验证。
 - `fetchLatestWaWebVersion` 这类可能访问网络的 Baileys API 不适合作为第一版启动必需路径；最小实现优先避免在 `start` 期间引入额外网络依赖。
 
-### 2026-03-18 WhatsApp 登录页补充
-
-成功经验：
-- 对“全前端任意页面未授权即跳转”的需求，最稳的落点是 `ProtectedRoute` 这类全局保护层，而不是逐页加判断；后端只需提供一个统一的 WhatsApp 状态接口。
-- 若二维码最终展示在前端，最简单的链路是 sidecar 直接把 QR 转成 `data URL`，前端只渲染 `<img>`，避免额外引入前端二维码生成依赖。
-- 为 `gateway` API 增加 `whatsapp/status` 这种单点状态端点后，前端 Guard 和独立登录页都能复用同一份数据结构，逻辑更容易收敛。
-
-失败/风险经验：
-- 当前 Playwright 配置会联动启动整套 `npm run dev`，在受限环境下后端 watch 模式可能直接因为系统权限失败，导致前端 e2e 不是页面逻辑失败而是基础设施失败。
-- `next build` 在当前环境会因为 `next/font` 访问 Google Fonts 失败而中断；这种网络型失败不能误判为新页面或跳转逻辑本身有语法问题。
-
 ### 2026-03-17 Telegram Channel 接入补充
 
 成功经验：
@@ -198,6 +219,28 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境下 `uv sync` 与 `uv pip install` 都可能在 Rust `system-configuration` 层 panic，不能假设 `uv` 一定可用；若必须安装新依赖，需要准备降级到 `pip` 并申请越权网络。
 - `python-telegram-bot` 的对象反序列化要求比裸 JSON 严格，例如 `User` 需要 `first_name`、`PhotoSize` 需要 `file_unique_id/width/height`；测试数据必须按 SDK 的真实字段构造，否则会在 `de_json` 阶段失败。
+
+### 2026-03-17 ask_user 收尾补充
+
+成功经验：
+- ask_user 闭环建议采用“双轨验证”：`pytest` 进程内 e2e 固化事件链（`question_asked -> question_answered -> step_completed`），再补一个独立真实 API 脚本验证线上 provider 行为。
+- 前端 Playwright 用例将 mock websocket 回归与真实 API 回归拆分后更稳；真实 API 用例通过 `ENABLE_REAL_API_E2E=1` 门控，默认不会误触发慢测。
+- 回归脚本保留关键事件打印（含 `question_id`、answer payload）后，排查 ToolSessionWorker 的等待/恢复逻辑明显更高效。
+
+失败/风险经验：
+- 当前环境运行 Playwright Chromium 仍缺系统库（`libnspr4.so`）；`npx playwright install --with-deps chromium` 需要 sudo 密码，未授权时无法完成前端浏览器级 e2e。
+- 本地网络权限与沙箱能力会影响真实 API 回归；出现 DNS/连接异常时需在越权网络下复跑，避免把环境问题误判为功能缺陷。
+
+### 2026-03-18 WhatsApp 登录页补充
+
+成功经验：
+- 对“全前端任意页面未授权即跳转”的需求，最稳的落点是 `ProtectedRoute` 这类全局保护层，而不是逐页加判断；后端只需提供一个统一的 WhatsApp 状态接口。
+- 若二维码最终展示在前端，最简单的链路是 sidecar 直接把 QR 转成 `data URL`，前端只渲染 `<img>`，避免额外引入前端二维码生成依赖。
+- 为 `gateway` API 增加 `whatsapp/status` 这种单点状态端点后，前端 Guard 和独立登录页都能复用同一份数据结构，逻辑更容易收敛。
+
+失败/风险经验：
+- 当前 Playwright 配置会联动启动整套 `npm run dev`，在受限环境下后端 watch 模式可能直接因为系统权限失败，导致前端 e2e 不是页面逻辑失败而是基础设施失败。
+- `next build` 在当前环境会因为 `next/font` 访问 Google Fonts 失败而中断；这种网络型失败不能误判为新页面或跳转逻辑本身有语法问题。
 
 ### 2026-03-18 Feishu 插件发现补充
 
@@ -220,17 +263,6 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅移植 SDK 源码不等于可运行，运行依赖如 `pyee`、`aiohttp`、`cryptography` 仍需同步补到 `pyproject.toml` 并安装，否则内部 `sdk/__init__.py` 一 import 就会失败。
 - 企微 e2e 若调用 `setup_logging()`，必须显式把 `system.agentos_home` 指向测试临时目录；否则日志会默认落到 `~/.agentos/logs`，在当前环境下容易直接因权限问题失败。
-
-### 2026-03-17 ask_user 收尾补充
-
-成功经验：
-- ask_user 闭环建议采用“双轨验证”：`pytest` 进程内 e2e 固化事件链（`question_asked -> question_answered -> step_completed`），再补一个独立真实 API 脚本验证线上 provider 行为。
-- 前端 Playwright 用例将 mock websocket 回归与真实 API 回归拆分后更稳；真实 API 用例通过 `ENABLE_REAL_API_E2E=1` 门控，默认不会误触发慢测。
-- 回归脚本保留关键事件打印（含 `question_id`、answer payload）后，排查 ToolSessionWorker 的等待/恢复逻辑明显更高效。
-
-失败/风险经验：
-- 当前环境运行 Playwright Chromium 仍缺系统库（`libnspr4.so`）；`npx playwright install --with-deps chromium` 需要 sudo 密码，未授权时无法完成前端浏览器级 e2e。
-- 本地网络权限与沙箱能力会影响真实 API 回归；出现 DNS/连接异常时需在越权网络下复跑，避免把环境问题误判为功能缺陷。
 
 ### 2026-03-18 搜索工具扩展补充
 
@@ -293,38 +325,6 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `npm run test:backend:e2e` 依赖 `pytest` 可执行文件，当前环境不存在该命令；需要使用 `python3 -m pytest` 或改脚本兼容。  
 
-### 2026-03-07 CLI 交互修复补充
-
-成功经验：
-- `asyncio` 场景下仅在 `Prompt.ask` 外层捕获 `KeyboardInterrupt` 不够，需额外注册 `SIGINT` 处理器并在主循环兜底捕获，才能避免连续 `Ctrl+C` 直接退出。
-- 将命令输入统一做 `strip()` 后再分派，可稳定识别 ` / ` 与 `/quit`，避免因为前后空白导致命令失效。
-- 将输入分派提炼为纯函数（`parse_user_input`）后，可用轻量单测快速覆盖 `/` 菜单、`/quit` 退出和未知命令行为。
-
-失败/风险经验：
-- 当前环境运行 `uv` 默认缓存目录 `~/.cache/uv` 可能无权限，需要显式设置 `UV_CACHE_DIR=/tmp/uv_cache`。
-- 若本地未同步 dev 依赖，`uv run python -m pytest` 会报 `No module named pytest`，需先执行 `uv sync --extra dev`。
-
-### 2026-03-07 CLI 即时命令菜单补充
-
-成功经验：
-- 终端若使用按行读取（如 `Prompt.ask`），`/` 命令天然需要回车；要实现“按下 `/` 立即弹菜单”，需要切到逐字符读取（raw mode）。
-- 通过 `termios + tty.setraw` 在“输入缓冲为空且按下 `/`”时直接返回命令动作，可实现无需回车的命令菜单触发。
-- 将“是否触发即时菜单”抽成纯函数（`should_trigger_menu_on_keypress`）后，能用单测稳定覆盖该交互规则。
-
-失败/风险经验：
-- `termios` 仅适用于类 Unix 终端；非 TTY/不支持环境需保留按行读取降级路径，避免脚本不可用。
-
-### 2026-03-14 测试审查补充
-
-成功经验：
-- `tests/` 已是当前唯一有效的 pytest 根目录；对外脚本若继续引用旧 `test/`/`backend/` 结构，会直接造成“脚本存在但不覆盖真实测试”的假象，需尽快收敛到 `tests/`。
-- 为 agent 核心链路单独补一个进程内 e2e 用例最有效：验证“首轮 `llm.call_requested` -> `tool.call_requested/result` -> 二轮 `llm.call_requested` -> `agent.step_completed`”，同时断言第二轮消息里确实带有 assistant `tool_calls` 与 tool 结果消息。
-- 在当前受限环境下，测试脚本默认优先使用 `python3 -m pytest` 比自动走 `uv run` 更稳；若确实需要 `uv`，应显式开启并设置 `UV_CACHE_DIR=/tmp/uv_cache`。
-
-失败/风险经验：
-- `tests/e2e/run_e2e.py` 虽能做真实 API 回归，但它是手动脚本，不会被 `pytest tests/e2e/` 自动覆盖；核心链路断言不能只放在这个脚本里。
-- 真实 API 回归仍依赖网络与 API key；当前本机只能稳定验证 mock provider 的完整编排链路，不能在无密钥/无网络条件下宣称真实 provider 已回归。
-
 ### 2026-03-18 搜索工具扩展补充
 
 成功经验：
@@ -335,6 +335,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境下真实 `gemini` 进程内 e2e 仍不稳定：`serper_search` 返回 `403 Forbidden` 后，模型会回退到多次 `bash_command` 探测，最终超时，说明“真实 provider 回归”不能只看工具注册是否成功，还要验证外部 key 的真实性和可用性。
 - 新增的 `tests/e2e/test_live_search_tools.py` 只有在对应 `BRAVE_SEARCH_API_KEY`、`BAIDU_APPBUILDER_API_KEY`、`TAVILY_API_KEY` 配置后才会真正执行；无 key 场景下会全部 skip，不能误判为真实回归已完成。
+
+### 2026-03-18 Cron/通知/API Key 面板补充
+
+成功经验：
+- 将 `config.yml` 持久化逻辑抽到 `agentos/interfaces/http/config_store.py` 后，`config_api`、`tools` API key 管理和 `notification_api` 都能复用同一套“保留未知顶层字段 + 热重载”的写回路径，避免多处手写 YAML 合并逻辑。
+- 通知系统最稳的落点是事件总线：`NotificationService -> notification.push / notification.session -> WebSocketChannel -> 前端 NotificationProvider`，这样浏览器 toast、浏览器原生通知和会话内系统消息可以共享同一份 payload。
+- Cron UI 若直接复用 `CronRuntime` + `Repository.list_cron_runs()`，后端不需要新增第二套调度业务逻辑；前端只需要围绕 `/api/cron/jobs` 与 `/api/cron/jobs/{id}/runs` 做 CRUD 和历史面板即可。
+
+失败/风险经验：
+- 当前环境里 `python3 -m pytest` 仍不可用，验证新后端接口时要继续使用 `UV_CACHE_DIR=/tmp/uv_cache uv run python -m pytest ...`。
+- 当前前端类型检查仍会先卡在既有问题 `agentos/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为“本次改动失败”的依据。
 
 ### 2026-03-18 前端重连恢复补充
 
@@ -416,17 +427,6 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 如果 `NotificationService.resolve_channels()` 对显式 `channels=[...]` 仍套用全局子开关过滤，用户界面会表现成“明明勾选了 native，但什么都没发生”，而且排查时容易误以为是 `notify-send` 或系统桌面环境本身有问题。
-
-### 2026-03-18 Cron/通知/API Key 面板补充
-
-成功经验：
-- 将 `config.yml` 持久化逻辑抽到 `agentos/interfaces/http/config_store.py` 后，`config_api`、`tools` API key 管理和 `notification_api` 都能复用同一套“保留未知顶层字段 + 热重载”的写回路径，避免多处手写 YAML 合并逻辑。
-- 通知系统最稳的落点是事件总线：`NotificationService -> notification.push / notification.session -> WebSocketChannel -> 前端 NotificationProvider`，这样浏览器 toast、浏览器原生通知和会话内系统消息可以共享同一份 payload。
-- Cron UI 若直接复用 `CronRuntime` + `Repository.list_cron_runs()`，后端不需要新增第二套调度业务逻辑；前端只需要围绕 `/api/cron/jobs` 与 `/api/cron/jobs/{id}/runs` 做 CRUD 和历史面板即可。
-
-失败/风险经验：
-- 当前环境里 `python3 -m pytest` 仍不可用，验证新后端接口时要继续使用 `UV_CACHE_DIR=/tmp/uv_cache uv run python -m pytest ...`。
-- 当前前端类型检查仍会先卡在既有问题 `agentos/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为“本次改动失败”的依据。
 
 ### 2026-03-19 WhatsApp typingIndicator 配置补充
 
