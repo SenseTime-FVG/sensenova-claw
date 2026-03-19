@@ -482,3 +482,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 本次对 `wecom`/`telegram` 的结论主要基于代码路径与单测，而不是线上真实长连接压测；如果用户仍反馈偶发断流，需要优先抓运行日志区分是 SDK/网络层重连问题，还是业务 handler 慢/抛错问题。
+
+### 2026-03-19 WhatsApp 登录页错误展示补充
+
+成功经验：
+- `/gateway/whatsapp` 页面的 `lastError` 只是状态快照字段，不等于“当前仍出错”；如果只想隐藏历史错误展示，最小改动就是删除该页的错误卡片渲染，保留接口和状态类型不动。
+- 这类前端展示回归适合直接复用现有 Playwright mock 路由用例，在 `lastError` 非空时断言页面不出现错误标题和错误文本即可。
+
+失败/风险经验：
+- 当前前端 Playwright 配置会先执行 `cd .. && npm run dev`，该启动链路在本机仍会触发 `uv` 的 `system-configuration` panic，导致 e2e 无法进入实际页面断言；不能把这类失败误判为 UI 行为未生效。
+- 当前前端类型检查仍受既有问题阻塞：`agentos/app/web/components/ThemeProvider.tsx` 引用了不存在的 `next-themes/dist/types`，因此针对单页小改动也无法宣称全量 `tsc` 通过。
