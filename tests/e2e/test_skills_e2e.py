@@ -35,9 +35,35 @@ def test_skills_integration():
         # 验证 system prompt 包含 skills
         system_msg = messages[0]
         assert system_msg["role"] == "system"
+        assert "## Skill Usage" in system_msg["content"]
+        assert "If the user's request matches a skill by name or description" in system_msg["content"]
         assert "<available_skills>" in system_msg["content"]
+        assert "<skill>" in system_msg["content"]
+        assert "<name>test-skill</name>" in system_msg["content"]
+        assert "<description>测试技能描述</description>" in system_msg["content"]
+        assert f"<location>{skill_dir / 'SKILL.md'}</location>" in system_msg["content"]
         assert "test-skill" in system_msg["content"]
 
 
 if __name__ == "__main__":
     test_skills_integration()
+
+
+def test_research_union_builtin_skills_in_prompt():
+    """验证内置 research-union / union-search-plus 能被注入 prompt。"""
+    project_root = Path(__file__).resolve().parents[2]
+    builtin_dir = project_root / ".agentos" / "skills"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry = SkillRegistry(
+            workspace_dir=Path(tmpdir),
+            builtin_dir=builtin_dir,
+        )
+        registry.load_skills({})
+
+        builder = ContextBuilder(skill_registry=registry)
+        messages = builder.build_messages("请做一次深度调研")
+        system_msg = messages[0]["content"]
+
+        assert "research-union" in system_msg
+        assert "union-search-plus" in system_msg

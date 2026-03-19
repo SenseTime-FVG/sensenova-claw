@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*
+!.env.example
+
+# Responses directory
+responses/
+**/responses/
+**/responsive/
+search_output/
+**/search_output/
+**/test-file/
+
+# Search logs directory (本地搜索日志，不提交到远程)
+search_logs/
+**/search_logs/
+
+# Test outputs
+test_output.*
+test_note.md
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+
+# Archive files
+scripts/bilibili_archive_*.zip
+*.zip
+*.rar
+
+# Test folder (本地测试记录)
+test_folder/
+
+# RSS parsed results (动态生成的数据，不提交)
+parsed_results/
+scripts/rss_search/parsed_results/
+
+# Archive (task plans, notes)
+.archive/
+node_modules/
+*.log
+
+# Taobao scraper research output
+taobao-scraper-research/

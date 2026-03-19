@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
 from agentos.interfaces.http.config_store import persist_section_updates
+from agentos.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -56,3 +57,17 @@ async def update_config_sections(body: SectionsUpdateBody, request: Request):
     for key in EDITABLE_SECTIONS:
         result[key] = deepcopy(data.get(key, {}))
     return {"status": "saved", "sections": result}
+
+
+@router.get("/llm-status")
+async def get_llm_status(request: Request):
+    """检测当前配置中是否至少有一个 LLM 提供商已配置有效 API key"""
+    cfg = request.app.state.config
+    is_configured, providers = check_llm_configured(cfg.data)
+    return {"configured": is_configured, "providers": providers}
+
+
+@router.get("/llm-presets")
+async def get_llm_presets():
+    """返回所有 LLM 提供商预设分类列表，供前端展示使用"""
+    return {"categories": LLM_PROVIDER_CATEGORIES}

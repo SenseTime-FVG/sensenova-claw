@@ -23,6 +23,18 @@ class TestToolRegistry:
         assert r.get("write_file") is not None
         assert r.get("ask_user") is not None
 
+    def test_email_tools_registered(self):
+        r = ToolRegistry()
+        names = {t["name"] for t in r.as_llm_tools()}
+        assert {
+            "send_email",
+            "list_emails",
+            "read_email",
+            "download_attachment",
+            "mark_email",
+            "search_emails",
+        }.issubset(names)
+
     def test_register_custom(self):
         r = ToolRegistry()
         r.register(MockTool())

@@ -4,6 +4,7 @@ import { Inter } from "next/font/google";
 import { NotificationProvider } from '@/components/notification/NotificationProvider';
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from '@/contexts/AuthContext';
+import { ChatSessionProvider } from '@/contexts/ChatSessionContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { cn } from "@/lib/utils";
 
@@ -26,9 +27,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           >
           <NotificationProvider>
             <AuthProvider>
-              <ProtectedRoute>
-                {children}
-              </ProtectedRoute>
+              <ChatSessionProvider>
+                <ProtectedRoute>
+                  {children}
+                </ProtectedRoute>
+              </ChatSessionProvider>
             </AuthProvider>
           </NotificationProvider>
         </ThemeProvider>

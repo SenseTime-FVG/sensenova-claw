@@ -91,6 +91,31 @@ class TestAgentRegistry:
         assert helper.max_send_depth == 6
         assert helper.max_pingpong_turns == 9
 
+    def test_load_email_agent_config_contains_all_email_tools(self):
+        project_root = Path(__file__).resolve().parents[2]
+        registry = AgentRegistry(config_dir=project_root / ".agentos" / "agents")
+        registry.load_from_config(
+            {
+                "agent": {"model": "mock"},
+                "agents": ["email-agent"],
+            }
+        )
+
+        email_agent = registry.get("email-agent")
+        assert email_agent is not None
+        assert email_agent.tools == [
+            "bash_command",
+            "read_file",
+            "write_file",
+            "send_message",
+            "send_email",
+            "list_emails",
+            "read_email",
+            "download_attachment",
+            "mark_email",
+            "search_emails",
+        ]
+
     def test_update(self, tmp_path):
         r = AgentRegistry(config_dir=tmp_path / "a")
         r.register(AgentConfig.create(id="u", name="Old"))

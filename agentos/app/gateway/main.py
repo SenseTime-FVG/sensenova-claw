@@ -369,15 +369,47 @@ app.include_router(skills.router)
 from agentos.interfaces.http.skills import invoke_router
 app.include_router(invoke_router)
 app.include_router(workspace.router)
+from agentos.interfaces.http import files
+app.include_router(files.router)
 app.include_router(config_api.router)
 app.include_router(cron_api.router)
 app.include_router(notification_api.router)
 app.include_router(sessions.router)
+from agentos.interfaces.http import custom_pages
+app.include_router(custom_pages.router)
 
 
 @app.get("/health")
 async def health_check() -> dict:
     return {"status": "healthy", "timestamp": time.time(), "version": "0.1.0"}
+
+
+@app.get("/api/sessions")
+async def list_sessions():
+    """获取会话列表"""
+    sessions = await app.state.services.gateway.list_sessions()
+    return JSONResponse(content={"sessions": sessions})
+
+
+@app.get("/api/sessions/{session_id}/turns")
+async def get_session_turns(session_id: str):
+    """获取会话的所有轮次"""
+    turns = await app.state.services.gateway.get_session_turns(session_id)
+    return JSONResponse(content={"turns": turns})
+
+
+@app.get("/api/sessions/{session_id}/events")
+async def get_session_events(session_id: str):
+    """获取会话的所有事件"""
+    events = await app.state.services.gateway.get_session_events(session_id)
+    return JSONResponse(content={"events": events})
+
+
+@app.get("/api/sessions/{session_id}/messages")
+async def list_session_messages(session_id: str):
+    """获取会话的所有消息"""
+    messages = await app.state.services.gateway.get_messages(session_id)
+    return JSONResponse(content={"messages": messages})
 
 
 @app.websocket("/ws")
