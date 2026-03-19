@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useState, useCallback, useMemo } from 'react';
+import { ReactNode, useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -9,10 +9,44 @@ import {
   adminNavItems,
   type SubNavGroup,
 } from './DashboardNav';
-import { Search } from 'lucide-react';
+import { Search, Bell } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
+import { useChatSession } from '@/contexts/ChatSessionContext';
+import { authFetch, API_BASE } from '@/lib/authFetch';
+
+function GlobalReminderBell() {
+  const [todayCount, setTodayCount] = useState(0);
+
+  useEffect(() => {
+    authFetch(`${API_BASE}/api/cron/runs?limit=100`)
+      .then(r => r.json())
+      .then(data => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayMs = today.getTime();
+        const runs = (data.runs || []) as { started_at_ms: number }[];
+        setTodayCount(runs.filter(r => r.started_at_ms >= todayMs).length);
+      })
+      .catch(() => {});
+  }, []);
+
+  return (
+    <Link
+      href="/automation"
+      className="relative p-1.5 rounded-lg hover:bg-muted transition-colors"
+      title={`今日 ${todayCount} 条提醒`}
+    >
+      <Bell className="w-5 h-5 text-muted-foreground" />
+      {todayCount > 0 && (
+        <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center px-0.5">
+          {todayCount > 99 ? '99+' : todayCount}
+        </span>
+      )}
+    </Link>
+  );
+}
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -22,6 +56,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
   const [manualGroup, setManualGroup] = useState<SubNavGroup>(null);
   const featureNavItems = useFeatureNavItems();
+  const { startNewChat } = useChatSession();
 
   const isFeatureActive = featureNavItems.some((item) =>
     pathname?.startsWith(item.path)
@@ -76,6 +111,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 />
               </div>
             </div>
+            <GlobalReminderBell />
             <Avatar className="h-8 w-8 cursor-pointer">
               <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
               <AvatarFallback>AO</AvatarFallback>
@@ -94,6 +130,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               <Link
                 key={item.path}
                 href={item.path}
+                onClick={() => { if (pathname?.startsWith(item.path)) startNewChat(); }}
                 className={cn(
                   'px-3 py-1.5 text-sm rounded-md transition-colors',
                   pathname?.startsWith(item.path)

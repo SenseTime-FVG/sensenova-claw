@@ -282,10 +282,13 @@ class CronRuntime:
         # 标记 running
         await self._repo.update_cron_job_state(job.id, {"running_at_ms": start_ms})
 
+        job_text = job.payload.text if hasattr(job.payload, "text") else ""
         run_id = await self._repo.insert_cron_run({
             "job_id": job.id,
             "started_at_ms": start_ms,
             "status": "running",
+            "job_name": job.name or job.id,
+            "job_text": job_text,
             "created_at": time.time(),
         })
 
@@ -328,9 +331,9 @@ class CronRuntime:
                 next_run_at_ms=next_run,
             )
 
-            # at 类型成功后自动删除
+            # at 类型成功后自动删除（保留 runs 历史）
             if job.delete_after_run:
-                await self._repo.delete_cron_job(job.id)
+                await self._repo.delete_cron_job(job.id, keep_runs=True)
                 logger.info("Auto-deleted at-type job %s", job.id)
 
         except Exception as exc:

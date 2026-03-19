@@ -33,6 +33,8 @@ export interface ChatSessionContextValue {
   switchSession: (sessionId: string) => void;
   createSession: (agentId: string, taskId?: string) => void;
   startNewChat: () => void;
+  /** 删除会话 */
+  deleteSession: (sessionId: string) => Promise<void>;
   /** 页面挂载时调用：如果是通过 switchSession 跳转过来的则保留会话，否则重置 */
   resetIfNeeded: () => void;
 
@@ -98,7 +100,6 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
   const pendingCreateMeta = useRef<Record<string, string> | null>(null);
-  const skipNextResetRef = useRef(false);
 
   // ── helpers ──
 
@@ -315,6 +316,16 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         }));
         break;
       }
+      case 'session_deleted': {
+        const deletedSid = String(payload.session_id || '');
+        if (deletedSid) {
+          setSessions(prev => prev.filter(s => s.session_id !== deletedSid));
+          if (sessionIdRef.current === deletedSid) {
+            startNewChat();
+          }
+        }
+        break;
+      }
       case 'error':
         addMsg('system', `Error: ${payload.message || payload.error_type || 'Unknown Error'}`);
         setIsTyping(false);
@@ -462,7 +473,6 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   // ── 对外接口 ──
 
   const switchSession = useCallback(async (sid: string) => {
-    skipNextResetRef.current = true;
     await reloadSessionHistory(sid);
   }, [reloadSessionHistory]);
 
@@ -489,12 +499,20 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     toolStepMapRef.current.clear();
   }, []);
 
-  const resetIfNeeded = useCallback(() => {
-    if (skipNextResetRef.current) {
-      skipNextResetRef.current = false;
-      return;
+  const deleteSession = useCallback(async (sid: string) => {
+    try {
+      const res = await authFetch(`${API_BASE}/api/sessions/${sid}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('delete failed');
+    } catch {
+      // 忽略网络错误，继续清理本地状态
     }
-    if (sessionIdRef.current) return;
+    setSessions(prev => prev.filter(s => s.session_id !== sid));
+    if (sessionIdRef.current === sid) {
+      startNewChat();
+    }
+  }, [startNewChat]);
+
+  const resetIfNeeded = useCallback(() => {
     startNewChat();
   }, [startNewChat]);
 
@@ -588,6 +606,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     currentSessionId: sessionId,
     switchSession,
     createSession,
+    deleteSession,
     startNewChat,
     resetIfNeeded,
     messages,

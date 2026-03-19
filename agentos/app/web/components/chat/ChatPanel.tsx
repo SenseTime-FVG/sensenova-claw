@@ -12,9 +12,11 @@ import { type ContextFileRef } from '@/lib/chatTypes';
 interface ChatPanelProps {
   defaultAgentId: string;
   emptyState?: React.ReactNode | ((fillInput: (text: string) => void) => React.ReactNode);
+  hideAgentSelector?: boolean;
+  lockAgent?: boolean;
 }
 
-export function ChatPanel({ defaultAgentId, emptyState }: ChatPanelProps) {
+export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockAgent }: ChatPanelProps) {
   const {
     wsConnected,
     currentSessionId,
@@ -98,6 +100,8 @@ export function ChatPanel({ defaultAgentId, emptyState }: ChatPanelProps) {
         disabled={isTyping || !!activeInteraction || interactionSubmitting}
         wsConnected={wsConnected}
         handleSkillInvoke={handleSkillInvoke}
+        hideAgentSelector={hideAgentSelector}
+        lockAgent={lockAgent}
       />
 
       {/* 交互对话框 */}

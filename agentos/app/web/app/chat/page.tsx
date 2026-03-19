@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Loader2, Bot, MessageSquare, Plus, Search, RefreshCw,
+  Loader2, Bot, MessageSquare, Plus, Search, RefreshCw, Trash2,
   Folder, FolderOpen, File, ChevronRight, ChevronDown, PanelRightOpen, PanelRightClose, X,
 } from 'lucide-react';
 import { DndProvider } from 'react-dnd';
@@ -89,18 +89,32 @@ function AgentContactItem({
 
 /* ── Session 列表项（中栏） ── */
 
-function SessionItem({
-  session, isActive, onClick,
+function SessionListItem({
+  session, isActive, onClick, onDelete,
 }: {
   session: SessionItem;
   isActive: boolean;
   onClick: () => void;
+  onDelete: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirmDelete) {
+      onDelete();
+      setConfirmDelete(false);
+    } else {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+    }
+  };
+
   return (
     <div
       onClick={onClick}
       className={cn(
-        'flex items-center gap-2.5 px-3 py-2.5 mx-2 rounded-lg cursor-pointer transition-colors text-sm',
+        'flex items-center gap-2.5 px-3 py-2.5 mx-2 rounded-lg cursor-pointer transition-colors text-sm group relative',
         isActive ? 'bg-primary/10 text-foreground' : 'hover:bg-muted/60 text-foreground/80',
       )}
     >
@@ -112,6 +126,18 @@ function SessionItem({
         <div className="truncate font-medium text-xs">{getTitle(session.meta)}</div>
         <div className="text-[10px] text-muted-foreground mt-0.5">{timeLabel(session.last_active)}</div>
       </div>
+      <button
+        onClick={handleDelete}
+        className={cn(
+          'shrink-0 p-1 rounded transition-colors',
+          confirmDelete
+            ? 'opacity-100 text-destructive hover:bg-destructive/10'
+            : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10',
+        )}
+        title={confirmDelete ? '确认删除' : '删除会话'}
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }
@@ -271,6 +297,7 @@ function ChatContent() {
     sendMessage,
     switchSession,
     createSession,
+    deleteSession,
     startNewChat,
     resetIfNeeded,
     refreshTaskGroups,
@@ -479,11 +506,12 @@ function ChatContent() {
                 ) : (
                   <div className="space-y-0.5">
                     {selectedSessions.map(session => (
-                      <SessionItem
+                      <SessionListItem
                         key={session.session_id}
                         session={session}
                         isActive={currentSessionId === session.session_id}
                         onClick={() => switchSession(session.session_id)}
+                        onDelete={() => deleteSession(session.session_id)}
                       />
                     ))}
                   </div>
