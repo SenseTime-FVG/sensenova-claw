@@ -119,18 +119,11 @@ class BashCommandTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        from agentos.platform.security.path_policy import PathPolicy
-
-        policy: PathPolicy | None = kwargs.pop("_path_policy", None)
+        kwargs.pop("_path_policy", None)
         agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         command = str(kwargs.get("command", ""))
-        cwd, error = _resolve_bash_cwd(
-            policy=policy,
-            working_dir=kwargs.get("working_dir"),
-            agent_workdir=agent_workdir,
-        )
-        if error:
-            return error
+        cwd_raw = kwargs.get("working_dir")
+        cwd = cwd_raw or agent_workdir or "."
 
         def _run() -> dict[str, Any]:
             proc = subprocess.run(
@@ -561,28 +554,11 @@ class ReadFileTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        from agentos.platform.security.path_policy import PathPolicy, PathVerdict
-
-        policy: PathPolicy | None = kwargs.pop("_path_policy", None)
+        kwargs.pop("_path_policy", None)
         agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         raw_path = str(kwargs["file_path"])
 
-        # 相对路径优先基于 agent workdir 解析
-        resolved_path = _resolve_with_workdir(raw_path, agent_workdir)
-
-        if policy:
-            verdict = policy.check_read(str(resolved_path))
-            if verdict == PathVerdict.DENY:
-                return {"success": False, "error": f"系统目录禁止读取: {raw_path}"}
-            if verdict == PathVerdict.NEED_GRANT:
-                return {
-                    "success": False,
-                    "error": f"该目录未授权，请先获得用户许可: {raw_path}",
-                    "action": "need_grant", "path": raw_path,
-                }
-            file_path = resolved_path
-        else:
-            file_path = resolved_path
+        file_path = _resolve_with_workdir(raw_path, agent_workdir)
 
         if not file_path.exists():
             return {"success": False, "error": f"文件不存在: {file_path}"}
@@ -627,28 +603,11 @@ class WriteFileTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        from agentos.platform.security.path_policy import PathPolicy, PathVerdict
-
-        policy: PathPolicy | None = kwargs.pop("_path_policy", None)
+        kwargs.pop("_path_policy", None)
         agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         raw_path = str(kwargs["file_path"])
 
-        # 相对路径优先基于 agent workdir 解析
-        resolved_path = _resolve_with_workdir(raw_path, agent_workdir)
-
-        if policy:
-            verdict = policy.check_write(str(resolved_path))
-            if verdict == PathVerdict.DENY:
-                return {"success": False, "error": f"系统目录禁止写入: {raw_path}"}
-            if verdict == PathVerdict.NEED_GRANT:
-                return {
-                    "success": False,
-                    "error": f"该目录未授权，请先获得用户许可: {raw_path}",
-                    "action": "need_grant", "path": raw_path,
-                }
-            file_path = resolved_path
-        else:
-            file_path = resolved_path
+        file_path = _resolve_with_workdir(raw_path, agent_workdir)
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         content = str(kwargs.get("content", ""))
@@ -691,29 +650,3 @@ class WriteFileTool(Tool):
 
         return {"success": True, "file_path": str(file_path), "size": len(content), "mode": mode}
 
-
-class GrantPathTool(Tool):
-    """授权工具。risk_level=HIGH → 自动触发 _needs_confirmation。"""
-
-    name = "grant_path"
-    description = "授权 Agent 访问指定目录（需先征得用户同意）"
-    risk_level = ToolRiskLevel.HIGH
-    parameters = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "要授权的目录路径"},
-        },
-        "required": ["path"],
-    }
-
-    async def execute(self, **kwargs: Any) -> Any:
-        from agentos.platform.security.path_policy import PathPolicy
-        policy: PathPolicy | None = kwargs.pop("_path_policy", None)
-        path_str = str(kwargs["path"])
-        if not policy:
-            return {"success": False, "error": "PathPolicy 未初始化"}
-        try:
-            resolved = policy.grant(path_str)
-            return {"success": True, "granted": str(resolved)}
-        except ValueError as e:
-            return {"success": False, "error": str(e)}
