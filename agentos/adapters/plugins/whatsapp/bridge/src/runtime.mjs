@@ -43,6 +43,12 @@ function formatDisconnectError(error) {
   return parts.join(" | ");
 }
 
+function isQrRefsTimeout(error) {
+  const message = error?.message || "";
+  const payloadMessage = error?.data?.message ?? error?.output?.payload?.message ?? "";
+  return String(message).includes("QR refs attempts ended") || String(payloadMessage).includes("QR refs attempts ended");
+}
+
 function isGroupJid(jid) {
   return typeof jid === "string" && jid.endsWith("@g.us");
 }
@@ -225,6 +231,7 @@ export class WhatsAppRuntime {
     this._isRecoveringAuth = false;
     this._isRestarting = false;
     this._isReconnecting = false;
+    this._isRefreshingQr = false;
     this._reconnectAttempts = 0;
     this._recentOutboundMessageIds = new Map();
     this._status = {
@@ -358,6 +365,11 @@ export class WhatsAppRuntime {
 
         if (statusCode === 515 && !this._isRestarting) {
           void this._restartAfterPairing();
+          return;
+        }
+
+        if (statusCode === 408 && isQrRefsTimeout(update.lastDisconnect?.error) && !this._isRefreshingQr) {
+          void this._refreshQrAfterTimeout();
           return;
         }
 
@@ -653,6 +665,44 @@ export class WhatsAppRuntime {
       await this.start(this._authDir);
     } finally {
       this._isReconnecting = false;
+    }
+  }
+
+  async _refreshQrAfterTimeout() {
+    if (!this._authDir) {
+      return;
+    }
+
+    this._isRefreshingQr = true;
+    this._emit({
+      type: "status",
+      payload: {
+        ...this._status,
+        state: "refreshing_qr",
+        connected: false,
+        debugMessage: "qr expired, restarting login flow",
+      },
+    });
+    this._emit({
+      type: "error",
+      payload: {
+        message: "WhatsApp QR expired, refreshing login flow.",
+      },
+    });
+
+    try {
+      if (this._sock?.ws) {
+        try {
+          this._sock.ws.close();
+        } catch {
+          // ignore
+        }
+      }
+      this._sock = null;
+      await new Promise((resolve) => setTimeout(resolve, this._restartDelayMs));
+      await this.start(this._authDir);
+    } finally {
+      this._isRefreshingQr = false;
     }
   }
 }

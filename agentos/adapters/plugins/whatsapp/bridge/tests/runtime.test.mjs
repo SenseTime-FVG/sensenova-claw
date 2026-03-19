@@ -611,6 +611,64 @@ test("statusCode 408 reconnects socket without clearing auth dir", async () => {
   assert.equal(events.some((event) => event.type === "status" && event.payload.state === "reconnecting"), true);
 });
 
+test("qr refs timeout restarts login socket without consuming reconnect budget", async () => {
+  const events = [];
+  let makeSocketCalls = 0;
+  const sockets = [];
+
+  const runtime = new WhatsAppRuntime({
+    emit: (event) => {
+      events.push(event);
+    },
+    ensureAuthDir: async () => {},
+    restartDelayMs: 0,
+    reconnectDelayMs: 0,
+    maxReconnectAttempts: 1,
+    loadBaileys: async () => ({
+      makeWASocket() {
+        makeSocketCalls += 1;
+        const socket = {
+          ev: createFakeEmitter(),
+          ws: { close() {} },
+          user: null,
+        };
+        sockets.push(socket);
+        return socket;
+      },
+      useMultiFileAuthState: async () => ({
+        state: {
+          creds: {},
+          keys: {},
+        },
+        saveCreds: async () => {},
+      }),
+      fetchLatestBaileysVersion: async () => ({ version: [2, 3000, 1] }),
+      makeCacheableSignalKeyStore(keys) {
+        return keys;
+      },
+    }),
+  });
+
+  await runtime.start("/tmp/agentos-whatsapp-runtime-test");
+  sockets[0].ev.emit("connection.update", {
+    connection: "close",
+    lastDisconnect: {
+      error: {
+        message: "QR refs attempts ended",
+        output: {
+          statusCode: 408,
+          payload: { statusCode: 408, error: "Request Time-out", message: "QR refs attempts ended" },
+        },
+      },
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(makeSocketCalls, 2);
+  assert.equal(events.some((event) => event.type === "status" && event.payload.state === "refreshing_qr"), true);
+  assert.equal(runtime._reconnectAttempts, 0);
+});
+
 test("sendText resolves lid target to pn jid before sending", async () => {
   const sent = [];
   const runtime = new WhatsAppRuntime({

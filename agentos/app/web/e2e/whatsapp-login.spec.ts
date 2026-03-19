@@ -21,6 +21,35 @@ async function mockAuthenticatedWhatsAppBlocked(page: Page, context: BrowserCont
     });
   });
 
+  await page.route('**/api/gateway/stats', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        totalChannels: 1,
+        activeChannels: 1,
+        totalConnections: 0,
+        totalSessions: 0,
+      }),
+    });
+  });
+
+  await page.route('**/api/gateway/channels', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'whatsapp',
+          name: 'whatsapp',
+          type: 'whatsapp',
+          status: 'connected',
+          config: {},
+        },
+      ]),
+    });
+  });
+
   await page.route('**/api/gateway/whatsapp/status', async (route: Route) => {
     await route.fulfill({
       status: 200,
@@ -38,27 +67,27 @@ async function mockAuthenticatedWhatsAppBlocked(page: Page, context: BrowserCont
   });
 }
 
-test('whatsapp 未授权时访问 gateway 会自动跳转到独立登录页并显示二维码', async ({ page, context }) => {
+test('whatsapp 未授权时 gateway 页面显示红灯和授权按钮', async ({ page, context }) => {
   await mockAuthenticatedWhatsAppBlocked(page, context);
 
   await page.goto('/gateway');
 
-  await expect(page).toHaveURL(/\/gateway\/whatsapp/);
-  await expect(page.getByText('WhatsApp Login')).toBeVisible();
-  await expect(page.locator('img[alt="WhatsApp QR"]')).toBeVisible();
-  await expect(page.getByText('未授权')).toBeVisible();
+  await expect(page).toHaveURL(/\/gateway$/);
+  await expect(page.getByText('unauthorized')).toBeVisible();
+  await expect(page.getByRole('button', { name: '授权' })).toBeVisible();
 });
 
-test('whatsapp 未授权时访问 sessions/whatsapp 页面会自动跳转到独立登录页', async ({ page, context }) => {
+test('点击 gateway 中的 whatsapp 授权按钮后进入独立登录页', async ({ page, context }) => {
   await mockAuthenticatedWhatsAppBlocked(page, context);
 
-  await page.goto('/sessions/whatsapp_demo');
+  await page.goto('/gateway');
+  await page.getByRole('button', { name: '授权' }).click();
 
   await expect(page).toHaveURL(/\/gateway\/whatsapp/);
   await expect(page.getByText('WhatsApp Login')).toBeVisible();
 });
 
-test('whatsapp 未授权时访问非 gateway 页面不会自动跳转', async ({ page, context }) => {
+test('whatsapp 未授权时访问普通页面不会自动跳转', async ({ page, context }) => {
   await mockAuthenticatedWhatsAppBlocked(page, context);
 
   await page.goto('/chat');
