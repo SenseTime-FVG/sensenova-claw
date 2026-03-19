@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.adapters.channels.wecom.channel import WecomChannel, WecomSessionMeta
-from agentos.adapters.channels.wecom.config import WecomConfig
+from agentos.adapters.plugins.wecom.channel import WecomChannel, WecomSessionMeta
+from agentos.adapters.plugins.wecom.config import WecomConfig
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope

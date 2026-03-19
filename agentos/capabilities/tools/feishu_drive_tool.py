@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentos.adapters.channels.feishu.tool_client import FeishuToolClient, FeishuToolError
+from agentos.adapters.plugins.feishu.tool_client import FeishuToolClient, FeishuToolError
 from agentos.capabilities.tools.base import Tool, ToolRiskLevel
 
 

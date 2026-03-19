@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from agentos.adapters.channels.wecom.channel import WecomChannel
-from agentos.adapters.channels.wecom.config import WecomConfig
+from agentos.adapters.plugins.wecom.channel import WecomChannel
+from agentos.adapters.plugins.wecom.config import WecomConfig
 from agentos.adapters.llm.factory import LLMFactory
 from agentos.adapters.storage.repository import Repository
 from agentos.capabilities.tools.registry import ToolRegistry

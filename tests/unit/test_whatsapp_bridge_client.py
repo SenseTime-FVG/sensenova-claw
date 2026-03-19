@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from agentos.adapters.channels.whatsapp.bridge_client import SidecarBridgeClient
-from agentos.adapters.channels.whatsapp.models import WhatsAppInboundMessage
+from agentos.adapters.plugins.whatsapp.bridge_client import SidecarBridgeClient
+from agentos.adapters.plugins.whatsapp.models import WhatsAppInboundMessage
 
 
 def _write_fake_sidecar(path: Path) -> None:

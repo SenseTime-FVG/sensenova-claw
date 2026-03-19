@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from agentos.adapters.plugins.whatsapp.status_api import build_whatsapp_status
+
 router = APIRouter(prefix="/api/gateway", tags=["gateway"])
 
 
@@ -43,3 +45,17 @@ async def list_channels(request: Request):
             "config": {},
         })
     return channels
+
+
+@router.get("/whatsapp/status")
+async def get_whatsapp_status(request: Request):
+    """获取 WhatsApp 登录与运行状态。"""
+    services = request.app.state.services
+    gw = services.gateway
+    cfg = request.app.state.config
+
+    channel = gw._channels.get("whatsapp")
+    return build_whatsapp_status(
+        config_data=getattr(cfg, "data", {}),
+        channel=channel,
+    )

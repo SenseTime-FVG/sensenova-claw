@@ -8,8 +8,8 @@ telegram_mod = pytest.importorskip("telegram", reason="python-telegram-bot not i
 from telegram import Update
 from unittest.mock import AsyncMock, patch
 
-from agentos.adapters.channels.telegram.config import TelegramConfig
-from agentos.adapters.channels.telegram.runtime import TelegramRuntime
+from agentos.adapters.plugins.telegram.config import TelegramConfig
+from agentos.adapters.plugins.telegram.runtime import TelegramRuntime
 
 
 class TestPolling:

@@ -14,8 +14,8 @@ import os
 from contextlib import suppress
 from pathlib import Path
 
-from agentos.adapters.channels.telegram.channel import TelegramChannel
-from agentos.adapters.channels.telegram.config import TelegramConfig
+from agentos.adapters.plugins.telegram.channel import TelegramChannel
+from agentos.adapters.plugins.telegram.config import TelegramConfig
 from agentos.adapters.llm.factory import LLMFactory
 from agentos.adapters.storage.repository import Repository
 from agentos.capabilities.tools.registry import ToolRegistry

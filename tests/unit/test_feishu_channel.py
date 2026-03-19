@@ -30,8 +30,8 @@ from agentos.kernel.events.types import (
 )
 from agentos.kernel.runtime.publisher import EventPublisher
 from agentos.interfaces.ws.gateway import Gateway
-from agentos.adapters.channels.feishu.config import FeishuConfig
-from agentos.adapters.channels.feishu.channel import FeishuChannel, FeishuSessionMeta
+from agentos.adapters.plugins.feishu.config import FeishuConfig
+from agentos.adapters.plugins.feishu.channel import FeishuChannel, FeishuSessionMeta
 
 
 # ---- 辅助：轻量 PluginApi 替代品（不使用 mock） ----
