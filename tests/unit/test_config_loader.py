@@ -29,7 +29,7 @@ def test_load_parent_project_and_legacy_config(isolated_tmp: Path) -> None:
 
     (root / ".agentos").mkdir(parents=True)
     (root / ".agentos" / "config.yaml").write_text(
-        "agent:\n  model: gpt_4o_mini\n",
+        "agent:\n  model: gpt-5.4\n",
         encoding="utf-8",
     )
 
@@ -42,7 +42,7 @@ def test_load_parent_project_and_legacy_config(isolated_tmp: Path) -> None:
 
     cfg = Config(project_root=backend_dir, user_config_dir=isolated_tmp / "no_user_config")
 
-    assert cfg.get("agent.model") == "gpt_4o_mini"
+    assert cfg.get("agent.model") == "gpt-5.4"
     assert cfg.get("llm.providers.openai.base_url") == "https://api.example.com/v1"
     assert cfg.get("llm.providers.openai.api_key") == "sk-test"
     assert cfg.get("tools.serper_search.api_key") == "serper-test"
@@ -55,7 +55,7 @@ def test_nearer_project_config_overrides_parent(isolated_tmp: Path) -> None:
 
     (root / ".agentos").mkdir(parents=True)
     (root / ".agentos" / "config.yaml").write_text(
-        "agent:\n  model: gpt_4o\n",
+        "agent:\n  model: gpt-5.4\n",
         encoding="utf-8",
     )
 
@@ -81,8 +81,8 @@ def test_legacy_openai_key_enables_openai_provider(isolated_tmp: Path) -> None:
 
     cfg = Config(project_root=backend_dir, user_config_dir=isolated_tmp / "no_user_config")
 
-    assert cfg.get("llm.default_model") == "gpt_4o_mini"
-    assert cfg.get("agent.model") == "gpt_4o_mini"
+    assert cfg.get("llm.default_model") == "gpt-5.4"
+    assert cfg.get("agent.model") == "gpt-5.4"
     assert cfg.get("llm.providers.openai.api_key") == "sk-test"
 
 

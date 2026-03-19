@@ -6,6 +6,7 @@ import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, ChevronDown, Check }
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
 import { useNotification } from '@/hooks/useNotification';
+import { InteractionDialog, type PendingInteraction } from '@/components/chat/QuestionDialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
@@ -345,6 +346,8 @@ function ChatPageInner() {
   const [inputValue, setInputValue] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
+  const [activeInteraction, setActiveInteraction] = useState<PendingInteraction | null>(null);
+  const [interactionSubmitting, setInteractionSubmitting] = useState(false);
 
   const [selectedAgent, setSelectedAgent] = useState(initialAgent);
 
@@ -357,6 +360,8 @@ function ChatPageInner() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
   const pendingInputRef = useRef<string | null>(null);
+  const interactionQueueRef = useRef<PendingInteraction[]>([]);
+  const activeInteractionRef = useRef<PendingInteraction | null>(null);
 
   const handleSelectAgent = (id: string) => {
     setSelectedAgent(id);
@@ -412,6 +417,7 @@ function ChatPageInner() {
     setMessages([]);
     setIsTyping(false);
     toolCallMapRef.current.clear();
+    clearInteractions();
 
     if (shouldBind) {
       bindSessionToCurrentSocket(sid);
@@ -431,9 +437,69 @@ function ChatPageInner() {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
+  const interactionKey = (interaction: PendingInteraction) => `${interaction.kind}:${interaction.interactionId}`;
+
+  const enqueueInteraction = (interaction: PendingInteraction) => {
+    const active = activeInteractionRef.current;
+    const queue = interactionQueueRef.current;
+    const nextKey = interactionKey(interaction);
+    const exists = (active && interactionKey(active) === nextKey)
+      || queue.some((item) => interactionKey(item) === nextKey);
+    if (exists) return;
+
+    if (!active) {
+      activeInteractionRef.current = interaction;
+      setActiveInteraction(interaction);
+      return;
+    }
+
+    interactionQueueRef.current = [...queue, interaction];
+  };
+
+  const resolveInteraction = (kind: PendingInteraction['kind'], interactionId: string) => {
+    const active = activeInteractionRef.current;
+    const queue = interactionQueueRef.current;
+
+    if (active && active.kind === kind && active.interactionId === interactionId) {
+      if (queue.length > 0) {
+        const [next, ...rest] = queue;
+        interactionQueueRef.current = rest;
+        activeInteractionRef.current = next;
+        setActiveInteraction(next);
+      } else {
+        activeInteractionRef.current = null;
+        setActiveInteraction(null);
+      }
+      setInteractionSubmitting(false);
+      return;
+    }
+
+    const filtered = queue.filter((item) => !(item.kind === kind && item.interactionId === interactionId));
+    if (filtered.length !== queue.length) {
+      interactionQueueRef.current = filtered;
+    }
+  };
+
+  const clearInteractions = () => {
+    interactionQueueRef.current = [];
+    activeInteractionRef.current = null;
+    setActiveInteraction(null);
+    setInteractionSubmitting(false);
+  };
+
+  // ── WebSocket ──
+
   const handleWsMessage = (data: Record<string, unknown>) => {
     const payload = (data.payload || {}) as Record<string, unknown>;
-    switch (data.type) {
+    const eventType = String(data.type || '');
+    const incomingSessionId = typeof data.session_id === 'string' ? data.session_id : null;
+    const isGlobalInteractionEvent = eventType === 'tool_confirmation_requested'
+      || eventType === 'user_question_asked'
+      || eventType === 'user_question_answered_event';
+    if (incomingSessionId && sessionId && incomingSessionId !== sessionId && !isGlobalInteractionEvent) {
+      return;
+    }
+    switch (eventType) {
       case 'session_created': {
         const newSid = data.session_id as string;
         setSessionId(newSid);
@@ -487,8 +553,13 @@ function ChatPageInner() {
         const final = String(payload.final_response || '');
         if (final) addMsg('assistant', final);
         setIsTyping(false);
+        clearInteractions();
         break;
       }
+      case 'turn_cancelled':
+        setIsTyping(false);
+        clearInteractions();
+        break;
       case 'title_updated': {
         const sid = data.session_id as string;
         const title = (payload.title || '') as string;
@@ -499,8 +570,9 @@ function ChatPageInner() {
         break;
       }
       case 'error':
-        addMsg('system', `Error: ${payload.message || 'Unknown Error'}`);
+        addMsg('system', `Error: ${payload.message || payload.error_type || 'Unknown Error'}`);
         setIsTyping(false);
+        clearInteractions();
         break;
       case 'notification': {
         const title = String(payload.title || 'Notification');
@@ -525,6 +597,56 @@ function ChatPageInner() {
         if (body && shouldAppendToChat && (!targetSessionId || targetSessionId === sessionIdRef.current)) {
           addMsg('system', body);
         }
+        break;
+      }
+      case 'tool_confirmation_requested': {
+        const toolCallId = String(payload.tool_call_id || '');
+        if (!toolCallId) break;
+        const sourceSessionId = incomingSessionId || '';
+        if (!sourceSessionId) break;
+        enqueueInteraction({
+          kind: 'confirmation',
+          interactionId: toolCallId,
+          sourceSessionId,
+          timeout: Number(payload.timeout || 300),
+          createdAt: Date.now(),
+          toolName: String(payload.tool_name || ''),
+          riskLevel: String(payload.risk_level || 'high'),
+          arguments: (payload.arguments || {}) as Record<string, unknown>,
+        });
+        setIsTyping(true);
+        break;
+      }
+      case 'user_question_asked': {
+        const questionId = String(payload.question_id || '');
+        if (!questionId) {
+          break;
+        }
+        const sourceSessionId = incomingSessionId || '';
+        if (!sourceSessionId) {
+          break;
+        }
+        const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
+        const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
+        enqueueInteraction({
+          kind: 'question',
+          interactionId: questionId,
+          sourceSessionId,
+          sourceAgentId,
+          sourceAgentName,
+          question: String(payload.question || ''),
+          options: Array.isArray(payload.options) ? payload.options.map(String) : null,
+          multiSelect: Boolean(payload.multi_select),
+          timeout: Number(payload.timeout || 300),
+          createdAt: Date.now(),
+        });
+        setIsTyping(true);
+        break;
+      }
+      case 'user_question_answered_event': {
+        const questionId = String(payload.question_id || '');
+        if (!questionId) break;
+        resolveInteraction('question', questionId);
         break;
       }
     }
@@ -613,6 +735,56 @@ function ChatPageInner() {
     setMessages(prev => [...prev, { id: makeId(), role, content, timestamp: Date.now() }]);
   }
 
+  const sendQuestionAnswer = (answer: string | string[] | null, cancelled: boolean) => {
+    if (!activeInteraction || activeInteraction.kind !== 'question') return;
+    if (!activeInteraction.sourceSessionId) {
+      addMsg('system', 'Question source session not found, cannot submit answer.');
+      return;
+    }
+    setInteractionSubmitting(true);
+    wsSend({
+      type: 'user_question_answered',
+      session_id: activeInteraction.sourceSessionId,
+      payload: {
+        question_id: activeInteraction.interactionId,
+        answer,
+        cancelled,
+      },
+      timestamp: Date.now() / 1000,
+    });
+    resolveInteraction('question', activeInteraction.interactionId);
+  };
+
+  const sendConfirmationResponse = (approved: boolean) => {
+    if (!activeInteraction || activeInteraction.kind !== 'confirmation') return;
+    if (!activeInteraction.sourceSessionId) {
+      addMsg('system', 'Confirmation source session not found, cannot submit result.');
+      return;
+    }
+    setInteractionSubmitting(true);
+    wsSend({
+      type: 'tool_confirmation_response',
+      session_id: activeInteraction.sourceSessionId,
+      payload: {
+        tool_call_id: activeInteraction.interactionId,
+        approved,
+      },
+      timestamp: Date.now() / 1000,
+    });
+    resolveInteraction('confirmation', activeInteraction.interactionId);
+  };
+
+  const handleInteractionTimeout = () => {
+    if (!activeInteraction) return;
+    if (activeInteraction.kind === 'confirmation') {
+      addMsg('system', '工具审批已超时，系统将按后端策略拒绝。');
+      resolveInteraction('confirmation', activeInteraction.interactionId);
+      return;
+    }
+    addMsg('system', '问题已超时，已取消等待。');
+    resolveInteraction('question', activeInteraction.interactionId);
+  };
+
   // ── Sessions ──
 
   useEffect(() => { loadSessionList(); }, [loadSessionList]);
@@ -628,13 +800,14 @@ function ChatPageInner() {
     setIsTyping(false);
     toolCallMapRef.current.clear();
     pendingInputRef.current = null;
+    clearInteractions();
   };
 
   // ── Send ──
 
   const sendMessage = () => {
     const content = inputValue.trim();
-    if (!content || !wsConnected) return;
+    if (!content || !wsConnected || activeInteraction || interactionSubmitting) return;
 
     // 斜杠命令拦截
     if (handleSlashSubmit(content)) {
@@ -780,7 +953,7 @@ function ChatPageInner() {
                         ? 'Message AgentOS... (Enter to send, Shift+Enter for new line)'
                         : 'Waiting for connection...'
                     }
-                    disabled={!wsConnected || isTyping}
+                    disabled={!wsConnected || isTyping || !!activeInteraction || interactionSubmitting}
                     rows={1}
                     className="w-full bg-transparent border-none px-5 py-4 text-lg text-foreground placeholder-muted-foreground/50 focus:outline-none focus:ring-0 resize-none disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
                     style={{ minHeight: '56px', maxHeight: '300px' }}
@@ -788,7 +961,7 @@ function ChatPageInner() {
                 </div>
                 <button
                   onClick={sendMessage}
-                  disabled={!inputValue.trim() || !wsConnected || isTyping}
+                  disabled={!inputValue.trim() || !wsConnected || isTyping || !!activeInteraction || interactionSubmitting}
                   className="w-14 h-14 mb-1 mr-1 rounded-2xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
                 >
                   <Send size={24} className="ml-1" />
@@ -801,6 +974,16 @@ function ChatPageInner() {
           </div>
         </div>
       </div>
+      <InteractionDialog
+        open={!!activeInteraction}
+        interaction={activeInteraction}
+        submitting={interactionSubmitting}
+        wsConnected={wsConnected}
+        onQuestionSubmit={(answer) => sendQuestionAnswer(answer, false)}
+        onQuestionCancel={() => sendQuestionAnswer(null, true)}
+        onConfirmationSubmit={sendConfirmationResponse}
+        onTimeout={handleInteractionTimeout}
+      />
     </DashboardLayout>
   );
 }

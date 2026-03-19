@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from typing import Any
 
 import pytest
 
@@ -33,6 +34,14 @@ class MockChannel(Channel):
 
     async def send_event(self, event: EventEnvelope) -> None:
         self.received_events.append(event)
+
+
+class _RepoWithMeta:
+    def __init__(self, meta_by_session: dict[str, dict[str, Any] | None]):
+        self._meta_by_session = meta_by_session
+
+    async def get_session_meta(self, session_id: str) -> dict[str, Any] | None:
+        return self._meta_by_session.get(session_id)
 
 
 @pytest.mark.asyncio
@@ -127,3 +136,88 @@ async def test_gateway_publish_from_channel():
 
     assert len(collected) == 1
     assert collected[0].type == USER_INPUT
+
+
+@pytest.mark.asyncio
+async def test_gateway_dispatch_event_inherits_channel_binding_from_parent():
+    """子会话未绑定时，应继承父会话的 channel 绑定并缓存。"""
+    bus = PublicEventBus()
+    publisher = EventPublisher(bus=bus)
+    repo = _RepoWithMeta(
+        {
+            "child_sess": {"parent_session_id": "parent_sess"},
+            "parent_sess": {"agent_id": "default"},
+        }
+    )
+    gateway = Gateway(publisher=publisher, repo=repo)
+
+    channel = MockChannel("websocket")
+    gateway.register_channel(channel)
+    gateway.bind_session("parent_sess", "websocket")
+
+    event = EventEnvelope(
+        type=AGENT_STEP_COMPLETED,
+        session_id="child_sess",
+        source="test",
+        payload={"result": {"content": "ok"}},
+    )
+    await gateway._dispatch_event(event)
+
+    assert len(channel.received_events) == 1
+    assert channel.received_events[0].session_id == "child_sess"
+    assert gateway._session_bindings.get("child_sess") == "websocket"
+
+
+@pytest.mark.asyncio
+async def test_gateway_dispatch_event_without_parent_binding_is_dropped():
+    """父链路无绑定时，事件不应误投递。"""
+    bus = PublicEventBus()
+    publisher = EventPublisher(bus=bus)
+    repo = _RepoWithMeta(
+        {
+            "child_sess": {"parent_session_id": "parent_sess"},
+            "parent_sess": {"agent_id": "default"},
+        }
+    )
+    gateway = Gateway(publisher=publisher, repo=repo)
+
+    channel = MockChannel("websocket")
+    gateway.register_channel(channel)
+
+    event = EventEnvelope(
+        type=AGENT_STEP_COMPLETED,
+        session_id="child_sess",
+        source="test",
+        payload={"result": {"content": "no-route"}},
+    )
+    await gateway._dispatch_event(event)
+
+    assert len(channel.received_events) == 0
+    assert "child_sess" not in gateway._session_bindings
+
+
+@pytest.mark.asyncio
+async def test_gateway_dispatch_event_parent_loop_is_safe():
+    """父会话链路出现环时应安全退出，不应死循环。"""
+    bus = PublicEventBus()
+    publisher = EventPublisher(bus=bus)
+    repo = _RepoWithMeta(
+        {
+            "sess_a": {"parent_session_id": "sess_b"},
+            "sess_b": {"parent_session_id": "sess_a"},
+        }
+    )
+    gateway = Gateway(publisher=publisher, repo=repo)
+    channel = MockChannel("websocket")
+    gateway.register_channel(channel)
+
+    event = EventEnvelope(
+        type=AGENT_STEP_COMPLETED,
+        session_id="sess_a",
+        source="test",
+        payload={"result": {"content": "loop"}},
+    )
+    await gateway._dispatch_event(event)
+
+    assert len(channel.received_events) == 0
+    assert "sess_a" not in gateway._session_bindings

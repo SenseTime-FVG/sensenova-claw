@@ -165,6 +165,10 @@ class WebSocketChannel(Channel):
                     "type": "session_created", "session_id": session_id,
                     "payload": {"created_at": result["created_at"]}, "timestamp": time.time(),
                 })
+            else:
+                # 已存在会话也需要补绑定，确保后续事件（含 ask_user）能回到当前连接
+                gw.bind_session(session_id, self._channel_id)
+                self.bind_session(session_id, websocket)
             await gw.send_user_input(
                 session_id=session_id,
                 content=payload.get("content", ""),
@@ -240,16 +244,36 @@ class WebSocketChannel(Channel):
             return
 
         if msg_type == "user_question_answered":
-            if session_id:
-                await gw.publish_from_channel(EventEnvelope(
-                    type=USER_QUESTION_ANSWERED,
-                    session_id=session_id, source="websocket",
-                    payload={
-                        "question_id": payload.get("question_id"),
-                        "answer": payload.get("answer"),
-                        "cancelled": payload.get("cancelled", False),
+            if not session_id:
+                await self.send_json(websocket, {
+                    "type": "error",
+                    "payload": {
+                        "error_type": "InvalidMessage",
+                        "message": "user_question_answered requires session_id",
                     },
-                ))
+                    "timestamp": time.time(),
+                })
+                return
+            question_id = payload.get("question_id")
+            if not question_id:
+                await self.send_json(websocket, {
+                    "type": "error",
+                    "payload": {
+                        "error_type": "InvalidMessage",
+                        "message": "user_question_answered requires question_id",
+                    },
+                    "timestamp": time.time(),
+                })
+                return
+            await gw.publish_from_channel(EventEnvelope(
+                type=USER_QUESTION_ANSWERED,
+                session_id=session_id, source="websocket",
+                payload={
+                    "question_id": question_id,
+                    "answer": payload.get("answer"),
+                    "cancelled": payload.get("cancelled", False),
+                },
+            ))
             return
 
         # 未知消息类型
@@ -267,11 +291,21 @@ class WebSocketChannel(Channel):
         if not mapped:
             return
 
+        # 通知/cron 事件：有 session 则路由到绑定连接，否则广播
         if event.type in {CRON_DELIVERY_REQUESTED, NOTIFICATION_PUSH}:
             if event.session_id and event.session_id != "system":
                 await self._send_to_websockets(self._session_bindings.get(event.session_id, set()), mapped)
             else:
                 await self._send_to_websockets(self._connections, mapped)
+            return
+
+        # 部分事件为连接级广播（不依赖 session 绑定）
+        if event.type in {
+            TOOL_CONFIRMATION_REQUESTED,
+            USER_QUESTION_ASKED,
+            USER_QUESTION_ANSWERED,
+        }:
+            await self._send_to_websockets(self._connections, mapped)
             return
 
         session_id = event.session_id
@@ -441,6 +475,16 @@ class WebSocketChannel(Channel):
                 "timestamp": event.ts,
             }
         if event.type == USER_QUESTION_ASKED:
+            source_agent_id = str(
+                event.payload.get("source_agent_id") or event.agent_id or "default"
+            ).strip() or "default"
+            source_agent_name = source_agent_id
+            registry = getattr(self.gateway, "agent_registry", None)
+            if registry and hasattr(registry, "get"):
+                agent_cfg = registry.get(source_agent_id)
+                name = getattr(agent_cfg, "name", "") if agent_cfg else ""
+                if name:
+                    source_agent_name = str(name)
             return {
                 "type": "user_question_asked",
                 "session_id": event.session_id,
@@ -450,6 +494,18 @@ class WebSocketChannel(Channel):
                     "options": event.payload.get("options"),
                     "multi_select": event.payload.get("multi_select", False),
                     "timeout": event.payload.get("timeout", 300),
+                    "source_agent_id": source_agent_id,
+                    "source_agent_name": source_agent_name,
+                },
+                "timestamp": event.ts,
+            }
+        if event.type == USER_QUESTION_ANSWERED:
+            return {
+                "type": "user_question_answered_event",
+                "session_id": event.session_id,
+                "payload": {
+                    "question_id": event.payload.get("question_id"),
+                    "cancelled": event.payload.get("cancelled", False),
                 },
                 "timestamp": event.ts,
             }

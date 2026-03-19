@@ -72,8 +72,8 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
     # 配置 provider
     if provider_name == "gemini":
         gemini_cfg = load_gemini_config()
-        cfg.set("agent.model", "gemini_pro")
-        cfg.set("llm.default_model", "gemini_pro")
+        cfg.set("agent.model", "gemini-pro")
+        cfg.set("llm.default_model", "gemini-pro")
         cfg.data["llm"]["providers"]["gemini"] = {
             **cfg.data["llm"]["providers"].get("gemini", {}),
             **gemini_cfg,
@@ -321,19 +321,32 @@ class TestReceiveLoopParsing:
         app = self._make_app()
         assert not app._waiting.is_set()
 
-    async def test_confirm_queue_starts_empty(self):
-        """确认队列初始为空"""
+    async def test_interaction_queue_starts_empty(self):
+        """统一交互队列初始为空"""
         app = self._make_app()
-        assert app._confirm_queue.empty()
+        assert app._interaction_queue.empty()
 
-    async def test_confirm_queue_put_get(self):
-        """确认队列可正常存取"""
+    async def test_interaction_queue_put_get(self):
+        """统一交互队列可正常存取"""
         app = self._make_app()
-        data = {"payload": {"tool_call_id": "tc-1"}}
-        await app._confirm_queue.put(data)
-        assert not app._confirm_queue.empty()
-        got = await app._confirm_queue.get()
-        assert got["payload"]["tool_call_id"] == "tc-1"
+        data = {
+            "kind": "confirmation",
+            "data": {"payload": {"tool_call_id": "tc-1"}},
+        }
+        await app._interaction_queue.put(data)
+        assert not app._interaction_queue.empty()
+        got = await app._interaction_queue.get()
+        assert got["kind"] == "confirmation"
+        assert got["data"]["payload"]["tool_call_id"] == "tc-1"
+
+    async def test_drain_interaction_queue(self):
+        """turn 终态清理会清空交互队列"""
+        app = self._make_app()
+        await app._interaction_queue.put({"kind": "confirmation", "data": {"payload": {"tool_call_id": "tc-1"}}})
+        await app._interaction_queue.put({"kind": "question", "data": {"payload": {"question_id": "q-1"}}})
+        assert not app._interaction_queue.empty()
+        app._drain_interaction_queue()
+        assert app._interaction_queue.empty()
 
 
 class TestWaitForTurn:
@@ -348,6 +361,7 @@ class TestWaitForTurn:
 
         async def set_waiting():
             await asyncio.sleep(0.01)
+            app._turn_terminal = True
             app._waiting.set()
 
         asyncio.create_task(set_waiting())
@@ -457,6 +471,47 @@ class TestSendAndSessionMethods:
             await app._create_session()
             confirm_data = {"payload": {"tool_call_id": "tc-fake"}}
             await app._send_confirmation_response(confirm_data, approved=False)
+
+    async def test_send_confirmation_response_prefers_source_session(self):
+        """确认响应应优先发回交互来源 session，而非当前会话。"""
+        app = CLIApp(host="localhost", port=8000)
+        app.current_session_id = "sess_current"
+
+        sent: list[dict] = []
+
+        async def fake_send(msg: dict) -> None:
+            sent.append(msg)
+
+        app._send = fake_send  # type: ignore[method-assign]
+        await app._send_confirmation_response(
+            {"session_id": "sess_child", "payload": {"tool_call_id": "tc_1"}},
+            approved=True,
+        )
+
+        assert len(sent) == 1
+        assert sent[0]["type"] == "tool_confirmation_response"
+        assert sent[0]["session_id"] == "sess_child"
+
+    async def test_send_question_response_prefers_source_session(self):
+        """问答响应应优先发回交互来源 session，而非当前会话。"""
+        app = CLIApp(host="localhost", port=8000)
+        app.current_session_id = "sess_current"
+
+        sent: list[dict] = []
+
+        async def fake_send(msg: dict) -> None:
+            sent.append(msg)
+
+        app._send = fake_send  # type: ignore[method-assign]
+        await app._send_question_response(
+            {"session_id": "sess_child", "payload": {"question_id": "q_1"}},
+            answer="prod",
+            cancelled=False,
+        )
+
+        assert len(sent) == 1
+        assert sent[0]["type"] == "user_question_answered"
+        assert sent[0]["session_id"] == "sess_child"
 
     async def test_receive_loop_turn_completed(self, ws_server):
         """_receive_loop 接收 turn_completed 后设置 _waiting"""

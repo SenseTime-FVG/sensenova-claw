@@ -1,10 +1,40 @@
+from __future__ import annotations
+
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from agentos.kernel.runtime.workers.tool_worker import ToolSessionWorker
+import pytest
+
+import agentos.kernel.runtime.workers.tool_worker as tool_worker_module
 from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import USER_QUESTION_ANSWERED
+from agentos.kernel.events.types import (
+    ERROR_RAISED,
+    TOOL_CALL_RESULT,
+    USER_QUESTION_ANSWERED,
+    USER_QUESTION_ASKED,
+)
+from agentos.kernel.runtime.workers.tool_worker import ToolSessionWorker
+
+
+class _QuickTool:
+    async def execute(self, **kwargs):
+        _ = kwargs
+        return {"ok": True}
+
+
+class _TimeoutTool:
+    async def execute(self, **kwargs):
+        _ = kwargs
+        raise asyncio.TimeoutError()
+
+
+class _CaptureSourceAgentTool:
+    def __init__(self):
+        self.source_agent_id = None
+
+    async def execute(self, **kwargs):
+        self.source_agent_id = kwargs.get("_source_agent_id")
+        return {"ok": True}
 
 
 @pytest.fixture
@@ -30,53 +60,93 @@ def worker(mock_bus, mock_runtime):
 
 @pytest.mark.asyncio
 async def test_ask_user_handler_creates_future(worker, mock_bus):
-    """ask_user handler 应创建 Future 并发布事件"""
+    """ask_user handler 应创建 Future 并发布事件。"""
     handler = worker._make_ask_user_handler()
-    task = asyncio.create_task(handler(
-        question="测试？", options=["A", "B"], multi_select=False,
-        session_id="test_session", turn_id="turn1", tool_call_id="call1",
-    ))
-    await asyncio.sleep(0.1)
+    task = asyncio.create_task(
+        handler(
+            question="测试？",
+            options=["A", "B"],
+            multi_select=False,
+            session_id="test_session",
+            turn_id="turn1",
+            tool_call_id="call1",
+        )
+    )
+    await asyncio.sleep(0.05)
 
     assert len(worker._pending_questions) == 1
     assert mock_bus.publish.called
 
     task.cancel()
-    try:
+    with pytest.raises(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
+
+
+@pytest.mark.asyncio
+async def test_ask_user_handler_publishes_source_agent_id(worker, mock_bus):
+    """ask_user 事件应携带来源 agent_id。"""
+    handler = worker._make_ask_user_handler()
+    task = asyncio.create_task(
+        handler(
+            question="测试来源 agent",
+            options=["A", "B"],
+            multi_select=False,
+            session_id="test_session",
+            turn_id="turn1",
+            tool_call_id="call_source_agent",
+            source_agent_id="research",
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    published = [call.args[0] for call in mock_bus.publish.await_args_list]
+    asked = next(e for e in published if e.type == USER_QUESTION_ASKED)
+    assert asked.payload["source_agent_id"] == "research"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 @pytest.mark.asyncio
 async def test_ask_user_handler_timeout(worker):
-    """超时应返回错误"""
-    import agentos.platform.config.config as config_module
-    original_get = config_module.config.get
-    config_module.config.get = lambda key, default=None: 0.1 if "timeout" in key else original_get(key, default)
-
-    handler = worker._make_ask_user_handler()
-    result = await handler(
-        question="测试？", options=None, multi_select=False,
-        session_id="test_session", turn_id="turn1", tool_call_id="call1",
+    """超时应返回错误并清理挂起状态。"""
+    original_get = tool_worker_module.config.get
+    tool_worker_module.config.get = (
+        lambda key, default=None: 0.1 if key == "tools.ask_user.timeout" else original_get(key, default)
     )
+
+    try:
+        handler = worker._make_ask_user_handler()
+        result = await handler(
+            question="测试？",
+            options=None,
+            multi_select=False,
+            session_id="test_session",
+            turn_id="turn1",
+            tool_call_id="call1",
+        )
+    finally:
+        tool_worker_module.config.get = original_get
 
     assert result["success"] is False
     assert "未在" in result["error"]
     assert len(worker._pending_questions) == 0
 
-    config_module.config.get = original_get
-
 
 @pytest.mark.asyncio
 async def test_ask_user_handler_concurrent_reject(worker):
-    """同时只允许一个挂起问题"""
+    """同时只允许一个挂起问题。"""
     worker._pending_questions["existing"] = asyncio.Future()
 
     handler = worker._make_ask_user_handler()
     result = await handler(
-        question="测试？", options=None, multi_select=False,
-        session_id="test_session", turn_id="turn1", tool_call_id="call1",
+        question="测试？",
+        options=None,
+        multi_select=False,
+        session_id="test_session",
+        turn_id="turn1",
+        tool_call_id="call1",
     )
 
     assert result["success"] is False
@@ -85,14 +155,15 @@ async def test_ask_user_handler_concurrent_reject(worker):
 
 @pytest.mark.asyncio
 async def test_resolve_question_success(worker):
-    """回答成功应设置 Future 结果"""
+    """回答成功应设置 Future 结果。"""
     question_id = "q1"
     future = asyncio.Future()
     worker._pending_questions[question_id] = future
 
     event = EventEnvelope(
         type=USER_QUESTION_ANSWERED,
-        session_id="test_session", source="test",
+        session_id="test_session",
+        source="test",
         payload={"question_id": question_id, "answer": "A", "cancelled": False},
     )
     worker._resolve_question(event)
@@ -105,14 +176,15 @@ async def test_resolve_question_success(worker):
 
 @pytest.mark.asyncio
 async def test_resolve_question_cancelled(worker):
-    """取消回答应设置 cancelled 结果"""
+    """取消回答应设置 cancelled 结果。"""
     question_id = "q1"
     future = asyncio.Future()
     worker._pending_questions[question_id] = future
 
     event = EventEnvelope(
         type=USER_QUESTION_ANSWERED,
-        session_id="test_session", source="test",
+        session_id="test_session",
+        source="test",
         payload={"question_id": question_id, "cancelled": True},
     )
     worker._resolve_question(event)
@@ -125,7 +197,7 @@ async def test_resolve_question_cancelled(worker):
 
 @pytest.mark.asyncio
 async def test_stop_cleans_pending_questions(worker):
-    """stop 应取消所有挂起的 Future"""
+    """stop 应取消所有挂起的 Future。"""
     future1 = asyncio.Future()
     future2 = asyncio.Future()
     worker._pending_questions["q1"] = future1
@@ -136,3 +208,96 @@ async def test_stop_cleans_pending_questions(worker):
     assert future1.cancelled()
     assert future2.cancelled()
     assert len(worker._pending_questions) == 0
+
+
+@pytest.mark.asyncio
+async def test_tool_requested_ask_user_uses_300s_default_timeout(worker, mock_runtime):
+    """tools.ask_user.timeout 缺失时，ask_user 默认超时应为 300 秒。"""
+    mock_runtime.registry.get.return_value = _QuickTool()
+
+    event = EventEnvelope(
+        type="tool.call_requested",
+        session_id="test_session",
+        turn_id="turn1",
+        source="test",
+        payload={
+            "tool_call_id": "call_ask_user",
+            "tool_name": "ask_user",
+            "arguments": {"question": "Q"},
+        },
+    )
+
+    captured_timeout: list[float] = []
+    original_wait_for = tool_worker_module.asyncio.wait_for
+    original_get = tool_worker_module.config.get
+
+    async def fake_wait_for(awaitable, timeout):
+        captured_timeout.append(float(timeout))
+        return await awaitable
+
+    def fake_get(key, default=None):
+        if key == "tools.ask_user.timeout":
+            return default
+        return original_get(key, default)
+
+    tool_worker_module.asyncio.wait_for = fake_wait_for
+    tool_worker_module.config.get = fake_get
+    try:
+        await worker._handle_tool_requested(event)
+    finally:
+        tool_worker_module.asyncio.wait_for = original_wait_for
+        tool_worker_module.config.get = original_get
+
+    assert captured_timeout
+    assert captured_timeout[0] == 300
+
+
+@pytest.mark.asyncio
+async def test_tool_requested_timeout_error_message_not_empty(worker, mock_runtime, mock_bus):
+    """TimeoutError 无文案时，应回落为异常类型名，避免前端显示 Unknown Error。"""
+    mock_runtime.registry.get.return_value = _TimeoutTool()
+
+    event = EventEnvelope(
+        type="tool.call_requested",
+        session_id="test_session",
+        turn_id="turn1",
+        source="test",
+        payload={
+            "tool_call_id": "call_timeout",
+            "tool_name": "ask_user",
+            "arguments": {"question": "Q"},
+        },
+    )
+
+    await worker._handle_tool_requested(event)
+
+    published = [call.args[0] for call in mock_bus.publish.await_args_list]
+    error_event = next(e for e in published if e.type == ERROR_RAISED)
+    result_event = next(e for e in published if e.type == TOOL_CALL_RESULT)
+
+    assert error_event.payload["error_message"] == "TimeoutError"
+    assert "TimeoutError" in str(result_event.payload["error"])
+
+
+@pytest.mark.asyncio
+async def test_tool_requested_injects_source_agent_id(worker, mock_runtime):
+    """tool.execute 应接收到 _source_agent_id。"""
+    tool = _CaptureSourceAgentTool()
+    mock_runtime.registry.get.return_value = tool
+
+    event = EventEnvelope(
+        type="tool.call_requested",
+        session_id="test_session",
+        turn_id="turn1",
+        source="test",
+        payload={
+            "tool_call_id": "call_source",
+            "tool_name": "read_file",
+            "arguments": {"path": "README.md"},
+            "_source_agent_id": "research",
+        },
+    )
+
+    await worker._handle_tool_requested(event)
+
+    assert tool.source_agent_id == "research"

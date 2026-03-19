@@ -106,6 +106,7 @@ class LLMSessionWorker(SessionWorker):
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("llm call failed")
+            error_message = str(exc).strip() or type(exc).__name__
             await self.bus.publish(
                 EventEnvelope(
                     type=ERROR_RAISED,
@@ -115,7 +116,7 @@ class LLMSessionWorker(SessionWorker):
                     source="llm",
                     payload={
                         "error_type": type(exc).__name__,
-                        "error_message": str(exc),
+                        "error_message": error_message,
                         "context": {"model": model, "provider": provider_name},
                     },
                 )
@@ -129,7 +130,7 @@ class LLMSessionWorker(SessionWorker):
                     source="llm",
                     payload={
                         "llm_call_id": llm_call_id,
-                        "response": {"content": f"LLM调用失败: {str(exc)}", "tool_calls": []},
+                        "response": {"content": f"LLM调用失败: {error_message}", "tool_calls": []},
                         "usage": {},
                         "finish_reason": "error",
                     },

@@ -63,31 +63,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "provider": "mock",
                 "model_id": "mock-agent-v1",
             },
-            "gpt_4o_mini": {
+            "gpt-5.4": {
                 "provider": "openai",
-                "model_id": "gpt-4o-mini",
+                "model_id": "gpt-5.4",
                 "timeout": 60,
                 "max_output_tokens": 8192,
             },
-            "gpt_4o": {
-                "provider": "openai",
-                "model_id": "gpt-4o",
-                "timeout": 60,
-                "max_output_tokens": 8192,
-            },
-            "claude_sonnet": {
+            "claude-sonnet": {
                 "provider": "anthropic",
-                "model_id": "claude-sonnet-4-20250514",
+                "model_id": "claude-sonnet-4-6",
                 "timeout": 60,
                 "max_output_tokens": 8192,
             },
-            "claude_opus": {
+            "claude-opus": {
                 "provider": "anthropic",
                 "model_id": "claude-opus-4-6",
                 "timeout": 60,
                 "max_output_tokens": 8192,
             },
-            "gemini_pro": {
+            "gemini-pro": {
                 "provider": "gemini",
                 "model_id": "gemini-2.5-pro",
                 "timeout": 120,
@@ -126,6 +120,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "max_attachment_size_mb": 10,
             "timeout": 30,
         },
+        "ask_user": {"enabled": True, "timeout": 300},
         "result_truncation": {
             "max_tokens": 8000,
             "save_dir": "workspace",
@@ -370,8 +365,8 @@ class Config:
         if "OPENAI_API_KEY" in legacy and legacy["OPENAI_API_KEY"]:
             result["llm"]["providers"]["openai"]["api_key"] = legacy["OPENAI_API_KEY"]
             if result["llm"]["default_model"] == DEFAULT_CONFIG["llm"]["default_model"]:
-                result["llm"]["default_model"] = "gpt_4o_mini"
-                result["agent"]["model"] = "gpt_4o_mini"
+                result["llm"]["default_model"] = "gpt-5.4"
+                result["agent"]["model"] = "gpt-5.4"
 
         if "SERPER_API_KEY" in legacy and legacy["SERPER_API_KEY"]:
             result["tools"]["serper_search"]["api_key"] = legacy["SERPER_API_KEY"]
@@ -482,7 +477,7 @@ class Config:
         则视为直接的 model_id（向后兼容），从注册表中反查 provider。
 
         Args:
-            model_key: llm.models 中的 key（如 "claude_sonnet"），
+            model_key: llm.models 中的 key（如 "claude-sonnet"），
                        为 None 时使用 llm.default_model。
         Returns:
             (provider_name, model_id) 元组

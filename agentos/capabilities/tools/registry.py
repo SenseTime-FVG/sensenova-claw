@@ -7,6 +7,7 @@ from agentos.capabilities.tools.builtin import (
     BashCommandTool,
     BraveSearchTool,
     FetchUrlTool,
+    ImageSearchTool,
     ReadFileTool,
     SerperSearchTool,
     TavilySearchTool,
@@ -25,6 +26,7 @@ class ToolRegistry:
         for tool in [
             BashCommandTool(),
             SerperSearchTool(),
+            ImageSearchTool(),
             BraveSearchTool(),
             BaiduSearchTool(),
             TavilySearchTool(),
@@ -50,6 +52,8 @@ class ToolRegistry:
             return True
         if tool.name in {"serper_search", "brave_search", "baidu_search", "tavily_search"}:
             return bool(config.get(f"tools.{tool.name}.api_key", ""))
+        if tool.name == "image_search":
+            return bool(config.get("tools.image_search.api_key", "") or config.get("tools.serper_search.api_key", ""))
         return True
 
     def as_llm_tools(self) -> list[dict]:
