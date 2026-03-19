@@ -41,7 +41,7 @@ from agentos.platform.config.workspace import (
     ensure_agent_workspace,
     resolve_agentos_home,
 )
-from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api
+from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api, sessions
 from agentos.interfaces.http import cron_api, notification_api
 
 # Token 认证模块（Jupyter-lab 风格）
@@ -372,39 +372,12 @@ app.include_router(workspace.router)
 app.include_router(config_api.router)
 app.include_router(cron_api.router)
 app.include_router(notification_api.router)
+app.include_router(sessions.router)
 
 
 @app.get("/health")
 async def health_check() -> dict:
     return {"status": "healthy", "timestamp": time.time(), "version": "0.1.0"}
-
-
-@app.get("/api/sessions")
-async def list_sessions():
-    """获取会话列表"""
-    sessions = await app.state.services.gateway.list_sessions()
-    return JSONResponse(content={"sessions": sessions})
-
-
-@app.get("/api/sessions/{session_id}/turns")
-async def get_session_turns(session_id: str):
-    """获取会话的所有轮次"""
-    turns = await app.state.services.gateway.get_session_turns(session_id)
-    return JSONResponse(content={"turns": turns})
-
-
-@app.get("/api/sessions/{session_id}/events")
-async def get_session_events(session_id: str):
-    """获取会话的所有事件"""
-    events = await app.state.services.gateway.get_session_events(session_id)
-    return JSONResponse(content={"events": events})
-
-
-@app.get("/api/sessions/{session_id}/messages")
-async def list_session_messages(session_id: str):
-    """获取会话的所有消息"""
-    messages = await app.state.services.gateway.get_messages(session_id)
-    return JSONResponse(content={"messages": messages})
 
 
 @app.websocket("/ws")

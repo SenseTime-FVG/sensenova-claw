@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface Agent {
@@ -29,6 +30,9 @@ export default function OrchestrationPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
 
   const loadAgents = () => {
     setAgentsLoading(true);
@@ -46,14 +50,31 @@ export default function OrchestrationPage() {
     a.id.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const deleteAgent = async (e: React.MouseEvent, agentId: string) => {
+  const requestDeleteAgent = (e: React.MouseEvent, agent: Agent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm(`确定要删除 Agent "${agentId}" 吗？`)) return;
+    setDeleteError('');
+    setAgentToDelete(agent);
+  };
+
+  const deleteAgent = async () => {
+    if (!agentToDelete) return;
+    setDeletingAgentId(agentToDelete.id);
+    setDeleteError('');
     try {
-      const res = await authFetch(`${API_BASE}/api/agents/${agentId}`, { method: 'DELETE' });
-      if (res.ok) loadAgents();
-    } catch { /* ignore */ }
+      const res = await authFetch(`${API_BASE}/api/agents/${agentToDelete.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setDeleteError(data.detail || '删除失败');
+        return;
+      }
+      setAgentToDelete(null);
+      loadAgents();
+    } catch {
+      setDeleteError('删除失败');
+    } finally {
+      setDeletingAgentId(null);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -156,23 +177,40 @@ export default function OrchestrationPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredAgents.map((agent) => (
-                  <Link href={`/agents/${agent.id}`} key={agent.id}>
-                    <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full flex flex-col group shadow-sm">
+                    <Card key={agent.id} className="hover:border-primary/50 transition-colors h-full flex flex-col group shadow-sm">
                       <CardHeader className="p-6 pb-4">
                         <div className="flex items-center justify-between">
-                          <CardTitle className="text-xl flex items-center gap-2">
-                            {agent.name}
-                          </CardTitle>
-                          <Badge variant={getStatusColor(agent.status) as any} className="text-xs px-2.5 py-0.5">
-                            {agent.status}
-                          </Badge>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <CardTitle className="text-xl flex items-center gap-2 truncate">
+                              {agent.name}
+                            </CardTitle>
+                            <Badge variant={getStatusColor(agent.status) as any} className="text-xs px-2.5 py-0.5 shrink-0">
+                              {agent.status}
+                            </Badge>
+                          </div>
+                          {agent.id !== 'default' && (
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="shrink-0 text-muted-foreground hover:text-destructive"
+                              data-testid={`agent-delete-button-${agent.id}`}
+                              aria-label={`删除 ${agent.name}`}
+                              title={`删除 ${agent.name}`}
+                              onClick={(e) => requestDeleteAgent(e, agent)}
+                            >
+                              <Trash2 size={16} />
+                            </Button>
+                          )}
                         </div>
-                        <CardDescription className="line-clamp-2 min-h-[44px] pt-1.5 text-sm leading-relaxed">
-                          {agent.description || "No description provided."}
-                        </CardDescription>
+                        <Link href={`/agents/${agent.id}`} className="block">
+                          <CardDescription className="line-clamp-2 min-h-[44px] pt-1.5 text-sm leading-relaxed cursor-pointer">
+                            {agent.description || "No description provided."}
+                          </CardDescription>
+                        </Link>
                       </CardHeader>
                       <CardContent className="mt-auto p-6 pt-0">
-                        <div className="flex items-center justify-between text-sm text-muted-foreground border-t border-border pt-4">
+                        <Link href={`/agents/${agent.id}`} className="block">
+                        <div className="flex items-center justify-between text-sm text-muted-foreground border-t border-border pt-4 cursor-pointer">
                            <div className="flex items-center gap-4">
                              <span className="flex items-center gap-1.5" title="Sessions"><MessageSquare size={16}/> {agent.sessionCount || 0}</span>
                              <span className="flex items-center gap-1.5" title="Tools"><Wrench size={16}/> {agent.toolCount || 0}</span>
@@ -181,9 +219,9 @@ export default function OrchestrationPage() {
                              <span className="text-xs font-mono uppercase bg-muted text-muted-foreground px-2.5 py-1 rounded-md tracking-wider">{agent.model}</span>
                            </div>
                         </div>
+                        </Link>
                       </CardContent>
                     </Card>
-                  </Link>
                 ))}
               </div>
             )}
@@ -195,6 +233,47 @@ export default function OrchestrationPage() {
       {showCreateAgent && (
         <CreateAgentModal onClose={() => setShowCreateAgent(false)} onCreated={loadAgents} />
       )}
+
+      <Dialog open={!!agentToDelete} onOpenChange={(open) => {
+        if (!open) {
+          setAgentToDelete(null);
+          setDeleteError('');
+        }
+      }}>
+        <DialogContent data-testid="agent-delete-dialog">
+          <DialogHeader>
+            <DialogTitle>确认删除 Agent</DialogTitle>
+            <DialogDescription>
+              {agentToDelete
+                ? `确定要删除 Agent "${agentToDelete.name}" 吗？该操作会移除它的注册配置。`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAgentToDelete(null);
+                setDeleteError('');
+              }}
+              disabled={!!deletingAgentId}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="agent-delete-confirm"
+              onClick={deleteAgent}
+              disabled={!agentToDelete || !!deletingAgentId}
+              className="gap-2"
+            >
+              {deletingAgentId && <Loader2 size={16} className="animate-spin" />}
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

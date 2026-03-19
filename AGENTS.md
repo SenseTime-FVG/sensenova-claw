@@ -437,3 +437,48 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 如果 runtime 里原本没有发送 typing/composing，仅增加 `typingIndicator` 配置不会有任何实际效果；要先确认当前 sidecar 的真实出站行为，再决定是“增加开关”还是“同时补行为 + 开关”。
+
+### 2026-03-19 Agents 删除入口补充
+
+成功经验：
+- `/agents` 这种“卡片主体可导航 + 局部危险操作”的列表页，删除按钮最好从外层 `Link` 里拆出来，并配独立确认弹窗；否则删除点击容易被页面跳转吞掉。
+- 当前环境可以跑前端浏览器级 e2e，但需要同时满足两个条件：`localhost:3000` 上已有可复用前端服务，以及提前把 Playwright 浏览器安装到可写目录（如 `PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers`）。
+
+失败/风险经验：
+- 仓库级 `npx tsc --noEmit` 仍会先命中既有问题：`agentos/app/web/components/ThemeProvider.tsx` 无法解析 `next-themes/dist/types`；验证这类页面级改动时，不能把这个历史错误误记为本次回归失败。
+
+### 2026-03-19 Sessions 删除补充
+
+成功经验：
+- session 删除如果要同时清理数据库和 `~/.agentos/agents/{agent_id}/sessions/{session_id}.jsonl`，最简洁的落点是新增独立 `sessions` HTTP router：先通过 `repo.get_session_meta()` 解析 `agent_id`，再调用 `gateway.delete_session()` 删库解绑，最后删 JSONL 文件。
+- `/sessions` 这种“整行可点击跳详情”的表格，删除按钮必须放在独立操作列里，并在 `onClick` 里显式 `stopPropagation()`；否则按钮会和行级跳转冲突。
+
+失败/风险经验：
+- 当前环境下 `uv run python -m pytest` 仍可能因为 Rust `system-configuration` panic 直接失败；针对性后端单测优先改用 `python3 -m pytest` 更稳。
+
+### 2026-03-19 Sessions 批量删除补充
+
+成功经验：
+- “全选当前页面”和“全选当前筛选的所有结果”必须拆成两套选择语义：前者由前端直接维护 `selectedSessionIds`，后者则进入独立 `filtered_all` 选择模式，真正删除时把当前 `search_term + status` 交给后端匹配，语义才不会混淆。
+- 对这类“平时不显示复选框”的列表页，单独加一个“选择”切换按钮最稳；进入选择模式后再展示复选框和批量操作条，退出时统一清空选择状态，可以显著减少误操作。
+
+失败/风险经验：
+- 如果“全选当前筛选的所有结果”只是把当前前端已加载列表全勾上，看起来像实现了需求，实际会漏删未加载命中的结果；这类需求必须由后端按筛选条件执行。
+
+### 2026-03-19 飞书 Channel 稳定性修复补充
+
+成功经验：
+- 飞书 `lark_oapi` WebSocket SDK 默认虽然会自动重连，但如果在 SDK 入站线程里同步 `future.result()` 等待主事件循环处理，仍会因为 loop 偶发卡顿把该条消息直接打成异常；更稳的做法是只做 `run_coroutine_threadsafe` 非阻塞投递，并在 `done_callback` 中记录真正的异步异常。
+- 这类跨线程回调退化问题，补一个“只调度、不等待”的单测最有效；能直接防止后续维护时又把阻塞等待加回去。
+
+失败/风险经验：
+- 本次仅完成飞书相关单元测试回归，未做真实飞书长连接 e2e；如果用户现场仍有“断流”现象，需要结合运行日志继续区分是 SDK 连接层抖动还是飞书发消息 API 瞬时失败。
+
+### 2026-03-19 Channel 稳定性横向排查补充
+
+成功经验：
+- `telegram` 当前 runtime 采用单事件循环 polling/webhook 处理，没有发现类似飞书那种“跨线程回调里同步等待主 loop”的实现；`wecom` 虽然底层 SDK 同步派发 `on_message`，但上层 `MessageHandler` 自身已包 `try/except`，单条解析异常不会直接打死接收循环。
+- `whatsapp` sidecar bridge 的 stdout reader 不应直接 await 业务 handler；改成“reader 只读和分发，handler 用 task 异步执行并单独记录异常”后，单条 `event_handler`/`message_handler` 异常不会让后续消息整段断流。
+
+失败/风险经验：
+- 本次对 `wecom`/`telegram` 的结论主要基于代码路径与单测，而不是线上真实长连接压测；如果用户仍反馈偶发断流，需要优先抓运行日志区分是 SDK/网络层重连问题，还是业务 handler 慢/抛错问题。

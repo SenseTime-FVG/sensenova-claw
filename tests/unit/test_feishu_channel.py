@@ -65,6 +65,39 @@ class _FakeMention:
     key: str = "@_user_1"
 
 
+@dataclass
+class _FakeInboundMessage:
+    """模拟飞书 SDK 入站消息对象"""
+    chat_id: str = "chat_001"
+    chat_type: str = "p2p"
+    message_id: str = "msg_001"
+    message_type: str = "text"
+    content: str = '{"text": "hello"}'
+    mentions: list[Any] | None = None
+
+
+@dataclass
+class _FakeSenderId:
+    open_id: str = "sender_001"
+
+
+@dataclass
+class _FakeSender:
+    sender_id: _FakeSenderId = field(default_factory=_FakeSenderId)
+
+
+@dataclass
+class _FakeEventData:
+    """模拟飞书 SDK 回调 data.event 结构"""
+    message: _FakeInboundMessage = field(default_factory=_FakeInboundMessage)
+    sender: _FakeSender = field(default_factory=_FakeSender)
+
+
+@dataclass
+class _FakeCallbackData:
+    event: _FakeEventData = field(default_factory=_FakeEventData)
+
+
 # ---- 辅助：创建 Channel ----
 
 
@@ -319,6 +352,38 @@ class TestOnMessageAsync:
         sid1 = collected[0].session_id
         sid2 = collected[1].session_id
         assert sid1 == sid2  # 同一群聊复用 session
+
+
+class TestHandleMessageEvent:
+    def test_handle_message_event_schedules_without_waiting(self, monkeypatch):
+        """SDK 回调线程只应投递协程，不应同步等待异步处理结果"""
+        ch, _ = _make_channel()
+
+        class _FakeLoop:
+            def is_closed(self) -> bool:
+                return False
+
+        ch._loop = _FakeLoop()
+        calls = {"scheduled": 0, "result_called": 0}
+
+        class _FakeFuture:
+            def result(self, timeout=None):
+                del timeout
+                calls["result_called"] += 1
+                raise AssertionError("should not wait in SDK callback thread")
+
+        def fake_run_coroutine_threadsafe(coro, loop):
+            assert loop is ch._loop
+            calls["scheduled"] += 1
+            coro.close()
+            return _FakeFuture()
+
+        monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
+
+        ch._handle_message_event(_FakeCallbackData())
+
+        assert calls["scheduled"] == 1
+        assert calls["result_called"] == 0
 
 
 # ---- _build_content 测试 ----
