@@ -427,3 +427,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境里 `python3 -m pytest` 仍不可用，验证新后端接口时要继续使用 `UV_CACHE_DIR=/tmp/uv_cache uv run python -m pytest ...`。
 - 当前前端类型检查仍会先卡在既有问题 `agentos/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为“本次改动失败”的依据。
+
+### 2026-03-19 WhatsApp typingIndicator 配置补充
+
+成功经验：
+- 对“新增插件配置”这类改动，不能只停在 Python `config.py`；像 WhatsApp 这种 `Python channel + Node sidecar` 架构，配置需要贯穿 `config -> bridge_client -> start payload -> runtime.sendText` 才真正生效。
+- 这类出站行为最适合用 Node 侧单测锁死顺序：直接断言 `sendPresenceUpdate("composing")` 是否在 `sendMessage()` 之前触发，能快速验证默认行为和 `none` 分支。
+- 文档示例里的路径要同步到当前真实插件目录；否则用户很容易按旧的 `channels/whatsapp` 路径安装 sidecar，导致配置看起来正确但运行时走错目录。
+
+失败/风险经验：
+- 如果 runtime 里原本没有发送 typing/composing，仅增加 `typingIndicator` 配置不会有任何实际效果；要先确认当前 sidecar 的真实出站行为，再决定是“增加开关”还是“同时补行为 + 开关”。

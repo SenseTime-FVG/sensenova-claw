@@ -246,12 +246,14 @@ export class WhatsAppRuntime {
       lastEventAt: null,
       debugMessage: null,
     };
+    this._typingIndicator = "composing";
   }
 
-  async start(authDir) {
+  async start(authDir, options = {}) {
     this._authDir = authDir;
+    this._typingIndicator = options.typingIndicator === "none" ? "none" : "composing";
     await this._ensureAuthDir(authDir);
-    this._emitDebug(`start called with authDir=${authDir}`);
+    this._emitDebug(`start called with authDir=${authDir} typingIndicator=${this._typingIndicator}`);
 
     const baileys = await this._loadBaileys();
     const {
@@ -480,6 +482,9 @@ export class WhatsAppRuntime {
       throw new Error("WhatsApp runtime not started");
     }
     const resolvedTarget = await resolveOutboundTarget(this._sock, target);
+    if (this._typingIndicator !== "none") {
+      await this._sock.sendPresenceUpdate?.("composing", resolvedTarget);
+    }
     const result = await this._sock.sendMessage(resolvedTarget, { text });
     const outboundId = result?.key?.id ?? null;
     if (outboundId) {

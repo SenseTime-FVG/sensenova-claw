@@ -10,7 +10,9 @@ async function handleCommand(command) {
 
   try {
     if (type === "start") {
-      await runtime.start(payload.authDir);
+      await runtime.start(payload.authDir, {
+        typingIndicator: payload.typingIndicator,
+      });
       writeResponse(id, { success: true });
       return;
     }

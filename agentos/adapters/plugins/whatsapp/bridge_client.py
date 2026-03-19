@@ -47,6 +47,7 @@ class SidecarBridgeClient:
         command: str,
         entry: str,
         auth_dir: str,
+        typing_indicator: str = "composing",
         startup_timeout_seconds: float = 30,
         send_timeout_seconds: float = 15,
         env: dict[str, str] | None = None,
@@ -54,6 +55,7 @@ class SidecarBridgeClient:
         self._command = command
         self._entry = entry
         self._auth_dir = str(Path(auth_dir).expanduser())
+        self._typing_indicator = typing_indicator
         self._startup_timeout_seconds = startup_timeout_seconds
         self._send_timeout_seconds = send_timeout_seconds
         self._extra_env = env or {}
@@ -93,7 +95,10 @@ class SidecarBridgeClient:
 
         await self._request(
             "start",
-            {"authDir": self._auth_dir},
+            {
+                "authDir": self._auth_dir,
+                "typingIndicator": self._typing_indicator,
+            },
             timeout=self._startup_timeout_seconds,
         )
 

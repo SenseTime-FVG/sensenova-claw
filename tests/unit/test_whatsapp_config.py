@@ -13,6 +13,7 @@ class TestWhatsAppConfigDefaults:
         cfg = WhatsAppConfig()
         assert cfg.enabled is False
         assert cfg.auth_dir == ""
+        assert cfg.typing_indicator == "composing"
         assert cfg.dm_policy == "open"
         assert cfg.group_policy == "open"
         assert cfg.allowlist == []
@@ -27,6 +28,7 @@ class TestWhatsAppConfigFromPluginApi:
         defaults = {
             "enabled": True,
             "auth_dir": "/tmp/agentos-whatsapp-auth",
+            "typing_indicator": "none",
             "dm_policy": "allowlist",
             "group_policy": "allowlist",
             "allowlist": ["+15550000001"],
@@ -51,6 +53,7 @@ class TestWhatsAppConfigFromPluginApi:
         cfg = WhatsAppConfig.from_plugin_api(api)
         assert cfg.enabled is True
         assert Path(cfg.auth_dir) == Path("/tmp/agentos-whatsapp-auth").resolve()
+        assert cfg.typing_indicator == "none"
         assert cfg.dm_policy == "allowlist"
         assert cfg.group_policy == "allowlist"
         assert cfg.allowlist == ["+15550000001"]
@@ -67,6 +70,7 @@ class TestWhatsAppConfigFromPluginApi:
         cfg = WhatsAppConfig.from_plugin_api(api)
         assert cfg.enabled is False
         assert cfg.auth_dir == ""
+        assert cfg.typing_indicator == "composing"
         assert cfg.dm_policy == "open"
         assert cfg.group_policy == "open"
         assert cfg.allowlist == []

@@ -34,6 +34,12 @@ async def main():
             if os.environ.get("FAKE_SIDECAR_MODE") == "timeout":
                 continue
             await emit({"type": "response", "id": command["id"], "payload": {"success": True}})
+            await emit(
+                {
+                    "type": "debug",
+                    "payload": {"message": f"typing_indicator={command['payload'].get('typingIndicator', 'missing')}"},
+                }
+            )
             await emit({"type": "qr", "payload": {"text": "qr-text", "ascii": "##"}})
             await emit(
                 {
@@ -101,6 +107,10 @@ async def test_bridge_client_reads_qr_and_message_events(tmp_path: Path) -> None
 
     assert any(event["type"] == "qr" for event in events)
     assert any(event["type"] == "status" for event in events)
+    assert any(
+        event["type"] == "debug" and event["payload"]["message"] == "typing_indicator=composing"
+        for event in events
+    )
     assert messages
     assert messages[0].text == "hello from sidecar"
 
@@ -146,3 +156,33 @@ async def test_start_times_out_when_sidecar_does_not_respond(tmp_path: Path) -> 
         await client.start()
 
     await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_bridge_client_passes_typing_indicator_to_start_payload(tmp_path: Path) -> None:
+    events: list[dict] = []
+
+    async def on_event(event: dict) -> None:
+        events.append(event)
+
+    sidecar = tmp_path / "fake_sidecar.py"
+    _write_fake_sidecar(sidecar)
+
+    client = SidecarBridgeClient(
+        command="python3",
+        entry=str(sidecar),
+        auth_dir=str(tmp_path / "auth"),
+        startup_timeout_seconds=2,
+        send_timeout_seconds=2,
+        typing_indicator="none",
+    )
+    client.set_event_handler(on_event)
+
+    await client.start()
+    await asyncio.sleep(0.1)
+    await client.stop()
+
+    assert any(
+        event["type"] == "debug" and event["payload"]["message"] == "typing_indicator=none"
+        for event in events
+    )

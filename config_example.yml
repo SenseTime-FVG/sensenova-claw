@@ -207,6 +207,7 @@ plugins:
   whatsapp:
     enabled: false
     auth_dir: "~/.agentos/data/plugins/whatsapp/auth"
+    typing_indicator: "none"  # composing | none  新用户建议使用none，过于频繁容易limited
     dm_policy: "open"
     group_policy: "open"
     allowlist: []

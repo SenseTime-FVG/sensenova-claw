@@ -777,3 +777,88 @@ test("sendText falls back to self jid when target is self lid", async () => {
   assert.equal(sent[0].target, "85293432086:1@s.whatsapp.net");
   assert.deepEqual(sent[0].payload, { text: "hello self lid target" });
 });
+
+test("sendText sends composing presence by default before outbound text", async () => {
+  const calls = [];
+  const runtime = new WhatsAppRuntime({
+    emit: () => {},
+    ensureAuthDir: async () => {},
+    loadBaileys: async () => ({
+      makeWASocket() {
+        return {
+          ev: createFakeEmitter(),
+          ws: { close() {} },
+          user: { id: "85293432086:1@s.whatsapp.net" },
+          async sendPresenceUpdate(type, target) {
+            calls.push({ kind: "presence", type, target });
+          },
+          async sendMessage(target, payload) {
+            calls.push({ kind: "message", target, payload });
+            return { key: { id: "wamid-send-presence-1" } };
+          },
+        };
+      },
+      useMultiFileAuthState: async () => ({
+        state: {
+          creds: {},
+          keys: {},
+        },
+        saveCreds: async () => {},
+      }),
+      fetchLatestBaileysVersion: async () => ({ version: [2, 3000, 1] }),
+      makeCacheableSignalKeyStore(keys) {
+        return keys;
+      },
+    }),
+  });
+
+  await runtime.start("/tmp/agentos-whatsapp-runtime-test");
+  await runtime.sendText("15550000001@s.whatsapp.net", "hello typing");
+
+  assert.deepEqual(calls, [
+    { kind: "presence", type: "composing", target: "15550000001@s.whatsapp.net" },
+    { kind: "message", target: "15550000001@s.whatsapp.net", payload: { text: "hello typing" } },
+  ]);
+});
+
+test("sendText skips composing presence when typingIndicator is none", async () => {
+  const calls = [];
+  const runtime = new WhatsAppRuntime({
+    emit: () => {},
+    ensureAuthDir: async () => {},
+    loadBaileys: async () => ({
+      makeWASocket() {
+        return {
+          ev: createFakeEmitter(),
+          ws: { close() {} },
+          user: { id: "85293432086:1@s.whatsapp.net" },
+          async sendPresenceUpdate(type, target) {
+            calls.push({ kind: "presence", type, target });
+          },
+          async sendMessage(target, payload) {
+            calls.push({ kind: "message", target, payload });
+            return { key: { id: "wamid-send-presence-none-1" } };
+          },
+        };
+      },
+      useMultiFileAuthState: async () => ({
+        state: {
+          creds: {},
+          keys: {},
+        },
+        saveCreds: async () => {},
+      }),
+      fetchLatestBaileysVersion: async () => ({ version: [2, 3000, 1] }),
+      makeCacheableSignalKeyStore(keys) {
+        return keys;
+      },
+    }),
+  });
+
+  await runtime.start("/tmp/agentos-whatsapp-runtime-test", { typingIndicator: "none" });
+  await runtime.sendText("15550000001@s.whatsapp.net", "hello typing none");
+
+  assert.deepEqual(calls, [
+    { kind: "message", target: "15550000001@s.whatsapp.net", payload: { text: "hello typing none" } },
+  ]);
+});

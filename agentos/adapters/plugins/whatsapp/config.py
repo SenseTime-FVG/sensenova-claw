@@ -31,6 +31,7 @@ class WhatsAppConfig:
 
     enabled: bool = False
     auth_dir: str = ""
+    typing_indicator: str = "composing"  # composing | none
     dm_policy: str = "open"  # open | allowlist | disabled
     group_policy: str = "open"  # open | allowlist | disabled
     allowlist: list[str] = field(default_factory=list)
@@ -52,6 +53,7 @@ class WhatsAppConfig:
         return cls(
             enabled=api.get_config("enabled", False),
             auth_dir=auth_dir,
+            typing_indicator=api.get_config("typing_indicator", "composing"),
             dm_policy=api.get_config("dm_policy", "open"),
             group_policy=api.get_config("group_policy", "open"),
             allowlist=api.get_config("allowlist", []),

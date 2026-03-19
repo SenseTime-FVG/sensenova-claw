@@ -43,6 +43,7 @@ class WhatsAppChannel(Channel):
             command=config.bridge.command,
             entry=config.bridge.entry,
             auth_dir=config.auth_dir,
+            typing_indicator=config.typing_indicator,
             startup_timeout_seconds=config.bridge.startup_timeout_seconds,
             send_timeout_seconds=config.bridge.send_timeout_seconds,
         )
