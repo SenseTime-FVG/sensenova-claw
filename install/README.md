@@ -34,25 +34,21 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.
 
 ## 安装完成后
 
-**1. 配置 LLM API Key**
+**1. 启动服务**
 
 ```bash
-# 编辑配置文件，填入 LLM provider 的 API Key
-vim ~/.agentos/app/config.yml
+agentos run
 ```
 
-配置文件基于 `config_example.yml` 生成，支持 OpenAI / Anthropic / Gemini / Kimi / GLM / Qwen / DeepSeek 等多个 LLM 提供商，按需填入对应的 API Key 即可。
+**2. 配置 LLM 等设置**
 
-**2. 启动服务**
+启动后，打开 Web 界面进行配置：
+
+- Web Dashboard: http://localhost:3000
+
+或使用 CLI 客户端（需先启动服务）：
 
 ```bash
-# 启动服务（后端 + 前端 Dashboard）
-agentos run
-
-# 仅启动后端
-agentos run --no-frontend
-
-# 启动 CLI 客户端（需先启动服务）
 agentos cli
 ```
 

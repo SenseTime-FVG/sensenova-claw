@@ -78,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/i
 irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.ps1 | iex
 ```
 
-安装完成后，编辑 `~/.agentos/app/config.yml` 填入 LLM API Key，然后运行 `agentos run` 启动服务。
+安装完成后，运行 `agentos run` 启动服务，然后打开 http://localhost:3000 进行 LLM 等配置。
 
 > 详细说明见 [install/README.md](install/README.md)
 

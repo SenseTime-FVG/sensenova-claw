@@ -324,23 +324,24 @@ function Print-Success {
     Write-Host "  AgentOS 安装完成!" -ForegroundColor Green
     Write-Host "======================================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  启动服务:"
-    Write-Host "    agentos run" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  启动 CLI 客户端（需先启动服务）:"
-    Write-Host "    agentos cli" -ForegroundColor White
-    Write-Host ""
     Write-Host "  安装目录: $APP_DIR"
-    Write-Host "  配置文件: $APP_DIR\config.yml"
     Write-Host "  数据目录: $AGENTOS_HOME"
-    Write-Host ""
-    Write-Host "  下一步: 编辑 $APP_DIR\config.yml 填入 LLM API Key" -ForegroundColor Yellow
     Write-Host ""
     if ($IS_CN) {
         Write-Host "  已配置国内镜像: npm($CN_NPM_REGISTRY) pip($CN_PIP_INDEX)"
         Write-Host ""
     }
-    Write-Host "  配置参考: $APP_DIR\config_example.yml"
+    Write-Host "  下一步:" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "    1. 启动服务:"
+    Write-Host "       agentos run" -ForegroundColor White
+    Write-Host ""
+    Write-Host "    2. 打开 Web 界面进行 LLM 等配置:"
+    Write-Host "       http://localhost:3000" -ForegroundColor White
+    Write-Host ""
+    Write-Host "    或使用 CLI 客户端（需先启动服务）:"
+    Write-Host "       agentos cli" -ForegroundColor White
+    Write-Host ""
     Write-Host "  文档: https://github.com/SenseTime-FVG/agentos"
     Write-Host ""
 }
