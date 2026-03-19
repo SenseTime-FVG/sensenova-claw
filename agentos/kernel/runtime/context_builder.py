@@ -134,15 +134,19 @@ class ContextBuilder:
             return None
         lines = [
             "## Skill Usage",
-            "技能不是 Agent，也不是 Tool 调用名。",
-            "当某个 skill 适用时，先用 read_file 读取下面 <location> 指向的 SKILL.md，再按其中步骤执行。",
-            "不要对 skill 名称使用 send_message 或 create_agent。",
-            "如果系统提示或用户明确要求使用某个 skill，必须先读取对应的 SKILL.md，再决定后续工具调用。",
+            "当用户请求匹配到某个 skill 的名称或描述时，先用 read_file 读取对应 `<location>` 路径下的 `SKILL.md`，再继续执行。",
+            "",
             "<available_skills>",
         ]
         for skill in skills:
             skill_md = skill.path / "SKILL.md"
-            lines.append(f"- {skill.name}: {skill.description} <location>{skill_md}</location>")
+            lines.extend([
+                "<skill>",
+                f"<name>{skill.name}</name>",
+                f"<description>{skill.description}</description>",
+                f"<location>{skill_md}</location>",
+                "</skill>",
+            ])
         lines.append("</available_skills>")
         return "\n".join(lines)
 

@@ -310,6 +310,26 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前环境执行 Playwright 仍缺浏览器二进制（`chrome-headless-shell` 不存在），即使越权可启动流程也无法完成浏览器级断言。
 - `next build` 在本机会停在 `Linting and checking validity of types ...` 且无进一步堆栈，需在 CI 或本地完整 Node 环境结合日志排查。
 
+### 2026-03-19 skills prompt 注入补充
+
+成功经验：
+- skills 只注入 `name/description/location` 时，模型未必会主动读取正文；在 system prompt 中增加一条极简 `Skill Usage` 规则，明确”匹配到 skill 后先读对应 `SKILL.md`”，效果更稳定。
+- 将 skills 列表从自由文本改为 `<available_skills><skill><name><description><location>` 结构后，测试断言和后续字段扩展都更直接。
+- 当前仓库虽缺少全局 `pytest`，但可稳定使用 `.venv/bin/python -m pytest` 跑本地回归，适合作为受限环境下的默认验证方式。
+
+失败/风险经验：
+- 仅替换标签格式而不补”命中后去读 `SKILL.md`”的协议指令，收益有限；真正影响模型行为的是规则和结构一起改。
+
+### 2026-03-19 email-agent 工具接入补充
+
+成功经验：
+- Agent 侧 `tools` 白名单与全局 `ToolRegistry` 注册缺一不可；仅修改 `.agentos/agents/<id>/config.yml` 不会让未注册工具自动可用。
+- 对预置 Agent 配置做回归时，直接用仓库内真实 `.agentos/agents/<id>/config.yml` 构造 `AgentRegistry` 断言，比复制一份测试夹具更能防止配置漂移。
+- 当前环境执行 pytest 应优先使用 `.venv/bin/python -m pytest`；系统 `python3` 缺少 `pytest`，直接调用会误判为测试无法运行。
+
+失败/风险经验：
+- 邮件工具虽然注册后会暴露给运行时，但真实可用性仍依赖 `tools.email.enabled` 及 SMTP/IMAP 凭据；仅单元测试通过不能代表邮件链路已完成真实回归。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：
@@ -436,4 +456,36 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 文档示例里的路径要同步到当前真实插件目录；否则用户很容易按旧的 `channels/whatsapp` 路径安装 sidecar，导致配置看起来正确但运行时走错目录。
 
 失败/风险经验：
-- 如果 runtime 里原本没有发送 typing/composing，仅增加 `typingIndicator` 配置不会有任何实际效果；要先确认当前 sidecar 的真实出站行为，再决定是“增加开关”还是“同时补行为 + 开关”。
+- 如果 runtime 里原本没有发送 typing/composing，仅增加 `typingIndicator` 配置不会有任何实际效果；要先确认当前 sidecar 的真实出站行为，再决定是”增加开关”还是”同时补行为 + 开关”。
+- 当前环境里 `python3 -m pytest` 仍不可用，验证新后端接口时要继续使用 `UV_CACHE_DIR=/tmp/uv_cache uv run python -m pytest ...`。
+- 当前前端类型检查仍会先卡在既有问题 `agentos/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为”本次改动失败”的依据。
+
+### 2026-03-19 Chat Markdown 设计补充
+
+成功经验：
+- 聊天区 Markdown 改造最稳的边界是”字符串走 Markdown、结构化内容走 JSON 查看器”，这样 `toolInfo.arguments/result` 不会因为富文本改造破坏原有结构化阅读体验。
+- 在设计阶段就明确”增强版 Markdown + 禁止原始 HTML + 保留折叠逻辑”，能显著减少后续实现时的安全分歧与交互返工。
+- 将通用渲染能力收敛为独立 `MarkdownRenderer` 组件，比在 `MessageBubble` 和工具详情区分别内联渲染更利于后续扩展代码高亮、链接策略与统一样式。
+
+失败/风险经验：
+- 当前会话环境没有可直接调用的 spec reviewer 子代理能力，设计文档阶段需要显式说明该限制，并以人工自检作为退化方案，避免误称已完成完整的 spec review loop。
+
+### 2026-03-19 Chat Markdown 计划补充
+
+成功经验：
+- 当前前端同时存在共享 `components/chat/MessageBubble.tsx` 与页面内联 `MessageBubble`（`/chat`、`/sessions/[id]`）两套路径；实施计划里优先共享 `MarkdownRenderer` 和内容分流工具，而不是直接做大规模 UI 合并，能更符合 YAGNI。
+- 对 Markdown 能力做前端回归时，优先新增 mock WebSocket 的 Playwright 用例比依赖真实模型输出更稳，断言 `h1/table/pre code` 等语义化节点也比断言文案本身更抗波动。
+
+失败/风险经验：
+- `docs/superpowers/` 当前被 `.gitignore` 忽略，后续如果需要把 spec/plan 正式纳入版本库，必须显式 `git add -f`，否则容易误以为文件已保存但实际上不会进入提交。
+
+### 2026-03-19 Chat Markdown 执行补充
+
+成功经验：
+- `react-markdown` v10 不接受直接传 `className` 到根组件；最稳的写法是在外层包一层容器，再让 `ReactMarkdown` 只负责内容节点渲染。
+- `/chat` 页面实时 websocket 链路中的 `tool_result` 消息并不带 `toolInfo`，如果只按 `msg.role === “tool” && msg.toolInfo` 分支渲染，会把工具结果误走到 assistant 展示路径；需要单独补一个”无 `toolInfo` 的 tool 消息”分支。
+- 把 `isJsonLike/stringifyContent/previewText` 抽到共享工具后，共享消息组件、`/chat` 和 `/sessions/[id]` 三处展示层可以统一”JSON 优先，其余走 Markdown”的规则，减少分叉。
+
+失败/风险经验：
+- 当前环境浏览器级 Playwright 仍缺系统库 `libnspr4.so`，即使越权能拉起 web server，也会在 Chromium 启动阶段失败；这类前端 e2e 结果不能作为功能缺陷依据，只能记录为环境阻塞。
+- `npx tsc --noEmit` 与 `next build` 仍会先被仓库既有问题 `components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入挡住；验证时必须区分”本次新增错误已清零”和”仓库老错误仍在”。
