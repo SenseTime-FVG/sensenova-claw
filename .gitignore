@@ -46,6 +46,7 @@ workspace/skills/
 workspace/*.json
 my_workspace/
 .agentos/workdir/
+.agentos/token
 
 # var/ 运行时数据（数据库等）默认忽略，但保留内置 skills
 var/
@@ -70,6 +71,7 @@ build/
 
 # ========== 本地密钥与环境变量 ==========
 config.yml
+config.yaml
 .env
 .env.*
 !.env.example

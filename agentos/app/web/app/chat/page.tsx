@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, ChevronDown, Check } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
+import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
 import { useNotification } from '@/hooks/useNotification';
 import { InteractionDialog, type PendingInteraction } from '@/components/chat/QuestionDialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
@@ -15,7 +17,7 @@ const WS_MAX_RECONNECT_ATTEMPTS = 10;
 
 interface ToolInfo {
   name: string;
-  arguments: Record<string, unknown>;
+  arguments: unknown;
   result?: unknown;
   success?: boolean;
   error?: string;
@@ -27,6 +29,7 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
   timestamp: number;
+  name?: string;
   toolInfo?: ToolInfo;
 }
 
@@ -68,7 +71,13 @@ function truncateResult(result: unknown, max = 50000): unknown {
 
 function formatArgs(args: unknown): string {
   if (!args) return '';
-  if (typeof args === 'string') { try { return JSON.stringify(JSON.parse(args), null, 2); } catch { return args; } }
+  if (typeof args === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(args), null, 2);
+    } catch {
+      return args;
+    }
+  }
   if (typeof args === 'object') return JSON.stringify(args, null, 2);
   return String(args);
 }
@@ -168,7 +177,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   if (msg.role === 'system') {
     return (
       <div className="flex justify-center my-3">
-        <span className="text-[10px] bg-muted/50 text-muted-foreground px-3 py-1 rounded-full border border-border">{msg.content}</span>
+        <div className="max-w-3xl rounded-2xl border border-border bg-muted/50 px-4 py-2 text-[10px] text-muted-foreground">
+          <MarkdownRenderer className="chat-markdown chat-markdown--system" content={msg.content} />
+        </div>
       </div>
     );
   }
@@ -180,14 +191,42 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           <User size={20} className="text-secondary-foreground" />
         </div>
         <div className="flex-1 flex flex-col items-end pt-1">
-          <div className="bg-primary text-primary-foreground text-base md:text-lg p-5 rounded-3xl rounded-tr-sm max-w-[85%] whitespace-pre-wrap leading-relaxed shadow-lg">{msg.content}</div>
+          <div className="bg-primary text-primary-foreground text-base md:text-lg p-5 rounded-3xl rounded-tr-sm max-w-[85%] leading-relaxed shadow-lg">
+            <MarkdownRenderer className="chat-markdown chat-markdown--user" content={msg.content} />
+          </div>
         </div>
       </div>
     );
   }
 
-  if (msg.role === 'tool' && msg.toolInfo) {
+  if (msg.role === 'tool') {
     const ti = msg.toolInfo;
+    if (!ti) {
+      return (
+        <div className="flex gap-3 max-w-3xl mx-auto my-2 overflow-hidden">
+          <div className="w-8 h-8 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
+              <div className="bg-muted px-4 py-2 flex items-center gap-2 text-xs border-b">
+                <Wrench size={14} className="text-green-500" />
+                <span className="text-muted-foreground uppercase tracking-wider">Tool Result</span>
+                {msg.name ? <span className="ml-auto font-mono text-foreground">{msg.name}</span> : null}
+              </div>
+              <div className="px-4 py-3">
+                {isJsonLike(msg.content) ? (
+                  <pre className="json-viewer">
+                    <code>{formatArgs(msg.content)}</code>
+                  </pre>
+                ) : (
+                  <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={msg.content} />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex gap-3 max-w-3xl mx-auto my-2 overflow-hidden">
         <div className="w-8 h-8 shrink-0" />
@@ -207,7 +246,15 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
                 <ChevronDown size={14} className={`transition-transform duration-200 ${showArgs ? 'rotate-180' : ''}`} /> Payload
               </button>
               {showArgs && (
-                <pre className="text-[11px] text-muted-foreground font-mono bg-muted/50 p-3 rounded-md overflow-auto border max-h-32 whitespace-pre-wrap break-all">{formatArgs(ti.arguments)}</pre>
+                isJsonLike(ti.arguments) ? (
+                  <pre className="json-viewer">
+                    <code>{formatArgs(ti.arguments)}</code>
+                  </pre>
+                ) : (
+                  <div className="rounded-md border bg-muted/50 p-3">
+                    <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={stringifyContent(ti.arguments)} />
+                  </div>
+                )
               )}
               {ti.status === 'completed' && (
                 <>
@@ -215,9 +262,19 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
                     <ChevronDown size={14} className={`transition-transform duration-200 ${showResult ? 'rotate-180' : ''}`} /> Output
                   </button>
                   {showResult && (
-                    <pre className="text-[11px] text-foreground font-mono bg-muted/50 p-3 rounded-md overflow-auto border max-h-40 whitespace-pre-wrap break-all">
-                      {ti.error || formatArgs(ti.result)}
-                    </pre>
+                    ti.error ? (
+                      <div className="rounded-md border border-red-500/20 bg-red-500/10 p-3 text-red-600 dark:text-red-400">
+                        <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={ti.error} />
+                      </div>
+                    ) : isJsonLike(ti.result) ? (
+                      <pre className="json-viewer">
+                        <code>{formatArgs(ti.result)}</code>
+                      </pre>
+                    ) : (
+                      <div className="rounded-md border bg-muted/50 p-3">
+                        <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={stringifyContent(ti.result)} />
+                      </div>
+                    )
                   )}
                 </>
               )}
@@ -235,7 +292,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
         <Bot size={20} className="text-primary-foreground" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-base md:text-lg text-foreground whitespace-pre-wrap break-words leading-relaxed font-medium">{msg.content}</div>
+        <div className="text-base md:text-lg text-foreground break-words leading-relaxed font-medium">
+          <MarkdownRenderer className="chat-markdown chat-markdown--assistant" content={msg.content} />
+        </div>
       </div>
     </div>
   );

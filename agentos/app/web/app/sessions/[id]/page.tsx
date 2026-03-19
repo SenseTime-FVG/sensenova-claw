@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send } from 'lucide-react';
+import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
+import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { InteractionDialog, type PendingInteraction } from '@/components/chat/QuestionDialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
@@ -66,9 +68,9 @@ function MessageBubble({ msg }: { msg: Message }) {
   if (msg.role === 'system') {
     return (
       <div className="flex justify-center my-8">
-        <span className="text-xs bg-muted text-muted-foreground px-4 py-1.5 rounded-full border border-border">
-          System Prompt
-        </span>
+        <div className="max-w-3xl rounded-2xl border border-border bg-muted px-4 py-2 text-xs text-muted-foreground">
+          <MarkdownRenderer className="chat-markdown chat-markdown--system" content={msg.content || ''} />
+        </div>
       </div>
     );
   }
@@ -80,8 +82,8 @@ function MessageBubble({ msg }: { msg: Message }) {
           <User size={20} className="text-secondary-foreground" />
         </div>
         <div className="flex-1 flex flex-col items-end">
-          <div className="bg-primary text-primary-foreground text-base p-4 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] whitespace-pre-wrap leading-relaxed">
-            {msg.content}
+          <div className="bg-primary text-primary-foreground text-base p-4 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] leading-relaxed">
+            <MarkdownRenderer className="chat-markdown chat-markdown--user" content={msg.content || ''} />
           </div>
         </div>
       </div>
@@ -97,8 +99,8 @@ function MessageBubble({ msg }: { msg: Message }) {
         </div>
         <div className="flex-1 min-w-0 space-y-4">
           {msg.content && (
-            <div className="text-base text-foreground bg-card border border-border p-5 rounded-2xl rounded-tl-none shadow-sm whitespace-pre-wrap break-words leading-relaxed">
-              {msg.content}
+            <div className="text-base text-foreground bg-card border border-border p-5 rounded-2xl rounded-tl-none shadow-sm break-words leading-relaxed">
+              <MarkdownRenderer className="chat-markdown chat-markdown--assistant" content={msg.content} />
             </div>
           )}
           {hasToolCalls && (
@@ -112,9 +114,15 @@ function MessageBubble({ msg }: { msg: Message }) {
                       <Wrench size={14} className="text-yellow-500" />
                       <span className="text-foreground font-mono">{tcName}</span>
                     </div>
-                    <pre className="p-4 text-xs text-muted-foreground font-mono overflow-auto max-h-60 bg-background/50 whitespace-pre-wrap break-all">
-                      {formatArgs(tcArgs)}
-                    </pre>
+                    {isJsonLike(tcArgs) ? (
+                      <pre className="json-viewer">
+                        <code>{formatArgs(tcArgs)}</code>
+                      </pre>
+                    ) : (
+                      <div className="p-4">
+                        <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={stringifyContent(tcArgs)} />
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -139,9 +147,15 @@ function MessageBubble({ msg }: { msg: Message }) {
               <span className="text-muted-foreground uppercase tracking-wider">Tool result</span>
               {msg.name && <span className="text-foreground font-mono ml-auto">{msg.name}</span>}
             </div>
-            <pre className="p-4 text-xs text-muted-foreground font-mono overflow-auto max-h-60 whitespace-pre-wrap break-all bg-background/30">
-              {displayContent}
-            </pre>
+            {isJsonLike(displayContent) ? (
+              <pre className="json-viewer">
+                <code>{formatArgs(displayContent)}</code>
+              </pre>
+            ) : (
+              <div className="p-4 bg-background/30">
+                <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={displayContent} />
+              </div>
+            )}
           </div>
         </div>
       </div>

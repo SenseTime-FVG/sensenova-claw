@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
+import { isJsonLike, previewText, stringifyContent } from '@/components/chat/messageContent';
 import type { Message } from '@/types/message';
 
-function JsonViewer({ data }: { data: any }) {
+function JsonViewer({ data }: { data: unknown }) {
   try {
     const jsonString = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
     return (
@@ -16,32 +18,18 @@ function JsonViewer({ data }: { data: any }) {
   }
 }
 
-function isJsonLike(value: any): boolean {
-  if (typeof value === 'object' && value !== null) return true;
-  if (typeof value === 'string') {
-    try {
-      JSON.parse(value);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  return false;
-}
-
 function CollapsibleContent({ content, maxLength = 500 }: { content: string; maxLength?: number }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const needsCollapse = content.length > maxLength;
 
   if (!needsCollapse) {
-    return <div className="content-text">{content}</div>;
+    return <MarkdownRenderer className="chat-markdown--detail content-text" content={content} />;
   }
 
   return (
     <div className="collapsible-content">
-      <div className="content-text">
-        {isExpanded ? content : content.slice(0, maxLength) + '...'}
-      </div>
+      {!isExpanded ? <div className="content-text">{previewText(content, maxLength)}</div> : null}
+      {isExpanded ? <MarkdownRenderer className="chat-markdown--detail content-text" content={content} /> : null}
       <button className="collapse-button" onClick={() => setIsExpanded(!isExpanded)}>
         {isExpanded ? '收起' : '展开'}
       </button>
@@ -75,7 +63,7 @@ function ToolInfoDisplay({ message }: { message: Message }) {
             {isJsonLike(toolInfo.arguments) ? (
               <JsonViewer data={toolInfo.arguments} />
             ) : (
-              <CollapsibleContent content={String(toolInfo.arguments)} />
+              <CollapsibleContent content={stringifyContent(toolInfo.arguments)} />
             )}
           </div>
         )}
@@ -90,11 +78,13 @@ function ToolInfoDisplay({ message }: { message: Message }) {
           {showResult && (
             <div className="section-content">
               {toolInfo.error ? (
-                <div className="tool-error">{toolInfo.error}</div>
+                <div className="tool-error">
+                  <MarkdownRenderer className="chat-markdown--detail" content={toolInfo.error} />
+                </div>
               ) : isJsonLike(toolInfo.result) ? (
                 <JsonViewer data={toolInfo.result} />
               ) : (
-                <CollapsibleContent content={String(toolInfo.result)} maxLength={1000} />
+                <CollapsibleContent content={stringifyContent(toolInfo.result)} maxLength={1000} />
               )}
             </div>
           )}
@@ -108,11 +98,17 @@ export function MessageBubble({ message }: { message: Message }) {
   if (message.role === 'tool') {
     return (
       <div className="bubble tool">
-        <div className="tool-message-content">{message.content}</div>
+        <div className="tool-message-content">
+          <MarkdownRenderer className="chat-markdown--detail" content={message.content} />
+        </div>
         <ToolInfoDisplay message={message} />
       </div>
     );
   }
 
-  return <div className={`bubble ${message.role}`}>{message.content}</div>;
+  return (
+    <div className={`bubble ${message.role}`}>
+      <MarkdownRenderer content={message.content} />
+    </div>
+  );
 }
