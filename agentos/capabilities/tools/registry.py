@@ -13,6 +13,14 @@ from agentos.capabilities.tools.builtin import (
     TavilySearchTool,
     WriteFileTool,
 )
+from agentos.capabilities.tools.email import (
+    DownloadAttachmentTool,
+    ListEmailsTool,
+    MarkEmailTool,
+    ReadEmailTool,
+    SearchEmailsTool,
+    SendEmailTool,
+)
 from agentos.capabilities.tools.orchestration import CreateAgentTool
 from agentos.platform.config.config import config
 
@@ -35,6 +43,12 @@ class ToolRegistry:
             WriteFileTool(),
             CreateAgentTool(),
             AskUserTool(),
+            SendEmailTool(),
+            ListEmailsTool(),
+            ReadEmailTool(),
+            DownloadAttachmentTool(),
+            MarkEmailTool(),
+            SearchEmailsTool(),
         ]:
             self.register(tool)
 

@@ -1,0 +1,14 @@
+{
+  "id": "default",
+  "name": "Default Agent",
+  "description": "默认 AI Agent",
+  "model": "gemini_maas_pro_20260219",
+  "temperature": 0.2,
+  "system_prompt": "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。",
+  "tools": [],
+  "skills": [],
+  "can_delegate_to": [],
+  "max_delegation_depth": 3,
+  "max_pingpong_turns": 10,
+  "enabled": true
+}
