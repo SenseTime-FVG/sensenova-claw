@@ -81,6 +81,9 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.
 安装完成后，运行 `agentos run` 启动服务，然后打开 http://localhost:3000 进行 LLM 等配置。
 
 > 详细说明见 [install/README.md](install/README.md)
+>
+> 如需验证某个发布分支或 tag，可在安装前指定 `AGENTOS_REPO_REF`，例如:
+> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.sh | AGENTOS_REPO_REF=v0.5.0 bash`
 
 ### Option B: 手动安装
 

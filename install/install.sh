@@ -13,8 +13,8 @@ set -euo pipefail
 
 AGENTOS_HOME="${AGENTOS_HOME:-$HOME/.agentos}"
 APP_DIR="$AGENTOS_HOME/app"
-REPO_URL="https://github.com/SenseTime-FVG/agentos.git"
-REPO_BRANCH="dev"
+REPO_URL="${AGENTOS_REPO_URL:-https://github.com/SenseTime-FVG/agentos.git}"
+REPO_REF="${AGENTOS_REPO_REF:-${AGENTOS_REPO_BRANCH:-dev}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
 
@@ -272,19 +272,31 @@ install_node() {
 
 setup_repo() {
   if [ -d "$APP_DIR/.git" ]; then
-    info "更新 AgentOS..."
+    info "更新 AgentOS ($REPO_REF)..."
     cd "$APP_DIR"
-    git fetch origin "$REPO_BRANCH" --quiet
-    git checkout "$REPO_BRANCH" --quiet 2>/dev/null || true
-    git pull origin "$REPO_BRANCH" --ff-only --quiet || {
-      warn "git pull 失败，可能有本地修改，跳过更新"
+    git fetch origin "$REPO_REF" --quiet || {
+      warn "git fetch $REPO_REF 失败，跳过更新"
+      cd - >/dev/null
+      return
     }
+    if git show-ref --verify --quiet "refs/remotes/origin/$REPO_REF"; then
+      git checkout "$REPO_REF" --quiet 2>/dev/null || git checkout -B "$REPO_REF" "origin/$REPO_REF" --quiet
+      git pull origin "$REPO_REF" --ff-only --quiet || {
+        warn "git pull 失败，可能有本地修改，跳过更新"
+      }
+    else
+      git checkout --detach FETCH_HEAD --quiet || {
+        warn "git checkout $REPO_REF 失败，跳过更新"
+        cd - >/dev/null
+        return
+      }
+    fi
     cd - >/dev/null
     log "AgentOS 已更新"
   else
-    info "克隆 AgentOS 仓库..."
+    info "克隆 AgentOS 仓库 ($REPO_REF)..."
     mkdir -p "$(dirname "$APP_DIR")"
-    git clone --branch "$REPO_BRANCH" --depth 1 "$REPO_URL" "$APP_DIR"
+    git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$APP_DIR"
     log "AgentOS 克隆完成"
   fi
 }
@@ -389,7 +401,8 @@ register_command() {
   info "注册 agentos 命令..."
   cd "$APP_DIR"
 
-  uv tool install --from . --force agentos 2>/dev/null || {
+  # 使用 editable 安装，避免 uv tool 环境里残留一份过期代码副本。
+  uv tool install --editable --from . --force agentos 2>/dev/null || {
     # 降级：用 pip install -e
     warn "uv tool install 失败，尝试 pip install..."
     uv pip install -e . 2>/dev/null || pip install -e . 2>/dev/null || {
@@ -422,6 +435,7 @@ print_success() {
   echo ""
   echo "  安装目录: $APP_DIR"
   echo "  数据目录: $AGENTOS_HOME"
+  echo "  安装来源: $REPO_URL@$REPO_REF"
   echo ""
   if [ "$IS_CN" = "true" ]; then
     echo "  已配置国内镜像: npm($CN_NPM_REGISTRY) pip($CN_UV_INDEX)"
