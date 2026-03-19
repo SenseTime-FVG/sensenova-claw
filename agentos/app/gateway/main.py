@@ -369,6 +369,8 @@ app.include_router(skills.router)
 from agentos.interfaces.http.skills import invoke_router
 app.include_router(invoke_router)
 app.include_router(workspace.router)
+from agentos.interfaces.http import files
+app.include_router(files.router)
 app.include_router(config_api.router)
 app.include_router(cron_api.router)
 app.include_router(notification_api.router)
