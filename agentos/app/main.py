@@ -119,6 +119,15 @@ def cmd_run(args: argparse.Namespace) -> int:
                 cleanup()
                 return 1
 
+    # 检测 LLM 配置状态
+    try:
+        from agentos.platform.config.config import Config, PROJECT_ROOT as _CFG_ROOT
+        from agentos.platform.config.llm_presets import check_llm_configured
+        _cfg = Config(project_root=_CFG_ROOT)
+        _llm_ok, _ = check_llm_configured(_cfg.data)
+    except Exception:
+        _llm_ok = True  # 检测失败时不误报警告
+
     # 读取后端生成的 token（通过环境变量传递，或从 stdout 解析）
     # 后端会在启动时打印 token URL，这里也提示用户
     print()
@@ -130,6 +139,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"  CLI 连接:    agentos cli --port {backend_port}")
     print()
     print("  注意: 后端日志中包含带 token 的访问 URL")
+    if not _llm_ok:
+        print()
+        print("  ⚠️  未检测到可用的 LLM API 配置，当前使用 Mock 模式")
+        if frontend_proc:
+            print(f"     → 访问 http://localhost:{frontend_port} 进行配置")
+        print(f"     → 或使用 agentos cli --port {backend_port} 进行配置")
     print("=" * 50)
     print("按 Ctrl+C 停止所有服务\n")
 
