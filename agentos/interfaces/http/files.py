@@ -1,14 +1,18 @@
-"""通用文件列表 API - 浏览服务端文件系统目录 & 文件上传"""
+"""通用文件列表 API - 浏览服务端文件系统目录 & 文件上传 & 文件下载"""
 from __future__ import annotations
 
+import base64
 import logging
+import mimetypes
 import os
 import platform
 import string
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File as FastAPIFile
+from fastapi.responses import FileResponse
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +210,180 @@ async def list_uploads(request: Request):
     except OSError:
         pass
     return {"path": str(uploads), "items": items}
+
+
+@router.get("/files/workdir/{filepath:path}")
+async def serve_workdir_file(request: Request, filepath: str):
+    """以原始 MIME 类型提供 workdir 下的文件。
+
+    路径相对于 ${AGENTOS_HOME}/workdir，例如
+    ``/api/files/workdir/default/gold_price_ppt/page_01.html``
+    对应 ``~/.agentos/workdir/default/gold_price_ppt/page_01.html``。
+
+    HTML 中引用的相对路径（如 ``images/page1_bg.jpg``）会被浏览器
+    基于当前 URL 目录自动解析到同级子路径。
+    """
+    workspace = _resolve_workspace_dir(request)
+    workdir = workspace / "workdir"
+    target = workdir / filepath
+
+    try:
+        resolved = target.resolve()
+    except (OSError, ValueError):
+        raise HTTPException(400, f"无效路径: {filepath}")
+
+    # 只允许访问 workdir 下的文件
+    try:
+        resolved.relative_to(workdir.resolve())
+    except ValueError:
+        raise HTTPException(403, "路径越界")
+
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(404, f"文件不存在: {filepath}")
+
+    media_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    return FileResponse(path=str(resolved), media_type=media_type)
+
+
+@router.get("/files/workdir-list")
+async def list_workdir_slides(
+    request: Request,
+    dir: str = Query(..., description="相对于 workdir 的目录路径"),
+):
+    """列出指定 workdir 子目录下的 HTML 幻灯片文件（按文件名排序）"""
+    workspace = _resolve_workspace_dir(request)
+    workdir = workspace / "workdir"
+    target = workdir / dir
+
+    try:
+        resolved = target.resolve()
+    except (OSError, ValueError):
+        raise HTTPException(400, f"无效路径: {dir}")
+
+    try:
+        resolved.relative_to(workdir.resolve())
+    except ValueError:
+        raise HTTPException(403, "路径越界")
+
+    if not resolved.is_dir():
+        raise HTTPException(404, f"目录不存在: {dir}")
+
+    slides: list[dict] = []
+    for entry in sorted(resolved.iterdir(), key=lambda e: e.name):
+        if entry.is_file() and entry.suffix.lower() == ".html":
+            slides.append({
+                "name": entry.name,
+                "path": str(entry.relative_to(workdir)).replace("\\", "/"),
+            })
+
+    return {"dir": dir, "slides": slides}
+
+
+def _encode_dir_token(dir_path: str) -> str:
+    """将目录绝对路径编码为 URL-safe base64 token"""
+    raw = base64.urlsafe_b64encode(dir_path.encode("utf-8")).decode("ascii")
+    return raw.rstrip("=")
+
+
+def _decode_dir_token(token: str) -> str:
+    """将 URL-safe base64 token 解码为目录绝对路径"""
+    padded = token + "=" * (-len(token) % 4)
+    return base64.urlsafe_b64decode(padded).decode("utf-8")
+
+
+@router.get("/files/dir-token")
+async def get_dir_token(
+    request: Request,
+    path: str = Query(..., description="要编码的目录绝对路径"),
+):
+    """为指定目录返回可用于 /files/serve/ 的 token 及其中的 HTML 幻灯片列表"""
+    workspace = _resolve_workspace_dir(request)
+    target = Path(path)
+
+    try:
+        resolved = target.resolve()
+    except (OSError, ValueError):
+        raise HTTPException(400, f"无效路径: {path}")
+
+    if not _is_path_allowed(resolved, workspace):
+        raise HTTPException(403, f"无权访问: {path}")
+
+    if not resolved.is_dir():
+        raise HTTPException(404, f"目录不存在: {path}")
+
+    token = _encode_dir_token(str(resolved))
+
+    slides: list[dict] = []
+    for entry in sorted(resolved.iterdir(), key=lambda e: e.name):
+        if entry.is_file() and entry.suffix.lower() == ".html":
+            slides.append({"name": entry.name, "path": entry.name})
+
+    return {"token": token, "dir": str(resolved), "slides": slides}
+
+
+@router.get("/files/serve/{dir_token}/{filepath:path}")
+async def serve_dir_file(request: Request, dir_token: str, filepath: str):
+    """通过 token 提供目录下的文件，HTML 相对引用能够自动解析。
+
+    dir_token 是 /files/dir-token 返回的 URL-safe base64 编码目录路径，
+    filepath 是该目录下的相对路径。
+    """
+    workspace = _resolve_workspace_dir(request)
+    try:
+        base_dir = Path(_decode_dir_token(dir_token))
+    except Exception:
+        raise HTTPException(400, "无效的目录 token")
+
+    target = base_dir / filepath
+
+    try:
+        resolved = target.resolve()
+        base_resolved = base_dir.resolve()
+    except (OSError, ValueError):
+        raise HTTPException(400, f"无效路径: {filepath}")
+
+    # 必须在 base_dir 内
+    try:
+        resolved.relative_to(base_resolved)
+    except ValueError:
+        raise HTTPException(403, "路径越界")
+
+    if not _is_path_allowed(resolved, workspace):
+        raise HTTPException(403, f"无权访问")
+
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(404, f"文件不存在: {filepath}")
+
+    media_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    return FileResponse(path=str(resolved), media_type=media_type)
+
+
+@router.get("/files/download")
+async def download_file(
+    request: Request,
+    path: str = Query(..., description="要下载的文件绝对路径"),
+):
+    """下载/预览指定路径的文件，Content-Type 根据扩展名自动推断"""
+    workspace = _resolve_workspace_dir(request)
+    target = Path(path)
+
+    try:
+        resolved = target.resolve()
+    except (OSError, ValueError):
+        raise HTTPException(400, f"无效路径: {path}")
+
+    if not _is_path_allowed(resolved, workspace):
+        raise HTTPException(403, f"无权访问: {path}")
+
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(404, f"文件不存在: {path}")
+
+    media_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    return FileResponse(
+        path=str(resolved),
+        filename=resolved.name,
+        media_type=media_type,
+    )
 
 
 @router.delete("/files/uploads/{filename}")

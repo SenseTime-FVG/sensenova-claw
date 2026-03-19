@@ -75,6 +75,12 @@ class Gateway:
         self.unbind_session(session_id)
         logger.info("Session deleted: %s", session_id)
 
+    async def hide_session(self, session_id: str) -> None:
+        """软删除：隐藏会话，前端不再展示"""
+        await self.repo.hide_session(session_id)
+        self.unbind_session(session_id)
+        logger.info("Session hidden: %s", session_id)
+
     async def rename_session(self, session_id: str, title: str) -> None:
         """重命名会话"""
         await self.repo.update_session_title(session_id, title)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -152,6 +153,35 @@ def _serialize_job(job: CronJob) -> dict:
 def _ensure_supported_target(session_target: str | None) -> None:
     if session_target == "isolated":
         raise HTTPException(400, "session_target='isolated' is not supported yet")
+
+
+@router.get("/runs")
+async def list_all_cron_runs(request: Request, limit: int = 50, status: str | None = None):
+    """跨所有 job 返回 cron runs，附带 job 名称和提醒文本。"""
+    rows = await _runtime(request)._repo.list_all_cron_runs(limit=limit, status=status)
+    runs = []
+    for row in rows:
+        # 优先从 run 自身冗余字段读取（job 可能已被自动删除）
+        name = row.get("job_name") or row.get("joined_job_name") or row["job_id"]
+        text = row.get("job_text") or ""
+        if not text and row.get("payload_json"):
+            try:
+                payload = json.loads(row["payload_json"])
+                text = payload.get("text", "")
+            except Exception:
+                pass
+        runs.append({
+            "id": row["id"],
+            "job_id": row["job_id"],
+            "job_name": name,
+            "text": text,
+            "started_at_ms": row["started_at_ms"],
+            "ended_at_ms": row.get("ended_at_ms"),
+            "status": row.get("status"),
+            "error": row.get("error"),
+            "duration_ms": row.get("duration_ms"),
+        })
+    return {"runs": runs}
 
 
 @router.get("/jobs")

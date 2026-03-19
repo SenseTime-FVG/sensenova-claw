@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plus, RefreshCw, ChevronRight, ChevronDown, Folder, File, FolderOpen,
-  MessageSquare, Bot, X, Clock, Loader2,
+  MessageSquare, Bot, X, Clock, Loader2, Trash2,
 } from 'lucide-react';
 import { useDrag } from 'react-dnd';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -172,13 +172,27 @@ function RecentChatItem({
   agentName,
   isActive,
   onClick,
+  onDelete,
 }: {
   session: SessionItem;
   agentName: string;
   isActive: boolean;
   onClick: () => void;
+  onDelete: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const title = getTitle(session.meta);
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirmDelete) {
+      onDelete();
+      setConfirmDelete(false);
+    } else {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+    }
+  };
 
   return (
     <div
@@ -203,18 +217,31 @@ function RecentChatItem({
           <span className="text-[10px] text-muted-foreground/60 shrink-0">{timeLabel(session.last_active)}</span>
         </div>
       </div>
+      <button
+        onClick={handleDelete}
+        className={cn(
+          'shrink-0 p-1 rounded transition-colors mt-0.5',
+          confirmDelete
+            ? 'opacity-100 text-destructive hover:bg-destructive/10'
+            : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10',
+        )}
+        title={confirmDelete ? '确认删除' : '删除会话'}
+      >
+        <Trash2 className="w-3 h-3" />
+      </button>
     </div>
   );
 }
 
 // ── 最近对话面板 ──
 
-function RecentChatsPanel() {
+function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
   const {
     sessions,
     currentSessionId,
     switchSession,
     createSession,
+    deleteSession,
     startNewChat,
     refreshTaskGroups,
     loadingSessions,
@@ -241,12 +268,14 @@ function RecentChatsPanel() {
 
   useEffect(() => { loadAgents(); }, [loadAgents]);
 
-  const recentSessions = [...sessions].sort((a, b) => b.last_active - a.last_active);
+  const recentSessions = [...sessions]
+    .filter(s => !agentFilter || getAgentId(s.meta) === agentFilter)
+    .sort((a, b) => b.last_active - a.last_active);
 
   const handleNewChat = () => {
-    const firstAgentId = Object.keys(agentMap)[0] || 'default';
+    const newAgentId = agentFilter || Object.keys(agentMap)[0] || 'default';
     startNewChat();
-    createSession(firstAgentId);
+    createSession(newAgentId);
   };
 
   const handleRefresh = () => {
@@ -299,6 +328,7 @@ function RecentChatsPanel() {
               agentName={agentMap[getAgentId(session.meta)] || getAgentId(session.meta)}
               isActive={currentSessionId === session.session_id}
               onClick={() => switchSession(session.session_id)}
+              onDelete={() => deleteSession(session.session_id)}
             />
           ))
         )}
@@ -309,7 +339,7 @@ function RecentChatsPanel() {
 
 // ── LeftNav ──
 
-export function LeftNav() {
+export function LeftNav({ agentFilter }: { agentFilter?: string }) {
   return (
     <nav className="h-full flex flex-col">
       <Tabs defaultValue="chats" className="flex-1 flex flex-col">
@@ -329,7 +359,7 @@ export function LeftNav() {
         </TabsList>
 
         <TabsContent value="chats" className="flex-1 mt-0 overflow-hidden flex flex-col">
-          <RecentChatsPanel />
+          <RecentChatsPanel agentFilter={agentFilter} />
         </TabsContent>
 
         <TabsContent value="files" className="flex-1 mt-0 overflow-hidden">

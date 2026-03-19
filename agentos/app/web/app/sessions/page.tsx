@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Filter, MessageSquare, Loader2, Plus, X, Bot } from 'lucide-react';
+import { Search, Filter, MessageSquare, Loader2, Plus, X, Bot, Trash2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -64,6 +64,21 @@ export default function SessionsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const handleDeleteSession = async (sid: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirmDeleteId !== sid) {
+      setConfirmDeleteId(sid);
+      setTimeout(() => setConfirmDeleteId(prev => prev === sid ? null : prev), 3000);
+      return;
+    }
+    try {
+      await authFetch(`${API_BASE}/api/sessions/${sid}`, { method: 'DELETE' });
+    } catch { /* ignore */ }
+    setSessions(prev => prev.filter(s => s.session_id !== sid));
+    setConfirmDeleteId(null);
+  };
 
   useEffect(() => {
     authFetch(`${API_BASE}/api/sessions`)
@@ -202,7 +217,8 @@ export default function SessionsPage() {
                           <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Session Title</TableHead>
                           <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Primary Actor</TableHead>
                           <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Timestamp</TableHead>
-                          <TableHead className="pr-10 py-5 text-xs font-black uppercase tracking-widest text-muted-foreground text-right">Liveness</TableHead>
+                          <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground text-right">Liveness</TableHead>
+                          <TableHead className="pr-10 py-5 text-xs font-black uppercase tracking-widest text-muted-foreground text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -232,7 +248,16 @@ export default function SessionsPage() {
                                 )}
                               </TableCell>
                               <TableCell className="text-sm text-muted-foreground font-medium">{formatTime(session.created_at)}</TableCell>
-                              <TableCell className="pr-10 py-6 text-sm text-muted-foreground font-black text-right group-hover:text-foreground transition-colors uppercase tracking-tighter">{timeAgo(session.last_active)}</TableCell>
+                              <TableCell className="py-6 text-sm text-muted-foreground font-black text-right group-hover:text-foreground transition-colors uppercase tracking-tighter">{timeAgo(session.last_active)}</TableCell>
+                              <TableCell className="pr-10 py-6 text-right">
+                                <button
+                                  onClick={(e) => handleDeleteSession(session.session_id, e)}
+                                  className={`p-1.5 rounded-lg transition-colors ${confirmDeleteId === session.session_id ? 'text-destructive bg-destructive/10' : 'text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100'}`}
+                                  title={confirmDeleteId === session.session_id ? '确认删除' : '删除会话'}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </TableCell>
                             </TableRow>
                           );
                         })}

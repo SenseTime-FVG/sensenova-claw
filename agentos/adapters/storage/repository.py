@@ -125,6 +125,8 @@ CREATE TABLE IF NOT EXISTS cron_runs (
     duration_ms INTEGER,
     session_id TEXT,
     delivery_status TEXT,
+    job_name TEXT,
+    job_text TEXT,
     created_at REAL NOT NULL,
     FOREIGN KEY (job_id) REFERENCES cron_jobs(id)
 );
@@ -153,6 +155,7 @@ class Repository:
         conn.commit()
         self._migrate_sessions_table(conn)
         self._migrate_agent_messages_table(conn)
+        self._migrate_cron_runs_table(conn)
         conn.close()
 
     async def create_session(self, session_id: str, meta: dict[str, Any] | None = None) -> None:
@@ -184,9 +187,14 @@ class Repository:
             conn.commit()
         conn.close()
 
-    async def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def list_sessions(self, limit: int = 50, include_hidden: bool = False) -> list[dict[str, Any]]:
         conn = self._conn()
-        rows = conn.execute("SELECT * FROM sessions ORDER BY last_active DESC LIMIT ?", (limit,)).fetchall()
+        if include_hidden:
+            rows = conn.execute("SELECT * FROM sessions ORDER BY last_active DESC LIMIT ?", (limit,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM sessions WHERE hidden = 0 ORDER BY last_active DESC LIMIT ?", (limit,),
+            ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
 
@@ -268,6 +276,7 @@ class Repository:
             ("model", "ALTER TABLE sessions ADD COLUMN model TEXT"),
             ("message_count", "ALTER TABLE sessions ADD COLUMN message_count INTEGER DEFAULT 0"),
             ("agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT DEFAULT 'default'"),
+            ("hidden", "ALTER TABLE sessions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0"),
         ]
         for col, sql in migrations:
             if col not in existing_cols:
@@ -310,6 +319,18 @@ class Repository:
             ("timeout_seconds", "ALTER TABLE agent_messages ADD COLUMN timeout_seconds REAL"),
         ]
         for col, sql in migrations:
+            if col not in existing_cols:
+                conn.execute(sql)
+        conn.commit()
+
+    def _migrate_cron_runs_table(self, conn: sqlite3.Connection) -> None:
+        """为 cron_runs 表补充 job_name / job_text 冗余列（兼容旧库）。"""
+        cursor = conn.execute("PRAGMA table_info(cron_runs)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        for col, sql in [
+            ("job_name", "ALTER TABLE cron_runs ADD COLUMN job_name TEXT"),
+            ("job_text", "ALTER TABLE cron_runs ADD COLUMN job_text TEXT"),
+        ]:
             if col not in existing_cols:
                 conn.execute(sql)
         conn.commit()
@@ -389,6 +410,20 @@ class Repository:
             "UPDATE sessions SET message_count = COALESCE(message_count, 0) + 1 WHERE session_id = ?",
             (session_id,),
         )
+        conn.commit()
+        conn.close()
+
+    async def hide_session(self, session_id: str) -> None:
+        """软删除：将会话标记为隐藏，前端不再展示"""
+        conn = self._conn()
+        conn.execute("UPDATE sessions SET hidden = 1 WHERE session_id = ?", (session_id,))
+        conn.commit()
+        conn.close()
+
+    async def unhide_session(self, session_id: str) -> None:
+        """恢复被隐藏的会话"""
+        conn = self._conn()
+        conn.execute("UPDATE sessions SET hidden = 0 WHERE session_id = ?", (session_id,))
         conn.commit()
         conn.close()
 
@@ -585,10 +620,11 @@ class Repository:
         conn.commit()
         conn.close()
 
-    async def delete_cron_job(self, job_id: str) -> None:
-        """删除 cron job 及其 runs 记录"""
+    async def delete_cron_job(self, job_id: str, *, keep_runs: bool = False) -> None:
+        """删除 cron job。keep_runs=True 时保留 runs 历史（用于自动删除场景）。"""
         conn = self._conn()
-        conn.execute("DELETE FROM cron_runs WHERE job_id = ?", (job_id,))
+        if not keep_runs:
+            conn.execute("DELETE FROM cron_runs WHERE job_id = ?", (job_id,))
         conn.execute("DELETE FROM cron_jobs WHERE id = ?", (job_id,))
         conn.commit()
         conn.close()
@@ -621,13 +657,14 @@ class Repository:
         conn = self._conn()
         cursor = conn.execute(
             """INSERT INTO cron_runs (job_id, started_at_ms, ended_at_ms, status, error,
-               duration_ms, session_id, delivery_status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               duration_ms, session_id, delivery_status, job_name, job_text, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run_data["job_id"], run_data["started_at_ms"],
                 run_data.get("ended_at_ms"), run_data.get("status"),
                 run_data.get("error"), run_data.get("duration_ms"),
                 run_data.get("session_id"), run_data.get("delivery_status"),
+                run_data.get("job_name"), run_data.get("job_text"),
                 run_data["created_at"],
             ),
         )
@@ -654,5 +691,23 @@ class Repository:
             "SELECT * FROM cron_runs WHERE job_id = ? ORDER BY started_at_ms DESC LIMIT ?",
             (job_id, limit),
         ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    async def list_all_cron_runs(self, limit: int = 50, status: str | None = None) -> list[dict[str, Any]]:
+        """跨所有 job 列出 cron_runs，并 JOIN cron_jobs 获取 job 名称和 payload。"""
+        conn = self._conn()
+        sql = """
+            SELECT r.*, j.name AS joined_job_name, j.payload_json
+            FROM cron_runs r
+            LEFT JOIN cron_jobs j ON r.job_id = j.id
+        """
+        params: list[Any] = []
+        if status:
+            sql += " WHERE r.status = ?"
+            params.append(status)
+        sql += " ORDER BY r.started_at_ms DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(sql, params).fetchall()
         conn.close()
         return [dict(row) for row in rows]

@@ -17,6 +17,7 @@ interface ChatInputProps {
   wsConnected: boolean;
   handleSkillInvoke: (skillName: string, args: string) => void;
   hideAgentSelector?: boolean;
+  lockAgent?: boolean;
 }
 
 export interface ChatInputHandle {
@@ -33,6 +34,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   wsConnected,
   handleSkillInvoke,
   hideAgentSelector,
+  lockAgent,
 }, ref) {
   const [inputValue, setInputValue] = useState('');
   const [showUploadMenu, setShowUploadMenu] = useState(false);
@@ -177,7 +179,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center gap-3 mb-3 pl-1">
           {!hideAgentSelector && (
-            <TargetSelector selectedAgent={selectedAgent} onSelectAgent={onSelectAgent} />
+            <TargetSelector selectedAgent={selectedAgent} onSelectAgent={onSelectAgent} locked={lockAgent} />
           )}
           <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground bg-muted/50 px-2 py-1 rounded-full border">
             <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
