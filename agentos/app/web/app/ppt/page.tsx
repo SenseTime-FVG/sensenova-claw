@@ -1,58 +1,195 @@
 'use client';
 
+import { useState, useCallback, useRef } from 'react';
+import { useDrop } from 'react-dnd';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { WorkbenchShell } from '@/components/workbench/WorkbenchShell';
 import { ChatPanel } from '@/components/chat/ChatPanel';
+import { SlideViewer, type SlideSet } from '@/components/ppt/PPTViewer';
+import { Button } from '@/components/ui/button';
+import { Presentation, Upload, FileDown } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 
-import { Presentation } from 'lucide-react';
-import { Card } from '@/components/ui/card';
+interface DroppedFile {
+  name: string;
+  path: string;
+}
 
-const pptTemplates = [
-  { title: '制作项目汇报PPT', desc: '根据项目进展，自动生成专业汇报演示文稿' },
-  { title: '制作培训课件', desc: '输入培训主题，自动设计课件内容与排版' },
-  { title: '制作数据分析报告', desc: '将数据转化为图表丰富的分析演示文稿' },
-  { title: '制作产品介绍PPT', desc: '根据产品信息，生成吸引力强的介绍文稿' },
-];
+// ── PPTX 文件预览（浏览器不能直接渲染 pptx，提供下载） ──
 
-function PPTTemplates({ onQuickTask }: { onQuickTask: (msg: string) => void }) {
+function PptxPreview({ file, onClose }: { file: DroppedFile; onClose: () => void }) {
+  const downloadUrl = `${API_BASE}/api/files/download?path=${encodeURIComponent(file.path)}`;
+
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6">
-      <div className="max-w-2xl mx-auto w-full">
-        <div className="text-center py-8">
-          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
-            <Presentation className="w-8 h-8 text-primary" />
-          </div>
-          <h2 className="text-xl font-semibold text-foreground mb-2">创建演示文稿</h2>
-          <p className="text-muted-foreground text-sm mb-8">
-            使用下方快捷动作快速开始，或在下方输入框描述你的 PPT 需求
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          {pptTemplates.map((tmpl, i) => (
-            <Card
-              key={i}
-              className="p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-primary/30"
-              onClick={() => onQuickTask(tmpl.title)}
-            >
-              <h3 className="font-semibold text-foreground mb-1 text-sm">{tmpl.title}</h3>
-              <p className="text-xs text-muted-foreground">{tmpl.desc}</p>
-            </Card>
-          ))}
-        </div>
+    <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8">
+      <div className="w-24 h-24 rounded-3xl bg-primary/10 flex items-center justify-center">
+        <Presentation className="w-12 h-12 text-primary/60" />
+      </div>
+      <div className="text-center">
+        <h3 className="text-lg font-semibold text-foreground mb-1">{file.name}</h3>
+        <p className="text-sm text-muted-foreground">PPTX 文件需要下载后用本地应用打开</p>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button asChild>
+          <a href={downloadUrl} target="_blank" rel="noopener noreferrer">
+            <FileDown className="w-4 h-4 mr-2" />
+            下载文件
+          </a>
+        </Button>
+        <Button variant="outline" onClick={onClose}>
+          关闭
+        </Button>
       </div>
     </div>
   );
 }
 
+// ── PPT 工作区（含拖拽接收） ──
+
+function PPTWorkspace() {
+  const [previewSlides, setPreviewSlides] = useState<SlideSet | null>(null);
+  const [previewPptx, setPreviewPptx] = useState<DroppedFile | null>(null);
+  const [loadingDrop, setLoadingDrop] = useState(false);
+  const dropContainerRef = useRef<HTMLDivElement>(null);
+
+  const closePreview = useCallback(() => {
+    setPreviewSlides(null);
+    setPreviewPptx(null);
+  }, []);
+
+  const handleDrop = useCallback(async (item: DroppedFile) => {
+    if (/\.pptx?$/i.test(item.name)) {
+      setPreviewPptx(item);
+      setPreviewSlides(null);
+      return;
+    }
+
+    // 假定是文件夹 → 获取 token 和幻灯片列表
+    setLoadingDrop(true);
+    try {
+      const res = await authFetch(
+        `${API_BASE}/api/files/dir-token?path=${encodeURIComponent(item.path)}`,
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.slides?.length > 0) {
+        setPreviewSlides({
+          dir: item.name,
+          slides: data.slides,
+          urlPrefix: `${API_BASE}/api/files/serve/${data.token}`,
+        });
+        setPreviewPptx(null);
+      }
+    } catch {
+      // 静默
+    } finally {
+      setLoadingDrop(false);
+    }
+  }, []);
+
+  const [{ isOver, canDrop }, dropRef] = useDrop(
+    () => ({
+      accept: 'FILE',
+      drop: (item: DroppedFile) => {
+        handleDrop(item);
+      },
+      collect: (monitor) => ({
+        isOver: monitor.isOver(),
+        canDrop: monitor.canDrop(),
+      }),
+    }),
+    [handleDrop],
+  );
+
+  // 合并 drop ref 到容器
+  const setRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      (dropRef as unknown as (el: HTMLDivElement | null) => void)(node);
+      (dropContainerRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+    },
+    [dropRef],
+  );
+
+  const hasPreview = !!previewSlides || !!previewPptx;
+
+  const emptyState = (
+    <div className="flex-1 flex flex-col items-center justify-center p-8">
+      <div
+        className={cn(
+          'w-24 h-24 rounded-3xl flex items-center justify-center mb-6 transition-colors',
+          isOver && canDrop
+            ? 'bg-primary/15 border-2 border-primary border-dashed'
+            : 'bg-primary/5 border-2 border-dashed border-primary/20',
+        )}
+      >
+        {isOver && canDrop ? (
+          <Upload className="w-12 h-12 text-primary/60" />
+        ) : (
+          <Presentation className="w-12 h-12 text-primary/30" />
+        )}
+      </div>
+      {loadingDrop ? (
+        <p className="text-sm text-muted-foreground">加载中…</p>
+      ) : isOver && canDrop ? (
+        <>
+          <h3 className="text-lg font-semibold text-primary/80 mb-2">释放以预览</h3>
+          <p className="text-sm text-muted-foreground text-center max-w-sm">
+            支持包含 HTML 幻灯片的文件夹或 PPTX 文件
+          </p>
+        </>
+      ) : (
+        <>
+          <h3 className="text-lg font-semibold text-foreground/70 mb-2">创建演示文稿</h3>
+          <p className="text-sm text-muted-foreground text-center max-w-sm">
+            在下方输入框描述你的 PPT 需求，或从左侧文件区拖入文件夹 / PPTX 文件预览
+          </p>
+        </>
+      )}
+    </div>
+  );
+
+  return (
+    <div ref={setRef} className="flex flex-col h-full relative">
+      {/* 拖拽经过整个区域时的全局高亮 */}
+      {isOver && canDrop && hasPreview && (
+        <div className="absolute inset-0 z-30 bg-primary/5 border-2 border-dashed border-primary rounded-xl flex items-center justify-center pointer-events-none">
+          <div className="text-center">
+            <Upload className="w-12 h-12 text-primary mx-auto mb-2" />
+            <p className="text-primary font-medium">释放以替换预览</p>
+          </div>
+        </div>
+      )}
+
+      {/* 预览覆盖层 */}
+      {hasPreview && (
+        <div className="absolute inset-0 z-20 bg-background flex flex-col">
+          {previewSlides && (
+            <SlideViewer slideSet={previewSlides} onClose={closePreview} />
+          )}
+          {previewPptx && (
+            <PptxPreview file={previewPptx} onClose={closePreview} />
+          )}
+        </div>
+      )}
+
+      <ChatPanel
+        defaultAgentId="ppt_generator"
+        lockAgent
+        hideAgentSelector
+        emptyState={emptyState}
+      />
+    </div>
+  );
+}
+
+// ── 页面入口 ──
+
 export default function PPTPage() {
   return (
     <DashboardLayout>
-      <WorkbenchShell>
-        <ChatPanel
-          defaultAgentId="ppt_generator"
-          emptyState={(fillInput) => <PPTTemplates onQuickTask={fillInput} />}
-        />
+      <WorkbenchShell agentFilter="ppt_generator">
+        <PPTWorkspace />
       </WorkbenchShell>
     </DashboardLayout>
   );

@@ -493,7 +493,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-19 Agents 删除入口补充
 
 成功经验：
-- `/agents` 这种“卡片主体可导航 + 局部危险操作”的列表页，删除按钮最好从外层 `Link` 里拆出来，并配独立确认弹窗；否则删除点击容易被页面跳转吞掉。
+- `/agents` 这种”卡片主体可导航 + 局部危险操作”的列表页，删除按钮最好从外层 `Link` 里拆出来，并配独立确认弹窗；否则删除点击容易被页面跳转吞掉。
 - 当前环境可以跑前端浏览器级 e2e，但需要同时满足两个条件：`localhost:3000` 上已有可复用前端服务，以及提前把 Playwright 浏览器安装到可写目录（如 `PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers`）。
 
 失败/风险经验：
@@ -503,7 +503,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 成功经验：
 - session 删除如果要同时清理数据库和 `~/.agentos/agents/{agent_id}/sessions/{session_id}.jsonl`，最简洁的落点是新增独立 `sessions` HTTP router：先通过 `repo.get_session_meta()` 解析 `agent_id`，再调用 `gateway.delete_session()` 删库解绑，最后删 JSONL 文件。
-- `/sessions` 这种“整行可点击跳详情”的表格，删除按钮必须放在独立操作列里，并在 `onClick` 里显式 `stopPropagation()`；否则按钮会和行级跳转冲突。
+- `/sessions` 这种”整行可点击跳详情”的表格，删除按钮必须放在独立操作列里，并在 `onClick` 里显式 `stopPropagation()`；否则按钮会和行级跳转冲突。
 
 失败/风险经验：
 - 当前环境下 `uv run python -m pytest` 仍可能因为 Rust `system-configuration` panic 直接失败；针对性后端单测优先改用 `python3 -m pytest` 更稳。
@@ -511,8 +511,19 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-19 Sessions 批量删除补充
 
 成功经验：
-- “全选当前页面”和“全选当前筛选的所有结果”必须拆成两套选择语义：前者由前端直接维护 `selectedSessionIds`，后者则进入独立 `filtered_all` 选择模式，真正删除时把当前 `search_term + status` 交给后端匹配，语义才不会混淆。
-- 对这类“平时不显示复选框”的列表页，单独加一个“选择”切换按钮最稳；进入选择模式后再展示复选框和批量操作条，退出时统一清空选择状态，可以显著减少误操作。
+- “全选当前页面”和”全选当前筛选的所有结果”必须拆成两套选择语义：前者由前端直接维护 `selectedSessionIds`，后者则进入独立 `filtered_all` 选择模式，真正删除时把当前 `search_term + status` 交给后端匹配，语义才不会混淆。
+- 对这类”平时不显示复选框”的列表页，单独加一个”选择”切换按钮最稳；进入选择模式后再展示复选框和批量操作条，退出时统一清空选择状态，可以显著减少误操作。
 
 失败/风险经验：
-- 如果“全选当前筛选的所有结果”只是把当前前端已加载列表全勾上，看起来像实现了需求，实际会漏删未加载命中的结果；这类需求必须由后端按筛选条件执行。
+- 如果”全选当前筛选的所有结果”只是把当前前端已加载列表全勾上，看起来像实现了需求，实际会漏删未加载命中的结果；这类需求必须由后端按筛选条件执行。
+
+### 2026-03-19 安装脚本与发布流补充
+
+成功经验：
+- `uv tool install --from .` 会把包复制进独立 tool 环境；当安装目录仓库更新或本地 hotfix 未重新注册命令时，`agentos` 可能继续跑旧版代码。改为 `uv tool install --editable --from . --force agentos` 后，CLI 会直接跟随安装目录源码。
+- 安装脚本支持 `AGENTOS_REPO_REF`（兼容旧 `AGENTOS_REPO_BRANCH`）后，发布验证、tag 回滚和灰度安装都更直接，不必修改脚本正文。
+- 给安装脚本补”文本契约测试”很划算：直接断言 shell / PowerShell 脚本里存在 `--editable` 与 `REPO_REF` 覆盖逻辑，能防止回归。
+
+失败/风险经验：
+- 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `agentos` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
+- 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `AGENTOS_REPO_REF`。

@@ -390,8 +390,8 @@ export default function SessionsPage() {
                           <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Session Title</TableHead>
                           <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Primary Actor</TableHead>
                           <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Timestamp</TableHead>
-                          <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground text-center">Actions</TableHead>
-                          <TableHead className="pr-10 py-5 text-xs font-black uppercase tracking-widest text-muted-foreground text-right">Liveness</TableHead>
+                          <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground text-right">Liveness</TableHead>
+                          <TableHead className="pr-10 py-5 text-xs font-black uppercase tracking-widest text-muted-foreground text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -433,20 +433,18 @@ export default function SessionsPage() {
                                 )}
                               </TableCell>
                               <TableCell className="text-sm text-muted-foreground font-medium">{formatTime(session.created_at)}</TableCell>
-                              <TableCell className="py-6 text-center">
-                                <Button
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  className="text-muted-foreground hover:text-destructive"
+                              <TableCell className="py-6 text-sm text-muted-foreground font-black text-right group-hover:text-foreground transition-colors uppercase tracking-tighter">{timeAgo(session.last_active)}</TableCell>
+                              <TableCell className="pr-10 py-6 text-right">
+                                <button
                                   data-testid={`session-delete-button-${session.session_id}`}
                                   aria-label={`删除会话 ${parseTitle(session.meta)}`}
                                   title={`删除会话 ${parseTitle(session.meta)}`}
                                   onClick={(event) => requestDeleteSession(event, session)}
+                                  className="p-1.5 rounded-lg transition-colors text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100"
                                 >
-                                  <Trash2 size={16} />
-                                </Button>
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
                               </TableCell>
-                              <TableCell className="pr-10 py-6 text-sm text-muted-foreground font-black text-right group-hover:text-foreground transition-colors uppercase tracking-tighter">{timeAgo(session.last_active)}</TableCell>
                             </TableRow>
                           );
                         })}

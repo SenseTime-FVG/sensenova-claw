@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Settings, ChevronDown, Zap } from 'lucide-react';
 import { useCustomPages } from '@/hooks/useCustomPages';
+import { useChatSession } from '@/contexts/ChatSessionContext';
 
 const mainNavItems = [
   { path: '/', label: '工作台', exact: true },
@@ -54,6 +55,7 @@ export function DashboardNav({
 }) {
   const pathname = usePathname();
   const featureNavItems = useFeatureNavItems();
+  const { startNewChat } = useChatSession();
   const isActive = (item: { path: string; exact?: boolean }) => {
     if (item.exact) return pathname === item.path;
     return pathname?.startsWith(item.path);
@@ -87,6 +89,7 @@ export function DashboardNav({
         <Link
           key={item.path}
           href={item.path}
+          onClick={() => { if (isActive(item)) startNewChat(); }}
           className={cn(
             'text-sm font-medium transition-colors hover:text-primary',
             isActive(item) ? 'text-primary' : 'text-muted-foreground'

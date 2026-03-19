@@ -8,9 +8,11 @@ import { authFetch, API_BASE } from '@/lib/authFetch';
 export function TargetSelector({
   selectedAgent,
   onSelectAgent,
+  locked,
 }: {
   selectedAgent: string;
   onSelectAgent: (id: string) => void;
+  locked?: boolean;
 }) {
   const [agents, setAgents] = useState<AgentOption[]>([]);
   const [open, setOpen] = useState(false);
@@ -29,6 +31,15 @@ export function TargetSelector({
   }, []);
 
   const currentLabel = agents.find(a => a.id === selectedAgent)?.name || selectedAgent || 'Default Agent';
+
+  if (locked) {
+    return (
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary/50 border text-xs font-medium text-secondary-foreground">
+        <Bot size={14} className="text-primary" />
+        <span className="max-w-[140px] truncate">{currentLabel}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="relative" ref={ref}>

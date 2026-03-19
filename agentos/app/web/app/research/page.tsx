@@ -48,9 +48,10 @@ function ResearchTemplates({ onQuickTask }: { onQuickTask: (msg: string) => void
 export default function ResearchPage() {
   return (
     <DashboardLayout>
-      <WorkbenchShell>
+      <WorkbenchShell agentFilter="deep_research">
         <ChatPanel
           defaultAgentId="deep_research"
+          lockAgent
           emptyState={(fillInput) => <ResearchTemplates onQuickTask={fillInput} />}
         />
       </WorkbenchShell>

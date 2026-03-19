@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Settings, Loader2, Save, Plus, FileText, Trash2, ChevronDown, ChevronRight, Wrench, Bot } from 'lucide-react';
+import { ArrowLeft, Loader2, Save, Plus, FileText, Trash2, ChevronDown, ChevronRight, Wrench, Bot, MessageSquare } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface ToolDetail { name: string; description: string; enabled: boolean; }
@@ -221,10 +222,10 @@ export default function AgentDetailPage() {
   };
 
   if (loading) {
-    return <DashboardLayout><div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground"><Loader2 className="animate-spin text-primary" size={40} /><p className="text-sm font-medium">Loading agent details...</p></div></DashboardLayout>;
+    return <DashboardLayout><div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground"><Loader2 className="animate-spin text-primary" size={48} /><p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Loading agent details...</p></div></DashboardLayout>;
   }
   if (!agent) {
-    return <DashboardLayout><div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground"><Trash2 size={40} className="opacity-20" /><p className="text-lg font-medium">Agent not found</p></div></DashboardLayout>;
+    return <DashboardLayout><div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground"><Trash2 size={48} className="opacity-20" /><p className="text-lg font-bold uppercase tracking-widest opacity-40">Agent not found</p></div></DashboardLayout>;
   }
 
   const enabledToolCount = Object.values(toolStates).filter(Boolean).length;
@@ -232,66 +233,77 @@ export default function AgentDetailPage() {
 
   return (
     <DashboardLayout>
-      <div className="h-full flex flex-col bg-background">
-        {/* Header */}
-        <div className="bg-card/50 backdrop-blur-sm border-b border-border p-6 sticky top-0 z-20 shadow-sm">
-          <div className="flex items-center gap-6 mb-6">
-            <Link href="/agents" className="p-2.5 hover:bg-muted rounded-full transition-all border border-transparent hover:border-border shadow-sm">
-              <ArrowLeft size={22} />
-            </Link>
-            <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-bold text-foreground tracking-tight">{agent.name}</h1>
-              <p className="text-base text-muted-foreground mt-1.5 line-clamp-1">{agent.description}</p>
-            </div>
-            <button className="p-2.5 hover:bg-muted rounded-full transition-all border border-transparent hover:border-border shadow-sm" title="Configure">
-              <Settings size={22} className="text-muted-foreground" />
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-x-8 gap-y-3 text-sm font-medium">
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Status:</span>
-              <span className="flex items-center gap-1.5 text-green-600 dark:text-green-400 capitalize bg-green-500/10 px-2.5 py-0.5 rounded-full border border-green-500/20 shadow-sm">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
-                {agent.status}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Provider:</span>
-              <span className="text-foreground bg-muted/60 px-2.5 py-0.5 rounded-full border border-border/50">{agent.provider}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Model:</span>
-              <span className="text-foreground bg-muted/60 px-2.5 py-0.5 rounded-full border border-border/50">{agent.model}</span>
-            </div>
-            <div className="flex items-center gap-2 lg:ml-auto">
-              <span className="text-muted-foreground">Sessions:</span>
-              <span className="text-foreground font-bold text-base">{agent.sessionCount}</span>
-            </div>
+      <div className="flex-1 space-y-8 p-10 lg:p-12">
+        <div className="flex items-center gap-6">
+          <Link href="/agents" className="p-2.5 hover:bg-muted rounded-xl transition-all border border-border/60 shadow-sm">
+            <ArrowLeft size={22} />
+          </Link>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-4xl font-extrabold tracking-tight text-foreground/90">{agent.name}</h2>
+            <p className="text-base text-muted-foreground mt-1.5 line-clamp-1">{agent.description}</p>
           </div>
         </div>
 
-        {/* Tabs Bar */}
-        <div className="bg-muted/30 border-b border-border px-8 overflow-x-auto no-scrollbar">
-          <div className="flex gap-2">
-            {(['config', 'files', 'tools', 'skills', 'sessions'] as const).map((tab) => (
-              <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`relative px-6 py-4 text-base font-semibold capitalize transition-all whitespace-nowrap ${
-                  activeTab === tab 
-                    ? 'text-primary' 
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}>
-                {tab === 'files' ? 'Workspace Files' : tab}
-                {activeTab === tab && (
-                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-primary rounded-t-full shadow-[0_-2px_8px_rgba(59,130,246,0.3)]" />
-                )}
-              </button>
-            ))}
-          </div>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <Card className="shadow-lg border-border/60">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Status</CardTitle>
+              <div className={`w-3 h-3 rounded-full ${agent.status === 'active' ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/40'}`} />
+            </CardHeader>
+            <CardContent>
+              <div className={`text-4xl font-black capitalize ${agent.status === 'active' ? 'text-green-600 dark:text-green-500' : ''}`}>{agent.status}</div>
+              <p className="text-sm font-medium text-muted-foreground mt-2">{agent.provider} / {agent.model}</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-lg border-border/60">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Sessions</CardTitle>
+              <MessageSquare className="h-5 w-5 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black">{agent.sessionCount}</div>
+              <p className="text-sm font-medium text-muted-foreground mt-2">Historical conversations</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-lg border-border/60">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Tools</CardTitle>
+              <Wrench className="h-5 w-5 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black">{enabledToolCount}<span className="text-lg font-bold text-muted-foreground">/{agent.toolCount}</span></div>
+              <p className="text-sm font-medium text-muted-foreground mt-2">Enabled tool bindings</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-lg border-border/60">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Skills</CardTitle>
+              <Bot className="h-5 w-5 text-primary" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black">{enabledSkillCount}<span className="text-lg font-bold text-muted-foreground">/{agent.skillCount}</span></div>
+              <p className="text-sm font-medium text-muted-foreground mt-2">Loaded procedural skills</p>
+            </CardContent>
+          </Card>
         </div>
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-auto p-8 lg:p-10">
-          <div className="max-w-6xl mx-auto">
+        <Card className="shadow-xl border-border/80 overflow-hidden">
+          <CardHeader className="bg-muted/30 border-b p-8">
+            <div className="flex flex-wrap gap-2">
+              {(['config', 'files', 'tools', 'skills', 'sessions'] as const).map((tab) => (
+                <button key={tab} onClick={() => setActiveTab(tab)}
+                  className={`px-6 py-3 text-base font-bold capitalize rounded-xl transition-all whitespace-nowrap ${
+                    activeTab === tab
+                      ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  }`}>
+                  {tab === 'files' ? 'Workspace Files' : tab}
+                </button>
+              ))}
+            </div>
+          </CardHeader>
+          <CardContent className="p-8">
+            <div className="max-w-6xl mx-auto">
             {/* Config Tab */}
             {activeTab === 'config' && (
               <div className="space-y-8">
@@ -619,7 +631,8 @@ export default function AgentDetailPage() {
               </div>
             )}
           </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
     </DashboardLayout>
   );

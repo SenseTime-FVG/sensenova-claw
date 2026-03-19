@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Plus, Search, Activity, MessageSquare, Loader2, Trash2, X, Bot, ChevronRight, Wrench } from 'lucide-react';
+import { Plus, Search, Activity, MessageSquare, Loader2, X, Bot, Wrench, Trash2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -88,143 +87,147 @@ export default function OrchestrationPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex-1 space-y-4 p-8 pt-6">
-        <div className="flex items-center justify-between space-y-2">
-          <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
-          <div className="flex items-center space-x-2">
-            <Button onClick={() => setShowCreateAgent(true)} className="gap-2">
-              <Plus size={16} /> New Agent
-            </Button>
-          </div>
+      <div className="flex-1 space-y-8 p-10 lg:p-12">
+        <div className="flex items-center justify-between">
+          <h2 className="text-4xl font-extrabold tracking-tight text-foreground/90">Dashboard</h2>
+          <Button onClick={() => setShowCreateAgent(true)} size="lg" className="gap-2 rounded-xl px-8 font-bold shadow-lg shadow-primary/20">
+            <Plus size={18} /> New Agent
+          </Button>
         </div>
 
-        <div className="flex flex-col md:flex-row gap-6 mt-6">
+        <div className="flex flex-col md:flex-row gap-8 mt-10">
           {/* Nested Sidebar */}
-          <aside className="w-full md:w-48 lg:w-56 shrink-0">
-            <nav className="flex space-x-2 md:flex-col md:space-x-0 md:space-y-1">
-              <span className="bg-muted hover:bg-muted text-primary font-medium justify-start w-full text-sm px-4 py-2 rounded-md transition-colors cursor-default">
-                Overview
-              </span>
-              <span className="hover:bg-muted text-muted-foreground hover:text-foreground justify-start w-full text-sm px-4 py-2 rounded-md transition-colors cursor-not-allowed opacity-50">
-                Analytics
-              </span>
+          <aside className="w-full md:w-64 lg:w-72 shrink-0">
+            <nav className="flex space-x-2 md:flex-col md:space-x-0 md:space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70 mb-2 px-4">Overview</p>
+              <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+                <Bot className="h-5 w-5" /> Agents
+              </button>
+              <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground opacity-60">
+                <Activity className="h-5 w-5" /> Analytics
+              </button>
             </nav>
           </aside>
 
           {/* Main Content Area */}
-          <div className="flex-1 space-y-6">
+          <div className="flex-1 space-y-8">
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Agents</CardTitle>
-                  <Bot className="h-5 w-5 text-muted-foreground" />
+              <Card className="shadow-lg border-border/60">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Total Agents</CardTitle>
+                  <Bot className="h-5 w-5 text-primary" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-3xl font-bold">{agents.length}</div>
+                  <div className="text-4xl font-black">{agents.length}</div>
+                  <p className="text-sm font-medium text-muted-foreground mt-2">Registered agent instances</p>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Sessions</CardTitle>
-                  <MessageSquare className="h-5 w-5 text-muted-foreground" />
+              <Card className="shadow-lg border-border/60">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Total Sessions</CardTitle>
+                  <MessageSquare className="h-5 w-5 text-primary" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-3xl font-bold">{agents.reduce((acc, a) => acc + (a.sessionCount || 0), 0)}</div>
+                  <div className="text-4xl font-black">{agents.reduce((acc, a) => acc + (a.sessionCount || 0), 0)}</div>
+                  <p className="text-sm font-medium text-muted-foreground mt-2">Cumulative conversations</p>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Active Tools</CardTitle>
-                  <Wrench className="h-5 w-5 text-muted-foreground" />
+              <Card className="shadow-lg border-border/60">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Active Tools</CardTitle>
+                  <Wrench className="h-5 w-5 text-primary" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-3xl font-bold">{agents.reduce((acc, a) => acc + (a.toolCount || 0), 0)}</div>
+                  <div className="text-4xl font-black">{agents.reduce((acc, a) => acc + (a.toolCount || 0), 0)}</div>
+                  <p className="text-sm font-medium text-muted-foreground mt-2">Enabled tool bindings</p>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">System Status</CardTitle>
-                  <Activity className="h-5 w-5 text-muted-foreground" />
+              <Card className="shadow-lg border-border/60">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">System Status</CardTitle>
+                  <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-3xl font-bold text-green-500">Healthy</div>
+                  <div className="text-4xl font-black text-green-600 dark:text-green-500">Healthy</div>
+                  <p className="text-sm font-medium text-muted-foreground mt-2">All services operational</p>
                 </CardContent>
               </Card>
             </div>
 
-            <div className="flex items-center justify-between mt-6 mb-4">
-              <div className="relative w-80">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="text"
-                  placeholder="Search Agents..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 bg-background h-10 text-sm"
-                />
-              </div>
-            </div>
-
-            {agentsLoading ? (
-            <div className="flex items-center justify-center h-64 border rounded-xl bg-card">
-              <Loader2 className="animate-spin text-muted-foreground" size={32} />
-            </div>
-            ) : filteredAgents.length === 0 ? (
-              <div className="flex flex-col items-center justify-center p-12 text-muted-foreground border border-dashed border-border rounded-xl bg-card">
-                <Bot size={48} className="mb-4 opacity-20" />
-                <p className="text-base">{searchTerm ? 'No agents match your search.' : 'No agents found. Click "New Agent" to get started.'}</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredAgents.map((agent) => (
-                    <Card key={agent.id} className="hover:border-primary/50 transition-colors h-full flex flex-col group shadow-sm">
-                      <CardHeader className="p-6 pb-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <CardTitle className="text-xl flex items-center gap-2 truncate">
-                              {agent.name}
-                            </CardTitle>
-                            <Badge variant={getStatusColor(agent.status) as any} className="text-xs px-2.5 py-0.5 shrink-0">
+            <Card className="shadow-xl border-border/80 overflow-hidden">
+              <CardHeader className="bg-muted/30 border-b p-8">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div>
+                    <CardTitle className="text-2xl font-bold">Agent Registry</CardTitle>
+                    <CardDescription className="text-base mt-2">
+                      Manage and inspect all registered agent configurations.
+                    </CardDescription>
+                  </div>
+                  <div className="relative w-full md:w-96">
+                    <Search className="absolute left-4 top-4 h-5 w-5 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Search agents..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-12 py-7 text-base bg-background rounded-2xl shadow-inner border-border/60"
+                    />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-8">
+                {agentsLoading ? (
+                  <div className="flex flex-col items-center justify-center py-24 gap-4">
+                    <Loader2 className="animate-spin text-primary" size={48} />
+                    <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Hydrating agent registry...</p>
+                  </div>
+                ) : filteredAgents.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-24 border border-dashed rounded-2xl text-center text-muted-foreground bg-muted/5">
+                    <Bot size={64} className="mb-4 opacity-20" />
+                    <p className="text-lg font-bold uppercase tracking-widest opacity-40">{searchTerm ? 'No agents match your search' : 'No agents registered'}</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredAgents.map((agent) => (
+                      <div key={agent.id} className="flex flex-col p-8 border border-border/60 rounded-2xl bg-card hover:bg-muted/30 transition-all shadow-sm group relative overflow-hidden h-full">
+                        <div className={`absolute top-0 right-0 w-2 h-full ${agent.status === 'active' ? 'bg-green-500/40' : 'bg-muted-foreground/20'}`} />
+                        <div className="flex items-center justify-between mb-3">
+                          <Link href={`/agents/${agent.id}`} className="flex items-center gap-2 min-w-0">
+                            <h3 className="text-xl font-bold text-foreground group-hover:text-primary transition-colors">{agent.name}</h3>
+                            <Badge variant={getStatusColor(agent.status) as any} className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 ${agent.status === 'active' ? 'bg-green-500 text-white shadow-sm' : ''}`}>
                               {agent.status}
                             </Badge>
-                          </div>
+                          </Link>
                           {agent.id !== 'default' && (
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="shrink-0 text-muted-foreground hover:text-destructive"
+                            <button
+                              className="shrink-0 p-1.5 rounded-lg text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-all"
                               data-testid={`agent-delete-button-${agent.id}`}
                               aria-label={`删除 ${agent.name}`}
                               title={`删除 ${agent.name}`}
                               onClick={(e) => requestDeleteAgent(e, agent)}
                             >
                               <Trash2 size={16} />
-                            </Button>
+                            </button>
                           )}
                         </div>
                         <Link href={`/agents/${agent.id}`} className="block">
-                          <CardDescription className="line-clamp-2 min-h-[44px] pt-1.5 text-sm leading-relaxed cursor-pointer">
+                          <p className="text-base leading-relaxed text-muted-foreground line-clamp-2 min-h-[48px] mb-4">
                             {agent.description || "No description provided."}
-                          </CardDescription>
+                          </p>
+                          <div className="mt-auto flex items-center justify-between pt-4 border-t border-border/40">
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                              <span className="flex items-center gap-1.5" title="Sessions"><MessageSquare size={16}/> {agent.sessionCount || 0}</span>
+                              <span className="flex items-center gap-1.5" title="Tools"><Wrench size={16}/> {agent.toolCount || 0}</span>
+                            </div>
+                            <span className="text-xs font-mono font-black uppercase bg-muted text-muted-foreground/60 px-2.5 py-1 rounded-lg tracking-wider">{agent.model}</span>
+                          </div>
                         </Link>
-                      </CardHeader>
-                      <CardContent className="mt-auto p-6 pt-0">
-                        <Link href={`/agents/${agent.id}`} className="block">
-                        <div className="flex items-center justify-between text-sm text-muted-foreground border-t border-border pt-4 cursor-pointer">
-                           <div className="flex items-center gap-4">
-                             <span className="flex items-center gap-1.5" title="Sessions"><MessageSquare size={16}/> {agent.sessionCount || 0}</span>
-                             <span className="flex items-center gap-1.5" title="Tools"><Wrench size={16}/> {agent.toolCount || 0}</span>
-                           </div>
-                           <div className="flex items-center gap-2">
-                             <span className="text-xs font-mono uppercase bg-muted text-muted-foreground px-2.5 py-1 rounded-md tracking-wider">{agent.model}</span>
-                           </div>
-                        </div>
-                        </Link>
-                      </CardContent>
-                    </Card>
-                ))}
-              </div>
-            )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </div>
       </div>

@@ -8,14 +8,15 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/componen
 
 interface WorkbenchShellProps {
   children: React.ReactNode;
+  agentFilter?: string;
 }
 
-export function WorkbenchShell({ children }: WorkbenchShellProps) {
+export function WorkbenchShell({ children, agentFilter }: WorkbenchShellProps) {
   return (
     <DndProvider backend={HTML5Backend}>
       <ResizablePanelGroup orientation="horizontal" className="h-[calc(100vh-4rem)]">
         <ResizablePanel id="workbench-left" defaultSize="16%" minSize="10%" maxSize="30%" className="bg-muted/20">
-          <LeftNav />
+          <LeftNav agentFilter={agentFilter} />
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel id="workbench-main" defaultSize="62%" minSize="30%">
