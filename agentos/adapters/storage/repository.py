@@ -187,14 +187,9 @@ class Repository:
             conn.commit()
         conn.close()
 
-    async def list_sessions(self, limit: int = 50, include_hidden: bool = False) -> list[dict[str, Any]]:
+    async def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
         conn = self._conn()
-        if include_hidden:
-            rows = conn.execute("SELECT * FROM sessions ORDER BY last_active DESC LIMIT ?", (limit,)).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM sessions WHERE hidden = 0 ORDER BY last_active DESC LIMIT ?", (limit,),
-            ).fetchall()
+        rows = conn.execute("SELECT * FROM sessions ORDER BY last_active DESC LIMIT ?", (limit,)).fetchall()
         conn.close()
         return [dict(row) for row in rows]
 
@@ -276,7 +271,6 @@ class Repository:
             ("model", "ALTER TABLE sessions ADD COLUMN model TEXT"),
             ("message_count", "ALTER TABLE sessions ADD COLUMN message_count INTEGER DEFAULT 0"),
             ("agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT DEFAULT 'default'"),
-            ("hidden", "ALTER TABLE sessions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0"),
         ]
         for col, sql in migrations:
             if col not in existing_cols:
@@ -410,20 +404,6 @@ class Repository:
             "UPDATE sessions SET message_count = COALESCE(message_count, 0) + 1 WHERE session_id = ?",
             (session_id,),
         )
-        conn.commit()
-        conn.close()
-
-    async def hide_session(self, session_id: str) -> None:
-        """软删除：将会话标记为隐藏，前端不再展示"""
-        conn = self._conn()
-        conn.execute("UPDATE sessions SET hidden = 1 WHERE session_id = ?", (session_id,))
-        conn.commit()
-        conn.close()
-
-    async def unhide_session(self, session_id: str) -> None:
-        """恢复被隐藏的会话"""
-        conn = self._conn()
-        conn.execute("UPDATE sessions SET hidden = 0 WHERE session_id = ?", (session_id,))
         conn.commit()
         conn.close()
 

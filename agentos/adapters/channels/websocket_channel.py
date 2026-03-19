@@ -187,14 +187,14 @@ class WebSocketChannel(Channel):
             sid = payload.get("session_id")
             if sid:
                 try:
-                    await gw.hide_session(sid)
+                    await gw.delete_session(sid)
                     self._session_bindings.pop(sid, None)
                     await self.send_json(websocket, {
                         "type": "session_deleted", "payload": {"session_id": sid}, "timestamp": time.time(),
                     })
                 except Exception as e:
                     await self.send_json(websocket, {
-                        "type": "error", "payload": {"message": f"隐藏会话失败: {e}"}, "timestamp": time.time(),
+                        "type": "error", "payload": {"message": f"删除会话失败: {e}"}, "timestamp": time.time(),
                     })
             return
 

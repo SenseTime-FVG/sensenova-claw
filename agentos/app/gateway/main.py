@@ -391,10 +391,10 @@ async def list_sessions():
 
 
 @app.delete("/api/sessions/{session_id}")
-async def hide_session(session_id: str):
-    """软删除会话：标记为隐藏，前端不再展示，数据保留"""
+async def delete_session(session_id: str):
+    """删除会话及关联数据"""
     try:
-        await app.state.services.gateway.hide_session(session_id)
+        await app.state.services.gateway.delete_session(session_id)
         return JSONResponse(content={"ok": True, "session_id": session_id})
     except Exception as e:
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
