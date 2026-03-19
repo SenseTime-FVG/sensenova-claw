@@ -11,7 +11,6 @@ from agentos.kernel.events.types import USER_QUESTION_ANSWERED
 def mock_runtime():
     runtime = MagicMock()
     runtime.registry = MagicMock()
-    runtime.path_policy = None
     runtime.agent_registry = None
     return runtime
 

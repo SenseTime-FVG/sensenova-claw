@@ -296,8 +296,6 @@ class ToolSessionWorker(SessionWorker):
         result = None
         # 构建执行参数：注入内部上下文对象（不可 JSON 序列化，仅供工具内部使用）
         exec_kwargs = dict(arguments)
-        if self.rt.path_policy:
-            exec_kwargs["_path_policy"] = self.rt.path_policy
         if self.rt.agent_registry:
             exec_kwargs["_agent_registry"] = self.rt.agent_registry
         agent_workdir = event.payload.get("_agent_workdir")

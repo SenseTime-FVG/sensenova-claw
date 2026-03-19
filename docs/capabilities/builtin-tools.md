@@ -14,7 +14,6 @@ AgentOS 内置多种工具，覆盖命令执行、信息检索、文件操作、
 | `fetch_url` | HTTP 获取网页内容 | LOW | builtin.py |
 | `read_file` | 读取文本文件 | LOW | builtin.py |
 | `write_file` | 写入文本文件 | MEDIUM | builtin.py |
-| `grant_path` | 授权目录访问权限（已定义但未默认注册） | HIGH | builtin.py |
 | `create_agent` | 创建新 Agent 配置 | MEDIUM | orchestration.py |
 | `send_message` | 向其他 Agent 发送消息或任务 | MEDIUM | send_message_tool.py |
 
@@ -41,9 +40,8 @@ AgentOS 内置多种工具，覆盖命令执行、信息检索、文件操作、
 }
 ```
 
-**安全机制**：
-- `working_dir` 受 PathPolicy 管控：DENY 的系统目录无法作为工作目录
-- 未指定 `working_dir` 时默认在 `workspace` 目录执行
+**工作目录**：
+- 未指定 `working_dir` 时默认使用 Agent 工作目录
 - 执行超时：300 秒（硬编码），可通过 `tools.bash_command.timeout` 配置 Worker 层超时
 - 通过 `subprocess.run` 在线程池中执行，不阻塞事件循环
 
@@ -237,10 +235,9 @@ AgentOS 内置多种工具，覆盖命令执行、信息检索、文件操作、
 }
 ```
 
-**安全机制**：
-- 路径通过 PathPolicy 检查读取权限
-- DENY 的系统目录（如 `/etc`、`/sys`）无法读取
-- NEED_GRANT 的目录需要用户先授权
+**路径解析**：
+- 相对路径基于 Agent 工作目录解析
+- 绝对路径直接使用
 
 ## write_file
 
@@ -278,35 +275,9 @@ AgentOS 内置多种工具，覆盖命令执行、信息检索、文件操作、
 }
 ```
 
-**安全机制**：
-- 路径通过 PathPolicy 检查写入权限
+**路径解析**：
+- 相对路径基于 Agent 工作目录解析
 - 自动创建父目录（`mkdir -p` 语义）
-- 优先写入 workspace 目录
-
-## grant_path
-
-> **注意**：`GrantPathTool` 已在 `builtin.py` 中定义，但未在 `ToolRegistry._register_builtin()` 中注册。如需使用，需手动调用 `registry.register(GrantPathTool())` 注册。
-
-授权 Agent 访问指定目录。因为风险等级为 HIGH，执行前自动触发用户确认流程。
-
-**风险等级**：HIGH
-
-**参数**：
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `path` | string | 是 | 要授权的目录路径 |
-
-**返回值**：
-
-```json
-{
-  "success": true,
-  "granted": "/resolved/absolute/path"
-}
-```
-
-**使用场景**：当 `read_file` 或 `write_file` 返回 `NEED_GRANT` 错误时，Agent 可调用此工具请求用户授权，授权后重试文件操作。
 
 ## create_agent
 

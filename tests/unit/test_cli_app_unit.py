@@ -36,7 +36,6 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
     from agentos.capabilities.tools.registry import ToolRegistry
     from agentos.capabilities.skills.registry import SkillRegistry
     from agentos.capabilities.skills.market_service import SkillMarketService
-    from agentos.platform.security.path_policy import PathPolicy
     from agentos.adapters.storage.repository import Repository
     from agentos.kernel.events.bus import PublicEventBus
     from agentos.kernel.events.persister import EventPersister
@@ -105,8 +104,6 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
     )
     skill_registry.load_skills(cfg.data)
 
-    path_policy = PathPolicy(workspace=workspace_dir)
-
     market_service = SkillMarketService(
         skills_dir=skills_dir,
         skill_registry=skill_registry,
@@ -138,7 +135,7 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
     llm_runtime = LLMRuntime(bus_router=bus_router, factory=LLMFactory())
     tool_runtime = ToolRuntime(
         bus_router=bus_router, registry=tool_registry,
-        path_policy=path_policy, agent_registry=agent_registry,
+        agent_registry=agent_registry,
     )
     title_runtime = TitleRuntime(bus=bus, repo=repo)
 
@@ -195,7 +192,6 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
     app.state.agent_registry = agent_registry
     app.state.config = cfg
     app.state.market_service = market_service
-    app.state.path_policy = path_policy
 
     # 使用 uvicorn 在后台任务中运行
     port = _find_free_port()
@@ -249,7 +245,7 @@ async def _teardown_ws_server(ctx: dict):
 
     app = ctx["app"]
     for attr in ("services", "agent_registry", "tool_registry", "skill_registry",
-                 "config", "market_service", "path_policy"):
+                 "config", "market_service"):
         if hasattr(app.state, attr):
             delattr(app.state, attr)
 
