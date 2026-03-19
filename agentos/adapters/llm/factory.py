@@ -10,7 +10,7 @@ from agentos.adapters.llm.providers.mock_provider import MockProvider
 def _has_api_key(provider_key: str) -> bool:
     """检查 provider 是否配置了有效的 api_key"""
     cfg = config.get(f"llm.providers.{provider_key}", {})
-    key = cfg.get("api_key", "")
+    key = str(cfg.get("api_key", ""))
     return bool(key) and not key.startswith("${")
 
 
