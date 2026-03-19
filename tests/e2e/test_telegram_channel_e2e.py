@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from agentos.adapters.channels.telegram.channel import TelegramChannel
-from agentos.adapters.channels.telegram.config import TelegramConfig
-from agentos.adapters.channels.telegram.models import TelegramInboundMessage
+from agentos.adapters.plugins.telegram.channel import TelegramChannel
+from agentos.adapters.plugins.telegram.config import TelegramConfig
+from agentos.adapters.plugins.telegram.models import TelegramInboundMessage
 from agentos.adapters.llm.factory import LLMFactory
 from agentos.adapters.storage.repository import Repository
 from agentos.capabilities.tools.registry import ToolRegistry

@@ -210,7 +210,8 @@ plugins:
 plugins:
   whatsapp:
     enabled: true
-    auth_dir: ".agentos/data/channels/whatsapp/auth"
+    auth_dir: "~/.agentos/data/plugins/whatsapp/auth"
+    typing_indicator: "none"   # composing / none
     dm_policy: "open"          # 私聊策略: open / allowlist / disabled
     group_policy: "open"       # 群聊策略: open / allowlist / disabled
     allowlist: []              # 私聊允许名单，支持 +15550000001 或 JID
@@ -218,7 +219,7 @@ plugins:
     show_tool_progress: false
     bridge:
       command: "node"
-      entry: "agentos/adapters/channels/whatsapp/bridge/src/index.mjs"
+      entry: "agentos/adapters/plugins/whatsapp/bridge/src/index.mjs"
       startup_timeout_seconds: 30
       send_timeout_seconds: 15
 ```
@@ -226,7 +227,7 @@ plugins:
 安装 sidecar 依赖：
 
 ```bash
-npm install --prefix agentos/adapters/channels/whatsapp/bridge
+npm install --prefix agentos/adapters/plugins/whatsapp/bridge
 ```
 
 当前仓库的 WhatsApp runtime 通过 Node sidecar + Baileys 提供；若未安装 sidecar 依赖，Python channel 只能完成协议层启动，无法真正连接 WhatsApp Web。
