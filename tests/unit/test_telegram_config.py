@@ -7,7 +7,7 @@ telegram = pytest.importorskip("telegram", reason="python-telegram-bot not insta
 
 from unittest.mock import MagicMock
 
-from agentos.adapters.channels.telegram.config import TelegramConfig
+from agentos.adapters.plugins.telegram.config import TelegramConfig
 
 
 class TestTelegramConfigDefaults:

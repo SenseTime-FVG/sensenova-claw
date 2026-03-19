@@ -12,9 +12,9 @@ import pytest
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.runtime.publisher import EventPublisher
 from agentos.interfaces.ws.gateway import Gateway
-from agentos.adapters.plugins import PluginRegistry
+from agentos.adapters.plugins import PluginRegistry, _iter_builtin_plugin_modules
 from agentos.adapters.plugins.base import PluginApi
-from agentos.adapters.channels.feishu.plugin import definition, register
+from agentos.adapters.plugins.feishu.plugin import definition, register
 
 
 # ---- 辅助：构造真实 PluginApi ----
@@ -135,3 +135,8 @@ class TestRegister:
         assert channel._config.app_id == "my_app"
         assert channel._config.app_secret == "my_secret"
         assert channel._config.render_mode == "text"
+
+
+def test_builtin_plugin_module_points_to_plugins_package():
+    modules = dict(_iter_builtin_plugin_modules())
+    assert modules["feishu"] == "agentos.adapters.plugins.feishu.plugin"

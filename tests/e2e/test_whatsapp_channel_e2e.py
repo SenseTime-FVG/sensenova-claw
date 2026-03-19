@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from agentos.adapters.channels.whatsapp.channel import WhatsAppChannel
-from agentos.adapters.channels.whatsapp.config import WhatsAppConfig
-from agentos.adapters.channels.whatsapp.models import WhatsAppInboundMessage
+from agentos.adapters.plugins.whatsapp.channel import WhatsAppChannel
+from agentos.adapters.plugins.whatsapp.config import WhatsAppConfig
+from agentos.adapters.plugins.whatsapp.models import WhatsAppInboundMessage
 from agentos.adapters.llm.factory import LLMFactory
 from agentos.adapters.storage.repository import Repository
 from agentos.capabilities.tools.registry import ToolRegistry

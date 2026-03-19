@@ -79,7 +79,7 @@ WebSocketChannel 是 Web 前端的主要接入方式：
 
 ## FeishuChannel
 
-> 路径：`agentos/adapters/channels/feishu/`
+> 路径：`agentos/adapters/plugins/feishu/`
 
 FeishuChannel 支持飞书/钉钉机器人集成：
 

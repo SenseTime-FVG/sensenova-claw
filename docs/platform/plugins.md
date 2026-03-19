@@ -112,6 +112,15 @@ plugins:
     enabled: true
     app_id: cli_xxx
     app_secret: xxx
+  telegram:
+    enabled: true
+    bot_token: "123:abc"
+    mode: polling
+    dm_policy: open
+    group_policy: allowlist
+    group_chat_allowlist: ["-1001234567890"]
+    group_allowlist: ["123456789"]
+    require_mention: true
   my_plugin:
     enabled: true
     # 插件自定义配置...

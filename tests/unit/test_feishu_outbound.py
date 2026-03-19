@@ -20,8 +20,8 @@ from agentos.kernel.events.types import (
 )
 from agentos.adapters.channels.base import Channel, OutboundCapable
 from agentos.interfaces.ws.gateway import Gateway
-from agentos.adapters.channels.feishu.card import build_markdown_card
-from agentos.adapters.channels.feishu.text import chunk_text
+from agentos.adapters.plugins.feishu.card import build_markdown_card
+from agentos.adapters.plugins.feishu.text import chunk_text
 from agentos.kernel.runtime.publisher import EventPublisher
 from agentos.capabilities.tools.message_tool import MessageTool
 

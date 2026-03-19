@@ -6,10 +6,10 @@ import asyncio
 
 import pytest
 
-from agentos.adapters.channels.whatsapp.bridge_client import SidecarBridgeClient
-from agentos.adapters.channels.whatsapp.channel import WhatsAppChannel
-from agentos.adapters.channels.whatsapp.config import WhatsAppConfig
-from agentos.adapters.channels.whatsapp.models import WhatsAppInboundMessage
+from agentos.adapters.plugins.whatsapp.bridge_client import SidecarBridgeClient
+from agentos.adapters.plugins.whatsapp.channel import WhatsAppChannel
+from agentos.adapters.plugins.whatsapp.config import WhatsAppConfig
+from agentos.adapters.plugins.whatsapp.models import WhatsAppInboundMessage
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope

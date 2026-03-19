@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from agentos.adapters.channels.wecom.channel import WecomChannel
-from agentos.adapters.channels.wecom.config import WecomConfig
+from agentos.adapters.plugins.wecom.channel import WecomChannel
+from agentos.adapters.plugins.wecom.config import WecomConfig
 from agentos.adapters.llm.factory import LLMFactory
 from agentos.adapters.storage.repository import Repository
 from agentos.capabilities.tools.registry import ToolRegistry
@@ -52,7 +52,10 @@ class _FakeWecomClient:
 
 
 @pytest.mark.asyncio
-async def test_wecom_channel_end_to_end_flow(tmp_path: Path) -> None:
+async def test_wecom_channel_end_to_end_flow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """覆盖企微文本入站到 Agent 回复出站的完整链路。"""
     original_config = copy.deepcopy(config.data)
 
@@ -65,6 +68,9 @@ async def test_wecom_channel_end_to_end_flow(tmp_path: Path) -> None:
     config.data["system"]["log_level"] = "DEBUG"
     config.data["agent"]["provider"] = "mock"
     config.data["agent"]["default_model"] = "mock-agent-v1"
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
 
     setup_logging()
 
