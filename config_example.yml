@@ -178,8 +178,8 @@ plugins:
     log_level: "INFO"
   wecom:
     enabled: false
-    bot_id: ""
-    secret: ""
+    bot_id: "${WECOM_BOT_ID}"
+    secret: "${WECOM_SECRET}"
     websocket_url: "wss://openws.work.weixin.qq.com"
     dm_policy: "open"
     group_policy: "open"
@@ -188,7 +188,7 @@ plugins:
     show_tool_progress: false
   telegram:
     enabled: false
-    bot_token: ""
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
     mode: "polling"  # polling | webhook
     dm_policy: "open"  # open | allowlist | disabled
     group_policy: "allowlist"  # open | allowlist | disabled
