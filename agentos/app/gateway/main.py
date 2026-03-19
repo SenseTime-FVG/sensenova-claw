@@ -35,8 +35,6 @@ from agentos.kernel.runtime.tool_runtime import ToolRuntime
 from agentos.capabilities.skills.registry import SkillRegistry
 from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.adapters.plugins import PluginRegistry
-from agentos.kernel.notification.service import NotificationService
-from agentos.platform.security.path_policy import PathPolicy
 from agentos.platform.config.workspace import (
     ensure_agentos_home,
     ensure_agent_workspace,
@@ -91,11 +89,6 @@ async def lifespan(app: FastAPI):
 
     repo = Repository(db_path=db_path)
     await repo.init()
-
-    # 路径安全策略：AGENTOS_HOME 为 GREEN zone
-    granted_paths = config.get("system.granted_paths", [])
-    path_policy = PathPolicy(workspace=agentos_home, granted_paths=granted_paths)
-    app.state.path_policy = path_policy
 
     # 会话维护：清理过期会话
     maintenance = SessionMaintenance(repo=repo)
@@ -184,6 +177,10 @@ async def lifespan(app: FastAPI):
 
         logger.info("Memory system enabled (home=%s)", agentos_home_str)
 
+    # Session JSONL 写入器：按 agent 分目录存储会话到 {agentos_home}/agents/{agent_id}/sessions/
+    from agentos.adapters.storage.session_jsonl import SessionJsonlWriter
+    jsonl_writer = SessionJsonlWriter(base_dir=agentos_home / "agents")
+
     # Runtime 使用 BusRouter（管理者模式）
     agent_runtime = AgentRuntime(
         bus_router=bus_router,
@@ -193,10 +190,10 @@ async def lifespan(app: FastAPI):
         state_store=state_store,
         agent_registry=agent_registry,
         memory_manager=memory_manager,
+        jsonl_writer=jsonl_writer,
     )
     llm_runtime = LLMRuntime(bus_router=bus_router, factory=llm_factory)
     tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry,
-                               path_policy=path_policy,
                                agent_registry=agent_registry)
     agent_message_coordinator = AgentMessageCoordinator(
         bus=bus,

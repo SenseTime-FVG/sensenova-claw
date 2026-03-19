@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, ChevronDown, Check } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { WorkbenchShell } from '@/components/workbench/WorkbenchShell';
 import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
 import { useNotification } from '@/hooks/useNotification';
 import { InteractionDialog, type PendingInteraction } from '@/components/chat/QuestionDialog';
@@ -351,6 +352,11 @@ function ChatPageInner() {
 
   const [selectedAgent, setSelectedAgent] = useState(initialAgent);
 
+  // 右侧面板状态（RightContext）
+  const [rightSteps, setRightSteps] = useState<{ label: string; status: 'done' | 'running' | 'pending' }[]>([]);
+  const [rightTaskProgress, setRightTaskProgress] = useState<{ task: string; step: number; total: number; status: 'running' | 'completed' }[]>([]);
+  const toolStepMapRef = useRef<Map<string, number>>(new Map());
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -417,7 +423,9 @@ function ChatPageInner() {
     setMessages([]);
     setIsTyping(false);
     toolCallMapRef.current.clear();
-    clearInteractions();
+    setRightSteps([]);
+    setRightTaskProgress([]);
+    toolStepMapRef.current.clear();
 
     if (shouldBind) {
       bindSessionToCurrentSocket(sid);
@@ -535,6 +543,13 @@ function ChatPageInner() {
         const msg: ChatMessage = { id: makeId(), role: 'tool', content: `Executing tool: ${toolName}`, timestamp: Date.now(), toolInfo: ti };
         setMessages(prev => [...prev, msg]);
         toolCallMapRef.current.set(toolCallId, msg.id);
+        // 更新右侧面板步骤
+        setRightSteps(prev => {
+          const idx = prev.length;
+          toolStepMapRef.current.set(toolCallId, idx);
+          return [...prev, { label: `执行 ${toolName}`, status: 'running' as const }];
+        });
+        setRightTaskProgress(prev => [...prev, { task: toolName, step: 0, total: 1, status: 'running' as const }]);
         break;
       }
       case 'tool_result': {
@@ -547,6 +562,17 @@ function ChatPageInner() {
         if (mid) {
           setMessages(prev => prev.map(m => m.id === mid ? { ...m, content: `Tool Finished: ${toolName}`, toolInfo: { name: toolName, arguments: m.toolInfo?.arguments || {}, result, success, error, status: 'completed' } } : m));
         }
+        // 更新右侧面板步骤完成
+        const stepIdx = toolStepMapRef.current.get(toolCallId);
+        if (stepIdx !== undefined) {
+          setRightSteps(prev => prev.map((s, i) => i === stepIdx ? { ...s, status: 'done' as const } : s));
+        }
+        setRightTaskProgress(prev => {
+          const tName = String(payload.tool_name || '');
+          const idx = prev.findIndex(t => t.task === tName && t.status === 'running');
+          if (idx === -1) return prev;
+          return prev.map((t, i) => i === idx ? { ...t, step: 1, status: 'completed' as const } : t);
+        });
         break;
       }
       case 'turn_completed': {
@@ -800,7 +826,9 @@ function ChatPageInner() {
     setIsTyping(false);
     toolCallMapRef.current.clear();
     pendingInputRef.current = null;
-    clearInteractions();
+    setRightSteps([]);
+    setRightTaskProgress([]);
+    toolStepMapRef.current.clear();
   };
 
   // ── Send ──
@@ -855,135 +883,133 @@ function ChatPageInner() {
     ? `Agent: ${selectedAgent}`
     : null;
 
-  return (
-    <DashboardLayout>
-      <div className="h-[calc(100vh-4rem)] flex overflow-hidden">
-        {/* Sidebar - Session list */}
-        <div className="w-72 bg-muted/20 border-r flex flex-col shrink-0 h-full">
-          <div className="p-6 border-b bg-card flex items-center justify-between">
-            <span className="text-base font-black uppercase tracking-widest text-foreground/80">History</span>
-            <div className="flex gap-2">
-              <button onClick={startNewChat} className="p-2 rounded-xl hover:bg-primary/10 text-primary transition-all active:scale-90" title="New Chat">
-                <Plus size={20} />
-              </button>
-              <button onClick={loadSessionList} disabled={loadingSessions} className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-all disabled:opacity-50" title="Refresh">
-                <RefreshCw size={20} className={loadingSessions ? 'animate-spin' : ''} />
-              </button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-2 no-scrollbar">
-            {sessions.length === 0 && !loadingSessions && (
-              <div className="text-center text-muted-foreground text-sm py-20 flex flex-col items-center gap-4 opacity-30">
-                <Bot size={48} />
-                <p className="font-bold uppercase tracking-widest">No active logs</p>
-              </div>
-            )}
-            {sessions.map(s => (
-              <div
-                key={s.session_id}
-                onClick={() => switchSession(s.session_id)}
-                className={`px-4 py-4 rounded-2xl cursor-pointer transition-all border text-sm shadow-sm group ${
-                  s.session_id === sessionId
-                    ? 'bg-primary border-primary text-primary-foreground shadow-lg shadow-primary/20'
-                    : 'bg-card border-border/60 text-foreground hover:border-primary/40 hover:bg-muted/30'
-                }`}
-              >
-                <div className="font-bold truncate text-base">{getTitle(s.meta)}</div>
-                <div className={`text-xs mt-2 uppercase font-black tracking-tighter opacity-60 ${s.session_id === sessionId ? 'text-primary-foreground' : 'text-muted-foreground'}`}>{timeLabel(s.last_active)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Chat area */}
-        <div className="flex-1 flex flex-col min-w-0 bg-background h-full">
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-8">
-            {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-5 text-muted-foreground max-w-md mx-auto text-center">
-                <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2 shadow-sm">
-                  <Bot size={32} />
-                </div>
-                <h3 className="text-xl font-semibold text-foreground">How can I help you today?</h3>
-                {targetLabel && (
-                  <span className="text-xs px-3 py-1.5 rounded-full border border-primary/20 text-primary bg-primary/10 font-medium">
-                    {targetLabel}
-                  </span>
-                )}
-                <p className="text-sm">Type a message below to start a new conversation with AgentOS.</p>
-              </div>
-            ) : (
-              <>
-                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
-                {isTyping && <TypingDots />}
-                <div ref={chatEndRef} />
-              </>
-            )}
-          </div>
-
-          {/* Input area */}
-          <div className="border-t bg-card/50 backdrop-blur-sm p-4 shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
-            <div className="max-w-4xl mx-auto">
-              <div className="flex items-center gap-3 mb-3 pl-1">
-                <TargetSelector
-                  selectedAgent={selectedAgent}
-                  onSelectAgent={handleSelectAgent}
-                />
-                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground bg-muted/50 px-2 py-1 rounded-full border">
-                  <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
-                  {wsConnected ? 'Connected' : 'Offline'}
-                </span>
-                {sessionId && <span className="font-mono text-xs text-muted-foreground px-2">ID: {sessionId.slice(0, 8)}...</span>}
-              </div>
-              
-              <div className="flex items-end gap-3 bg-background border border-border/80 rounded-[2rem] shadow-xl focus-within:ring-4 focus-within:ring-primary/10 focus-within:border-primary transition-all p-3 relative">
-                <div className="flex-1">
-                  <SlashCommandMenu
-                    inputValue={inputValue}
-                    onSelect={handleSlashSelect}
-                    visible={showMenu}
-                  />
-                  <textarea
-                    ref={textareaRef}
-                    value={inputValue}
-                    onChange={handleInput}
-                    onKeyDown={handleKeyDown}
-                    placeholder={
-                      wsConnected
-                        ? 'Message AgentOS... (Enter to send, Shift+Enter for new line)'
-                        : 'Waiting for connection...'
-                    }
-                    disabled={!wsConnected || isTyping || !!activeInteraction || interactionSubmitting}
-                    rows={1}
-                    className="w-full bg-transparent border-none px-5 py-4 text-lg text-foreground placeholder-muted-foreground/50 focus:outline-none focus:ring-0 resize-none disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
-                    style={{ minHeight: '56px', maxHeight: '300px' }}
-                  />
-                </div>
-                <button
-                  onClick={sendMessage}
-                  disabled={!inputValue.trim() || !wsConnected || isTyping || !!activeInteraction || interactionSubmitting}
-                  className="w-14 h-14 mb-1 mr-1 rounded-2xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
-                >
-                  <Send size={24} className="ml-1" />
-                </button>
-              </div>
-              <div className="text-center mt-3 text-[10px] text-muted-foreground/70">
-                 AgentOS can make mistakes. Consider verifying important information.
-              </div>
-            </div>
-          </div>
+  // ── 左侧会话栏（作为 WorkbenchShell leftNav 插槽）──
+  const chatLeftNav = (
+    <div className="w-72 bg-muted/20 border-r flex flex-col shrink-0 h-full">
+      <div className="p-6 border-b bg-card flex items-center justify-between">
+        <span className="text-base font-black uppercase tracking-widest text-foreground/80">History</span>
+        <div className="flex gap-2">
+          <button onClick={startNewChat} className="p-2 rounded-xl hover:bg-primary/10 text-primary transition-all active:scale-90" title="New Chat">
+            <Plus size={20} />
+          </button>
+          <button onClick={loadSessionList} disabled={loadingSessions} className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-all disabled:opacity-50" title="Refresh">
+            <RefreshCw size={20} className={loadingSessions ? 'animate-spin' : ''} />
+          </button>
         </div>
       </div>
-      <InteractionDialog
-        open={!!activeInteraction}
-        interaction={activeInteraction}
-        submitting={interactionSubmitting}
+      <div className="flex-1 overflow-y-auto p-4 space-y-2 no-scrollbar">
+        {sessions.length === 0 && !loadingSessions && (
+          <div className="text-center text-muted-foreground text-sm py-20 flex flex-col items-center gap-4 opacity-30">
+            <Bot size={48} />
+            <p className="font-bold uppercase tracking-widest">No active logs</p>
+          </div>
+        )}
+        {sessions.map(s => (
+          <div
+            key={s.session_id}
+            onClick={() => switchSession(s.session_id)}
+            className={`px-4 py-4 rounded-2xl cursor-pointer transition-all border text-sm shadow-sm group ${
+              s.session_id === sessionId
+                ? 'bg-primary border-primary text-primary-foreground shadow-lg shadow-primary/20'
+                : 'bg-card border-border/60 text-foreground hover:border-primary/40 hover:bg-muted/30'
+            }`}
+          >
+            <div className="font-bold truncate text-base">{getTitle(s.meta)}</div>
+            <div className={`text-xs mt-2 uppercase font-black tracking-tighter opacity-60 ${s.session_id === sessionId ? 'text-primary-foreground' : 'text-muted-foreground'}`}>{timeLabel(s.last_active)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ── 底部输入区（作为 WorkbenchShell bottomInput 插槽）──
+  const chatBottomInput = (
+    <div className="border-t bg-card/50 backdrop-blur-sm p-4 shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex items-center gap-3 mb-3 pl-1">
+          <TargetSelector
+            selectedAgent={selectedAgent}
+            onSelectAgent={handleSelectAgent}
+          />
+          <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground bg-muted/50 px-2 py-1 rounded-full border">
+            <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
+            {wsConnected ? 'Connected' : 'Offline'}
+          </span>
+          {sessionId && <span className="font-mono text-xs text-muted-foreground px-2">ID: {sessionId.slice(0, 8)}...</span>}
+        </div>
+
+        <div className="flex items-end gap-3 bg-background border border-border/80 rounded-[2rem] shadow-xl focus-within:ring-4 focus-within:ring-primary/10 focus-within:border-primary transition-all p-3 relative">
+          <div className="flex-1">
+            <SlashCommandMenu
+              inputValue={inputValue}
+              onSelect={handleSlashSelect}
+              visible={showMenu}
+            />
+            <textarea
+              ref={textareaRef}
+              value={inputValue}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                wsConnected
+                  ? 'Message AgentOS... (Enter to send, Shift+Enter for new line)'
+                  : 'Waiting for connection...'
+              }
+              disabled={!wsConnected || isTyping}
+              rows={1}
+              className="w-full bg-transparent border-none px-5 py-4 text-lg text-foreground placeholder-muted-foreground/50 focus:outline-none focus:ring-0 resize-none disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
+              style={{ minHeight: '56px', maxHeight: '300px' }}
+            />
+          </div>
+          <button
+            onClick={sendMessage}
+            disabled={!inputValue.trim() || !wsConnected || isTyping}
+            className="w-14 h-14 mb-1 mr-1 rounded-2xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
+          >
+            <Send size={24} className="ml-1" />
+          </button>
+        </div>
+        <div className="text-center mt-3 text-[10px] text-muted-foreground/70">
+           AgentOS can make mistakes. Consider verifying important information.
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <DashboardLayout>
+      <WorkbenchShell
+        steps={rightSteps}
+        taskProgress={rightTaskProgress}
+        isRightCollapsed={rightSteps.length === 0 && rightTaskProgress.length === 0}
         wsConnected={wsConnected}
-        onQuestionSubmit={(answer) => sendQuestionAnswer(answer, false)}
-        onQuestionCancel={() => sendQuestionAnswer(null, true)}
-        onConfirmationSubmit={sendConfirmationResponse}
-        onTimeout={handleInteractionTimeout}
-      />
+        leftNav={chatLeftNav}
+        bottomInput={chatBottomInput}
+      >
+        {/* 消息区域 */}
+        <div className="p-4 md:p-8 h-full">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-5 text-muted-foreground max-w-md mx-auto text-center">
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2 shadow-sm">
+                <Bot size={32} />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground">How can I help you today?</h3>
+              {targetLabel && (
+                <span className="text-xs px-3 py-1.5 rounded-full border border-primary/20 text-primary bg-primary/10 font-medium">
+                  {targetLabel}
+                </span>
+              )}
+              <p className="text-sm">Type a message below to start a new conversation with AgentOS.</p>
+            </div>
+          ) : (
+            <>
+              {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+              {isTyping && <TypingDots />}
+              <div ref={chatEndRef} />
+            </>
+          )}
+        </div>
+      </WorkbenchShell>
     </DashboardLayout>
   );
 }

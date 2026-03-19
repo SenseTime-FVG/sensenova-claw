@@ -19,6 +19,10 @@ interface WorkbenchShellProps {
   onSubmit?: (message: string) => void;
   inputDisabled?: boolean;
   wsConnected?: boolean;
+  // 可选插槽：自定义左侧导航，不传则使用默认 LeftNav
+  leftNav?: React.ReactNode;
+  // 可选插槽：自定义底部输入区，不传则使用默认 BottomInput，传 null 可隐藏
+  bottomInput?: React.ReactNode | null;
 }
 
 export function WorkbenchShell({
@@ -31,10 +35,17 @@ export function WorkbenchShell({
   onSubmit,
   inputDisabled,
   wsConnected = true,
+  leftNav,
+  bottomInput,
 }: WorkbenchShellProps) {
+  const leftNavContent = leftNav !== undefined ? leftNav : <LeftNav />;
+  const bottomInputContent = bottomInput !== undefined
+    ? bottomInput
+    : <BottomInput onSubmit={onSubmit} disabled={inputDisabled} connected={wsConnected} />;
+
   return (
     <div className="h-[calc(100vh-4rem)] flex overflow-hidden">
-      <LeftNav />
+      {leftNavContent}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="flex-1 flex overflow-hidden">
           <div className="flex-1 overflow-y-auto">
@@ -48,11 +59,7 @@ export function WorkbenchShell({
             isCollapsed={isRightCollapsed}
           />
         </div>
-        <BottomInput
-          onSubmit={onSubmit}
-          disabled={inputDisabled}
-          connected={wsConnected}
-        />
+        {bottomInputContent}
       </div>
     </div>
   );
