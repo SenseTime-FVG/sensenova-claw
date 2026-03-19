@@ -120,6 +120,39 @@ EOF
   export NVM_NODEJS_ORG_MIRROR="$CN_NVM_MIRROR"
 }
 
+# ── 步骤 1b: 安装 git ──
+
+install_git() {
+  if command_exists git; then
+    log "git 已安装: $(git --version)"
+    return
+  fi
+
+  info "安装 git..."
+
+  if command_exists apt-get; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq git
+  elif command_exists yum; then
+    sudo yum install -y -q git
+  elif command_exists dnf; then
+    sudo dnf install -y -q git
+  elif command_exists pacman; then
+    sudo pacman -S --noconfirm git
+  elif command_exists brew; then
+    brew install git
+  elif command_exists apk; then
+    sudo apk add --quiet git
+  else
+    fail "无法自动安装 git，请手动安装后重试: https://git-scm.com/downloads"
+  fi
+
+  if command_exists git; then
+    log "git 安装成功: $(git --version)"
+  else
+    fail "git 安装失败，请手动安装: https://git-scm.com/downloads"
+  fi
+}
+
 # ── 步骤 2: 安装 uv + Python ──
 
 install_uv() {
@@ -265,8 +298,22 @@ install_deps() {
   # 设置 uv 缓存目录（避免权限问题）
   export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv_cache}"
 
+  # 1) Python 依赖
+  info "安装 Python 依赖..."
+  uv sync 2>&1 | tail -5
+  log "Python 依赖安装完成"
+
+  # 2) 根目录 npm 依赖（跳过 postinstall，避免重复）
+  info "安装根目录 npm 依赖..."
+  npm install --ignore-scripts 2>&1 | tail -5
+  log "根目录 npm 依赖安装完成"
+
+  # 3) 前端依赖
+  info "安装前端依赖..."
+  cd "$APP_DIR/agentos/app/web"
   npm install 2>&1 | tail -5
-  log "项目依赖安装完成"
+  cd "$APP_DIR"
+  log "前端依赖安装完成"
 }
 
 # ── 步骤 5b: 构建 AGENTOS_HOME 目录结构 ──
@@ -412,6 +459,7 @@ main() {
 
   detect_region
   configure_cn_mirrors
+  install_git
   install_uv
   install_python
   install_nvm
