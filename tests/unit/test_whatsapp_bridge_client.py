@@ -186,3 +186,35 @@ async def test_bridge_client_passes_typing_indicator_to_start_payload(tmp_path: 
         event["type"] == "debug" and event["payload"]["message"] == "typing_indicator=none"
         for event in events
     )
+
+
+@pytest.mark.asyncio
+async def test_bridge_client_continues_after_event_handler_error(tmp_path: Path) -> None:
+    messages: list[WhatsAppInboundMessage] = []
+
+    async def on_event(event: dict) -> None:
+        if event.get("type") == "debug":
+            raise RuntimeError("boom")
+
+    async def on_message(message: WhatsAppInboundMessage) -> None:
+        messages.append(message)
+
+    sidecar = tmp_path / "fake_sidecar.py"
+    _write_fake_sidecar(sidecar)
+
+    client = SidecarBridgeClient(
+        command="python3",
+        entry=str(sidecar),
+        auth_dir=str(tmp_path / "auth"),
+        startup_timeout_seconds=2,
+        send_timeout_seconds=2,
+    )
+    client.set_event_handler(on_event)
+    client.set_message_handler(on_message)
+
+    await client.start()
+    await asyncio.sleep(0.2)
+    await client.stop()
+
+    assert messages
+    assert messages[0].text == "hello from sidecar"

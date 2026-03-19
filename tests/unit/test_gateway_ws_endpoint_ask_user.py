@@ -106,6 +106,12 @@ class _FakeWebSocket:
         _ = (code, reason)
 
 
+class _FakeClosingErrorWebSocket(_FakeWebSocket):
+    async def close(self, code: int = 1000, reason: str | None = None) -> None:
+        _ = (code, reason)
+        raise RuntimeError("Cannot call write() after write_eof()")
+
+
 @pytest.fixture
 def ws_env():
     old_services = getattr(gateway_main.app.state, "services", None)
@@ -154,6 +160,23 @@ async def test_user_input_with_existing_session_auto_binds_websocket(ws_env):
     assert ("sess_old", "websocket") in ws_env.gateway.bind_calls
     assert "sess_old" in ws_env.ws_channel._session_bindings
     assert any(e.type == USER_INPUT and e.session_id == "sess_old" for e in ws_env.gateway.published)
+
+
+@pytest.mark.asyncio
+async def test_invalid_websocket_token_close_runtime_error_is_swallowed(ws_env, monkeypatch):
+    from agentos.platform.config.config import config
+    from agentos.platform.security import middleware
+
+    ws_env.ws_channel._auth_service = object()
+    ws = _FakeClosingErrorWebSocket(messages=[])
+
+    monkeypatch.setattr(config, "get", lambda key, default=None: True if key == "security.auth_enabled" else default)
+    monkeypatch.setattr(middleware, "verify_websocket", lambda websocket, auth_service: False)
+
+    await ws_env.ws_channel.handle_connection(ws)
+
+    assert ws.accepted is True
+    assert ws not in ws_env.ws_channel._connections
 
 
 @pytest.mark.asyncio

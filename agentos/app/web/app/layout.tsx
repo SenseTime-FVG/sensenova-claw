@@ -27,11 +27,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           >
           <NotificationProvider>
             <AuthProvider>
-              <ChatSessionProvider>
-                <ProtectedRoute>
+              <ProtectedRoute>
+                <ChatSessionProvider>
                   {children}
-                </ProtectedRoute>
-              </ChatSessionProvider>
+                </ChatSessionProvider>
+              </ProtectedRoute>
             </AuthProvider>
           </NotificationProvider>
         </ThemeProvider>

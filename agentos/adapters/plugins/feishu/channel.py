@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import threading
@@ -183,16 +184,31 @@ class FeishuChannel(Channel):
                 text[:100],
             )
 
-            if self._loop:
-                future = asyncio.run_coroutine_threadsafe(
-                    self._on_message_async(
-                        text, chat_id, chat_type, message_id, sender_id
-                    ),
-                    self._loop,
-                )
-                future.result(timeout=15)
+            if not self._loop or self._loop.is_closed():
+                logger.warning("Feishu event loop unavailable, drop inbound message: chat=%s", chat_id)
+                return
+
+            future = asyncio.run_coroutine_threadsafe(
+                self._on_message_async(
+                    text, chat_id, chat_type, message_id, sender_id
+                ),
+                self._loop,
+            )
+            future.add_done_callback(self._log_inbound_dispatch_result)
         except Exception:
             logger.exception("Failed to handle Feishu message event")
+
+    @staticmethod
+    def _log_inbound_dispatch_result(
+        future: concurrent.futures.Future[None],
+    ) -> None:
+        """记录跨线程投递后的异步异常，避免静默吞掉入站消息处理失败。"""
+        try:
+            future.result()
+        except concurrent.futures.CancelledError:
+            logger.warning("Feishu inbound dispatch cancelled")
+        except Exception:
+            logger.exception("Feishu inbound dispatch failed")
 
     async def _on_message_async(
         self, text: str, chat_id: str, chat_type: str, message_id: str, sender_id: str

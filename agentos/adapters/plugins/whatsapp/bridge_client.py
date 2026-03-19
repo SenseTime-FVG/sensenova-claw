@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -204,11 +205,16 @@ class SidecarBridgeClient:
             return
 
         if self._event_handler:
-            await self._event_handler(event)
+            self._dispatch_handler(
+                self._event_handler(event),
+                handler_name="event_handler",
+                event_type=event_type,
+            )
 
         if event_type == "message" and self._message_handler:
             payload = event.get("payload", {})
-            await self._message_handler(
+            self._dispatch_handler(
+                self._message_handler(
                 WhatsAppInboundMessage(
                     text=payload.get("text", ""),
                     chat_jid=payload.get("chat_jid", ""),
@@ -217,6 +223,47 @@ class SidecarBridgeClient:
                     message_id=payload.get("message_id", ""),
                     push_name=payload.get("push_name"),
                 )
+                ),
+                handler_name="message_handler",
+                event_type=event_type,
+            )
+
+    def _dispatch_handler(
+        self,
+        coro: Awaitable[None],
+        *,
+        handler_name: str,
+        event_type: str,
+    ) -> None:
+        task = asyncio.create_task(coro)
+        task.add_done_callback(
+            lambda finished: self._log_handler_result(
+                finished,
+                handler_name=handler_name,
+                event_type=event_type,
+            )
+        )
+
+    @staticmethod
+    def _log_handler_result(
+        task: asyncio.Task[None],
+        *,
+        handler_name: str,
+        event_type: str,
+    ) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            logger.warning(
+                "WhatsApp bridge %s cancelled: event_type=%s",
+                handler_name,
+                event_type,
+            )
+        except Exception:
+            logger.exception(
+                "WhatsApp bridge %s failed: event_type=%s",
+                handler_name,
+                event_type,
             )
 
 
@@ -255,6 +302,3 @@ class LocalBridgeStub:
             "error": "WhatsApp bridge runtime is not configured",
             "target": target,
         }
-
-
-import contextlib

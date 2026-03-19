@@ -36,6 +36,7 @@ agentos/app/web/dist/
 agentos/app/web/test-results/
 agentos/app/web/playwright-report/
 *.tsbuildinfo
+test-results/
 
 # ========== 运行时目录 ==========
 .SenseAssistant/

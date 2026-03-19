@@ -61,3 +61,11 @@ class SessionJsonlWriter:
         line = json.dumps(record, ensure_ascii=False)
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
+
+    def delete_session_file(self, agent_id: str, session_id: str) -> bool:
+        """删除指定会话的 JSONL 文件。"""
+        path = self._session_path(agent_id, session_id)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True

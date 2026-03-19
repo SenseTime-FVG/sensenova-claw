@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Plus, Search, Activity, MessageSquare, Loader2, X, Bot, Wrench } from 'lucide-react';
+import { Plus, Search, Activity, MessageSquare, Loader2, X, Bot, Wrench, Trash2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface Agent {
@@ -28,6 +29,9 @@ export default function OrchestrationPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
 
   const loadAgents = () => {
     setAgentsLoading(true);
@@ -45,14 +49,31 @@ export default function OrchestrationPage() {
     a.id.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const deleteAgent = async (e: React.MouseEvent, agentId: string) => {
+  const requestDeleteAgent = (e: React.MouseEvent, agent: Agent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm(`确定要删除 Agent "${agentId}" 吗？`)) return;
+    setDeleteError('');
+    setAgentToDelete(agent);
+  };
+
+  const deleteAgent = async () => {
+    if (!agentToDelete) return;
+    setDeletingAgentId(agentToDelete.id);
+    setDeleteError('');
     try {
-      const res = await authFetch(`${API_BASE}/api/agents/${agentId}`, { method: 'DELETE' });
-      if (res.ok) loadAgents();
-    } catch { /* ignore */ }
+      const res = await authFetch(`${API_BASE}/api/agents/${agentToDelete.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setDeleteError(data.detail || '删除失败');
+        return;
+      }
+      setAgentToDelete(null);
+      loadAgents();
+    } catch {
+      setDeleteError('删除失败');
+    } finally {
+      setDeletingAgentId(null);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -168,15 +189,28 @@ export default function OrchestrationPage() {
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredAgents.map((agent) => (
-                      <Link href={`/agents/${agent.id}`} key={agent.id}>
-                        <div className="flex flex-col p-8 border border-border/60 rounded-2xl bg-card hover:bg-muted/30 transition-all shadow-sm group relative overflow-hidden h-full">
-                          <div className={`absolute top-0 right-0 w-2 h-full ${agent.status === 'active' ? 'bg-green-500/40' : 'bg-muted-foreground/20'}`} />
-                          <div className="flex items-center justify-between mb-3">
+                      <div key={agent.id} className="flex flex-col p-8 border border-border/60 rounded-2xl bg-card hover:bg-muted/30 transition-all shadow-sm group relative overflow-hidden h-full">
+                        <div className={`absolute top-0 right-0 w-2 h-full ${agent.status === 'active' ? 'bg-green-500/40' : 'bg-muted-foreground/20'}`} />
+                        <div className="flex items-center justify-between mb-3">
+                          <Link href={`/agents/${agent.id}`} className="flex items-center gap-2 min-w-0">
                             <h3 className="text-xl font-bold text-foreground group-hover:text-primary transition-colors">{agent.name}</h3>
                             <Badge variant={getStatusColor(agent.status) as any} className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 ${agent.status === 'active' ? 'bg-green-500 text-white shadow-sm' : ''}`}>
                               {agent.status}
                             </Badge>
-                          </div>
+                          </Link>
+                          {agent.id !== 'default' && (
+                            <button
+                              className="shrink-0 p-1.5 rounded-lg text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-all"
+                              data-testid={`agent-delete-button-${agent.id}`}
+                              aria-label={`删除 ${agent.name}`}
+                              title={`删除 ${agent.name}`}
+                              onClick={(e) => requestDeleteAgent(e, agent)}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                        <Link href={`/agents/${agent.id}`} className="block">
                           <p className="text-base leading-relaxed text-muted-foreground line-clamp-2 min-h-[48px] mb-4">
                             {agent.description || "No description provided."}
                           </p>
@@ -187,8 +221,8 @@ export default function OrchestrationPage() {
                             </div>
                             <span className="text-xs font-mono font-black uppercase bg-muted text-muted-foreground/60 px-2.5 py-1 rounded-lg tracking-wider">{agent.model}</span>
                           </div>
-                        </div>
-                      </Link>
+                        </Link>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -202,6 +236,47 @@ export default function OrchestrationPage() {
       {showCreateAgent && (
         <CreateAgentModal onClose={() => setShowCreateAgent(false)} onCreated={loadAgents} />
       )}
+
+      <Dialog open={!!agentToDelete} onOpenChange={(open) => {
+        if (!open) {
+          setAgentToDelete(null);
+          setDeleteError('');
+        }
+      }}>
+        <DialogContent data-testid="agent-delete-dialog">
+          <DialogHeader>
+            <DialogTitle>确认删除 Agent</DialogTitle>
+            <DialogDescription>
+              {agentToDelete
+                ? `确定要删除 Agent "${agentToDelete.name}" 吗？该操作会移除它的注册配置。`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAgentToDelete(null);
+                setDeleteError('');
+              }}
+              disabled={!!deletingAgentId}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="agent-delete-confirm"
+              onClick={deleteAgent}
+              disabled={!agentToDelete || !!deletingAgentId}
+              className="gap-2"
+            >
+              {deletingAgentId && <Loader2 size={16} className="animate-spin" />}
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
