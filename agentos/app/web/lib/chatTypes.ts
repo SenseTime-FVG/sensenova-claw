@@ -191,6 +191,44 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
   return rebuilt;
 }
 
+/** 从 session 事件中重建右侧面板的步骤和任务进度 */
+export function rebuildStepsFromEvents(events: Record<string, unknown>[]): {
+  steps: StepItem[];
+  taskProgress: TaskProgressItem[];
+  toolStepMap: Map<string, number>;
+} {
+  const steps: StepItem[] = [];
+  const taskProgress: TaskProgressItem[] = [];
+  const toolStepMap = new Map<string, number>();
+
+  for (const event of events) {
+    const payload = parseEventPayload(event);
+    const eventType = String(event.event_type || '');
+
+    if (eventType === 'tool.call_requested') {
+      const toolName = String(payload.tool_name || '');
+      const toolCallId = String(payload.tool_call_id || '');
+      const idx = steps.length;
+      toolStepMap.set(toolCallId, idx);
+      steps.push({ label: `执行 ${toolName}`, status: 'running' });
+      taskProgress.push({ task: toolName, step: 0, total: 1, status: 'running' });
+    } else if (eventType === 'tool.call_result') {
+      const toolCallId = String(payload.tool_call_id || '');
+      const toolName = String(payload.tool_name || '');
+      const stepIdx = toolStepMap.get(toolCallId);
+      if (stepIdx !== undefined && stepIdx < steps.length) {
+        steps[stepIdx] = { ...steps[stepIdx], status: 'done' };
+      }
+      const progressIdx = taskProgress.findIndex(t => t.task === toolName && t.status === 'running');
+      if (progressIdx !== -1) {
+        taskProgress[progressIdx] = { ...taskProgress[progressIdx], step: 1, status: 'completed' };
+      }
+    }
+  }
+
+  return { steps, taskProgress, toolStepMap };
+}
+
 /** 将 session 列表按 task_id 分组为 TaskGroup[] */
 export function groupSessionsToTasks(sessions: SessionItem[]): TaskGroup[] {
   const taskMap = new Map<string, TaskGroup>();

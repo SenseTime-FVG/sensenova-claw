@@ -1,25 +1,26 @@
 'use client';
 
+import { useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { Settings } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Settings, ChevronDown, Zap } from 'lucide-react';
+import { useCustomPages } from '@/hooks/useCustomPages';
 
 const mainNavItems = [
   { path: '/', label: '工作台', exact: true },
-  { path: '/chat', label: 'Chat' },
+  { path: '/chat', label: '消息' },
+];
+
+export type SubNavGroup = 'features' | 'admin' | null;
+
+export const builtinFeatureNavItems = [
   { path: '/research', label: '深度研究' },
   { path: '/ppt', label: 'PPT' },
   { path: '/automation', label: '自动化' },
 ];
 
-const adminNavItems = [
+export const adminNavItems = [
   { path: '/agents', label: 'Dashboard' },
   { path: '/sessions', label: 'Sessions' },
   { path: '/gateway', label: 'Gateway' },
@@ -27,19 +28,54 @@ const adminNavItems = [
   { path: '/skills', label: 'Skills' },
 ];
 
+export function useFeatureNavItems() {
+  const { pages } = useCustomPages();
+  return useMemo(() => {
+    const customItems = pages.map(p => ({
+      path: `/features/${p.slug}`,
+      label: p.name,
+    }));
+    return [
+      ...builtinFeatureNavItems,
+      ...customItems,
+      { path: '/create-feature', label: '+ 创建' },
+    ];
+  }, [pages]);
+}
+
 export function DashboardNav({
   className,
+  activeGroup,
+  onGroupToggle,
   ...props
-}: React.HTMLAttributes<HTMLElement>) {
+}: React.HTMLAttributes<HTMLElement> & {
+  activeGroup?: SubNavGroup;
+  onGroupToggle?: (group: SubNavGroup) => void;
+}) {
   const pathname = usePathname();
-
+  const featureNavItems = useFeatureNavItems();
   const isActive = (item: { path: string; exact?: boolean }) => {
     if (item.exact) return pathname === item.path;
     return pathname?.startsWith(item.path);
   };
 
+  const isFeatureActive = featureNavItems.some((item) =>
+    pathname?.startsWith(item.path)
+  );
   const isAdminActive = adminNavItems.some((item) =>
     pathname?.startsWith(item.path)
+  );
+
+  const showFeatures = activeGroup === 'features' || isFeatureActive;
+  const showAdmin = activeGroup === 'admin' || isAdminActive;
+
+  const handleGroupClick = useCallback(
+    (group: 'features' | 'admin') => {
+      const isCurrentlyShown =
+        group === 'features' ? showFeatures : showAdmin;
+      onGroupToggle?.(isCurrentlyShown ? null : group);
+    },
+    [showFeatures, showAdmin, onGroupToggle]
   );
 
   return (
@@ -60,31 +96,39 @@ export function DashboardNav({
         </Link>
       ))}
 
-      <DropdownMenu>
-        <DropdownMenuTrigger
+      <button
+        onClick={() => handleGroupClick('features')}
+        className={cn(
+          'text-sm font-medium transition-colors hover:text-primary flex items-center gap-1',
+          showFeatures ? 'text-primary' : 'text-muted-foreground'
+        )}
+      >
+        <Zap className="h-3.5 w-3.5" />
+        功能
+        <ChevronDown
           className={cn(
-            'text-sm font-medium transition-colors hover:text-primary flex items-center gap-1',
-            isAdminActive ? 'text-primary' : 'text-muted-foreground'
+            'h-3 w-3 transition-transform duration-200',
+            showFeatures && 'rotate-180'
           )}
-        >
-          <Settings className="h-3.5 w-3.5" />
-          管理
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          {adminNavItems.map((item) => (
-            <DropdownMenuItem key={item.path} asChild>
-              <Link
-                href={item.path}
-                className={cn(
-                  pathname?.startsWith(item.path) && 'font-medium'
-                )}
-              >
-                {item.label}
-              </Link>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        />
+      </button>
+
+      <button
+        onClick={() => handleGroupClick('admin')}
+        className={cn(
+          'text-sm font-medium transition-colors hover:text-primary flex items-center gap-1',
+          showAdmin ? 'text-primary' : 'text-muted-foreground'
+        )}
+      >
+        <Settings className="h-3.5 w-3.5" />
+        管理
+        <ChevronDown
+          className={cn(
+            'h-3 w-3 transition-transform duration-200',
+            showAdmin && 'rotate-180'
+          )}
+        />
+      </button>
     </nav>
   );
 }

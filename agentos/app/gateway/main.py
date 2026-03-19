@@ -374,6 +374,8 @@ app.include_router(files.router)
 app.include_router(config_api.router)
 app.include_router(cron_api.router)
 app.include_router(notification_api.router)
+from agentos.interfaces.http import custom_pages
+app.include_router(custom_pages.router)
 
 
 @app.get("/health")

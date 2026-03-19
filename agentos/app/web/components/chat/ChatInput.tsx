@@ -1,7 +1,7 @@
 'use client';
 
-import { useRef, useState, useCallback } from 'react';
-import { Send, X, FileText } from 'lucide-react';
+import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect } from 'react';
+import { Send, Paperclip, File, FolderOpen } from 'lucide-react';
 import { useDrop } from 'react-dnd';
 import { TargetSelector } from './TargetSelector';
 import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
@@ -16,9 +16,14 @@ interface ChatInputProps {
   disabled: boolean;
   wsConnected: boolean;
   handleSkillInvoke: (skillName: string, args: string) => void;
+  hideAgentSelector?: boolean;
 }
 
-export function ChatInput({
+export interface ChatInputHandle {
+  setInput: (text: string) => void;
+}
+
+export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   defaultAgentId,
   selectedAgent,
   onSelectAgent,
@@ -27,38 +32,117 @@ export function ChatInput({
   disabled,
   wsConnected,
   handleSkillInvoke,
-}: ChatInputProps) {
+  hideAgentSelector,
+}, ref) {
   const [inputValue, setInputValue] = useState('');
-  const [droppedFiles, setDroppedFiles] = useState<ContextFileRef[]>([]);
+  const [showUploadMenu, setShowUploadMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const uploadMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showUploadMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (uploadMenuRef.current && !uploadMenuRef.current.contains(e.target as Node)) {
+        setShowUploadMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showUploadMenu]);
+
+  useImperativeHandle(ref, () => ({
+    setInput: (text: string) => {
+      setInputValue(text);
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+          textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
+          textareaRef.current.focus();
+        }
+      });
+    },
+  }), []);
 
   const { showMenu, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmitHook } = useSlashCommand(
     inputValue, setInputValue, handleSkillInvoke,
   );
 
-  // react-dnd drop target
+  const resizeTextarea = useCallback(() => {
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
+        textareaRef.current.focus();
+      }
+    });
+  }, []);
+
+  const insertAtRef = useCallback((path: string) => {
+    setInputValue(prev => {
+      const prefix = prev === '' || prev.endsWith(' ') || prev.endsWith('\n') ? prev : prev + ' ';
+      return prefix + `@${path} `;
+    });
+    resizeTextarea();
+  }, [resizeTextarea]);
+
   const [{ isOver }, dropRef] = useDrop(() => ({
     accept: 'FILE',
     drop: (item: { name: string; path: string }) => {
-      setDroppedFiles(prev => {
-        if (prev.some(f => f.path === item.path)) return prev;
-        return [...prev, { name: item.name, path: item.path }];
-      });
+      insertAtRef(item.path);
     },
     collect: (monitor) => ({
       isOver: monitor.isOver(),
     }),
-  }), []);
+  }), [insertAtRef]);
 
-  const removeFile = (path: string) => {
-    setDroppedFiles(prev => prev.filter(f => f.path !== path));
-  };
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = e.target.files;
+    if (!selectedFiles || selectedFiles.length === 0) return;
+
+    // 本地应用无需真正上传，直接插入文件名引用
+    const inserted = new Set<string>();
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const f = selectedFiles[i];
+      const relPath = (f as File & { webkitRelativePath?: string }).webkitRelativePath;
+      if (relPath) {
+        // webkitdirectory 模式：取顶层文件夹名（只插入一次）
+        const topFolder = relPath.split('/')[0];
+        if (!inserted.has(topFolder)) {
+          inserted.add(topFolder);
+          insertAtRef(topFolder);
+        }
+      } else {
+        if (!inserted.has(f.name)) {
+          inserted.add(f.name);
+          insertAtRef(f.name);
+        }
+      }
+    }
+
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (folderInputRef.current) folderInputRef.current.value = '';
+  }, [insertAtRef]);
+
+  const parseAtRefs = useCallback((content: string): ContextFileRef[] => {
+    const refs: ContextFileRef[] = [];
+    const regex = /@(\S+)/g;
+    let m;
+    while ((m = regex.exec(content)) !== null) {
+      const p = m[1];
+      const name = p.split(/[/\\]/).pop() || p;
+      if (!refs.some(r => r.path === p)) {
+        refs.push({ name, path: p });
+      }
+    }
+    return refs;
+  }, []);
 
   const handleSend = useCallback(() => {
     const content = inputValue.trim();
     if (!content || !wsConnected || disabled) return;
 
-    // 斜杠命令拦截
     if (handleSlashSubmitHook(content)) {
       setInputValue('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -71,11 +155,11 @@ export function ChatInput({
       return;
     }
 
-    onSend(content, droppedFiles.length > 0 ? droppedFiles : undefined);
+    const contextFiles = parseAtRefs(content);
+    onSend(content, contextFiles.length > 0 ? contextFiles : undefined);
     setInputValue('');
-    setDroppedFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [inputValue, wsConnected, disabled, handleSlashSubmitHook, onSlashSubmit, onSend, droppedFiles]);
+  }, [inputValue, wsConnected, disabled, handleSlashSubmitHook, onSlashSubmit, onSend, parseAtRefs]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -92,27 +176,14 @@ export function ChatInput({
     <div className="border-t bg-card/50 backdrop-blur-sm p-4 shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center gap-3 mb-3 pl-1">
-          <TargetSelector selectedAgent={selectedAgent} onSelectAgent={onSelectAgent} />
+          {!hideAgentSelector && (
+            <TargetSelector selectedAgent={selectedAgent} onSelectAgent={onSelectAgent} />
+          )}
           <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground bg-muted/50 px-2 py-1 rounded-full border">
             <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
             {wsConnected ? 'Connected' : 'Offline'}
           </span>
         </div>
-
-        {/* 已拖入的文件 Badge */}
-        {droppedFiles.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-2 pl-1">
-            {droppedFiles.map(f => (
-              <span key={f.path} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium border border-primary/20">
-                <FileText size={12} />
-                <span className="max-w-[120px] truncate">{f.name}</span>
-                <button onClick={() => removeFile(f.path)} className="hover:text-destructive transition-colors">
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
 
         <div
           ref={dropRef as unknown as React.Ref<HTMLDivElement>}
@@ -120,6 +191,40 @@ export function ChatInput({
             isOver ? 'border-primary bg-primary/5 ring-4 ring-primary/20' : 'border-border/80'
           }`}
         >
+          {/* 附件上传 */}
+          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
+          <input ref={folderInputRef} type="file" className="hidden" onChange={handleFileSelect}
+            {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
+          />
+          <div className="relative mb-1.5 ml-1 shrink-0" ref={uploadMenuRef}>
+            <button
+              onClick={() => setShowUploadMenu(v => !v)}
+              disabled={!wsConnected || disabled}
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="添加文件引用"
+            >
+              <Paperclip size={18} />
+            </button>
+            {showUploadMenu && (
+              <div className="absolute bottom-full left-0 mb-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[120px] z-50">
+                <button
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-muted transition-colors text-left"
+                  onClick={() => { fileInputRef.current?.click(); setShowUploadMenu(false); }}
+                >
+                  <File size={14} className="text-muted-foreground" />
+                  <span>选择文件</span>
+                </button>
+                <button
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-muted transition-colors text-left"
+                  onClick={() => { folderInputRef.current?.click(); setShowUploadMenu(false); }}
+                >
+                  <FolderOpen size={14} className="text-muted-foreground" />
+                  <span>选择文件夹</span>
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="flex-1">
             <SlashCommandMenu inputValue={inputValue} onSelect={handleSlashSelect} visible={showMenu} />
             <textarea
@@ -129,7 +234,7 @@ export function ChatInput({
               onKeyDown={handleKeyDown}
               placeholder={
                 wsConnected
-                  ? 'Message AgentOS... (Enter to send, Shift+Enter for new line)'
+                  ? '输入消息… 拖拽文件到此处自动插入 @引用 (Enter 发送, Shift+Enter 换行)'
                   : 'Waiting for connection...'
               }
               disabled={!wsConnected || disabled}
@@ -152,4 +257,4 @@ export function ChatInput({
       </div>
     </div>
   );
-}
+});

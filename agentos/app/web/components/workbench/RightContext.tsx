@@ -21,7 +21,7 @@ export function RightContext() {
   if (!hasContent && !expanded) return null;
 
   return (
-    <aside className="w-80 border-l border-border bg-muted/20 flex flex-col overflow-y-auto shrink-0">
+    <aside className="h-full flex flex-col overflow-y-auto">
       <div className="p-4">
         <button
           onClick={() => setExpanded(!expanded)}

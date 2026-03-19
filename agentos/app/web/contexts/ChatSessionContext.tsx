@@ -14,6 +14,7 @@ import {
   makeId,
   truncateResult,
   rebuildMessagesFromEvents,
+  rebuildStepsFromEvents,
   groupSessionsToTasks,
 } from '@/lib/chatTypes';
 
@@ -32,6 +33,8 @@ export interface ChatSessionContextValue {
   switchSession: (sessionId: string) => void;
   createSession: (agentId: string, taskId?: string) => void;
   startNewChat: () => void;
+  /** 页面挂载时调用：如果是通过 switchSession 跳转过来的则保留会话，否则重置 */
+  resetIfNeeded: () => void;
 
   // 消息
   messages: ChatMessage[];
@@ -95,6 +98,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
   const pendingCreateMeta = useRef<Record<string, string> | null>(null);
+  const skipNextResetRef = useRef(false);
 
   // ── helpers ──
 
@@ -133,9 +137,6 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     setMessages([]);
     setIsTyping(false);
     toolCallMapRef.current.clear();
-    setRightSteps([]);
-    setRightTaskProgress([]);
-    toolStepMapRef.current.clear();
 
     if (shouldBind) {
       bindSessionToCurrentSocket(sid);
@@ -146,8 +147,15 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       const d = await res.json();
       const events = (d.events || []) as Record<string, unknown>[];
       setMessages(rebuildMessagesFromEvents(events));
+
+      const { steps, taskProgress, toolStepMap } = rebuildStepsFromEvents(events);
+      setRightSteps(steps);
+      setRightTaskProgress(taskProgress);
+      toolStepMapRef.current = toolStepMap;
     } catch {
-      // 允许失败
+      setRightSteps([]);
+      setRightTaskProgress([]);
+      toolStepMapRef.current.clear();
     }
   }, [bindSessionToCurrentSocket]);
 
@@ -454,6 +462,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   // ── 对外接口 ──
 
   const switchSession = useCallback(async (sid: string) => {
+    skipNextResetRef.current = true;
     await reloadSessionHistory(sid);
   }, [reloadSessionHistory]);
 
@@ -479,6 +488,15 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     setRightTaskProgress([]);
     toolStepMapRef.current.clear();
   }, []);
+
+  const resetIfNeeded = useCallback(() => {
+    if (skipNextResetRef.current) {
+      skipNextResetRef.current = false;
+      return;
+    }
+    if (sessionIdRef.current) return;
+    startNewChat();
+  }, [startNewChat]);
 
   const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
     if (!content.trim() || !wsConnected) return;
@@ -571,6 +589,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     switchSession,
     createSession,
     startNewChat,
+    resetIfNeeded,
     messages,
     isTyping,
     sendMessage,
