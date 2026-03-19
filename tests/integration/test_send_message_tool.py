@@ -18,6 +18,8 @@ from agentos.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
     USER_INPUT,
+    USER_QUESTION_ANSWERED,
+    USER_QUESTION_ASKED,
     USER_TURN_CANCEL_REQUESTED,
 )
 from agentos.kernel.runtime.agent_message_coordinator import AgentMessageCoordinator
@@ -155,6 +157,101 @@ class TestSendMessageTool:
         assert completed_event["value"].payload["result"] == "async done"
 
         collector_task.cancel()
+        fake_task.cancel()
+        await coordinator.stop()
+        await runtime.stop()
+        await bus_router.stop()
+
+    async def test_sync_send_message_waits_for_ask_user_answer(self, test_repo, tmp_path):
+        bus, bus_router, registry, runtime, coordinator = await _build_runtime(test_repo, tmp_path)
+        await test_repo.create_session("parent", meta={"agent_id": "default"})
+
+        child_session: dict[str, str] = {}
+        asked = asyncio.Event()
+        answered = asyncio.Event()
+        question_id = "q_child_confirm"
+
+        async def fake_child_agent():
+            async for event in bus.subscribe():
+                if event.type == USER_INPUT and event.session_id.startswith("agent2agent_"):
+                    child_session["value"] = event.session_id
+                    await bus.publish(
+                        EventEnvelope(
+                            type=USER_QUESTION_ASKED,
+                            session_id=event.session_id,
+                            source="test",
+                            payload={
+                                "question_id": question_id,
+                                "question": "请确认环境",
+                                "options": ["dev", "prod"],
+                                "multi_select": False,
+                                "timeout": 300,
+                            },
+                        )
+                    )
+                    asked.set()
+                    continue
+
+                if (
+                    event.type == USER_QUESTION_ANSWERED
+                    and child_session.get("value")
+                    and event.session_id == child_session["value"]
+                    and event.payload.get("question_id") == question_id
+                ):
+                    answered.set()
+                    answer = str(event.payload.get("answer", ""))
+                    await bus.publish(
+                        EventEnvelope(
+                            type=AGENT_STEP_COMPLETED,
+                            session_id=event.session_id,
+                            source="test",
+                            payload={"result": {"content": f"已收到回答: {answer}"}},
+                        )
+                    )
+                    return
+
+        fake_task = asyncio.create_task(fake_child_agent())
+        await asyncio.sleep(0)
+
+        tool = SendMessageTool(
+            agent_registry=registry,
+            bus=bus,
+            repo=test_repo,
+            coordinator=coordinator,
+            timeout=5,
+        )
+        run_task = asyncio.create_task(
+            tool.execute(
+                target_agent="helper",
+                message="请先提问再处理",
+                _session_id="parent",
+                _turn_id="turn_parent",
+                _tool_call_id="tool_ask_user",
+            )
+        )
+
+        await asyncio.wait_for(asked.wait(), timeout=5)
+        await bus.publish(
+            EventEnvelope(
+                type=USER_QUESTION_ANSWERED,
+                session_id=child_session["value"],
+                source="test",
+                payload={
+                    "question_id": question_id,
+                    "answer": "prod",
+                    "cancelled": False,
+                },
+            )
+        )
+
+        result = await asyncio.wait_for(run_task, timeout=5)
+        assert answered.is_set() is True
+        assert "已收到回答: prod" in result
+
+        record = await test_repo.get_message_record_by_child_session(child_session["value"])
+        assert record is not None
+        assert record.status == "completed"
+
         fake_task.cancel()
         await coordinator.stop()
         await runtime.stop()

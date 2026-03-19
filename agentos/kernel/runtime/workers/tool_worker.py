@@ -131,6 +131,7 @@ class ToolSessionWorker(SessionWorker):
         async def handler(
             question: str, options: list | None, multi_select: bool,
             session_id: str, turn_id: str, tool_call_id: str,
+            source_agent_id: str | None = None,
         ) -> dict:
             if worker._pending_questions:
                 return {"success": False, "error": "已有待回答问题，请先回答当前问题"}
@@ -140,6 +141,7 @@ class ToolSessionWorker(SessionWorker):
             worker._pending_questions[question_id] = future
 
             timeout = float(config.get("tools.ask_user.timeout", 300))
+            resolved_source_agent_id = str(source_agent_id or "").strip() or "default"
 
             await worker.bus.publish(EventEnvelope(
                 type=USER_QUESTION_ASKED,
@@ -148,6 +150,7 @@ class ToolSessionWorker(SessionWorker):
                 payload={
                     "question_id": question_id, "question": question,
                     "options": options, "multi_select": multi_select, "timeout": timeout,
+                    "source_agent_id": resolved_source_agent_id,
                 },
             ))
 
@@ -286,7 +289,12 @@ class ToolSessionWorker(SessionWorker):
                 await self._publish_tool_result(event, result="用户拒绝执行该工具", success=False)
                 return
 
-        default_timeout = 600 if tool_name == "send_message" else 15
+        if tool_name == "send_message":
+            default_timeout = 600
+        elif tool_name == "ask_user":
+            default_timeout = 300
+        else:
+            default_timeout = 15
         timeout = float(config.get(f"tools.{tool_name}.timeout", default_timeout))
         if timeout <= 0:
             timeout = default_timeout
@@ -303,6 +311,9 @@ class ToolSessionWorker(SessionWorker):
         agent_workdir = event.payload.get("_agent_workdir")
         if agent_workdir:
             exec_kwargs["_agent_workdir"] = agent_workdir
+        exec_kwargs["_source_agent_id"] = (
+            str(event.payload.get("_source_agent_id") or event.agent_id or "").strip() or "default"
+        )
         if event.turn_id:
             exec_kwargs["_turn_id"] = event.turn_id
         if tool_call_id:
@@ -318,7 +329,7 @@ class ToolSessionWorker(SessionWorker):
             result = self._truncate_result(result, tool_call_id)
         except Exception as exc:  # noqa: BLE001
             success = False
-            error = str(exc) or f"{type(exc).__name__}"
+            error = str(exc).strip() or type(exc).__name__
             result = f"工具执行失败: {error}"
             logger.exception("tool execution failed")
             await self.bus.publish(
@@ -330,7 +341,7 @@ class ToolSessionWorker(SessionWorker):
                     source="tool",
                     payload={
                         "error_type": type(exc).__name__,
-                        "error_message": str(exc),
+                        "error_message": error,
                         "context": {"tool_name": tool_name, "arguments": arguments},
                     },
                 )

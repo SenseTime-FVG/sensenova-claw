@@ -71,6 +71,9 @@ async def test_ask_user_event_chain_roundtrip(tmp_path: Path) -> None:
     done = asyncio.Event()
     collected: list[EventEnvelope] = []
 
+    # 强制当前用例走 mock model，避免被本地 config.yml 的真实 provider 覆盖
+    config.data["agent"]["model"] = "mock"
+    config.data["llm"]["default_model"] = "mock"
     # 注入可控 provider，稳定触发 ask_user 工具调用
     svc["llm_runtime"].factory._providers["mock"] = AskUserMockProvider()
 

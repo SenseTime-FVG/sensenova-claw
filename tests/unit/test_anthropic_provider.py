@@ -62,7 +62,7 @@ def provider(real_config: Config) -> Any:
 @pytest.fixture(scope="module")
 def model(real_config: Config) -> str:
     """从配置中获取默认模型"""
-    return real_config.get("llm.models.claude_opus.model_id", "claude-opus-4-6")
+    return real_config.get("llm.models.claude-opus.model_id", "claude-opus-4-6")
 
 
 # ---------------------------------------------------------------------------
