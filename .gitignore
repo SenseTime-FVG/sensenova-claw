@@ -35,7 +35,6 @@ agentos/app/web/.next/
 agentos/app/web/dist/
 agentos/app/web/test-results/
 agentos/app/web/playwright-report/
-# TypeScript 构建信息
 *.tsbuildinfo
 
 # ========== 运行时目录 ==========
@@ -81,3 +80,8 @@ config.yml
 *.bak
 *.orig
 pytest_tmp/
+tmp_docs/
+updates/
+
+# ========== Lock 文件（仅保留 npm） ==========
+pnpm-lock.yaml
