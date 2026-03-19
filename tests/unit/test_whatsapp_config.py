@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
-from agentos.adapters.channels.whatsapp.config import WhatsAppBridgeConfig, WhatsAppConfig
+from agentos.adapters.plugins.whatsapp.config import WhatsAppBridgeConfig, WhatsAppConfig
 
 
 class TestWhatsAppConfigDefaults:
@@ -12,6 +13,7 @@ class TestWhatsAppConfigDefaults:
         cfg = WhatsAppConfig()
         assert cfg.enabled is False
         assert cfg.auth_dir == ""
+        assert cfg.typing_indicator == "composing"
         assert cfg.dm_policy == "open"
         assert cfg.group_policy == "open"
         assert cfg.allowlist == []
@@ -26,6 +28,7 @@ class TestWhatsAppConfigFromPluginApi:
         defaults = {
             "enabled": True,
             "auth_dir": "/tmp/agentos-whatsapp-auth",
+            "typing_indicator": "none",
             "dm_policy": "allowlist",
             "group_policy": "allowlist",
             "allowlist": ["+15550000001"],
@@ -49,7 +52,8 @@ class TestWhatsAppConfigFromPluginApi:
         api = self._make_api()
         cfg = WhatsAppConfig.from_plugin_api(api)
         assert cfg.enabled is True
-        assert cfg.auth_dir == "/tmp/agentos-whatsapp-auth"
+        assert Path(cfg.auth_dir) == Path("/tmp/agentos-whatsapp-auth").resolve()
+        assert cfg.typing_indicator == "none"
         assert cfg.dm_policy == "allowlist"
         assert cfg.group_policy == "allowlist"
         assert cfg.allowlist == ["+15550000001"]
@@ -66,9 +70,31 @@ class TestWhatsAppConfigFromPluginApi:
         cfg = WhatsAppConfig.from_plugin_api(api)
         assert cfg.enabled is False
         assert cfg.auth_dir == ""
+        assert cfg.typing_indicator == "composing"
         assert cfg.dm_policy == "open"
         assert cfg.group_policy == "open"
         assert cfg.allowlist == []
         assert cfg.group_allowlist == []
         assert cfg.show_tool_progress is False
         assert cfg.bridge.command == "node"
+
+    def test_from_plugin_api_resolves_relative_auth_dir_to_absolute(self):
+        api = self._make_api({"auth_dir": ".agentos/data/plugins/whatsapp/auth"})
+        cfg = WhatsAppConfig.from_plugin_api(api)
+        assert Path(cfg.auth_dir).is_absolute()
+
+    def test_from_plugin_api_remaps_legacy_bridge_entry_to_plugins_path(self):
+        api = self._make_api(
+            {
+                "bridge": {
+                    "command": "node",
+                    "entry": "agentos/adapters/channels/whatsapp/bridge/src/index.mjs",
+                    "startup_timeout_seconds": 30,
+                    "send_timeout_seconds": 15,
+                }
+            }
+        )
+        cfg = WhatsAppConfig.from_plugin_api(api)
+        assert cfg.bridge.entry.endswith(
+            "agentos/adapters/plugins/whatsapp/bridge/src/index.mjs"
+        )

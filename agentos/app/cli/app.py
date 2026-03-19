@@ -357,8 +357,25 @@ class CLIApp:
         sys.stdout.write(self._last_response + "\n")
         return 0
 
+    async def _check_and_setup_llm(self) -> None:
+        """检测 LLM 配置，未配置时引导用户完成设置"""
+        try:
+            resp = await self._http_get("/api/config/llm-status")
+            if resp.get("_error") or resp.get("configured"):
+                return
+        except Exception:
+            return
+
+        from agentos.app.cli.llm_setup import run_llm_setup_sync
+        from agentos.platform.config.config import PROJECT_ROOT
+        config_path = PROJECT_ROOT / "config.yml"
+        await asyncio.to_thread(run_llm_setup_sync, config_path)
+
     async def _run_interactive_mode(self) -> int:
         """交互模式：REPL 循环"""
+        # 检测 LLM 配置，未配置时引导用户完成设置
+        await self._check_and_setup_llm()
+
         # 获取 Agent 信息用于欢迎页
         agent_info = await self._fetch_agent_info(self.current_agent_id)
         agent_name = agent_info.get("name", "")

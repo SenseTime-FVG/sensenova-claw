@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.adapters.channels.wecom.plugin import definition, register
-from agentos.adapters.plugins import PluginRegistry
+from agentos.adapters.plugins import PluginRegistry, _iter_builtin_plugin_modules
+from agentos.adapters.plugins.wecom.plugin import definition, register
 from agentos.adapters.plugins.base import PluginApi
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.events.bus import PublicEventBus
@@ -100,3 +100,8 @@ async def test_plugin_registry_loads_channel_plugins():
     assert "wecom" in registry._plugins
     assert "telegram" in registry._plugins
     assert "whatsapp" in registry._plugins
+
+
+def test_builtin_plugin_module_points_to_plugins_package():
+    modules = dict(_iter_builtin_plugin_modules())
+    assert modules["wecom"] == "agentos.adapters.plugins.wecom.plugin"

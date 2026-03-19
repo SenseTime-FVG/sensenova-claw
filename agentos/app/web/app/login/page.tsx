@@ -23,8 +23,8 @@ export default function LoginPage() {
       } else {
         setError('Token 无效，请检查终端输出的 token');
       }
-    } catch {
-      setError('验证失败，请确认后端服务已启动');
+    } catch (err: any) {
+      setError(err?.message || '验证失败，请确认后端服务已启动');
     } finally {
       setIsLoading(false);
     }

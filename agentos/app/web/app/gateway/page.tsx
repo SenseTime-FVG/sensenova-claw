@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { Loader2, Globe, Settings } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface GatewayStats {
@@ -22,23 +24,52 @@ interface Channel {
   config: Record<string, unknown>;
 }
 
+interface WhatsAppStatus {
+  enabled: boolean;
+  authorized: boolean;
+  state: string;
+}
+
 export default function GatewayPage() {
+  const router = useRouter();
   const [stats, setStats] = useState<GatewayStats | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [whatsappStatus, setWhatsAppStatus] = useState<WhatsAppStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       authFetch(`${API_BASE}/api/gateway/stats`).then(r => r.json()),
       authFetch(`${API_BASE}/api/gateway/channels`).then(r => r.json()),
+      authFetch(`${API_BASE}/api/gateway/whatsapp/status`).then(r => r.json()).catch(() => null),
     ])
-      .then(([statsData, channelsData]) => {
+      .then(([statsData, channelsData, whatsappStatusData]) => {
         setStats(statsData);
         setChannels(channelsData);
+        setWhatsAppStatus(whatsappStatusData);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  function getChannelPresentation(channel: Channel) {
+    if (channel.id === 'whatsapp' && whatsappStatus?.enabled && !whatsappStatus.authorized) {
+      return {
+        status: 'unauthorized',
+        accentClass: 'bg-red-500/40',
+        dotClass: 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.6)]',
+        badgeClass: 'bg-red-500 text-white shadow-sm',
+      };
+    }
+
+    const connected = channel.status === 'connected';
+    return {
+      status: channel.status,
+      accentClass: connected ? 'bg-green-500/40' : 'bg-muted-foreground/20',
+      dotClass: connected ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)]' : 'bg-muted-foreground/40',
+      badgeClass: connected ? 'bg-green-500 text-white shadow-sm' : '',
+    };
+  }
 
   return (
     <DashboardLayout>
@@ -120,30 +151,39 @@ export default function GatewayPage() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {channels.map((channel) => (
-                      <div key={channel.id} className="flex flex-col p-8 border border-border/60 rounded-2xl bg-card hover:bg-muted/30 transition-all shadow-sm group relative overflow-hidden">
-                        <div className={`absolute top-0 right-0 w-2 h-full ${channel.status === 'connected' ? 'bg-green-500/40' : 'bg-muted-foreground/20'}`} />
-                        <div className="flex-1">
-                          <div className="flex flex-col mb-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <h3 className="text-xl font-bold text-foreground group-hover:text-primary transition-colors">{channel.name}</h3>
-                              <span className={`w-3 h-3 rounded-full ${channel.status === 'connected' ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)]' : 'bg-muted-foreground/40'}`} />
+                    {channels.map((channel) => {
+                      const presentation = getChannelPresentation(channel);
+                      const showAuthorizeButton = channel.id === 'whatsapp' && whatsappStatus?.enabled && !whatsappStatus.authorized;
+                      return (
+                        <div key={channel.id} className="flex flex-col p-8 border border-border/60 rounded-2xl bg-card hover:bg-muted/30 transition-all shadow-sm group relative overflow-hidden">
+                          <div className={`absolute top-0 right-0 w-2 h-full ${presentation.accentClass}`} />
+                          <div className="flex-1">
+                            <div className="flex flex-col mb-4">
+                              <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-xl font-bold text-foreground group-hover:text-primary transition-colors">{channel.name}</h3>
+                                <span className={`w-3 h-3 rounded-full ${presentation.dotClass}`} />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  variant={presentation.status === 'connected' ? 'default' : 'secondary'}
+                                  className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ${presentation.badgeClass}`}>
+                                  {presentation.status}
+                                </Badge>
+                                <Badge variant="outline" className="capitalize px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-muted-foreground/60">
+                                  {channel.type}
+                                </Badge>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                               <Badge 
-                                variant={channel.status === 'connected' ? 'default' : 'secondary'} 
-                                className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ${channel.status === 'connected' ? 'bg-green-500 text-white shadow-sm' : ''}`}>
-                                {channel.status}
-                              </Badge>
-                              <Badge variant="outline" className="capitalize px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-muted-foreground/60">
-                                {channel.type}
-                              </Badge>
-                            </div>
+                            <p className="text-xs font-mono text-muted-foreground/50 truncate">ID: {channel.id}</p>
+                            {showAuthorizeButton ? (
+                              <div className="mt-6">
+                                <Button onClick={() => router.push('/gateway/whatsapp')}>授权</Button>
+                              </div>
+                            ) : null}
                           </div>
-                          <p className="text-xs font-mono text-muted-foreground/50 truncate">ID: {channel.id}</p>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     {channels.length === 0 && (
                       <div className="col-span-full py-24 border border-dashed rounded-2xl text-center text-muted-foreground bg-muted/5">
                         <p className="text-lg font-bold opacity-30 uppercase tracking-widest">No active channels registered</p>
