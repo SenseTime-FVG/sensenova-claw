@@ -72,7 +72,11 @@ class AgentSessionWorker(SessionWorker):
         """获取 model key（llm.models 中的 key）"""
         if self.agent_config and self.agent_config.model:
             return self.agent_config.model
-        return config.get("agent.model") or config.get("llm.default_model", "mock")
+        return (
+            config.get("agent.model")
+            or config.get("agent.default_model")
+            or config.get("llm.default_model", "mock")
+        )
 
     def _get_temperature(self) -> float:
         if self.agent_config:

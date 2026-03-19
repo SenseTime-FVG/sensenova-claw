@@ -116,7 +116,7 @@ async def _run(args: argparse.Namespace) -> int:
     saw_error = ERROR_RAISED in event_types
 
     print("\n=== 回归摘要 ===")
-    print(f"provider={args.provider} model={args.model or config.get('agent.default_model')}")
+    print(f"provider={args.provider} model={args.model or config.get('agent.model') or config.get('llm.default_model')}")
     print(f"elapsed={elapsed:.2f}s")
     print(f"user.question_asked={saw_question_asked}")
     print(f"user.question_answered={saw_question_answered}")

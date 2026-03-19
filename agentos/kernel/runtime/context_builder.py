@@ -134,7 +134,7 @@ class ContextBuilder:
             return None
         lines = [
             "## Skill Usage",
-            "If the user's request matches a skill by name or description, first read the corresponding `SKILL.md` at `<location>` before continuing.",
+            "当用户请求匹配到某个 skill 的名称或描述时，先用 read_file 读取对应 `<location>` 路径下的 `SKILL.md`，再继续执行。",
             "",
             "<available_skills>",
         ]
@@ -170,7 +170,11 @@ class ContextBuilder:
         model_key = (
             agent_config.model
             if agent_config and agent_config.model
-            else config.get("agent.model") or config.get("llm.default_model", "mock")
+            else (
+                config.get("agent.model")
+                or config.get("agent.default_model")
+                or config.get("llm.default_model", "mock")
+            )
         )
         _, model = config.resolve_model(model_key)
         return RuntimeInfo(

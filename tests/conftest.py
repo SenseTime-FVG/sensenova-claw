@@ -28,7 +28,7 @@ def load_gemini_config() -> dict | None:
         return None
     with config_path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-    gemini_cfg = data.get("llm_providers", {}).get("gemini", {})
+    gemini_cfg = data.get("llm", {}).get("providers", {}).get("gemini", {})
     if not gemini_cfg.get("api_key"):
         return None
     return gemini_cfg
@@ -93,7 +93,6 @@ async def test_app(tmp_path):
     from agentos.capabilities.tools.registry import ToolRegistry
     from agentos.capabilities.skills.registry import SkillRegistry
     from agentos.capabilities.skills.market_service import SkillMarketService
-    from agentos.platform.security.path_policy import PathPolicy
     from agentos.adapters.storage.repository import Repository
 
     # 使用临时目录避免污染真实环境
@@ -131,9 +130,6 @@ async def test_app(tmp_path):
     )
     skill_registry.load_skills(cfg.data)
 
-    # PathPolicy
-    path_policy = PathPolicy(workspace=workspace_dir)
-
     # 真实 Services（只需 repo）
     @dataclass
     class Services:
@@ -155,7 +151,6 @@ async def test_app(tmp_path):
     app.state.skill_registry = skill_registry
     app.state.config = cfg
     app.state.market_service = market_service
-    app.state.path_policy = path_policy
 
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -166,6 +161,6 @@ async def test_app(tmp_path):
 
     # 清理 app.state，避免污染其他测试
     for attr in ("services", "agent_registry", "tool_registry", "skill_registry",
-                 "config", "market_service", "path_policy"):
+                 "config", "market_service"):
         if hasattr(app.state, attr):
             delattr(app.state, attr)

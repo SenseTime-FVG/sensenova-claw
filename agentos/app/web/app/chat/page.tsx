@@ -1,13 +1,17 @@
 'use client';
 
-import { useEffect, useRef, useState, Suspense } from 'react';
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Bot, User, Wrench, Send, Plus, RefreshCw, Loader2, ChevronDown, Check } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { SlashCommandMenu, useSlashCommand } from '@/components/chat/SlashCommandMenu';
+import { useNotification } from '@/hooks/useNotification';
 import { InteractionDialog, type PendingInteraction } from '@/components/chat/QuestionDialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
+
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
+const WS_RECONNECT_INTERVAL_MS = 1000;
+const WS_MAX_RECONNECT_ATTEMPTS = 10;
 
 interface ToolInfo {
   name: string;
@@ -67,6 +71,92 @@ function formatArgs(args: unknown): string {
   if (typeof args === 'string') { try { return JSON.stringify(JSON.parse(args), null, 2); } catch { return args; } }
   if (typeof args === 'object') return JSON.stringify(args, null, 2);
   return String(args);
+}
+
+function parseEventPayload(event: Record<string, unknown>): Record<string, unknown> {
+  const rawPayload = event.payload_json;
+  if (typeof rawPayload === 'string') {
+    try {
+      return JSON.parse(rawPayload) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+  return (event.payload || {}) as Record<string, unknown>;
+}
+
+function rebuildMessagesFromEvents(events: Record<string, unknown>[]): ChatMessage[] {
+  const rebuilt: ChatMessage[] = [];
+  const toolMessageMap = new Map<string, string>();
+
+  for (const event of events) {
+    const payload = parseEventPayload(event);
+    const eventType = String(event.event_type || '');
+
+    if (eventType === 'user.input') {
+      rebuilt.push({ id: makeId(), role: 'user', content: String(payload.content || ''), timestamp: Date.now() });
+      continue;
+    }
+
+    if (eventType === 'tool.call_requested') {
+      const toolInfo: ToolInfo = {
+        name: String(payload.tool_name || ''),
+        arguments: (payload.arguments || {}) as Record<string, unknown>,
+        status: 'running',
+      };
+      const message: ChatMessage = {
+        id: makeId(),
+        role: 'tool',
+        content: `Executing tool: ${payload.tool_name || ''}`,
+        timestamp: Date.now(),
+        toolInfo,
+      };
+      rebuilt.push(message);
+      toolMessageMap.set(String(payload.tool_call_id || ''), message.id);
+      continue;
+    }
+
+    if (eventType === 'tool.call_result') {
+      const messageId = toolMessageMap.get(String(payload.tool_call_id || ''));
+      if (!messageId) continue;
+      const messageIndex = rebuilt.findIndex((message) => message.id === messageId);
+      if (messageIndex === -1) continue;
+
+      rebuilt[messageIndex] = {
+        ...rebuilt[messageIndex],
+        content: `Tool Finished: ${payload.tool_name || ''}`,
+        toolInfo: {
+          name: String(payload.tool_name || ''),
+          arguments: rebuilt[messageIndex].toolInfo?.arguments || {},
+          result: truncateResult(payload.result),
+          success: Boolean(payload.success),
+          error: String(payload.error || ''),
+          status: 'completed',
+        },
+      };
+      continue;
+    }
+
+    if (eventType === 'agent.step_completed') {
+      const response =
+        String(payload.final_response || '') ||
+        String(((payload.result as Record<string, unknown> | undefined)?.content) || '');
+      if (response) {
+        rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+      }
+      continue;
+    }
+
+    if (eventType === 'notification.session') {
+      const metadata = (payload.metadata || {}) as Record<string, unknown>;
+      const body = String(payload.body || payload.text || '');
+      if (body && metadata.append_to_chat !== false) {
+        rebuilt.push({ id: makeId(), role: 'system', content: body, timestamp: Date.now() });
+      }
+    }
+  }
+
+  return rebuilt;
 }
 
 // ── Message Bubble ─────────────────────────────────────
@@ -247,6 +337,7 @@ function TargetSelector({
 function ChatPageInner() {
   const searchParams = useSearchParams();
   const initialAgent = searchParams.get('agent') || 'default';
+  const { pushNotification } = useNotification();
 
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -261,6 +352,10 @@ function ChatPageInner() {
   const [selectedAgent, setSelectedAgent] = useState(initialAgent);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const shouldReconnectRef = useRef(true);
+  const sessionIdRef = useRef<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
@@ -288,6 +383,59 @@ function ChatPageInner() {
   const { showMenu, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmit } = useSlashCommand(
     inputValue, setInputValue, handleSkillInvoke,
   );
+
+  const wsSend = useCallback((msg: Record<string, unknown>) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(msg));
+    }
+  }, []);
+
+  const bindSessionToCurrentSocket = useCallback((sid: string | null) => {
+    if (!sid) return;
+    wsSend({
+      type: 'load_session',
+      payload: { session_id: sid },
+      timestamp: Date.now() / 1000,
+    });
+  }, [wsSend]);
+
+  const loadSessionList = useCallback(async () => {
+    setLoadingSessions(true);
+    try {
+      const res = await authFetch(`${API_BASE}/api/sessions`);
+      const d = await res.json();
+      setSessions(d.sessions || []);
+    } catch {
+      // 服务重启窗口期允许失败，后续由重连回调补拉。
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, []);
+
+  const reloadSessionHistory = useCallback(async (sid: string, shouldBind = true) => {
+    setSessionId(sid);
+    setMessages([]);
+    setIsTyping(false);
+    toolCallMapRef.current.clear();
+    clearInteractions();
+
+    if (shouldBind) {
+      bindSessionToCurrentSocket(sid);
+    }
+
+    try {
+      const res = await authFetch(`${API_BASE}/api/sessions/${sid}/events`);
+      const d = await res.json();
+      const events = (d.events || []) as Record<string, unknown>[];
+      setMessages(rebuildMessagesFromEvents(events));
+    } catch {
+      // 服务重启窗口期允许失败，历史会在后续 load_session/刷新中恢复。
+    }
+  }, [bindSessionToCurrentSocket]);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   const interactionKey = (interaction: PendingInteraction) => `${interaction.kind}:${interaction.interactionId}`;
 
@@ -362,6 +510,16 @@ function ChatPageInner() {
         }
         break;
       }
+      case 'session_loaded': {
+        const sid = typeof data.session_id === 'string' ? data.session_id : null;
+        const events = Array.isArray(payload.events) ? payload.events as Record<string, unknown>[] : [];
+        if (sid) {
+          setSessionId(sid);
+          setMessages(rebuildMessagesFromEvents(events));
+          setIsTyping(false);
+        }
+        break;
+      }
       case 'agent_thinking':
         setIsTyping(true);
         break;
@@ -417,8 +575,28 @@ function ChatPageInner() {
         clearInteractions();
         break;
       case 'notification': {
-        const text = String(payload.text || '');
-        if (text) addMsg('system', text);
+        const title = String(payload.title || 'Notification');
+        const body = String(payload.body || payload.text || '');
+        const metadata = (payload.metadata || {}) as Record<string, unknown>;
+        const shouldShowToast = metadata.show_toast !== false;
+        const shouldShowBrowser = metadata.show_browser === true;
+        if (body) {
+          pushNotification({
+            title,
+            body,
+            level: String(payload.level || 'info') as 'info' | 'warning' | 'error' | 'success',
+            source: String(payload.source || 'system'),
+            createdAtMs: Number(payload.created_at_ms || Date.now()),
+          }, {
+            toast: shouldShowToast,
+            browser: shouldShowBrowser,
+          });
+        }
+        const targetSessionId = typeof data.session_id === 'string' ? data.session_id : null;
+        const shouldAppendToChat = Boolean(metadata.append_to_chat);
+        if (body && shouldAppendToChat && (!targetSessionId || targetSessionId === sessionIdRef.current)) {
+          addMsg('system', body);
+        }
         break;
       }
       case 'tool_confirmation_requested': {
@@ -479,42 +657,82 @@ function ChatPageInner() {
   handleWsMessageRef.current = handleWsMessage;
 
   useEffect(() => {
-    // 从 cookie 读取 token（Jupyter-lab 风格认证）
-    const cookieMatch = document.cookie.match(/(?:^|; )agentos_token=([^;]*)/);
-    const token = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
-    const wsUrl = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
-
-    let ws: WebSocket | null = null;
     let cancelled = false;
 
-    // 延迟连接，避免 React Strict Mode 双重执行时第一个连接被立即关闭
-    const timer = setTimeout(() => {
-      if (cancelled) return;
-      ws = new WebSocket(wsUrl);
+    const scheduleReconnect = () => {
+      if (cancelled || !shouldReconnectRef.current) return;
+      if (reconnectAttemptsRef.current >= WS_MAX_RECONNECT_ATTEMPTS) return;
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+
+      reconnectAttemptsRef.current += 1;
+      reconnectTimerRef.current = setTimeout(connect, WS_RECONNECT_INTERVAL_MS);
+    };
+
+    const connect = () => {
+      if (cancelled || !shouldReconnectRef.current) return;
+
+      const cookieMatch = document.cookie.match(/(?:^|; )agentos_token=([^;]*)/);
+      const token = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
+      const wsUrl = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
+
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
-      ws.onopen = () => setWsConnected(true);
-      ws.onclose = () => setWsConnected(false);
-      ws.onerror = () => setWsConnected(false);
+
+      ws.onopen = () => {
+        if (cancelled || wsRef.current !== ws) return;
+        setWsConnected(true);
+        reconnectAttemptsRef.current = 0;
+        loadSessionList();
+        bindSessionToCurrentSocket(sessionIdRef.current);
+      };
+
+      ws.onclose = () => {
+        if (wsRef.current !== ws && wsRef.current !== null) return;
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+        }
+        setWsConnected(false);
+        scheduleReconnect();
+      };
+
+      ws.onerror = () => {
+        if (wsRef.current !== ws) return;
+        setWsConnected(false);
+        if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      };
+
       ws.onmessage = (event) => {
         try {
           handleWsMessageRef.current(JSON.parse(event.data));
-        } catch { /* ignore */ }
+        } catch {
+          // ignore
+        }
       };
-    }, 50);
+    };
+
+    shouldReconnectRef.current = true;
+    const timer = setTimeout(connect, 50);
 
     return () => {
       cancelled = true;
+      shouldReconnectRef.current = false;
       clearTimeout(timer);
-      if (ws) ws.close();
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (wsRef.current) {
+        const activeSocket = wsRef.current;
+        wsRef.current = null;
+        activeSocket.close();
+      }
     };
-  }, []);
+  }, [bindSessionToCurrentSocket, loadSessionList]);
 
   function addMsg(role: ChatMessage['role'], content: string) {
     setMessages(prev => [...prev, { id: makeId(), role, content, timestamp: Date.now() }]);
-  }
-
-  function wsSend(msg: Record<string, unknown>) {
-    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(msg));
   }
 
   const sendQuestionAnswer = (answer: string | string[] | null, cancelled: boolean) => {
@@ -569,60 +787,15 @@ function ChatPageInner() {
 
   // ── Sessions ──
 
-  const loadSessionList = async () => {
-    setLoadingSessions(true);
-    try {
-      const res = await authFetch(`${API_BASE}/api/sessions`);
-      const d = await res.json();
-      setSessions(d.sessions || []);
-    } catch { /* ignore */ }
-    finally { setLoadingSessions(false); }
-  };
-
-  useEffect(() => { loadSessionList(); }, []);
+  useEffect(() => { loadSessionList(); }, [loadSessionList]);
 
   const switchSession = async (sid: string) => {
-    setSessionId(sid);
-    setMessages([]);
-    setIsTyping(false);
-    toolCallMapRef.current.clear();
-    clearInteractions();
-    try {
-      const res = await authFetch(`${API_BASE}/api/sessions/${sid}/events`);
-      const d = await res.json();
-      const events = (d.events || []) as Record<string, unknown>[];
-      const rebuilt: ChatMessage[] = [];
-      const tMap = new Map<string, string>();
-      for (const ev of events) {
-        const p = JSON.parse(ev.payload_json as string);
-        const et = ev.event_type as string;
-        if (et === 'user.input') {
-          rebuilt.push({ id: makeId(), role: 'user', content: p.content || '', timestamp: Date.now() });
-        } else if (et === 'tool.call_requested') {
-          const ti: ToolInfo = { name: p.tool_name || '', arguments: p.arguments || {}, status: 'running' };
-          const m: ChatMessage = { id: makeId(), role: 'tool', content: `Executing tool: ${p.tool_name}`, timestamp: Date.now(), toolInfo: ti };
-          rebuilt.push(m);
-          tMap.set(p.tool_call_id, m.id);
-        } else if (et === 'tool.call_result') {
-          const mid = tMap.get(p.tool_call_id);
-          if (mid) {
-            const idx = rebuilt.findIndex(m => m.id === mid);
-            if (idx !== -1) {
-              rebuilt[idx] = { ...rebuilt[idx], content: `Tool Finished: ${p.tool_name}`, toolInfo: { name: p.tool_name || '', arguments: rebuilt[idx].toolInfo?.arguments || {}, result: truncateResult(p.result), success: p.success, error: p.error, status: 'completed' } };
-            }
-          }
-        } else if (et === 'agent.step_completed') {
-          // 兼容两种格式：raw payload {result: {content}} 和映射后的 {final_response}
-          const resp = p.final_response || (p.result && p.result.content) || '';
-          if (resp) rebuilt.push({ id: makeId(), role: 'assistant', content: resp, timestamp: Date.now() });
-        }
-      }
-      setMessages(rebuilt);
-    } catch { /* ignore */ }
+    await reloadSessionHistory(sid);
   };
 
   const startNewChat = () => {
     setSessionId(null);
+    sessionIdRef.current = null;
     setMessages([]);
     setIsTyping(false);
     toolCallMapRef.current.clear();

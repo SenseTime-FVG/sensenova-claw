@@ -35,13 +35,14 @@ from agentos.kernel.runtime.tool_runtime import ToolRuntime
 from agentos.capabilities.skills.registry import SkillRegistry
 from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.adapters.plugins import PluginRegistry
-from agentos.platform.security.path_policy import PathPolicy
+from agentos.kernel.notification.service import NotificationService
 from agentos.platform.config.workspace import (
     ensure_agentos_home,
     ensure_agent_workspace,
     resolve_agentos_home,
 )
 from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api
+from agentos.interfaces.http import cron_api, notification_api
 
 # Token 认证模块（Jupyter-lab 风格）
 from agentos.platform.security.auth import TokenAuthService
@@ -67,6 +68,7 @@ class Services:
     ws_channel: WebSocketChannel
     cron_runtime: CronRuntime
     heartbeat_runtime: HeartbeatRuntime
+    notification_service: NotificationService
     # Token 认证服务（Jupyter-lab 风格）
     auth_service: TokenAuthService
 
@@ -89,17 +91,13 @@ async def lifespan(app: FastAPI):
     repo = Repository(db_path=db_path)
     await repo.init()
 
-    # 路径安全策略：AGENTOS_HOME 为 GREEN zone
-    granted_paths = config.get("system.granted_paths", [])
-    path_policy = PathPolicy(workspace=agentos_home, granted_paths=granted_paths)
-    app.state.path_policy = path_policy
-
     # 会话维护：清理过期会话
     maintenance = SessionMaintenance(repo=repo)
     await maintenance.run_maintenance()
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
+    notification_service = NotificationService(bus=bus)
 
     # 事件持久化：独立订阅 PublicEventBus
     persister = EventPersister(bus=bus, repo=repo)
@@ -180,6 +178,10 @@ async def lifespan(app: FastAPI):
 
         logger.info("Memory system enabled (home=%s)", agentos_home_str)
 
+    # Session JSONL 写入器：按 agent 分目录存储会话到 {agentos_home}/agents/{agent_id}/sessions/
+    from agentos.adapters.storage.session_jsonl import SessionJsonlWriter
+    jsonl_writer = SessionJsonlWriter(base_dir=agentos_home / "agents")
+
     # Runtime 使用 BusRouter（管理者模式）
     agent_runtime = AgentRuntime(
         bus_router=bus_router,
@@ -189,10 +191,10 @@ async def lifespan(app: FastAPI):
         state_store=state_store,
         agent_registry=agent_registry,
         memory_manager=memory_manager,
+        jsonl_writer=jsonl_writer,
     )
     llm_runtime = LLMRuntime(bus_router=bus_router, factory=llm_factory)
     tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry,
-                               path_policy=path_policy,
                                agent_registry=agent_registry)
     agent_message_coordinator = AgentMessageCoordinator(
         bus=bus,
@@ -237,8 +239,8 @@ async def lifespan(app: FastAPI):
     await gateway.start()
 
     # v0.8: Cron 定时任务 + Heartbeat 心跳巡检
-    cron_runtime = CronRuntime(bus=bus, repo=repo, gateway=gateway)
-    heartbeat_runtime = HeartbeatRuntime(bus=bus, repo=repo)
+    cron_runtime = CronRuntime(bus=bus, repo=repo, gateway=gateway, notification_service=notification_service)
+    heartbeat_runtime = HeartbeatRuntime(bus=bus, repo=repo, notification_service=notification_service)
     if config.get("cron.enabled", True):
         tool_registry.register(CronTool(cron_runtime))
     await cron_runtime.start()
@@ -266,6 +268,7 @@ async def lifespan(app: FastAPI):
         ws_channel=ws_channel,
         cron_runtime=cron_runtime,
         heartbeat_runtime=heartbeat_runtime,
+        notification_service=notification_service,
         auth_service=auth_service,
     )
     # 挂载 registries 供 API 路由使用
@@ -367,6 +370,8 @@ from agentos.interfaces.http.skills import invoke_router
 app.include_router(invoke_router)
 app.include_router(workspace.router)
 app.include_router(config_api.router)
+app.include_router(cron_api.router)
+app.include_router(notification_api.router)
 
 
 @app.get("/health")

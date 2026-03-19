@@ -9,6 +9,7 @@ from typing import Any, TYPE_CHECKING
 
 from agentos.kernel.scheduler.models import (
     AtSchedule,
+    CronDelivery,
     CronJob,
     CronSchedule,
     EverySchedule,
@@ -56,6 +57,15 @@ class CronTool(Tool):
                 "type": "string",
                 "description": "任务ID（remove 时必填）",
             },
+            "send_to_current_session": {
+                "type": "boolean",
+                "description": "是否将提醒消息发送回当前会话，默认 true",
+            },
+            "notification_channels": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["browser", "native"]},
+                "description": "额外通知渠道，如 browser/native",
+            },
         },
         "required": ["action"],
     }
@@ -79,6 +89,12 @@ class CronTool(Tool):
         text = kwargs.get("text", "")
         name = kwargs.get("name")
         session_id = kwargs.get("_session_id", "")
+        send_to_current_session = bool(kwargs.get("send_to_current_session", True))
+        notification_channels = [
+            channel
+            for channel in kwargs.get("notification_channels", [])
+            if channel in {"browser", "native"}
+        ]
 
         # 构建 Schedule
         if schedule_type == "at":
@@ -90,8 +106,14 @@ class CronTool(Tool):
         else:
             return {"error": f"未知调度类型: {schedule_type}"}
 
-        # 根据当前 session 自动解析投递目标
-        delivery = self._runtime.resolve_delivery_for_session(session_id)
+        delivery = None
+        if send_to_current_session and session_id:
+            delivery = self._runtime.resolve_delivery_for_session(session_id)
+        elif notification_channels:
+            delivery = CronDelivery(mode="none", session_id=session_id or None)
+
+        if delivery:
+            delivery.notification_channels = notification_channels
 
         job = CronJob(
             name=name,
@@ -107,6 +129,8 @@ class CronTool(Tool):
             "name": job.name,
             "next_run_at_ms": job.state.next_run_at_ms,
             "delivery_channel": delivery.channel_id if delivery else None,
+            "delivery_session_id": delivery.session_id if delivery else None,
+            "notification_channels": delivery.notification_channels if delivery else [],
         }
 
     async def _list(self) -> dict:

@@ -1,98 +1,156 @@
-# AgentOS 配置文件
+# AgentOS 配置文件示例
+# 复制此文件为 config.yml 并填入真实的 API Key
 
 system:
   workspace_dir: ~/.agentos/workspace
   database_path: ~/.agentos/db/agentos.db
-  max_concurrent_sessions: 10
 
-# 安全配置（Jupyter-lab 风格 token 认证）
 security:
-  auth_enabled: true  # 所有 API/WebSocket 需要 token（启动时终端打印）
+  auth_enabled: true
 
 # ════════════════════════════════════════════════════
 # LLM 配置
 # ════════════════════════════════════════════════════
 llm:
-  # Provider 注册表：只描述如何连接各家模型服务
   providers:
     anthropic:
-      api_key: "sk-ant-oat01-4e8a4c54efb87340e0717e7ad743f4b14ef7374ae983397477732375ea39bdc9"
-      base_url: https://api.anthropic.com
+      api_key: ${ANTHROPIC_API_KEY}
+      base_url: ${ANTHROPIC_BASE_URL}
       timeout: 60
       max_retries: 3
 
     openai:
-      api_key: "sk-proj-1234567890"
-      base_url: https://api.openai.com/v1
+      api_key: ${OPENAI_API_KEY}
+      base_url: ${OPENAI_BASE_URL}
       timeout: 60
       max_retries: 3
 
     gemini:
-      api_key: "NalkM8RX0D7RFrhKCvi1"
-      base_url: https://genaiapi.cloudsway.net/v1/ai/vEHkTgVnLcrvHENf
+      api_key: ${GEMINI_API_KEY}
+      base_url: ${GEMINI_BASE_URL}
       timeout: 120
       max_retries: 3
 
-  # 模型注册表：统一定义系统中可用的模型
+    kimi:
+      api_key: ${KIMI_API_KEY}
+      base_url: https://api.moonshot.cn/v1
+      timeout: 60
+      max_retries: 3
+
+    glm:
+      api_key: ${GLM_API_KEY}
+      base_url: https://open.bigmodel.cn/api/paas/v4/
+      timeout: 60
+      max_retries: 3
+
+    minimax:
+      api_key: ${MINIMAX_API_KEY}
+      base_url: https://api.minimax.chat/v1
+      timeout: 60
+      max_retries: 3
+
+    qwen:
+      api_key: ${QWEN_API_KEY}
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      timeout: 60
+      max_retries: 3
+
+    deepseek:
+      api_key: ${DEEPSEEK_API_KEY}
+      base_url: https://api.deepseek.com
+      timeout: 60
+      max_retries: 3
+
+    step:
+      api_key: ${STEP_API_KEY}
+      base_url: https://api.stepfun.com/v1
+      timeout: 60
+      max_retries: 3
+
   models:
-    claude_opus:
+    # ── Anthropic ──
+    claude-opus:
       provider: anthropic
       model_id: claude-opus-4-6
       timeout: 60
       max_output_tokens: 8192
-      capabilities:
-        - chat
-        - tools
-        - reasoning
 
-    claude_sonnet:
+    claude-sonnet:
       provider: anthropic
-      model_id: claude-sonnet-4-20250514
+      model_id: claude-sonnet-4-6
       timeout: 60
       max_output_tokens: 8192
-      capabilities:
-        - chat
-        - tools
 
-    gpt_4o:
+    # ── OpenAI ──
+    gpt-5.4:
       provider: openai
-      model_id: gpt-4o
+      model_id: gpt-5.4
       timeout: 60
       max_output_tokens: 8192
-      capabilities:
-        - chat
-        - tools
-        - vision
 
-    gpt_4o_mini:
-      provider: openai
-      model_id: gpt-4o-mini
-      timeout: 60
-      max_output_tokens: 8192
-      capabilities:
-        - chat
-        - tools
-
-    gemini_pro:
+    # ── Gemini ──
+    gemini-pro:
       provider: gemini
-      model_id: gemini-2.5-pro
+      model_id: gemini-2.0-flash
       timeout: 120
       max_output_tokens: 8192
-      capabilities:
-        - chat
-        - tools
-        - reasoning
 
-  # 全局默认模型（引用 models 中的 key）
-  default_model: claude_sonnet
+    # ── Kimi (Moonshot) ──
+    kimi-k2.5:
+      provider: kimi
+      model_id: kimi-k2.5
+      timeout: 60
+      max_output_tokens: 262144
+
+    # ── GLM (智谱) ──
+    glm-5:
+      provider: glm
+      model_id: GLM-5
+      timeout: 60
+      max_output_tokens: 200000
+
+    # ── Minimax ──
+    minimax-m2.7:
+      provider: minimax
+      model_id: MiniMax-M2.7-highspeed
+      timeout: 60
+      max_output_tokens: 204800
+
+    # ── Qwen (通义千问) ──
+    qwen-3.5-plus:
+      provider: qwen
+      model_id: qwen3.5-plus
+      timeout: 60
+      max_output_tokens: 1000000
+
+    # ── Deepseek ──
+    deepseek-chat:
+      provider: deepseek
+      model_id: deepseek-chat
+      timeout: 60
+      max_output_tokens: 128000
+
+    # ── Step (阶跃星辰) ──
+    step-3.5-flash:
+      provider: step
+      model_id: step-3.5-flash
+      timeout: 60
+      max_output_tokens: 256000
+
+  default_model: gemini-pro
 
 # ════════════════════════════════════════════════════
 # Agents 配置
 # ════════════════════════════════════════════════════
-# 每个 agent 的详细配置放在 ~/.agentos/agents/{id}/config.yml
-# 这里只声明 agent id 列表
 agents:
-  - default
+  default:
+    name: Default Agent
+    description: 默认 AI Agent
+    model: gemini-pro
+    temperature: 0.6
+    system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
+    tools: []
+    skills: []
 
 # ════════════════════════════════════════════════════
 # 工具配置
@@ -100,30 +158,21 @@ agents:
 tools:
   serper_search:
     enabled: true
-    api_key: ""
+    api_key: ${SERPER_API_KEY}
     timeout: 15
     max_results: 10
 
 # Skills 配置
 skills:
-  extra_dirs:
-    - ./backend/app/skills/feishu
-  entries:
-    feishu-doc:
-      enabled: true
-    feishu-wiki:
-      enabled: true
-    feishu-drive:
-      enabled: true
-    feishu-perm:
-      enabled: true
+  extra_dirs: []
+  entries: {}
 
 # 插件配置
 plugins:
   feishu:
-    enabled: true
-    app_id: ""
-    app_secret: ""
+    enabled: false
+    app_id: "${FEISHU_APP_ID}"
+    app_secret: "${FEISHU_APP_SECRET}"
     dm_policy: "open"
     group_policy: "mention"
     log_level: "INFO"

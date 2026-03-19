@@ -303,20 +303,13 @@ class DownloadAttachmentTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        from agentos.platform.security.path_policy import PathPolicy, PathVerdict
+        kwargs.pop("_path_policy", None)
 
         email_config = config.get("tools.email", {})
         if not email_config.get("enabled"):
             return {"success": False, "error": "邮件功能未启用"}
 
         save_path = kwargs["save_path"]
-        policy: PathPolicy | None = kwargs.pop("_path_policy", None)
-        if policy:
-            verdict = policy.check_write(save_path)
-            if verdict == PathVerdict.DENY:
-                return {"success": False, "error": f"路径不允许: {save_path}"}
-            if verdict == PathVerdict.NEED_GRANT:
-                return {"success": False, "error": f"路径需要授权: {save_path}"}
 
         imap_host = email_config.get("imap_host")
         imap_port = email_config.get("imap_port", 993)

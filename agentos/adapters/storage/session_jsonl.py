@@ -3,7 +3,8 @@
 文件布局：
   {base_dir}/
     {agent_id}/
-      {session_id}.jsonl
+      sessions/
+        {session_id}.jsonl
 
 每行一个 JSON 对象，格式：
   {"ts": 1710000000.0, "session_id": "...", "turn_id": "...", "role": "user", "content": "...", ...}
@@ -29,7 +30,7 @@ class SessionJsonlWriter:
     def _session_path(self, agent_id: str, session_id: str) -> Path:
         safe_agent = agent_id.replace("/", "_").replace("\\", "_") or "default"
         safe_session = session_id.replace("/", "_").replace("\\", "_")
-        return self.base_dir / safe_agent / f"{safe_session}.jsonl"
+        return self.base_dir / safe_agent / "sessions" / f"{safe_session}.jsonl"
 
     def append(
         self,

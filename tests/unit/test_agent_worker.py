@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from unittest.mock import AsyncMock
 
@@ -30,6 +31,7 @@ from agentos.kernel.events.types import (
 from agentos.kernel.runtime.context_builder import ContextBuilder
 from agentos.kernel.runtime.state import SessionStateStore, TurnState
 from agentos.kernel.runtime.workers.agent_worker import AgentSessionWorker
+from agentos.platform.config.config import config
 
 
 # ── 真实 AgentRuntime 替身 ────────────────────────────────
@@ -124,8 +126,8 @@ class TestConfigHelpers:
     """配置读取辅助方法测试"""
 
     def test_get_provider_from_agent_config(self, private_bus, runtime):
-        # model key "claude_sonnet" → provider 应为 "anthropic"
-        agent_cfg = AgentConfig(id="test", name="test", model="claude_sonnet")
+        # model key "claude-sonnet" → provider 应为 "anthropic"
+        agent_cfg = AgentConfig(id="test", name="test", model="claude-sonnet")
         worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
         assert worker._get_provider() == "anthropic"
 
@@ -135,8 +137,8 @@ class TestConfigHelpers:
         assert isinstance(provider, str)
 
     def test_get_model_from_agent_config(self, private_bus, runtime):
-        # model key "claude_opus" → model_id 应为 "claude-opus-4-6"
-        agent_cfg = AgentConfig(id="test", name="test", model="claude_opus")
+        # model key "claude-opus" → model_id 应为 "claude-opus-4-6"
+        agent_cfg = AgentConfig(id="test", name="test", model="claude-opus")
         worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
         assert worker._get_model() == "claude-opus-4-6"
 
@@ -149,6 +151,17 @@ class TestConfigHelpers:
         worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=None)
         temp = worker._get_temperature()
         assert isinstance(temp, (int, float))
+
+    def test_get_model_key_fallback_to_legacy_agent_default_model(self, private_bus, runtime):
+        original = copy.deepcopy(config.data)
+        try:
+            config.data["agent"]["model"] = ""
+            config.data["agent"]["default_model"] = "mock-agent-v1"
+            worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=None)
+            assert worker._get_model() == "mock-agent-v1"
+            assert worker._get_provider() == "mock"
+        finally:
+            config.data = original
 
     def test_get_filtered_tools_no_config(self, private_bus, runtime):
         """无 agent_config 时返回全部工具"""

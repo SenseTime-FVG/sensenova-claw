@@ -20,10 +20,10 @@ def app(tmp_path):
     initial = {
         "llm": {
             "providers": {"openai": {"api_key": "sk-xxx"}},
-            "models": {"gpt_4o_mini": {"provider": "openai", "model_id": "gpt-4o-mini"}},
-            "default_model": "gpt_4o_mini",
+            "models": {"gpt-5.4": {"provider": "openai", "model_id": "gpt-5.4"}},
+            "default_model": "gpt-5.4",
         },
-        "agent": {"model": "gpt_4o_mini", "temperature": 0.2},
+        "agent": {"model": "gpt-5.4", "temperature": 0.2},
         "plugins": {},
     }
     config_path.write_text(yaml.dump(initial), encoding="utf-8")
@@ -49,7 +49,7 @@ def test_get_sections(client):
     assert "llm" in data
     assert "agent" in data
     assert "plugins" in data
-    assert data["agent"]["model"] == "gpt_4o_mini"
+    assert data["agent"]["model"] == "gpt-5.4"
 
 
 def test_get_sections_has_defaults(client, app):
@@ -66,7 +66,7 @@ def test_get_sections_has_defaults(client, app):
 def test_update_sections(client, app):
     """正常更新 agent section"""
     resp = client.put("/api/config/sections", json={
-        "agent": {"model": "claude_opus", "temperature": 0.5},
+        "agent": {"model": "claude-opus", "temperature": 0.5},
     })
     assert resp.status_code == 200
     data = resp.json()
@@ -74,7 +74,7 @@ def test_update_sections(client, app):
     assert "sections" in data
     raw = app.state.config._config_path.read_text(encoding="utf-8")
     written = yaml.safe_load(raw)
-    assert written["agent"]["model"] == "claude_opus"
+    assert written["agent"]["model"] == "claude-opus"
 
 
 def test_update_sections_multiple(client, app):

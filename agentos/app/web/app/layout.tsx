@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Inter } from "next/font/google";
+import { NotificationProvider } from '@/components/notification/NotificationProvider';
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -23,11 +24,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             enableSystem
             disableTransitionOnChange
           >
+          <NotificationProvider>
             <AuthProvider>
               <ProtectedRoute>
                 {children}
               </ProtectedRoute>
             </AuthProvider>
+          </NotificationProvider>
         </ThemeProvider>
       </body>
     </html>
