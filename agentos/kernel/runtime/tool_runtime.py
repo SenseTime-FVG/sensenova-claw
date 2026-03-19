@@ -6,7 +6,6 @@ from typing import Any
 from agentos.kernel.events.bus import PrivateEventBus
 from agentos.kernel.events.router import BusRouter
 from agentos.kernel.runtime.workers.tool_worker import ToolSessionWorker
-from agentos.platform.security.path_policy import PathPolicy
 from agentos.capabilities.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -16,11 +15,9 @@ class ToolRuntime:
     """全局单例管理者：持有 ToolRegistry，管理 ToolSessionWorker 生命周期"""
 
     def __init__(self, bus_router: BusRouter, registry: ToolRegistry,
-                 path_policy: PathPolicy | None = None,
                  agent_registry: Any = None):
         self.bus_router = bus_router
         self.registry = registry
-        self.path_policy = path_policy
         self.agent_registry = agent_registry
         self._workers: dict[str, ToolSessionWorker] = {}
 

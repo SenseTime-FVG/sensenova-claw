@@ -67,4 +67,5 @@ class AskUserTool(Tool):
             session_id=kwargs.get("_session_id", ""),
             turn_id=kwargs.get("_turn_id", ""),
             tool_call_id=kwargs.get("_tool_call_id", ""),
+            source_agent_id=kwargs.get("_source_agent_id", "default"),
         )

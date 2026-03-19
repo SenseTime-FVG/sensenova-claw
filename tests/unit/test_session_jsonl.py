@@ -14,7 +14,7 @@ class TestSessionJsonlWriter:
             "role": "user", "content": "hello",
         })
 
-        path = tmp_path / "searcher-agent" / "sess_abc.jsonl"
+        path = tmp_path / "searcher-agent" / "sessions" / "sess_abc.jsonl"
         assert path.exists()
         lines = path.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 1
@@ -38,7 +38,7 @@ class TestSessionJsonlWriter:
             "role": "tool", "content": "ok", "name": "bash_command", "tool_call_id": "tc1",
         })
 
-        path = tmp_path / "default" / "s1.jsonl"
+        path = tmp_path / "default" / "sessions" / "s1.jsonl"
         lines = path.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 4
 
@@ -55,18 +55,18 @@ class TestSessionJsonlWriter:
         writer.append("agent-a", "s1", "t1", {"role": "user", "content": "a"})
         writer.append("agent-b", "s2", "t1", {"role": "user", "content": "b"})
 
-        assert (tmp_path / "agent-a" / "s1.jsonl").exists()
-        assert (tmp_path / "agent-b" / "s2.jsonl").exists()
+        assert (tmp_path / "agent-a" / "sessions" / "s1.jsonl").exists()
+        assert (tmp_path / "agent-b" / "sessions" / "s2.jsonl").exists()
 
     def test_different_sessions_separate_files(self, tmp_path):
         writer = SessionJsonlWriter(base_dir=tmp_path)
         writer.append("default", "s1", "t1", {"role": "user", "content": "a"})
         writer.append("default", "s2", "t1", {"role": "user", "content": "b"})
 
-        assert (tmp_path / "default" / "s1.jsonl").exists()
-        assert (tmp_path / "default" / "s2.jsonl").exists()
-        lines_s1 = (tmp_path / "default" / "s1.jsonl").read_text(encoding="utf-8").strip().split("\n")
-        lines_s2 = (tmp_path / "default" / "s2.jsonl").read_text(encoding="utf-8").strip().split("\n")
+        assert (tmp_path / "default" / "sessions" / "s1.jsonl").exists()
+        assert (tmp_path / "default" / "sessions" / "s2.jsonl").exists()
+        lines_s1 = (tmp_path / "default" / "sessions" / "s1.jsonl").read_text(encoding="utf-8").strip().split("\n")
+        lines_s2 = (tmp_path / "default" / "sessions" / "s2.jsonl").read_text(encoding="utf-8").strip().split("\n")
         assert len(lines_s1) == 1
         assert len(lines_s2) == 1
 
@@ -74,12 +74,12 @@ class TestSessionJsonlWriter:
         """Writer 本身不过滤 system（过滤在 _persist_message 层），直接写入即可"""
         writer = SessionJsonlWriter(base_dir=tmp_path)
         writer.append("default", "s1", "t1", {"role": "system", "content": "sys"})
-        path = tmp_path / "default" / "s1.jsonl"
+        path = tmp_path / "default" / "sessions" / "s1.jsonl"
         assert path.exists()
 
     def test_chinese_content(self, tmp_path):
         writer = SessionJsonlWriter(base_dir=tmp_path)
         writer.append("default", "s1", "t1", {"role": "user", "content": "你好世界"})
-        path = tmp_path / "default" / "s1.jsonl"
+        path = tmp_path / "default" / "sessions" / "s1.jsonl"
         obj = json.loads(path.read_text(encoding="utf-8").strip())
         assert obj["content"] == "你好世界"

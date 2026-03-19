@@ -60,10 +60,9 @@ export default function AgentDetailPage() {
   // Per-agent config 编辑状态
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
-  const [editProvider, setEditProvider] = useState('');
   const [editModel, setEditModel] = useState('');
   const [editTemp, setEditTemp] = useState('0.2');
-  const [editMaxTokens, setEditMaxTokens] = useState('');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [editPrompt, setEditPrompt] = useState('');
   const [editDelegateTo, setEditDelegateTo] = useState<string[]>([]);
   const [editMaxDepth, setEditMaxDepth] = useState('3');
@@ -82,10 +81,8 @@ export default function AgentDetailPage() {
         // 初始化编辑状态
         setEditName(data.name || '');
         setEditDesc(data.description || '');
-        setEditProvider(data.provider || '');
         setEditModel(data.model || '');
         setEditTemp(String(data.temperature ?? 0.2));
-        setEditMaxTokens(data.maxTokens ? String(data.maxTokens) : '');
         setEditPrompt(data.systemPrompt || '');
         setEditDelegateTo(data.canDelegateTo || []);
         setEditMaxDepth(String(data.maxDelegationDepth ?? 3));
@@ -103,13 +100,22 @@ export default function AgentDetailPage() {
 
   useEffect(() => { loadAgent(); }, [loadAgent]);
 
-  // 加载所有 agent 列表（用于委托配置）
+  // 加载所有 agent 列表（用于委托配置）和可用模型列表
   useEffect(() => {
     if (activeTab === 'config') {
       authFetch(`${API_BASE}/api/agents`)
         .then(res => res.json())
         .then(data => setAllAgents(data.map((a: AgentSummary) => ({ id: a.id, name: a.name }))))
         .catch(() => setAllAgents([]));
+      authFetch(`${API_BASE}/api/config/sections`)
+        .then(res => res.json())
+        .then(data => {
+          const models = data?.llm?.models;
+          if (models && typeof models === 'object') {
+            setAvailableModels(Object.keys(models).filter(k => k !== 'mock'));
+          }
+        })
+        .catch(() => setAvailableModels([]));
     }
   }, [activeTab]);
 
@@ -121,14 +127,12 @@ export default function AgentDetailPage() {
       const body: Record<string, unknown> = {
         name: editName,
         description: editDesc,
-        provider: editProvider || undefined,
         model: editModel || undefined,
         temperature: parseFloat(editTemp) || 0.2,
         systemPrompt: editPrompt,
         can_delegate_to: editDelegateTo,
         max_delegation_depth: parseInt(editMaxDepth) || 3,
       };
-      if (editMaxTokens) body.max_tokens = parseInt(editMaxTokens) || undefined;
       const res = await authFetch(`${API_BASE}/api/agents/${agentId}/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -328,13 +332,22 @@ export default function AgentDetailPage() {
                     </div>
                   </ConfigSection>
 
-                  <ConfigSection title="LLM Backend" desc="Model provider and generation parameters" expanded={expandedSections.llm}
+                  <ConfigSection title="LLM Backend" desc="Model selection and generation parameters" expanded={expandedSections.llm}
                     onToggle={() => setExpandedSections(p => ({ ...p, llm: !p.llm }))}>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <CfgInput label="Provider" value={editProvider} onChange={setEditProvider} />
-                      <CfgInput label="Model" value={editModel} onChange={setEditModel} />
+                      <div className="space-y-1.5">
+                        <label className="text-muted-foreground text-sm font-semibold">Model</label>
+                        <select value={editModel} onChange={e => setEditModel(e.target.value)}
+                          className="w-full bg-background border border-input rounded-xl px-4 py-2.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm appearance-none cursor-pointer">
+                          {!availableModels.includes(editModel) && editModel && (
+                            <option value={editModel}>{editModel}</option>
+                          )}
+                          {availableModels.map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
                       <CfgInput label="Temperature" type="number" value={editTemp} onChange={setEditTemp} />
-                      <CfgInput label="Max Tokens" type="number" value={editMaxTokens} onChange={setEditMaxTokens} />
                     </div>
                   </ConfigSection>
 

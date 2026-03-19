@@ -32,6 +32,14 @@ class _ErrorProvider(LLMProvider):
         raise RuntimeError("API 超时")
 
 
+class _SilentTimeoutProvider(LLMProvider):
+    """抛出无 message 的 TimeoutError，用于验证错误文案兜底。"""
+
+    async def call(self, **kwargs):
+        _ = kwargs
+        raise asyncio.TimeoutError()
+
+
 class _SimpleLLMRuntime:
     """轻量级 LLMRuntime 替身，持有真实 LLMFactory"""
 
@@ -222,6 +230,24 @@ class TestLLMWorkerError:
         assert "LLM调用失败" in fallback.payload["response"]["content"]
         assert fallback.payload["finish_reason"] == "error"
         assert LLM_CALL_COMPLETED in types
+
+    async def test_timeout_without_message_uses_exception_type(self, private_bus, public_bus):
+        factory = LLMFactory()
+        factory._providers["silent_timeout"] = _SilentTimeoutProvider()
+        runtime = _SimpleLLMRuntime(factory)
+        worker = LLMSessionWorker("s1", private_bus, runtime)
+
+        collected, done, task = await _collect_from_bus(public_bus, 4)
+
+        event = _make_llm_event("silent_timeout", "m", [{"role": "user", "content": "test"}])
+        await worker._handle(event)
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        err = [e for e in collected if e.type == ERROR_RAISED][0]
+        fallback = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+        assert err.payload["error_message"] == "TimeoutError"
+        assert "TimeoutError" in fallback.payload["response"]["content"]
 
 
 # ── 配置回退测试 ──────────────────────────────────────────

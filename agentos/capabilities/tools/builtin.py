@@ -5,6 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -66,6 +67,44 @@ def _resolve_with_workdir(raw_path: str, agent_workdir: str | None) -> Path:
     return p
 
 
+def _resolve_bash_cwd(
+    *,
+    policy: Any,
+    working_dir: Any,
+    agent_workdir: str | None,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """统一解析 bash_command 的 cwd，保证与 agent workdir 语义一致。"""
+    from agentos.platform.security.path_policy import PathVerdict
+
+    cwd_raw = str(working_dir) if working_dir else None
+    resolved_cwd: Path | None = None
+    if cwd_raw:
+        resolved_cwd = _resolve_with_workdir(cwd_raw, agent_workdir)
+    elif agent_workdir:
+        resolved_cwd = Path(agent_workdir).expanduser().resolve()
+
+    if policy:
+        if resolved_cwd is None:
+            return str(policy.workspace), None
+
+        verdict = policy.check_cwd(str(resolved_cwd))
+        blocked_path = cwd_raw or agent_workdir or str(resolved_cwd)
+        if verdict == PathVerdict.DENY:
+            return None, {"success": False, "error": f"系统目录禁止作为工作目录: {blocked_path}"}
+        if verdict == PathVerdict.NEED_GRANT:
+            return None, {
+                "success": False,
+                "error": f"该目录未授权，请先获得用户许可: {blocked_path}",
+                "action": "need_grant",
+                "path": blocked_path,
+            }
+        return str(policy.safe_resolve(str(resolved_cwd))), None
+
+    if resolved_cwd is None:
+        return ".", None
+    return str(resolved_cwd), None
+
+
 class BashCommandTool(Tool):
     name = "bash_command"
     description = "执行 shell 命令"
@@ -80,28 +119,11 @@ class BashCommandTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        from agentos.platform.security.path_policy import PathPolicy, PathVerdict
-
-        policy: PathPolicy | None = kwargs.pop("_path_policy", None)
+        kwargs.pop("_path_policy", None)
+        agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         command = str(kwargs.get("command", ""))
         cwd_raw = kwargs.get("working_dir")
-
-        if policy:
-            if cwd_raw:
-                verdict = policy.check_cwd(cwd_raw)
-                if verdict == PathVerdict.DENY:
-                    return {"success": False, "error": f"系统目录禁止作为工作目录: {cwd_raw}"}
-                if verdict == PathVerdict.NEED_GRANT:
-                    return {
-                        "success": False,
-                        "error": f"该目录未授权，请先获得用户许可: {cwd_raw}",
-                        "action": "need_grant", "path": cwd_raw,
-                    }
-                cwd = str(policy.safe_resolve(cwd_raw))
-            else:
-                cwd = str(policy.workspace)    # 默认在 workspace 执行
-        else:
-            cwd = cwd_raw or "."
+        cwd = cwd_raw or agent_workdir or "."
 
         def _run() -> dict[str, Any]:
             proc = subprocess.run(
@@ -169,6 +191,90 @@ class SerperSearchTool(Tool):
                 )
                 for item in organic
             ],
+        }
+
+
+class ImageSearchTool(Tool):
+    name = "image_search"
+    description = "使用 Serper Images API 搜索图片候选"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "图片搜索关键词"},
+            "top_k": {"type": "integer", "description": "返回候选图片数量，默认使用配置"},
+        },
+        "required": ["query"],
+    }
+
+    async def execute(self, **kwargs: Any) -> Any:
+        query = str(kwargs.get("query") or kwargs.get("q") or "").strip()
+        if not query:
+            return {"success": False, "error": "query 不能为空"}
+
+        api_key = config.get("tools.image_search.api_key", "") or config.get("tools.serper_search.api_key", "")
+        top_k = _clamp_search_limit(
+            kwargs.get("top_k", config.get("tools.image_search.top_k", 10)),
+            default=int(config.get("tools.image_search.top_k", 10)),
+        )
+
+        if not api_key:
+            result = _empty_search_response("serper_images", query, "SERPER_API_KEY 未配置，返回空结果")
+            result["results"] = []
+            result["top_k"] = top_k
+            return result
+
+        payload: dict[str, Any] = {"q": query}
+        if any("\u4E00" <= char <= "\u9FFF" for char in query):
+            payload.update({"gl": "cn", "hl": "zh-cn"})
+        else:
+            payload.update({"gl": "us", "hl": "en"})
+
+        headers = {"X-API-KEY": api_key, "Content-Type": "application/json"}
+        async with httpx.AsyncClient(timeout=config.get("tools.image_search.timeout", 30)) as client:
+            resp = await client.post("https://google.serper.dev/images", headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+
+        results: list[dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
+        for item in data.get("images", [])[:top_k]:
+            if not isinstance(item, dict):
+                continue
+            image_url = item.get("imageUrl") or item.get("image_url") or item.get("original")
+            if not image_url:
+                continue
+            source_page = item.get("link") or item.get("sourceUrl") or ""
+            source_domain = urlparse(source_page).netloc if source_page else ""
+            result_item = {
+                "title": item.get("title", ""),
+                "image_url": image_url,
+                "source_page": source_page,
+                "source_domain": source_domain,
+                "thumbnail_url": item.get("thumbnailUrl", ""),
+                "width": item.get("imageWidth"),
+                "height": item.get("imageHeight"),
+            }
+            results.append(result_item)
+            items.append(
+                _normalize_search_item(
+                    title=item.get("title", ""),
+                    link=source_page or image_url,
+                    snippet=item.get("title", ""),
+                    image_url=image_url,
+                    source_page=source_page,
+                    source_domain=source_domain,
+                    thumbnail_url=item.get("thumbnailUrl"),
+                    width=item.get("imageWidth"),
+                    height=item.get("imageHeight"),
+                )
+            )
+
+        return {
+            "provider": "serper_images",
+            "query": query,
+            "top_k": top_k,
+            "results": results,
+            "items": items,
         }
 
 
@@ -448,28 +554,11 @@ class ReadFileTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        from agentos.platform.security.path_policy import PathPolicy, PathVerdict
-
-        policy: PathPolicy | None = kwargs.pop("_path_policy", None)
+        kwargs.pop("_path_policy", None)
         agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         raw_path = str(kwargs["file_path"])
 
-        # 相对路径优先基于 agent workdir 解析
-        resolved_path = _resolve_with_workdir(raw_path, agent_workdir)
-
-        if policy:
-            verdict = policy.check_read(str(resolved_path))
-            if verdict == PathVerdict.DENY:
-                return {"success": False, "error": f"系统目录禁止读取: {raw_path}"}
-            if verdict == PathVerdict.NEED_GRANT:
-                return {
-                    "success": False,
-                    "error": f"该目录未授权，请先获得用户许可: {raw_path}",
-                    "action": "need_grant", "path": raw_path,
-                }
-            file_path = resolved_path
-        else:
-            file_path = resolved_path
+        file_path = _resolve_with_workdir(raw_path, agent_workdir)
 
         if not file_path.exists():
             return {"success": False, "error": f"文件不存在: {file_path}"}
@@ -514,28 +603,11 @@ class WriteFileTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        from agentos.platform.security.path_policy import PathPolicy, PathVerdict
-
-        policy: PathPolicy | None = kwargs.pop("_path_policy", None)
+        kwargs.pop("_path_policy", None)
         agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         raw_path = str(kwargs["file_path"])
 
-        # 相对路径优先基于 agent workdir 解析
-        resolved_path = _resolve_with_workdir(raw_path, agent_workdir)
-
-        if policy:
-            verdict = policy.check_write(str(resolved_path))
-            if verdict == PathVerdict.DENY:
-                return {"success": False, "error": f"系统目录禁止写入: {raw_path}"}
-            if verdict == PathVerdict.NEED_GRANT:
-                return {
-                    "success": False,
-                    "error": f"该目录未授权，请先获得用户许可: {raw_path}",
-                    "action": "need_grant", "path": raw_path,
-                }
-            file_path = resolved_path
-        else:
-            file_path = resolved_path
+        file_path = _resolve_with_workdir(raw_path, agent_workdir)
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         content = str(kwargs.get("content", ""))
@@ -577,31 +649,4 @@ class WriteFileTool(Tool):
             file_path.write_text(content, encoding="utf-8")
 
         return {"success": True, "file_path": str(file_path), "size": len(content), "mode": mode}
-
-
-class GrantPathTool(Tool):
-    """授权工具。risk_level=HIGH → 自动触发 _needs_confirmation。"""
-
-    name = "grant_path"
-    description = "授权 Agent 访问指定目录（需先征得用户同意）"
-    risk_level = ToolRiskLevel.HIGH
-    parameters = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "要授权的目录路径"},
-        },
-        "required": ["path"],
-    }
-
-    async def execute(self, **kwargs: Any) -> Any:
-        from agentos.platform.security.path_policy import PathPolicy
-        policy: PathPolicy | None = kwargs.pop("_path_policy", None)
-        path_str = str(kwargs["path"])
-        if not policy:
-            return {"success": False, "error": "PathPolicy 未初始化"}
-        try:
-            resolved = policy.grant(path_str)
-            return {"success": True, "granted": str(resolved)}
-        except ValueError as e:
-            return {"success": False, "error": str(e)}
 

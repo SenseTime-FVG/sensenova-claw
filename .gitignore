@@ -42,7 +42,17 @@ agentos/app/web/playwright-report/
 .SenseAssistant/
 SenseAssistant/
 archived/
+# workspace 中忽略运行时产物和 skills
+workspace/memory/
+workspace/skills/
+workspace/*.json
+my_workspace/
 
+# var/ 运行时数据（数据库等）默认忽略，但保留内置 skills
+var/
+!var/skills/
+!var/skills/**
+!var/.gitignore
 
 *.db
 *.sqlite
@@ -70,3 +80,4 @@ config.yml
 *.tmp
 *.bak
 *.orig
+pytest_tmp/
