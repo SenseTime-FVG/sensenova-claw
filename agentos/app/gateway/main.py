@@ -35,6 +35,7 @@ from agentos.kernel.runtime.tool_runtime import ToolRuntime
 from agentos.capabilities.skills.registry import SkillRegistry
 from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.adapters.plugins import PluginRegistry
+from agentos.kernel.notification.service import NotificationService
 from agentos.platform.config.workspace import (
     ensure_agentos_home,
     ensure_agent_workspace,
