@@ -47,6 +47,10 @@ HEARTBEAT_WAKE_REQUESTED = "heartbeat.wake_requested"
 HEARTBEAT_CHECK_STARTED = "heartbeat.check_started"
 HEARTBEAT_COMPLETED = "heartbeat.completed"
 
+# 通知事件
+NOTIFICATION_PUSH = "notification.push"
+NOTIFICATION_SESSION = "notification.session"
+
 # v1.1: Agent 消息通信事件
 AGENT_MESSAGE_REQUESTED = "agent.message_requested"
 AGENT_MESSAGE_COMPLETED = "agent.message_completed"

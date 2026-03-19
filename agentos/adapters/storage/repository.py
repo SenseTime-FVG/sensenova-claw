@@ -646,3 +646,13 @@ class Repository:
         conn.execute(f"UPDATE cron_runs SET {', '.join(set_parts)} WHERE id = ?", values)
         conn.commit()
         conn.close()
+
+    async def list_cron_runs(self, job_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        """按 started_at_ms 倒序列出 job 运行历史。"""
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT * FROM cron_runs WHERE job_id = ? ORDER BY started_at_ms DESC LIMIT ?",
+            (job_id, limit),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]

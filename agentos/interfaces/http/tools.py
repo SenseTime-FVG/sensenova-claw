@@ -1,22 +1,73 @@
 """
-Tools API - 从真实 ToolRegistry 读取已注册的工具，支持启用/禁用
+Tools API - 从真实 ToolRegistry 读取已注册工具，并提供 API key 管理能力。
 """
+
 from __future__ import annotations
 
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
+import httpx
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
+
+from agentos.interfaces.http.config_store import persist_path_updates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 
+TOOL_API_KEY_SPECS: dict[str, dict[str, Any]] = {
+    "serper_search": {
+        "config_path": "tools.serper_search.api_key",
+        "docs_url": "https://serper.dev/api-key",
+        "description": "Google search via Serper API",
+        "setup_guide": [
+            "Open https://serper.dev and sign in.",
+            "Go to Dashboard and locate the API Key section.",
+            "Copy the key and save it here.",
+        ],
+        "example_format": "sk-...",
+    },
+    "brave_search": {
+        "config_path": "tools.brave_search.api_key",
+        "docs_url": "https://brave.com/search/api/",
+        "description": "Web search via Brave Search API",
+        "setup_guide": [
+            "Open https://brave.com/search/api/ and create an account.",
+            "Create or open an API application.",
+            "Copy the subscription token and save it here.",
+        ],
+        "example_format": "BSA-...",
+    },
+    "baidu_search": {
+        "config_path": "tools.baidu_search.api_key",
+        "docs_url": "https://cloud.baidu.com/product/AppBuilder",
+        "description": "Web search via Baidu AppBuilder AI Search",
+        "setup_guide": [
+            "Open Baidu AppBuilder and create an application.",
+            "Enable AI Search capabilities for the app.",
+            "Copy the API Key and save it here.",
+        ],
+        "example_format": "appbuilder-...",
+    },
+    "tavily_search": {
+        "config_path": "tools.tavily_search.api_key",
+        "docs_url": "https://tavily.com",
+        "description": "Web search via Tavily Search API",
+        "setup_guide": [
+            "Open https://tavily.com and sign in.",
+            "Open the dashboard and copy the API key.",
+            "Save the key here and validate it.",
+        ],
+        "example_format": "tvly-...",
+    },
+}
+
 
 def _prefs_path(request: Request) -> Path:
-    cfg = request.app.state.config
     home = Path(getattr(request.app.state, "agentos_home", "") or str(Path.home() / ".agentos"))
     return home / ".agent_preferences.json"
 
@@ -34,20 +85,111 @@ def _save_prefs(request: Request, prefs: dict) -> None:
     p.write_text(json.dumps(prefs, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _mask_secret(secret: str | None) -> str | None:
+    if not secret:
+        return None
+    if len(secret) <= 8:
+        return f"{secret[:2]}...{secret[-2:]}"
+    return f"{secret[:4]}...{secret[-4:]}"
+
+
+def _api_key_status(cfg) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for tool_name, spec in TOOL_API_KEY_SPECS.items():
+        value = cfg.get(spec["config_path"], "")
+        result[tool_name] = {
+            "configured": bool(value),
+            "masked_key": _mask_secret(value),
+            "docs_url": spec["docs_url"],
+            "description": spec["description"],
+            "setup_guide": spec["setup_guide"],
+            "example_format": spec["example_format"],
+        }
+    return result
+
+
+async def _validate_serper(api_key: str) -> tuple[bool, str]:
+    payload = {"q": "test", "gl": "us", "hl": "en", "page": 1}
+    headers = {"X-API-KEY": api_key, "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post("https://google.serper.dev/search", headers=headers, json=payload)
+    if resp.is_success:
+        return True, "Serper API key is valid."
+    return False, f"Serper validation failed with status {resp.status_code}."
+
+
+async def _validate_brave(api_key: str) -> tuple[bool, str]:
+    headers = {"X-Subscription-Token": api_key, "Accept": "application/json"}
+    params = {"q": "test", "count": 1}
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get("https://api.search.brave.com/res/v1/web/search", headers=headers, params=params)
+    if resp.is_success:
+        return True, "Brave Search API key is valid."
+    return False, f"Brave validation failed with status {resp.status_code}."
+
+
+async def _validate_baidu(api_key: str) -> tuple[bool, str]:
+    headers = {
+        "X-Appbuilder-Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messages": [{"role": "user", "content": "test"}],
+        "search_source": "baidu_search_v2",
+        "resource_type_filter": [{"type": "web", "top_k": 1}],
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            "https://qianfan.baidubce.com/v2/ai_search/web_search",
+            headers=headers,
+            json=payload,
+        )
+    if not resp.is_success:
+        return False, f"Baidu validation failed with status {resp.status_code}."
+    data = resp.json()
+    if data.get("code"):
+        return False, str(data.get("message", "Baidu validation failed."))
+    return True, "Baidu AppBuilder API key is valid."
+
+
+async def _validate_tavily(api_key: str) -> tuple[bool, str]:
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"query": "test", "topic": "general", "search_depth": "basic", "max_results": 1}
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post("https://api.tavily.com/search", headers=headers, json=payload)
+    if resp.is_success:
+        return True, "Tavily API key is valid."
+    return False, f"Tavily validation failed with status {resp.status_code}."
+
+
+VALIDATORS = {
+    "serper_search": _validate_serper,
+    "brave_search": _validate_brave,
+    "baidu_search": _validate_baidu,
+    "tavily_search": _validate_tavily,
+}
+
+
 class EnablePayload(BaseModel):
     enabled: bool
 
 
+class ApiKeyValidatePayload(BaseModel):
+    api_key: str | None = None
+
+
 @router.get("")
 async def list_tools(request: Request):
-    """获取所有已注册的工具"""
+    """获取所有已注册的工具。"""
     tool_registry = request.app.state.tool_registry
+    cfg = request.app.state.config
     prefs = _load_prefs(request)
     tool_prefs = prefs.get("tools", {})
 
     tools = []
     for name, tool in tool_registry._tools.items():
         enabled = tool_prefs.get(name, True)
+        api_key_spec = TOOL_API_KEY_SPECS.get(name)
         tools.append({
             "id": f"tool-{name}",
             "name": name,
@@ -57,13 +199,15 @@ async def list_tools(request: Request):
             "enabled": enabled,
             "riskLevel": tool.risk_level.value if hasattr(tool.risk_level, "value") else "low",
             "parameters": tool.parameters or {},
+            "requiresApiKey": api_key_spec is not None,
+            "apiKeyConfigured": bool(api_key_spec and cfg.get(api_key_spec["config_path"], "")),
         })
     return tools
 
 
 @router.put("/{tool_name}/enabled")
 async def toggle_tool(tool_name: str, body: EnablePayload, request: Request):
-    """启用/禁用工具"""
+    """启用/禁用工具。"""
     tool_registry = request.app.state.tool_registry
     tool = tool_registry.get(tool_name)
     if not tool:
@@ -77,3 +221,57 @@ async def toggle_tool(tool_name: str, body: EnablePayload, request: Request):
 
     logger.info("Tool %s %s", tool_name, "enabled" if body.enabled else "disabled")
     return {"name": tool_name, "enabled": body.enabled}
+
+
+@router.get("/api-keys")
+async def get_tool_api_keys(request: Request):
+    """返回工具 API key 状态与配置指南。"""
+    return _api_key_status(request.app.state.config)
+
+
+@router.put("/api-keys")
+async def update_tool_api_keys(body: dict[str, str | None], request: Request):
+    """批量保存工具 API key。"""
+    if not body:
+        raise HTTPException(400, "No API key updates provided")
+
+    path_updates: dict[str, Any] = {}
+    for tool_name, api_key in body.items():
+        spec = TOOL_API_KEY_SPECS.get(tool_name)
+        if not spec:
+            raise HTTPException(404, f"Tool API key config not found: {tool_name}")
+        path_updates[spec["config_path"]] = api_key or ""
+
+    try:
+        persist_path_updates(request.app.state.config, path_updates)
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to save API keys: {exc}")
+
+    logger.info("Updated tool API keys: %s", list(body.keys()))
+    return {"status": "saved", "api_keys": _api_key_status(request.app.state.config)}
+
+
+@router.post("/api-keys/{tool_name}/validate")
+async def validate_tool_api_key(tool_name: str, body: ApiKeyValidatePayload, request: Request):
+    """对工具 API key 做轻量校验。"""
+    spec = TOOL_API_KEY_SPECS.get(tool_name)
+    if not spec:
+        raise HTTPException(404, f"Tool API key config not found: {tool_name}")
+
+    api_key = body.api_key or request.app.state.config.get(spec["config_path"], "")
+    if not api_key:
+        return {"valid": False, "message": "API key is empty."}
+
+    validator = VALIDATORS.get(tool_name)
+    if not validator:
+        return {"valid": True, "message": "No validator available for this tool."}
+
+    try:
+        valid, message = await validator(api_key)
+    except httpx.HTTPError as exc:
+        return {"valid": False, "message": f"Validation request failed: {exc}"}
+    except Exception as exc:
+        logger.exception("Tool API key validation failed: %s", tool_name)
+        return {"valid": False, "message": f"Validation failed: {exc}"}
+
+    return {"valid": valid, "message": message}

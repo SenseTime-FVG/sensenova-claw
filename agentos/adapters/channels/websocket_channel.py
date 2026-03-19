@@ -16,6 +16,8 @@ from agentos.kernel.events.types import (
     ERROR_RAISED,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
+    NOTIFICATION_PUSH,
+    NOTIFICATION_SESSION,
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
     TOOL_CONFIRMATION_REQUESTED,
@@ -289,23 +291,29 @@ class WebSocketChannel(Channel):
         if not mapped:
             return
 
+        # 通知/cron 事件：有 session 则路由到绑定连接，否则广播
+        if event.type in {CRON_DELIVERY_REQUESTED, NOTIFICATION_PUSH}:
+            if event.session_id and event.session_id != "system":
+                await self._send_to_websockets(self._session_bindings.get(event.session_id, set()), mapped)
+            else:
+                await self._send_to_websockets(self._connections, mapped)
+            return
+
         # 部分事件为连接级广播（不依赖 session 绑定）
         if event.type in {
-            CRON_DELIVERY_REQUESTED,
             TOOL_CONFIRMATION_REQUESTED,
             USER_QUESTION_ASKED,
             USER_QUESTION_ANSWERED,
         }:
-            for ws in list(self._connections):
-                try:
-                    await ws.send_json(mapped)
-                except Exception:
-                    self.disconnect(ws)
+            await self._send_to_websockets(self._connections, mapped)
             return
 
         session_id = event.session_id
         websockets = self._session_bindings.get(session_id, set())
+        await self._send_to_websockets(websockets, mapped)
 
+    async def _send_to_websockets(self, websockets: set[WebSocket], mapped: dict[str, Any]) -> None:
+        """向指定 websocket 集合发送映射后的消息。"""
         for ws in list(websockets):
             try:
                 await ws.send_json(mapped)
@@ -391,10 +399,66 @@ class WebSocketChannel(Channel):
                 "type": "notification",
                 "session_id": event.session_id,
                 "payload": {
+                    "title": event.payload.get("job_name") or "Cron notification",
+                    "body": event.payload.get("text", ""),
                     "text": event.payload.get("text", ""),
                     "source": "cron",
                     "job_id": event.payload.get("job_id"),
                     "job_name": event.payload.get("job_name"),
+                    "level": "info",
+                    "metadata": {
+                        "append_to_chat": True,
+                        "show_toast": True,
+                        "transport": "cron_delivery",
+                        "show_browser": False,
+                    },
+                },
+                "timestamp": event.ts,
+            }
+        if event.type == NOTIFICATION_PUSH:
+            body = event.payload.get("body", "")
+            metadata = {
+                "show_toast": True,
+                "show_browser": True,
+                **(event.payload.get("metadata", {}) or {}),
+            }
+            return {
+                "type": "notification",
+                "session_id": event.payload.get("session_id") or event.session_id,
+                "payload": {
+                    "id": event.payload.get("id"),
+                    "title": event.payload.get("title", "Notification"),
+                    "body": body,
+                    "text": body,
+                    "level": event.payload.get("level", "info"),
+                    "source": event.payload.get("source", "system"),
+                    "actions": event.payload.get("actions"),
+                    "metadata": metadata,
+                    "created_at_ms": event.payload.get("created_at_ms"),
+                },
+                "timestamp": event.ts,
+            }
+        if event.type == NOTIFICATION_SESSION:
+            body = event.payload.get("body", "")
+            metadata = {
+                "show_toast": False,
+                "show_browser": False,
+                **(event.payload.get("metadata", {}) or {}),
+                "append_to_chat": True,
+            }
+            return {
+                "type": "notification",
+                "session_id": event.session_id,
+                "payload": {
+                    "id": event.payload.get("id"),
+                    "title": event.payload.get("title", "Notification"),
+                    "body": body,
+                    "text": body,
+                    "level": event.payload.get("level", "info"),
+                    "source": event.payload.get("source", "system"),
+                    "actions": event.payload.get("actions"),
+                    "metadata": metadata,
+                    "created_at_ms": event.payload.get("created_at_ms"),
                 },
                 "timestamp": event.ts,
             }

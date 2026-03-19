@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { Bot, MessageSquare, GitBranch, Wrench, Sparkles, MessageCircle } from 'lucide-react';
 
 export function DashboardNav({
   className,
@@ -16,6 +15,7 @@ export function DashboardNav({
     { path: '/sessions', label: 'Sessions' },
     { path: '/gateway', label: 'Gateway' },
     { path: '/tools', label: 'Tools' },
+    { path: '/cron', label: 'Cron' },
     { path: '/skills', label: 'Skills' },
     { path: '/settings', label: 'Settings' },
     { path: '/chat', label: 'Chat' },

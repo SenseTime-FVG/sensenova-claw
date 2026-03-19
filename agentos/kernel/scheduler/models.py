@@ -74,6 +74,8 @@ class CronDelivery:
     mode: Literal["none", "announce"] = "announce"
     channel_id: str | None = None
     to: str | None = None
+    session_id: str | None = None
+    notification_channels: list[str] | None = None
     best_effort: bool = False
 
 
@@ -178,6 +180,8 @@ def delivery_to_json(delivery: CronDelivery | None) -> str | None:
         "mode": delivery.mode,
         "channel_id": delivery.channel_id,
         "to": delivery.to,
+        "session_id": delivery.session_id,
+        "notification_channels": delivery.notification_channels,
         "best_effort": delivery.best_effort,
     })
 
@@ -191,6 +195,8 @@ def delivery_from_json(raw: str | None) -> CronDelivery | None:
         mode=d.get("mode", "announce"),
         channel_id=d.get("channel_id"),
         to=d.get("to"),
+        session_id=d.get("session_id"),
+        notification_channels=d.get("notification_channels"),
         best_effort=d.get("best_effort", False),
     )
 
