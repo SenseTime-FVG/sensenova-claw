@@ -36,7 +36,7 @@ export interface ChatSessionContextValue {
   // 消息
   messages: ChatMessage[];
   isTyping: boolean;
-  sendMessage: (content: string, contextFiles?: ContextFileRef[]) => void;
+  sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string) => void;
 
   // 任务列表
   sessions: SessionItem[];
@@ -480,7 +480,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     toolStepMapRef.current.clear();
   }, []);
 
-  const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[]) => {
+  const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
     if (!content.trim() || !wsConnected) return;
 
     addMsg('user', content);
@@ -492,7 +492,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       const meta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
       wsSend({
         type: 'create_session',
-        payload: { agent_id: 'default', meta },
+        payload: { agent_id: agentId || 'default', meta },
         timestamp: Date.now() / 1000,
       });
     } else {
