@@ -3,29 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { Settings } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-
-const mainNavItems = [
-  { path: '/', label: '工作台', exact: true },
-  { path: '/chat', label: 'Chat' },
-  { path: '/research', label: '深度研究' },
-  { path: '/ppt', label: 'PPT' },
-  { path: '/automation', label: '自动化' },
-];
-
-const adminNavItems = [
-  { path: '/agents', label: 'Dashboard' },
-  { path: '/sessions', label: 'Sessions' },
-  { path: '/gateway', label: 'Gateway' },
-  { path: '/tools', label: 'Tools' },
-  { path: '/skills', label: 'Skills' },
-];
 
 export function DashboardNav({
   className,
@@ -33,14 +10,16 @@ export function DashboardNav({
 }: React.HTMLAttributes<HTMLElement>) {
   const pathname = usePathname();
 
-  const isActive = (item: { path: string; exact?: boolean }) => {
-    if (item.exact) return pathname === item.path;
-    return pathname?.startsWith(item.path);
-  };
-
-  const isAdminActive = adminNavItems.some((item) =>
-    pathname?.startsWith(item.path)
-  );
+  const navItems = [
+    { path: '/agents', label: 'Dashboard' }, // Let's rename '编排中心' to Dashboard for the sleek feel
+    { path: '/sessions', label: 'Sessions' },
+    { path: '/gateway', label: 'Gateway' },
+    { path: '/tools', label: 'Tools' },
+    { path: '/cron', label: 'Cron' },
+    { path: '/skills', label: 'Skills' },
+    { path: '/settings', label: 'Settings' },
+    { path: '/chat', label: 'Chat' },
+  ];
 
   return (
     <nav

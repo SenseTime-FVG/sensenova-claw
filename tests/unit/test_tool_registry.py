@@ -21,6 +21,7 @@ class TestToolRegistry:
         assert r.get("fetch_url") is not None
         assert r.get("read_file") is not None
         assert r.get("write_file") is not None
+        assert r.get("ask_user") is not None
 
     def test_register_custom(self):
         r = ToolRegistry()

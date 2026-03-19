@@ -7,6 +7,7 @@ from agentos.capabilities.tools.builtin import (
     BashCommandTool,
     BraveSearchTool,
     FetchUrlTool,
+    ImageSearchTool,
     ReadFileTool,
     SerperSearchTool,
     TavilySearchTool,
@@ -25,6 +26,7 @@ class ToolRegistry:
         for tool in [
             BashCommandTool(),
             SerperSearchTool(),
+            ImageSearchTool(),
             BraveSearchTool(),
             BaiduSearchTool(),
             TavilySearchTool(),
@@ -45,10 +47,13 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def _is_llm_exposed(self, tool: Tool) -> bool:
-        if config.get("agent.provider") == "mock":
+        provider_name, _model_id = config.resolve_model(config.get("agent.model"))
+        if provider_name == "mock":
             return True
         if tool.name in {"serper_search", "brave_search", "baidu_search", "tavily_search"}:
             return bool(config.get(f"tools.{tool.name}.api_key", ""))
+        if tool.name == "image_search":
+            return bool(config.get("tools.image_search.api_key", "") or config.get("tools.serper_search.api_key", ""))
         return True
 
     def as_llm_tools(self) -> list[dict]:

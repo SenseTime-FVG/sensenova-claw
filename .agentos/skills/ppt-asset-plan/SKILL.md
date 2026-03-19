@@ -1,0 +1,113 @@
+---
+name: ppt-asset-plan
+description: 当 storyboard 中存在图片或视觉资产缺口，需要为页面或槽位生成可追踪的资产计划，并优先落地本地图片文件时使用。
+---
+
+# PPT 资产计划
+
+## 目标
+
+产出 `asset-plan.json`，并在需要真实插图时同时落地：
+
+- `image_search_results.json`
+- `image_selection.json`
+- `images/` 目录
+
+这些文件必须与 `task-pack.json`、`storyboard.json`、`pages/page_XX.html` 一起保存在同一个 `deck_dir` 中。
+
+## 输入来源
+
+- `task-pack.json` 中的 `deck_dir`
+- `storyboard.json` 中的 `asset_requirements`
+- 可选的 `style-spec.json`
+- 可选的模板资产
+
+## 建议结构
+
+```python
+class AssetPlan:
+    schema_version: str
+    deck_dir: str
+    slots: list["AssetSlot"]
+
+
+class AssetSlot:
+    page_id: str
+    page_title: str
+    slot_id: str
+    purpose: str
+    source_caption: str
+    query: str
+    selected: bool
+    selected_image: "SelectedImage | None"
+    rejected_candidates: list["RejectedCandidate"]
+    status: str
+    reason: str
+
+
+class SelectedImage:
+    title: str
+    image_url: str
+    local_path: str
+    source_page: str
+    source_domain: str
+
+
+class RejectedCandidate:
+    image_url: str
+    rejection_stage: str
+    reason: str
+```
+
+## 工作流
+
+### 0. 依赖检查
+
+- 消费前必须先确认 `task-pack.json`、`storyboard.json` 以及要用到的 `style-spec.json` 真实存在且可读。
+- 如果目标文件不存在、路径与 `task-pack.json.deck_dir` 不一致，或关键字段缺失，先补齐依赖，不要猜测。
+
+### 1. 初始化资产目录
+
+- 下载前必须先创建 `deck_dir/images`。
+- 不要假设 `images/` 已存在；如果目录不存在，先初始化，再进入搜图与下载阶段。
+
+### 2. 提取待补资产
+
+从 `storyboard.json.pages[*]` 中提取有图片、插图、背景图、图标需求的槽位，并保留页面标题、页面类型、槽位用途、当前页核心摘要。
+
+### 3. 生成搜图 query
+
+- 优先使用槽位 caption 或描述作为主 query。
+- 可以在内部把中文 query 改写成更适合搜图的英文短语，但不要篡改源字段语言。
+- query 保持单意图、短语化，不要把整页大纲拼成一长串。
+
+### 4. 搜图并保留候选
+
+- 为每个槽位执行搜图，并把原始候选写入 `image_search_results.json`。
+- 不要只保留最终图，必须保留 query、候选列表和来源信息，便于后续审查筛选过程。
+
+### 5. 候选筛选与下载
+
+- 先判断候选是否与搜索意图和页面语义相关，再进入下载队列。
+- 先下载验证，再做最终选择。
+- 下载必须逐张进行，并确认本地文件真实存在、非空、可读、确实是图片。
+- 优先保留稳定、可直接下载、分辨率合适、无明显强水印的资源。
+- 下载失败、内容无效、强水印、缩略图、语义不符的候选，都要写入 `rejected_candidates`。
+
+### 6. 最终选择
+
+- 最终选择只能从下载成功且校验通过的本地文件中产生。
+- `selected_image.local_path` 必须指向 `deck_dir/images/...` 下真实存在的文件。
+- 如果某个槽位没有成功下载任何图片，必须标记为 `unresolved`，不能静默丢失。
+
+## 关键规则
+
+- 优先将最终图片落地为本地文件。
+- `image_search_results.json` 必须保留每个槽位的原始候选与 query。
+- `image_selection.json` 和 `asset-plan.json` 必须保留 `selected_image` 与 `rejected_candidates`。
+- 如果本地文件不存在，必须标记 `unresolved`。
+- 如果只有远程 URL 而没有下载成功的本地文件，不得标记为 `selected=True`。
+- 不要把远程 URL 伪装成最终本地资产。
+- 不要跳过筛选过程，也不要把“没有展示筛选过程”的结果当成完成。
+- 某个槽位失败不应阻塞其他页面继续生成。
+- 与页面语义不相关的图片不能硬塞。

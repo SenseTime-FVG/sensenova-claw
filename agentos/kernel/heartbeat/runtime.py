@@ -24,6 +24,7 @@ from agentos.kernel.events.types import (
     USER_INPUT,
 )
 from agentos.kernel.heartbeat.protocol import strip_heartbeat_token
+from agentos.kernel.notification.models import Notification
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,10 @@ def _parse_every_to_seconds(every: str) -> float:
 class HeartbeatRuntime:
     """心跳巡检运行时"""
 
-    def __init__(self, bus: PublicEventBus, repo: Repository):
+    def __init__(self, bus: PublicEventBus, repo: Repository, notification_service=None):
         self._bus = bus
         self._repo = repo
+        self._notification_service = notification_service
         self._enabled = config.get("heartbeat.enabled", False)
         self._every_s = _parse_every_to_seconds(config.get("heartbeat.every", "30m"))
         self._prompt = config.get(
@@ -161,8 +163,8 @@ class HeartbeatRuntime:
                 logger.info("Heartbeat OK (reason=%s), 清理 session %s", reason, session_id)
                 await self._repo.delete_session_cascade(session_id)
             else:
-                # 有内容需要投递（Phase 2 实现投递逻辑）
                 logger.info("Heartbeat 有内容 (reason=%s): %s", reason, strip.remaining[:100])
+                await self._notify_attention(reason=reason, content=strip.remaining)
 
             # 清空已消费的 pending events
             self._pending_system_events.clear()
@@ -215,3 +217,17 @@ class HeartbeatRuntime:
             logger.warning("Heartbeat 超时 session=%s", session_id)
 
         return result_text
+
+    async def _notify_attention(self, *, reason: str, content: str) -> None:
+        """当心跳发现待处理内容时发送通知。"""
+        if not self._notification_service:
+            return
+        await self._notification_service.send(
+            Notification(
+                title="Heartbeat requires attention",
+                body=content[:300],
+                level="warning",
+                source="heartbeat",
+                metadata={"reason": reason},
+            )
+        )

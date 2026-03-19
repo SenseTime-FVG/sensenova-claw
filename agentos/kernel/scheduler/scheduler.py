@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from agentos.kernel.scheduler.models import (
     AtSchedule,
@@ -62,7 +63,11 @@ def _croniter_next_ms(expr: str, now_ms: int, tz: str | None) -> int:
     """使用 croniter 计算下次触发时间（毫秒）"""
     from croniter import croniter
 
-    base_dt = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc)
+    try:
+        base_tz = ZoneInfo(tz) if tz else timezone.utc
+    except ZoneInfoNotFoundError:
+        base_tz = timezone.utc
+    base_dt = datetime.fromtimestamp(now_ms / 1000, tz=base_tz)
     cron = croniter(expr, base_dt)
     next_dt = cron.get_next(datetime)
     return int(next_dt.timestamp() * 1000)

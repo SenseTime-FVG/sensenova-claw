@@ -173,11 +173,11 @@ def test_update_agent_config(client):
 def test_update_agent_config_model(client):
     """更新 default Agent 的 model"""
     resp = client.put("/api/agents/default/config", json={
-        "model": "claude_opus",
+        "model": "claude-opus",
     })
     assert resp.status_code == 200
     data = resp.json()
-    assert data["model"] == "claude_opus"
+    assert data["model"] == "claude-opus"
 
 
 def test_update_agent_config_not_found(client):

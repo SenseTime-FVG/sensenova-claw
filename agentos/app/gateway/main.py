@@ -35,6 +35,7 @@ from agentos.kernel.runtime.tool_runtime import ToolRuntime
 from agentos.capabilities.skills.registry import SkillRegistry
 from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.adapters.plugins import PluginRegistry
+from agentos.kernel.notification.service import NotificationService
 from agentos.platform.security.path_policy import PathPolicy
 from agentos.platform.config.workspace import (
     ensure_agentos_home,
@@ -42,6 +43,7 @@ from agentos.platform.config.workspace import (
     resolve_agentos_home,
 )
 from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api
+from agentos.interfaces.http import cron_api, notification_api
 
 # Token 认证模块（Jupyter-lab 风格）
 from agentos.platform.security.auth import TokenAuthService
@@ -67,6 +69,7 @@ class Services:
     ws_channel: WebSocketChannel
     cron_runtime: CronRuntime
     heartbeat_runtime: HeartbeatRuntime
+    notification_service: NotificationService
     # Token 认证服务（Jupyter-lab 风格）
     auth_service: TokenAuthService
 
@@ -100,6 +103,7 @@ async def lifespan(app: FastAPI):
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
+    notification_service = NotificationService(bus=bus)
 
     # 事件持久化：独立订阅 PublicEventBus
     persister = EventPersister(bus=bus, repo=repo)
@@ -237,8 +241,8 @@ async def lifespan(app: FastAPI):
     await gateway.start()
 
     # v0.8: Cron 定时任务 + Heartbeat 心跳巡检
-    cron_runtime = CronRuntime(bus=bus, repo=repo, gateway=gateway)
-    heartbeat_runtime = HeartbeatRuntime(bus=bus, repo=repo)
+    cron_runtime = CronRuntime(bus=bus, repo=repo, gateway=gateway, notification_service=notification_service)
+    heartbeat_runtime = HeartbeatRuntime(bus=bus, repo=repo, notification_service=notification_service)
     if config.get("cron.enabled", True):
         tool_registry.register(CronTool(cron_runtime))
     await cron_runtime.start()
@@ -266,6 +270,7 @@ async def lifespan(app: FastAPI):
         ws_channel=ws_channel,
         cron_runtime=cron_runtime,
         heartbeat_runtime=heartbeat_runtime,
+        notification_service=notification_service,
         auth_service=auth_service,
     )
     # 挂载 registries 供 API 路由使用
@@ -367,6 +372,8 @@ from agentos.interfaces.http.skills import invoke_router
 app.include_router(invoke_router)
 app.include_router(workspace.router)
 app.include_router(config_api.router)
+app.include_router(cron_api.router)
+app.include_router(notification_api.router)
 
 
 @app.get("/health")
