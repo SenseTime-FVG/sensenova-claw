@@ -63,20 +63,6 @@ prompt_input() {
   fi
 }
 
-prompt_select() {
-  local prompt="$1"
-  shift
-  local options=("$@")
-  echo -e "${BLUE}[?]${NC} ${prompt}"
-  for i in "${!options[@]}"; do
-    echo "    $((i+1))) ${options[$i]}"
-  done
-  local choice
-  read -rp "    请选择 [1]: " choice
-  choice="${choice:-1}"
-  echo "${options[$((choice-1))]}"
-}
-
 # ── 步骤 1: 地区检测 ──
 
 detect_region() {
@@ -328,96 +314,25 @@ setup_home_dir() {
   log "AGENTOS_HOME 初始化完成: $AGENTOS_HOME"
 }
 
-# ── 步骤 6: 交互式配置 ──
+# ── 步骤 6: 初始化配置文件 ──
 
 setup_config() {
   local config_file="$APP_DIR/config.yml"
+  local example_file="$APP_DIR/config_example.yml"
 
   if [ -f "$config_file" ]; then
-    info "检测到已有配置文件"
-    local overwrite
-    overwrite=$(prompt_input "是否重新配置? (y/N)" "N")
-    if [[ ! "$overwrite" =~ ^[yY]$ ]]; then
-      log "保留现有配置"
-      return
-    fi
+    info "检测到已有配置文件，跳过"
+    log "保留现有配置: $config_file"
+    return
   fi
 
-  echo ""
-  info "配置 LLM 服务"
-  echo ""
-
-  local provider
-  provider=$(prompt_select "选择 LLM 提供商:" "openai" "anthropic" "gemini")
-
-  local api_key
-  api_key=$(prompt_input "输入 API Key")
-
-  local default_base_url default_model_key default_model_id
-  case "$provider" in
-    openai)
-      default_base_url="https://api.openai.com/v1"
-      default_model_key="gpt_4o_mini"
-      default_model_id="gpt-4o-mini"
-      ;;
-    anthropic)
-      default_base_url="https://api.anthropic.com"
-      default_model_key="claude_sonnet"
-      default_model_id="claude-sonnet-4-20250514"
-      ;;
-    gemini)
-      default_base_url="https://generativelanguage.googleapis.com"
-      default_model_key="gemini_pro"
-      default_model_id="gemini-2.5-pro"
-      ;;
-  esac
-
-  local base_url
-  base_url=$(prompt_input "API Base URL" "$default_base_url")
-
-  local model_key
-  model_key=$(prompt_input "默认模型 (key)" "$default_model_key")
-
-  # 写入主配置
-  cat > "$config_file" <<EOF
-# AgentOS 配置文件（由安装脚本生成）
-
-system:
-  workspace_dir: ${AGENTOS_HOME}/workspace
-  database_path: ${AGENTOS_HOME}/db/agentos.db
-
-security:
-  auth_enabled: true
-
-llm:
-  providers:
-    ${provider}:
-      api_key: "${api_key}"
-      base_url: "${base_url}"
-      timeout: 60
-      max_retries: 3
-
-  models:
-    ${model_key}:
-      provider: ${provider}
-      model_id: ${default_model_id}
-      timeout: 60
-      max_output_tokens: 8192
-
-  default_model: ${model_key}
-
-agents:
-  default:
-    name: Default Agent
-    description: 默认 AI Agent
-    model: ${model_key}
-    temperature: 0.2
-    system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
-    tools: []
-    skills: []
-EOF
-
-  log "配置已写入 $config_file"
+  if [ -f "$example_file" ]; then
+    cp "$example_file" "$config_file"
+    log "已从 config_example.yml 生成配置文件"
+    info "请编辑 $config_file 填入 LLM API Key 等配置"
+  else
+    warn "未找到 config_example.yml，请手动创建 config.yml"
+  fi
 }
 
 # ── 步骤 7: 注册全局命令 ──
@@ -457,21 +372,24 @@ print_success() {
   echo -e "${GREEN}  AgentOS 安装完成!${NC}"
   echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
   echo ""
-  echo "  启动服务:"
-  echo "    agentos run"
-  echo ""
-  echo "  启动 CLI 客户端（需先启动服务）:"
-  echo "    agentos cli"
-  echo ""
   echo "  安装目录: $APP_DIR"
-  echo "  配置文件: $APP_DIR/config.yml"
   echo "  数据目录: $AGENTOS_HOME"
   echo ""
   if [ "$IS_CN" = "true" ]; then
     echo "  已配置国内镜像: npm($CN_NPM_REGISTRY) pip($CN_UV_INDEX)"
     echo ""
   fi
-  echo "  如需重新配置，编辑 $APP_DIR/config.yml"
+  echo -e "  ${YELLOW}下一步:${NC}"
+  echo ""
+  echo "    1. 启动服务:"
+  echo "       agentos run"
+  echo ""
+  echo "    2. 打开 Web 界面进行 LLM 等配置:"
+  echo "       http://localhost:3000"
+  echo ""
+  echo "    或使用 CLI 客户端（需先启动服务）:"
+  echo "       agentos cli"
+  echo ""
   echo "  文档: https://github.com/SenseTime-FVG/agentos"
   echo ""
 }

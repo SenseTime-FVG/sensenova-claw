@@ -29,19 +29,26 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.
 | 5. 克隆仓库 | 将 AgentOS 克隆到 `{安装路径}/app/`（已存在则更新） |
 | 6. 安装依赖 | `npm install` 自动安装 Node.js 和 Python 依赖 |
 | 7. 初始化目录 | 创建 AGENTOS_HOME 目录结构，复制预置 agents 和 skills |
-| 8. 交互配置 | 引导选择 LLM 提供商、输入 API Key，自动生成 `config.yml` |
+| 8. 初始化配置 | 从 `config_example.yml` 生成 `config.yml`（已有则跳过） |
 | 9. 注册命令 | 注册全局 `agentos` 命令 |
 
 ## 安装完成后
 
+**1. 启动服务**
+
 ```bash
-# 启动服务（后端 + 前端 Dashboard）
 agentos run
+```
 
-# 仅启动后端
-agentos run --no-frontend
+**2. 配置 LLM 等设置**
 
-# 启动 CLI 客户端（需先启动服务）
+启动后，打开 Web 界面进行配置：
+
+- Web Dashboard: http://localhost:3000
+
+或使用 CLI 客户端（需先启动服务）：
+
+```bash
 agentos cli
 ```
 
