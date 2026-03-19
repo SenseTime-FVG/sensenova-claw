@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from agentos.platform.config.config import config
@@ -221,6 +223,12 @@ class AgentSessionWorker(SessionWorker):
             context_files = await load_workspace_files(agentos_home, agent_id=agent_id)
             self.rt.state_store.mark_first_turn_done(self.session_id)
 
+        # 读取前端拖入的用户文件
+        user_file_paths = event.payload.get("context_files", [])
+        if user_file_paths and isinstance(user_file_paths, list):
+            user_files = self._load_user_context_files(user_file_paths)
+            context_files = (context_files or []) + user_files
+
         # 从内存或 SQLite 惰性加载历史消息（必须在 persist_message 之前，避免重复）
         history = await self.rt.state_store.load_session_history(
             self.session_id, self.rt.repo,
@@ -301,6 +309,25 @@ class AgentSessionWorker(SessionWorker):
 
         # 增量持久化：立即保存 assistant 消息
         await self._persist_message(event.session_id, event.turn_id, assistant_msg)
+
+    def _load_user_context_files(self, paths: list[str]) -> list:
+        """读取前端传来的文件路径，转为 ContextFile 对象"""
+        from agentos.kernel.runtime.prompt_builder import ContextFile
+        files = []
+        for p in paths:
+            if not isinstance(p, str) or not p.strip():
+                continue
+            try:
+                real_path = os.path.realpath(p)
+                if not os.path.isfile(real_path):
+                    continue
+                content = Path(real_path).read_text(encoding="utf-8", errors="replace")
+                name = os.path.basename(real_path)
+                files.append(ContextFile(name=name, content=content))
+            except (OSError, PermissionError, UnicodeDecodeError):
+                logger.warning("无法读取 context_file: %s", p)
+                continue
+        return files
 
     async def _handle_llm_completed(self, event: EventEnvelope) -> None:
         """处理 LLM 调用完成，决定下一步动作"""
