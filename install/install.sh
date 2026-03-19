@@ -364,7 +364,8 @@ setup_home_dir() {
 # ── 步骤 6: 初始化配置文件 ──
 
 setup_config() {
-  local config_file="$APP_DIR/config.yml"
+  # 配置文件放在 AGENTOS_HOME 根目录，与代码 DEFAULT_CONFIG_PATH 一致
+  local config_file="$AGENTOS_HOME/config.yml"
   local example_file="$APP_DIR/config_example.yml"
 
   if [ -f "$config_file" ]; then
@@ -375,10 +376,10 @@ setup_config() {
 
   if [ -f "$example_file" ]; then
     cp "$example_file" "$config_file"
-    log "已从 config_example.yml 生成配置文件"
+    log "已从 config_example.yml 生成配置文件: $config_file"
     info "请编辑 $config_file 填入 LLM API Key 等配置"
   else
-    warn "未找到 config_example.yml，请手动创建 config.yml"
+    warn "未找到 config_example.yml，请手动创建 $config_file"
   fi
 }
 
