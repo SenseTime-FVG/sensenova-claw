@@ -13,8 +13,8 @@ set -euo pipefail
 
 AGENTOS_HOME="${AGENTOS_HOME:-$HOME/.agentos}"
 APP_DIR="$AGENTOS_HOME/app"
-REPO_URL="https://github.com/SenseTime-FVG/agentos.git"
-REPO_BRANCH="dev"
+REPO_URL="${AGENTOS_REPO_URL:-https://github.com/SenseTime-FVG/agentos.git}"
+REPO_REF="${AGENTOS_REPO_REF:-${AGENTOS_REPO_BRANCH:-dev}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
 
@@ -118,6 +118,39 @@ EOF
 
   # nvm Node 下载镜像
   export NVM_NODEJS_ORG_MIRROR="$CN_NVM_MIRROR"
+}
+
+# ── 步骤 1b: 安装 git ──
+
+install_git() {
+  if command_exists git; then
+    log "git 已安装: $(git --version)"
+    return
+  fi
+
+  info "安装 git..."
+
+  if command_exists apt-get; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq git
+  elif command_exists yum; then
+    sudo yum install -y -q git
+  elif command_exists dnf; then
+    sudo dnf install -y -q git
+  elif command_exists pacman; then
+    sudo pacman -S --noconfirm git
+  elif command_exists brew; then
+    brew install git
+  elif command_exists apk; then
+    sudo apk add --quiet git
+  else
+    fail "无法自动安装 git，请手动安装后重试: https://git-scm.com/downloads"
+  fi
+
+  if command_exists git; then
+    log "git 安装成功: $(git --version)"
+  else
+    fail "git 安装失败，请手动安装: https://git-scm.com/downloads"
+  fi
 }
 
 # ── 步骤 2: 安装 uv + Python ──
@@ -239,19 +272,31 @@ install_node() {
 
 setup_repo() {
   if [ -d "$APP_DIR/.git" ]; then
-    info "更新 AgentOS..."
+    info "更新 AgentOS ($REPO_REF)..."
     cd "$APP_DIR"
-    git fetch origin "$REPO_BRANCH" --quiet
-    git checkout "$REPO_BRANCH" --quiet 2>/dev/null || true
-    git pull origin "$REPO_BRANCH" --ff-only --quiet || {
-      warn "git pull 失败，可能有本地修改，跳过更新"
+    git fetch origin "$REPO_REF" --quiet || {
+      warn "git fetch $REPO_REF 失败，跳过更新"
+      cd - >/dev/null
+      return
     }
+    if git show-ref --verify --quiet "refs/remotes/origin/$REPO_REF"; then
+      git checkout "$REPO_REF" --quiet 2>/dev/null || git checkout -B "$REPO_REF" "origin/$REPO_REF" --quiet
+      git pull origin "$REPO_REF" --ff-only --quiet || {
+        warn "git pull 失败，可能有本地修改，跳过更新"
+      }
+    else
+      git checkout --detach FETCH_HEAD --quiet || {
+        warn "git checkout $REPO_REF 失败，跳过更新"
+        cd - >/dev/null
+        return
+      }
+    fi
     cd - >/dev/null
     log "AgentOS 已更新"
   else
-    info "克隆 AgentOS 仓库..."
+    info "克隆 AgentOS 仓库 ($REPO_REF)..."
     mkdir -p "$(dirname "$APP_DIR")"
-    git clone --branch "$REPO_BRANCH" --depth 1 "$REPO_URL" "$APP_DIR"
+    git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$APP_DIR"
     log "AgentOS 克隆完成"
   fi
 }
@@ -265,8 +310,22 @@ install_deps() {
   # 设置 uv 缓存目录（避免权限问题）
   export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv_cache}"
 
+  # 1) Python 依赖
+  info "安装 Python 依赖..."
+  uv sync 2>&1 | tail -5
+  log "Python 依赖安装完成"
+
+  # 2) 根目录 npm 依赖（跳过 postinstall，避免重复）
+  info "安装根目录 npm 依赖..."
+  npm install --ignore-scripts 2>&1 | tail -5
+  log "根目录 npm 依赖安装完成"
+
+  # 3) 前端依赖
+  info "安装前端依赖..."
+  cd "$APP_DIR/agentos/app/web"
   npm install 2>&1 | tail -5
-  log "项目依赖安装完成"
+  cd "$APP_DIR"
+  log "前端依赖安装完成"
 }
 
 # ── 步骤 5b: 构建 AGENTOS_HOME 目录结构 ──
@@ -317,7 +376,8 @@ setup_home_dir() {
 # ── 步骤 6: 初始化配置文件 ──
 
 setup_config() {
-  local config_file="$APP_DIR/config.yml"
+  # 配置文件放在 AGENTOS_HOME 根目录，与代码 DEFAULT_CONFIG_PATH 一致
+  local config_file="$AGENTOS_HOME/config.yml"
   local example_file="$APP_DIR/config_example.yml"
 
   if [ -f "$config_file" ]; then
@@ -328,10 +388,10 @@ setup_config() {
 
   if [ -f "$example_file" ]; then
     cp "$example_file" "$config_file"
-    log "已从 config_example.yml 生成配置文件"
+    log "已从 config_example.yml 生成配置文件: $config_file"
     info "请编辑 $config_file 填入 LLM API Key 等配置"
   else
-    warn "未找到 config_example.yml，请手动创建 config.yml"
+    warn "未找到 config_example.yml，请手动创建 $config_file"
   fi
 }
 
@@ -341,7 +401,8 @@ register_command() {
   info "注册 agentos 命令..."
   cd "$APP_DIR"
 
-  uv tool install --from . --force agentos 2>/dev/null || {
+  # 使用 editable 安装，避免 uv tool 环境里残留一份过期代码副本。
+  uv tool install --editable --from . --force agentos 2>/dev/null || {
     # 降级：用 pip install -e
     warn "uv tool install 失败，尝试 pip install..."
     uv pip install -e . 2>/dev/null || pip install -e . 2>/dev/null || {
@@ -374,6 +435,7 @@ print_success() {
   echo ""
   echo "  安装目录: $APP_DIR"
   echo "  数据目录: $AGENTOS_HOME"
+  echo "  安装来源: $REPO_URL@$REPO_REF"
   echo ""
   if [ "$IS_CN" = "true" ]; then
     echo "  已配置国内镜像: npm($CN_NPM_REGISTRY) pip($CN_UV_INDEX)"
@@ -412,6 +474,7 @@ main() {
 
   detect_region
   configure_cn_mirrors
+  install_git
   install_uv
   install_python
   install_nvm

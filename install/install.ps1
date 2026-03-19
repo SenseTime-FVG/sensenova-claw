@@ -13,8 +13,8 @@ $ErrorActionPreference = "Stop"
 
 $AGENTOS_HOME = if ($env:AGENTOS_HOME) { $env:AGENTOS_HOME } else { "$env:USERPROFILE\.agentos" }
 $APP_DIR = "$AGENTOS_HOME\app"
-$REPO_URL = "https://github.com/SenseTime-FVG/agentos.git"
-$REPO_BRANCH = "dev"
+$REPO_URL = if ($env:AGENTOS_REPO_URL) { $env:AGENTOS_REPO_URL } else { "https://github.com/SenseTime-FVG/agentos.git" }
+$REPO_REF = if ($env:AGENTOS_REPO_REF) { $env:AGENTOS_REPO_REF } elseif ($env:AGENTOS_REPO_BRANCH) { $env:AGENTOS_REPO_BRANCH } else { "dev" }
 $REQUIRED_PYTHON = "3.12"
 $REQUIRED_NODE = 18
 
@@ -197,18 +197,31 @@ function Install-Node {
 
 function Setup-Repo {
     if (Test-Path "$APP_DIR\.git") {
-        Info "更新 AgentOS..."
+        Info "更新 AgentOS ($REPO_REF)..."
         Push-Location $APP_DIR
-        git fetch origin $REPO_BRANCH --quiet 2>$null
-        git checkout $REPO_BRANCH --quiet 2>$null
-        git pull origin $REPO_BRANCH --ff-only --quiet 2>$null
+        try {
+            git fetch origin $REPO_REF --quiet 2>$null
+            $remoteBranchRef = "refs/remotes/origin/$REPO_REF"
+            git show-ref --verify --quiet $remoteBranchRef 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                git checkout $REPO_REF --quiet 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    git checkout -B $REPO_REF "origin/$REPO_REF" --quiet 2>$null
+                }
+                git pull origin $REPO_REF --ff-only --quiet 2>$null
+            } else {
+                git checkout --detach FETCH_HEAD --quiet 2>$null
+            }
+        } catch {
+            Warn "git 更新 $REPO_REF 失败，跳过更新"
+        }
         Pop-Location
         Log "AgentOS 已更新"
     } else {
-        Info "克隆 AgentOS 仓库..."
+        Info "克隆 AgentOS 仓库 ($REPO_REF)..."
         $parent = Split-Path $APP_DIR -Parent
         New-Item -ItemType Directory -Force -Path $parent | Out-Null
-        git clone --branch $REPO_BRANCH --depth 1 $REPO_URL $APP_DIR
+        git clone --branch $REPO_REF --depth 1 $REPO_URL $APP_DIR
         Log "AgentOS 克隆完成"
     }
 }
@@ -294,7 +307,7 @@ function Register-Command {
     Push-Location $APP_DIR
 
     try {
-        uv tool install --from . --force agentos 2>$null
+        uv tool install --editable --from . --force agentos 2>$null
     } catch {
         Warn "uv tool install 失败，尝试 pip install..."
         try {
@@ -326,6 +339,7 @@ function Print-Success {
     Write-Host ""
     Write-Host "  安装目录: $APP_DIR"
     Write-Host "  数据目录: $AGENTOS_HOME"
+    Write-Host "  安装来源: $REPO_URL@$REPO_REF"
     Write-Host ""
     if ($IS_CN) {
         Write-Host "  已配置国内镜像: npm($CN_NPM_REGISTRY) pip($CN_PIP_INDEX)"

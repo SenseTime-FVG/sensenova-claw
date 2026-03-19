@@ -18,7 +18,17 @@ import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-WEB_DIR = Path(__file__).resolve().parent / "web"
+
+# 前端目录：优先使用 AGENTOS_HOME/app 下的前端（install.sh 安装场景），
+# 回退到相对 __file__ 的路径（开发环境场景）
+def _resolve_web_dir() -> Path:
+    agentos_home = os.environ.get("AGENTOS_HOME", str(Path.home() / ".agentos"))
+    installed_web = Path(agentos_home) / "app" / "agentos" / "app" / "web"
+    if (installed_web / "node_modules").exists():
+        return installed_web
+    return Path(__file__).resolve().parent / "web"
+
+WEB_DIR = _resolve_web_dir()
 
 
 def _find_npm() -> str:
