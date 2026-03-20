@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 
 from agentos.adapters.channels.base import Channel
 from agentos.kernel.events.envelope import EventEnvelope
@@ -14,6 +15,7 @@ from agentos.kernel.events.types import (
     ERROR_RAISED,
     TOOL_CALL_STARTED,
     USER_INPUT,
+    USER_QUESTION_ANSWERED,
     USER_QUESTION_ASKED,
 )
 
@@ -22,6 +24,12 @@ from .config import WhatsAppConfig
 from .models import WhatsAppInboundMessage, WhatsAppRuntimeState, WhatsAppSessionMeta
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WhatsAppPendingQuestion:
+    question_id: str
+    question: str
 
 
 class WhatsAppChannel(Channel):
@@ -41,6 +49,7 @@ class WhatsAppChannel(Channel):
         self._bridge = bridge or self._build_default_bridge(config)
         self._chat_sessions: dict[str, str] = {}
         self._session_meta: dict[str, WhatsAppSessionMeta] = {}
+        self._pending_questions: dict[str, WhatsAppPendingQuestion] = {}
         self._runtime_state = WhatsAppRuntimeState()
 
     def _build_default_bridge(self, config: WhatsAppConfig) -> WhatsAppBridgeClient:
@@ -113,6 +122,22 @@ class WhatsAppChannel(Channel):
 
         gateway = self._plugin_api.get_gateway()
         gateway.bind_session(session_id, "whatsapp")
+        pending_question = self._pending_questions.pop(session_id, None)
+        if pending_question is not None:
+            await gateway.publish_from_channel(
+                EventEnvelope(
+                    type=USER_QUESTION_ANSWERED,
+                    session_id=session_id,
+                    turn_id=f"turn_{uuid.uuid4().hex[:12]}",
+                    source="whatsapp",
+                    payload={
+                        "question_id": pending_question.question_id,
+                        "answer": message.text,
+                        "cancelled": False,
+                    },
+                )
+            )
+            return
         await gateway.publish_from_channel(
             EventEnvelope(
                 type=USER_INPUT,
@@ -138,6 +163,10 @@ class WhatsAppChannel(Channel):
         elif event.type == USER_QUESTION_ASKED:
             question = event.payload.get("question", "")
             if question:
+                self._pending_questions[event.session_id] = WhatsAppPendingQuestion(
+                    question_id=str(event.payload.get("question_id", "")).strip(),
+                    question=question,
+                )
                 await self._send_reply(event.session_id, question)
         elif event.type == TOOL_CALL_STARTED and self._config.show_tool_progress:
             tool_name = event.payload.get("tool_name", "")

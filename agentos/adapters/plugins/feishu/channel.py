@@ -21,6 +21,7 @@ from agentos.kernel.events.types import (
     ERROR_RAISED,
     TOOL_CALL_STARTED,
     USER_INPUT,
+    USER_QUESTION_ANSWERED,
     USER_QUESTION_ASKED,
 )
 from agentos.adapters.channels.base import Channel
@@ -41,6 +42,14 @@ class FeishuSessionMeta:
     chat_type: str  # "p2p" | "group"
     last_message_id: str
     sender_id: str
+
+
+@dataclass
+class FeishuPendingQuestion:
+    """飞书会话中的待回答 ask_user 问题。"""
+
+    question_id: str
+    question: str
 
 
 class FeishuChannel(Channel):
@@ -66,6 +75,7 @@ class FeishuChannel(Channel):
         self._chat_sessions: dict[str, str] = {}
         # 反向: session_id → FeishuSessionMeta（O(1) 查找 chat_id）
         self._session_meta: dict[str, FeishuSessionMeta] = {}
+        self._pending_questions: dict[str, FeishuPendingQuestion] = {}
         self._lock = threading.Lock()
 
     def get_channel_id(self) -> str:
@@ -245,6 +255,23 @@ class FeishuChannel(Channel):
         gateway = self._plugin_api.get_gateway()
         gateway.bind_session(session_id, "feishu")
 
+        pending_question = self._pending_questions.pop(session_id, None)
+        if pending_question is not None:
+            await gateway.publish_from_channel(
+                EventEnvelope(
+                    type=USER_QUESTION_ANSWERED,
+                    session_id=session_id,
+                    turn_id=f"turn_{uuid.uuid4().hex[:12]}",
+                    source="feishu",
+                    payload={
+                        "question_id": pending_question.question_id,
+                        "answer": text,
+                        "cancelled": False,
+                    },
+                )
+            )
+            return
+
         await gateway.publish_from_channel(
             EventEnvelope(
                 type=USER_INPUT,
@@ -314,6 +341,10 @@ class FeishuChannel(Channel):
         elif event.type == USER_QUESTION_ASKED:
             question = event.payload.get("question", "")
             if question:
+                self._pending_questions[event.session_id] = FeishuPendingQuestion(
+                    question_id=str(event.payload.get("question_id", "")).strip(),
+                    question=question,
+                )
                 await self._send_reply(event.session_id, question)
         elif event.type == TOOL_CALL_STARTED:
             tool_name = event.payload.get("tool_name", "")

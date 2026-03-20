@@ -578,3 +578,23 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前环境仍缺少 `pytest`，这类轻量修复只能先用内联断言脚本和 `py_compile` 做最小验证；正式 pytest 回归仍要在完整依赖环境补跑。
+
+### 2026-03-20 飞书 ask_user 文本闭环补充
+
+成功经验：
+- 对 IM 渠道补 `ask_user`，第一版先做“待回答问题存在时，下一条文本优先解释为回答”最稳；不需要先引入按钮卡片回调，也能把 `USER_QUESTION_ASKED -> USER_QUESTION_ANSWERED` 主链路接通。
+- 渠道侧最小状态就是 `session_id -> question_id`；收到回答后立刻清理状态，后续消息自然回到普通 `USER_INPUT` 流，不容易和日常对话串台。
+- 这类闭环最关键的回归测试是两条：一条断言回答消息被转成 `USER_QUESTION_ANSWERED`，一条断言回答完成后下一条消息重新走 `USER_INPUT`。
+
+失败/风险经验：
+- 当前飞书第一版只支持文本回答，不校验 `options/multi_select` 合法性，也不支持飞书按钮/多选卡片交互；如果后续需要更强约束，必须补事件回调与结构化解析。
+
+### 2026-03-20 多渠道 ask_user 闭环补充
+
+成功经验：
+- `telegram/wecom/whatsapp` 可以直接复用飞书的最小闭环模式：各自 channel 内维护 `pending_questions`，在入站消息路径优先分流成 `USER_QUESTION_ANSWERED`，实现一致且改动面小。
+- 对多渠道并行补同一行为时，测试也要成对补齐：每个 channel 都应同时覆盖“回答优先分流”和“回答后恢复普通 `USER_INPUT`”，否则很容易只在一个渠道上闭环。
+- 渠道层实现保持“无待回答问题时完全不改原路径”，最利于控制回归范围；完整跑 `telegram/wecom/wecom_outbound/whatsapp` 四组单测能快速验证这一点。
+
+失败/风险经验：
+- 文本闭环虽然统一了，但仍然只是“下一条文本即回答”；`options/multi_select` 的结构化校验、取消操作和按钮回调在三个渠道上都还没落。
