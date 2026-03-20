@@ -7,7 +7,14 @@ import uuid
 
 from agentos.adapters.channels.base import Channel
 from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, CRON_DELIVERY_REQUESTED, ERROR_RAISED, TOOL_CALL_STARTED, USER_INPUT
+from agentos.kernel.events.types import (
+    AGENT_STEP_COMPLETED,
+    CRON_DELIVERY_REQUESTED,
+    ERROR_RAISED,
+    TOOL_CALL_STARTED,
+    USER_INPUT,
+    USER_QUESTION_ASKED,
+)
 
 from .config import TelegramConfig
 from .models import TelegramInboundMessage, TelegramSessionMeta
@@ -38,7 +45,7 @@ class TelegramChannel(Channel):
         return "telegram"
 
     def event_filter(self) -> set[str] | None:
-        types = {AGENT_STEP_COMPLETED, ERROR_RAISED, CRON_DELIVERY_REQUESTED}
+        types = {AGENT_STEP_COMPLETED, ERROR_RAISED, CRON_DELIVERY_REQUESTED, USER_QUESTION_ASKED}
         if self._config.show_tool_progress:
             types.add(TOOL_CALL_STARTED)
         return types
@@ -103,6 +110,10 @@ class TelegramChannel(Channel):
         elif event.type == ERROR_RAISED:
             error_message = event.payload.get("error_message", "处理失败")
             await self._send_reply(event.session_id, f"错误: {error_message}")
+        elif event.type == USER_QUESTION_ASKED:
+            question = event.payload.get("question", "")
+            if question:
+                await self._send_reply(event.session_id, question)
         elif event.type == TOOL_CALL_STARTED and self._config.show_tool_progress:
             tool_name = event.payload.get("tool_name", "")
             if tool_name:

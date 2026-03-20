@@ -415,6 +415,133 @@ body {
   color: var(--text-secondary);
 }
 
+.chat-markdown {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol,
+.chat-markdown blockquote,
+.chat-markdown pre,
+.chat-markdown table {
+  margin: 0;
+}
+
+.chat-markdown :where(h1, h2, h3, h4) {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.chat-markdown h1 {
+  font-size: 1.35em;
+}
+
+.chat-markdown h2 {
+  font-size: 1.2em;
+}
+
+.chat-markdown h3,
+.chat-markdown h4 {
+  font-size: 1.05em;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  padding-left: 1.25rem;
+}
+
+.chat-markdown li + li {
+  margin-top: 0.25rem;
+}
+
+.chat-markdown ul.contains-task-list,
+.chat-markdown ul:has(input[type="checkbox"]) {
+  list-style: none;
+  padding-left: 0;
+}
+
+.chat-markdown input[type="checkbox"] {
+  margin-right: 0.5rem;
+  accent-color: currentColor;
+}
+
+.chat-markdown a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.chat-markdown blockquote {
+  border-left: 3px solid var(--border-color);
+  padding-left: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.chat-markdown code {
+  font-family: 'JetBrains Mono', 'Segoe UI', 'Microsoft Yahei', monospace;
+  font-size: 0.92em;
+}
+
+.chat-markdown :not(pre) > code {
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.4rem;
+  background: rgba(15, 23, 42, 0.12);
+}
+
+.chat-markdown pre {
+  overflow-x: auto;
+  border-radius: 0.9rem;
+  padding: 0.9rem 1rem;
+  background: rgba(15, 23, 42, 0.16);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.chat-markdown pre code {
+  white-space: pre;
+}
+
+.chat-markdown table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border-radius: 0.75rem;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  text-align: left;
+}
+
+.chat-markdown th {
+  font-weight: 600;
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.chat-markdown--user {
+  color: inherit;
+}
+
+.chat-markdown--assistant,
+.chat-markdown--detail,
+.chat-markdown--system {
+  color: inherit;
+}
+
 .typing {
   margin: 0 24px 16px;
   color: var(--accent-blue);

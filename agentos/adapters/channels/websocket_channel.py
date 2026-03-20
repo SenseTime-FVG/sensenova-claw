@@ -82,7 +82,10 @@ class WebSocketChannel(Channel):
             if not verify_websocket(websocket, self._auth_service):
                 logger.warning("WebSocket connection rejected: invalid or missing token")
                 await websocket.accept()
-                await websocket.close(code=1008, reason="Invalid or missing token")
+                try:
+                    await websocket.close(code=1008, reason="Invalid or missing token")
+                except RuntimeError:
+                    logger.debug("WebSocket close skipped after transport EOF during auth rejection")
                 return
 
         await self.connect(websocket)

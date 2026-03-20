@@ -14,7 +14,7 @@ from agentos.adapters.plugins.telegram.models import TelegramInboundMessage
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED, USER_INPUT
+from agentos.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED, USER_INPUT, USER_QUESTION_ASKED
 from agentos.kernel.runtime.publisher import EventPublisher
 
 
@@ -287,6 +287,29 @@ class TestInbound:
 
 
 class TestOutbound:
+    @pytest.mark.asyncio
+    async def test_send_event_forwards_user_question_asked(self):
+        channel, _, _, runtime = _make_channel()
+        channel._session_meta["telegram_001"] = channel._session_meta_model(
+            chat_id="1001",
+            chat_type="p2p",
+            sender_id="1001",
+            sender_username="alice",
+            last_message_id=10,
+        )
+
+        await channel.send_event(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id="telegram_001",
+                source="tool",
+                payload={"question": "请补充更多上下文"},
+            )
+        )
+
+        assert runtime.sent_messages[-1]["chat_id"] == "1001"
+        assert runtime.sent_messages[-1]["text"] == "请补充更多上下文"
+
     @pytest.mark.asyncio
     async def test_send_event_replies_with_thread_and_reply_message(self):
         channel, _, _, runtime = _make_channel(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import threading
@@ -14,7 +15,14 @@ import lark_oapi as lark
 from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
 from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, CRON_DELIVERY_REQUESTED, ERROR_RAISED, TOOL_CALL_STARTED, USER_INPUT
+from agentos.kernel.events.types import (
+    AGENT_STEP_COMPLETED,
+    CRON_DELIVERY_REQUESTED,
+    ERROR_RAISED,
+    TOOL_CALL_STARTED,
+    USER_INPUT,
+    USER_QUESTION_ASKED,
+)
 from agentos.adapters.channels.base import Channel
 from agentos.adapters.plugins.feishu.text import chunk_text
 
@@ -52,6 +60,7 @@ class FeishuChannel(Channel):
         self._client: lark.Client | None = None
         self._ws_client: lark.ws.Client | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._agentos_status = {"status": "initialized", "error": None}
 
         # 正向: session_key("dm:<id>" / "group:<id>") → session_id
         self._chat_sessions: dict[str, str] = {}
@@ -64,13 +73,14 @@ class FeishuChannel(Channel):
 
     def event_filter(self) -> set[str] | None:
         """此 Channel 关心的事件类型集合"""
-        types = {AGENT_STEP_COMPLETED, ERROR_RAISED, CRON_DELIVERY_REQUESTED}
+        types = {AGENT_STEP_COMPLETED, ERROR_RAISED, CRON_DELIVERY_REQUESTED, USER_QUESTION_ASKED}
         if self._config.show_tool_progress:
             types.add(TOOL_CALL_STARTED)
         return types
 
     async def start(self) -> None:
         self._loop = asyncio.get_event_loop()
+        self._agentos_status = {"status": "connecting", "error": None}
 
         self._client = (
             lark.Client.builder()
@@ -107,6 +117,7 @@ class FeishuChannel(Channel):
             target=self._run_ws_in_thread, daemon=True, name="feishu-ws"
         )
         thread.start()
+        self._agentos_status = {"status": "connected", "error": None}
         logger.info("FeishuChannel started (WebSocket mode)")
 
     def _run_ws_in_thread(self) -> None:
@@ -124,12 +135,14 @@ class FeishuChannel(Channel):
 
         try:
             self._ws_client.start()
-        except Exception:
+        except Exception as exc:
+            self._agentos_status = {"status": "failed", "error": str(exc)}
             logger.exception("Feishu WebSocket thread crashed")
         finally:
             thread_loop.close()
 
     async def stop(self) -> None:
+        self._agentos_status = {"status": "stopped", "error": None}
         logger.info("FeishuChannel stopped")
 
     # ---- 消息构建 ----
@@ -183,16 +196,31 @@ class FeishuChannel(Channel):
                 text[:100],
             )
 
-            if self._loop:
-                future = asyncio.run_coroutine_threadsafe(
-                    self._on_message_async(
-                        text, chat_id, chat_type, message_id, sender_id
-                    ),
-                    self._loop,
-                )
-                future.result(timeout=15)
+            if not self._loop or self._loop.is_closed():
+                logger.warning("Feishu event loop unavailable, drop inbound message: chat=%s", chat_id)
+                return
+
+            future = asyncio.run_coroutine_threadsafe(
+                self._on_message_async(
+                    text, chat_id, chat_type, message_id, sender_id
+                ),
+                self._loop,
+            )
+            future.add_done_callback(self._log_inbound_dispatch_result)
         except Exception:
             logger.exception("Failed to handle Feishu message event")
+
+    @staticmethod
+    def _log_inbound_dispatch_result(
+        future: concurrent.futures.Future[None],
+    ) -> None:
+        """记录跨线程投递后的异步异常，避免静默吞掉入站消息处理失败。"""
+        try:
+            future.result()
+        except concurrent.futures.CancelledError:
+            logger.warning("Feishu inbound dispatch cancelled")
+        except Exception:
+            logger.exception("Feishu inbound dispatch failed")
 
     async def _on_message_async(
         self, text: str, chat_id: str, chat_type: str, message_id: str, sender_id: str
@@ -283,6 +311,10 @@ class FeishuChannel(Channel):
         elif event.type == ERROR_RAISED:
             error_msg = event.payload.get("error_message", "处理失败")
             await self._send_reply(event.session_id, f"⚠️ 错误: {error_msg}")
+        elif event.type == USER_QUESTION_ASKED:
+            question = event.payload.get("question", "")
+            if question:
+                await self._send_reply(event.session_id, question)
         elif event.type == TOOL_CALL_STARTED:
             tool_name = event.payload.get("tool_name", "")
             if tool_name:

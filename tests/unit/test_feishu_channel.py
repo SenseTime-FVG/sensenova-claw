@@ -27,6 +27,7 @@ from agentos.kernel.events.types import (
     CRON_DELIVERY_REQUESTED,
     ERROR_RAISED,
     TOOL_CALL_STARTED,
+    USER_QUESTION_ASKED,
 )
 from agentos.kernel.runtime.publisher import EventPublisher
 from agentos.interfaces.ws.gateway import Gateway
@@ -63,6 +64,39 @@ class _FakeMessage:
 class _FakeMention:
     """模拟飞书 SDK mention 对象"""
     key: str = "@_user_1"
+
+
+@dataclass
+class _FakeInboundMessage:
+    """模拟飞书 SDK 入站消息对象"""
+    chat_id: str = "chat_001"
+    chat_type: str = "p2p"
+    message_id: str = "msg_001"
+    message_type: str = "text"
+    content: str = '{"text": "hello"}'
+    mentions: list[Any] | None = None
+
+
+@dataclass
+class _FakeSenderId:
+    open_id: str = "sender_001"
+
+
+@dataclass
+class _FakeSender:
+    sender_id: _FakeSenderId = field(default_factory=_FakeSenderId)
+
+
+@dataclass
+class _FakeEventData:
+    """模拟飞书 SDK 回调 data.event 结构"""
+    message: _FakeInboundMessage = field(default_factory=_FakeInboundMessage)
+    sender: _FakeSender = field(default_factory=_FakeSender)
+
+
+@dataclass
+class _FakeCallbackData:
+    event: _FakeEventData = field(default_factory=_FakeEventData)
 
 
 # ---- 辅助：创建 Channel ----
@@ -109,6 +143,7 @@ class TestChannelBasics:
         assert AGENT_STEP_COMPLETED in flt
         assert ERROR_RAISED in flt
         assert CRON_DELIVERY_REQUESTED in flt
+        assert USER_QUESTION_ASKED in flt
         assert TOOL_CALL_STARTED not in flt
 
     def test_event_filter_with_tool_progress(self):
@@ -321,6 +356,38 @@ class TestOnMessageAsync:
         assert sid1 == sid2  # 同一群聊复用 session
 
 
+class TestHandleMessageEvent:
+    def test_handle_message_event_schedules_without_waiting(self, monkeypatch):
+        """SDK 回调线程只应投递协程，不应同步等待异步处理结果"""
+        ch, _ = _make_channel()
+
+        class _FakeLoop:
+            def is_closed(self) -> bool:
+                return False
+
+        ch._loop = _FakeLoop()
+        calls = {"scheduled": 0, "result_called": 0}
+
+        class _FakeFuture:
+            def result(self, timeout=None):
+                del timeout
+                calls["result_called"] += 1
+                raise AssertionError("should not wait in SDK callback thread")
+
+        def fake_run_coroutine_threadsafe(coro, loop):
+            assert loop is ch._loop
+            calls["scheduled"] += 1
+            coro.close()
+            return _FakeFuture()
+
+        monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
+
+        ch._handle_message_event(_FakeCallbackData())
+
+        assert calls["scheduled"] == 1
+        assert calls["result_called"] == 0
+
+
 # ---- _build_content 测试 ----
 
 
@@ -430,6 +497,25 @@ class TestSendEvent:
         await ch.send_event(event)
         assert len(calls) == 1
         assert "boom" in calls[0][1]
+
+    async def test_user_question_asked(self):
+        """USER_QUESTION_ASKED 事件应发送提问内容"""
+        ch, _ = _make_channel()
+        calls: list[tuple[str, str]] = []
+
+        async def tracking_send_reply(session_id: str, text: str) -> None:
+            calls.append((session_id, text))
+
+        ch._send_reply = tracking_send_reply
+
+        event = EventEnvelope(
+            type=USER_QUESTION_ASKED,
+            session_id="s1",
+            payload={"question": "请补充更多上下文"},
+        )
+        await ch.send_event(event)
+        assert len(calls) == 1
+        assert calls[0] == ("s1", "请补充更多上下文")
 
     async def test_tool_call_started(self):
         """TOOL_CALL_STARTED 事件应发送工具进度"""

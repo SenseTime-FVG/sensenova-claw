@@ -159,6 +159,13 @@ tools:
     search_depth: basic
     topic: general
 
+  research_union:
+    # research-union 技能在判断主链不足时使用的阈值
+    min_sources: 3
+    min_topic_coverage: 0.45
+    min_valid_evidence: 6
+    union_timeout: 90
+
   fetch_url:
     enabled: true
     # 请求超时（秒）
@@ -193,6 +200,10 @@ tools:
 | `tavily_search` | `timeout` | int | `15` | 搜索请求超时时间（秒） |
 | `tavily_search` | `max_results` | int | `5` | 最大搜索结果数 |
 | `tavily_search` | `search_depth/topic/time_range` | string | `basic/general/""` | Tavily 搜索深度、主题、时间范围 |
+| `research_union` | `min_sources` | int | `3` | 最少来源数（不足时触发 union 补充） |
+| `research_union` | `min_topic_coverage` | float | `0.45` | 主题覆盖率阈值 |
+| `research_union` | `min_valid_evidence` | int | `6` | 最少有效证据条数（title+link） |
+| `research_union` | `union_timeout` | int | `90` | union 补充阶段超时（秒） |
 | `fetch_url` | `enabled` | bool | `true` | 是否启用网页抓取 |
 | `fetch_url` | `timeout` | int | `30` | 请求超时时间（秒） |
 | `file_operations` | `enabled` | bool | `true` | 是否启用文件读写 |

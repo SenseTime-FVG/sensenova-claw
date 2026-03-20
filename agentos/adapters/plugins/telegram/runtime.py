@@ -30,6 +30,7 @@ class TelegramRuntime:
         self._poll_task: asyncio.Task | None = None
         self._server: uvicorn.Server | None = None
         self._server_task: asyncio.Task | None = None
+        self._agentos_status = {"status": "initialized", "error": None}
 
     def set_message_handler(self, handler: MessageHandler) -> None:
         self._message_handler = handler
@@ -38,16 +39,23 @@ class TelegramRuntime:
         self._bot_username = username.lstrip("@") if username else None
 
     async def start(self) -> None:
-        me = await self._bot.get_me()
-        self.set_bot_username(me.username)
+        self._agentos_status = {"status": "connecting", "error": None}
+        try:
+            me = await self._bot.get_me()
+            self.set_bot_username(me.username)
 
-        if self._config.mode == "webhook":
-            await self._start_webhook()
-            logger.info("TelegramRuntime started in webhook mode")
-            return
+            if self._config.mode == "webhook":
+                await self._start_webhook()
+                self._agentos_status = {"status": "connected", "error": None}
+                logger.info("TelegramRuntime started in webhook mode")
+                return
 
-        self._poll_task = asyncio.create_task(self._poll_loop(), name="telegram-polling")
-        logger.info("TelegramRuntime started in polling mode")
+            self._poll_task = asyncio.create_task(self._poll_loop(), name="telegram-polling")
+            self._agentos_status = {"status": "connected", "error": None}
+            logger.info("TelegramRuntime started in polling mode")
+        except Exception as exc:
+            self._agentos_status = {"status": "failed", "error": str(exc)}
+            raise
 
     async def stop(self) -> None:
         if self._poll_task:
@@ -70,6 +78,7 @@ class TelegramRuntime:
                 await self._bot.delete_webhook()
             except Exception:
                 logger.exception("Failed to delete Telegram webhook")
+        self._agentos_status = {"status": "stopped", "error": None}
 
     async def handle_update(self, update: Update) -> None:
         message = update.effective_message
@@ -108,12 +117,14 @@ class TelegramRuntime:
                     timeout=self._config.polling_timeout_seconds,
                     allowed_updates=Update.ALL_TYPES,
                 )
+                self._agentos_status = {"status": "connected", "error": None}
                 for update in updates:
                     offset = update.update_id + 1
                     await self.handle_update(update)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                self._agentos_status = {"status": "failed", "error": str(exc)}
                 logger.exception("Telegram polling loop failed")
                 await asyncio.sleep(1)
 

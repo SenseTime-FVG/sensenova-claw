@@ -83,3 +83,22 @@ class TestSessionJsonlWriter:
         path = tmp_path / "default" / "sessions" / "s1.jsonl"
         obj = json.loads(path.read_text(encoding="utf-8").strip())
         assert obj["content"] == "你好世界"
+
+    def test_delete_session_file_removes_existing_jsonl(self, tmp_path):
+        writer = SessionJsonlWriter(base_dir=tmp_path)
+        writer.append("helper", "sess_to_delete", "t1", {"role": "user", "content": "bye"})
+
+        path = tmp_path / "helper" / "sessions" / "sess_to_delete.jsonl"
+        assert path.exists()
+
+        deleted = writer.delete_session_file("helper", "sess_to_delete")
+
+        assert deleted is True
+        assert path.exists() is False
+
+    def test_delete_session_file_returns_false_when_missing(self, tmp_path):
+        writer = SessionJsonlWriter(base_dir=tmp_path)
+
+        deleted = writer.delete_session_file("helper", "missing")
+
+        assert deleted is False

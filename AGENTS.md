@@ -310,6 +310,26 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前环境执行 Playwright 仍缺浏览器二进制（`chrome-headless-shell` 不存在），即使越权可启动流程也无法完成浏览器级断言。
 - `next build` 在本机会停在 `Linting and checking validity of types ...` 且无进一步堆栈，需在 CI 或本地完整 Node 环境结合日志排查。
 
+### 2026-03-19 skills prompt 注入补充
+
+成功经验：
+- skills 只注入 `name/description/location` 时，模型未必会主动读取正文；在 system prompt 中增加一条极简 `Skill Usage` 规则，明确”匹配到 skill 后先读对应 `SKILL.md`”，效果更稳定。
+- 将 skills 列表从自由文本改为 `<available_skills><skill><name><description><location>` 结构后，测试断言和后续字段扩展都更直接。
+- 当前仓库虽缺少全局 `pytest`，但可稳定使用 `.venv/bin/python -m pytest` 跑本地回归，适合作为受限环境下的默认验证方式。
+
+失败/风险经验：
+- 仅替换标签格式而不补”命中后去读 `SKILL.md`”的协议指令，收益有限；真正影响模型行为的是规则和结构一起改。
+
+### 2026-03-19 email-agent 工具接入补充
+
+成功经验：
+- Agent 侧 `tools` 白名单与全局 `ToolRegistry` 注册缺一不可；仅修改 `.agentos/agents/<id>/config.yml` 不会让未注册工具自动可用。
+- 对预置 Agent 配置做回归时，直接用仓库内真实 `.agentos/agents/<id>/config.yml` 构造 `AgentRegistry` 断言，比复制一份测试夹具更能防止配置漂移。
+- 当前环境执行 pytest 应优先使用 `.venv/bin/python -m pytest`；系统 `python3` 缺少 `pytest`，直接调用会误判为测试无法运行。
+
+失败/风险经验：
+- 邮件工具虽然注册后会暴露给运行时，但真实可用性仍依赖 `tools.email.enabled` 及 SMTP/IMAP 凭据；仅单元测试通过不能代表邮件链路已完成真实回归。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：
@@ -380,6 +400,38 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 即使 channel/e2e 都通过，如果 sidecar 的文本解包逻辑过窄，生产环境仍会表现为“登录正常但没有任何回复”；进程内 e2e 不能替代真实协议样本覆盖。
 
+### 2026-03-20 Gateway Channel 失败态补充
+
+成功经验：
+- `/api/gateway/channels` 适合做统一状态汇总层；优先读取 channel 自身、`_runtime`、`_client` 上的 `_agentos_status`，前端就不需要分别理解 `feishu/telegram/wecom` 的内部实现。
+- `/gateway` 的失败态展示可以完全复用 WhatsApp 现有红色视觉 token，只需新增 `status === "failed"` 分支，避免再为每个 channel 做单独样式。
+- Playwright 若只验证前端页面渲染，最好绕开仓库默认 `webServer`，单独启动 `agentos/app/web` 的 `next dev` 并用最小配置执行；否则容易被后端 `uv` 启动链路干扰。
+
+失败/风险经验：
+- 当前环境下默认 Playwright 配置会经过根目录 `npm run dev`，而这条链路里的 `uv` 可能 panic；前端页面级回归不能假设默认配置一定可用。
+- macOS 沙箱下直接启动 Chromium 可能报 `bootstrap_check_in ... Permission denied (1100)`；浏览器级 e2e 需要越权执行。
+
+### 2026-03-20 WhatsApp ask_user 出站补充
+
+成功经验：
+- 当日志停在 `tool.call_requested(ask_user) -> user.question_asked`，而前端能看到问题、IM 渠道没有收到时，优先检查对应 channel 的 `event_filter()` 是否订阅了 `USER_QUESTION_ASKED`，以及 `send_event()` 是否有实际下发逻辑。
+- 对这类 channel 断点，最有效的红绿验证不是先跑整套 e2e，而是直接构造最小 `send_event(EventEnvelope(type=USER_QUESTION_ASKED,...))` 进程内脚本；可以快速区分“事件没订阅”与“底层发送失败”。
+- WhatsApp channel 订阅并转发 `user.question_asked` 后，`ask_user` 的澄清问题就能像普通回复一样发回原始 `chat_jid`，避免出现“Web 会话显示已提问，但用户侧完全无感知”的假象。
+
+失败/风险经验：
+- 仅凭前端 session 出现气泡，不能推断外部 IM 已收到消息；前端可能是 WebSocket 广播收到了 `user.question_asked`，而 channel 因未订阅该事件完全没有出站动作。
+- 当前环境 `.venv` 缺少 `pytest`，`uv run python -m pytest` 又可能在 macOS 上因 `system-configuration` panic；验证新增测试时要准备进程内脚本兜底，不能把测试工具故障误判为业务修复失败。
+
+### 2026-03-20 IM Channel ask_user 对齐补充
+
+成功经验：
+- 对多 IM channel 做相同行为补齐时，最稳的检查清单就是两项：`event_filter()` 是否包含 `USER_QUESTION_ASKED`，`send_event()` 是否把 `payload.question` 走到统一 `_send_reply()`；漏任一项都会出现“前端看得到、外部渠道收不到”。
+- Telegram、WeCom、Feishu 这三类实现虽然底层发送接口不同，但 `ask_user` 出站都可以复用同一条最小规则：“收到 `USER_QUESTION_ASKED` 就原样发送 question 文本”，不需要单独设计新事件或新模板。
+- 在 `pytest` 不可用时，单个进程内脚本同时验证多个 channel 的 `send_event + event_filter`，是做跨渠道回归的高性价比手段。
+
+失败/风险经验：
+- WeCom 之前没有显式 `event_filter()`，默认 `None` 看起来“像是全订阅”，但如果 `send_event()` 不处理 `USER_QUESTION_ASKED`，实际效果仍然是静默丢弃；不能只看订阅层，不看分发层。
+
 ### 2026-03-19 WhatsApp Self Chat 补充
 
 成功经验：
@@ -436,4 +488,74 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 文档示例里的路径要同步到当前真实插件目录；否则用户很容易按旧的 `channels/whatsapp` 路径安装 sidecar，导致配置看起来正确但运行时走错目录。
 
 失败/风险经验：
-- 如果 runtime 里原本没有发送 typing/composing，仅增加 `typingIndicator` 配置不会有任何实际效果；要先确认当前 sidecar 的真实出站行为，再决定是“增加开关”还是“同时补行为 + 开关”。
+- 如果 runtime 里原本没有发送 typing/composing，仅增加 `typingIndicator` 配置不会有任何实际效果；要先确认当前 sidecar 的真实出站行为，再决定是”增加开关”还是”同时补行为 + 开关”。
+- 当前环境里 `python3 -m pytest` 仍不可用，验证新后端接口时要继续使用 `UV_CACHE_DIR=/tmp/uv_cache uv run python -m pytest ...`。
+- 当前前端类型检查仍会先卡在既有问题 `agentos/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为”本次改动失败”的依据。
+
+### 2026-03-19 Chat Markdown 设计补充
+
+成功经验：
+- 聊天区 Markdown 改造最稳的边界是”字符串走 Markdown、结构化内容走 JSON 查看器”，这样 `toolInfo.arguments/result` 不会因为富文本改造破坏原有结构化阅读体验。
+- 在设计阶段就明确”增强版 Markdown + 禁止原始 HTML + 保留折叠逻辑”，能显著减少后续实现时的安全分歧与交互返工。
+- 将通用渲染能力收敛为独立 `MarkdownRenderer` 组件，比在 `MessageBubble` 和工具详情区分别内联渲染更利于后续扩展代码高亮、链接策略与统一样式。
+
+失败/风险经验：
+- 当前会话环境没有可直接调用的 spec reviewer 子代理能力，设计文档阶段需要显式说明该限制，并以人工自检作为退化方案，避免误称已完成完整的 spec review loop。
+
+### 2026-03-19 Chat Markdown 计划补充
+
+成功经验：
+- 当前前端同时存在共享 `components/chat/MessageBubble.tsx` 与页面内联 `MessageBubble`（`/chat`、`/sessions/[id]`）两套路径；实施计划里优先共享 `MarkdownRenderer` 和内容分流工具，而不是直接做大规模 UI 合并，能更符合 YAGNI。
+- 对 Markdown 能力做前端回归时，优先新增 mock WebSocket 的 Playwright 用例比依赖真实模型输出更稳，断言 `h1/table/pre code` 等语义化节点也比断言文案本身更抗波动。
+
+失败/风险经验：
+- `docs/superpowers/` 当前被 `.gitignore` 忽略，后续如果需要把 spec/plan 正式纳入版本库，必须显式 `git add -f`，否则容易误以为文件已保存但实际上不会进入提交。
+
+### 2026-03-19 Chat Markdown 执行补充
+
+成功经验：
+- `react-markdown` v10 不接受直接传 `className` 到根组件；最稳的写法是在外层包一层容器，再让 `ReactMarkdown` 只负责内容节点渲染。
+- `/chat` 页面实时 websocket 链路中的 `tool_result` 消息并不带 `toolInfo`，如果只按 `msg.role === “tool” && msg.toolInfo` 分支渲染，会把工具结果误走到 assistant 展示路径；需要单独补一个”无 `toolInfo` 的 tool 消息”分支。
+- 把 `isJsonLike/stringifyContent/previewText` 抽到共享工具后，共享消息组件、`/chat` 和 `/sessions/[id]` 三处展示层可以统一”JSON 优先，其余走 Markdown”的规则，减少分叉。
+
+失败/风险经验：
+- 当前环境浏览器级 Playwright 仍缺系统库 `libnspr4.so`，即使越权能拉起 web server，也会在 Chromium 启动阶段失败；这类前端 e2e 结果不能作为功能缺陷依据，只能记录为环境阻塞。
+- `npx tsc --noEmit` 与 `next build` 仍会先被仓库既有问题 `components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入挡住；验证时必须区分”本次新增错误已清零”和”仓库老错误仍在”。
+
+### 2026-03-19 Agents 删除入口补充
+
+成功经验：
+- `/agents` 这种”卡片主体可导航 + 局部危险操作”的列表页，删除按钮最好从外层 `Link` 里拆出来，并配独立确认弹窗；否则删除点击容易被页面跳转吞掉。
+- 当前环境可以跑前端浏览器级 e2e，但需要同时满足两个条件：`localhost:3000` 上已有可复用前端服务，以及提前把 Playwright 浏览器安装到可写目录（如 `PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers`）。
+
+失败/风险经验：
+- 仓库级 `npx tsc --noEmit` 仍会先命中既有问题：`agentos/app/web/components/ThemeProvider.tsx` 无法解析 `next-themes/dist/types`；验证这类页面级改动时，不能把这个历史错误误记为本次回归失败。
+
+### 2026-03-19 Sessions 删除补充
+
+成功经验：
+- session 删除如果要同时清理数据库和 `~/.agentos/agents/{agent_id}/sessions/{session_id}.jsonl`，最简洁的落点是新增独立 `sessions` HTTP router：先通过 `repo.get_session_meta()` 解析 `agent_id`，再调用 `gateway.delete_session()` 删库解绑，最后删 JSONL 文件。
+- `/sessions` 这种”整行可点击跳详情”的表格，删除按钮必须放在独立操作列里，并在 `onClick` 里显式 `stopPropagation()`；否则按钮会和行级跳转冲突。
+
+失败/风险经验：
+- 当前环境下 `uv run python -m pytest` 仍可能因为 Rust `system-configuration` panic 直接失败；针对性后端单测优先改用 `python3 -m pytest` 更稳。
+
+### 2026-03-19 Sessions 批量删除补充
+
+成功经验：
+- “全选当前页面”和”全选当前筛选的所有结果”必须拆成两套选择语义：前者由前端直接维护 `selectedSessionIds`，后者则进入独立 `filtered_all` 选择模式，真正删除时把当前 `search_term + status` 交给后端匹配，语义才不会混淆。
+- 对这类”平时不显示复选框”的列表页，单独加一个”选择”切换按钮最稳；进入选择模式后再展示复选框和批量操作条，退出时统一清空选择状态，可以显著减少误操作。
+
+失败/风险经验：
+- 如果”全选当前筛选的所有结果”只是把当前前端已加载列表全勾上，看起来像实现了需求，实际会漏删未加载命中的结果；这类需求必须由后端按筛选条件执行。
+
+### 2026-03-19 安装脚本与发布流补充
+
+成功经验：
+- `uv tool install --from .` 会把包复制进独立 tool 环境；当安装目录仓库更新或本地 hotfix 未重新注册命令时，`agentos` 可能继续跑旧版代码。改为 `uv tool install --editable --from . --force agentos` 后，CLI 会直接跟随安装目录源码。
+- 安装脚本支持 `AGENTOS_REPO_REF`（兼容旧 `AGENTOS_REPO_BRANCH`）后，发布验证、tag 回滚和灰度安装都更直接，不必修改脚本正文。
+- 给安装脚本补”文本契约测试”很划算：直接断言 shell / PowerShell 脚本里存在 `--editable` 与 `REPO_REF` 覆盖逻辑，能防止回归。
+
+失败/风险经验：
+- 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `agentos` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
+- 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `AGENTOS_REPO_REF`。

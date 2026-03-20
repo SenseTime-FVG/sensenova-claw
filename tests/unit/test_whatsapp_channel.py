@@ -13,7 +13,7 @@ from agentos.adapters.plugins.whatsapp.models import WhatsAppInboundMessage
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED, USER_INPUT
+from agentos.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED, USER_INPUT, USER_QUESTION_ASKED
 from agentos.kernel.runtime.publisher import EventPublisher
 
 
@@ -217,6 +217,28 @@ class TestInbound:
 
 
 class TestOutbound:
+    @pytest.mark.asyncio
+    async def test_send_event_forwards_user_question_asked(self):
+        channel, _, _, bridge = _make_channel()
+        channel._session_meta["whatsapp_001"] = channel._session_meta_model(
+            chat_jid="15550000001@s.whatsapp.net",
+            chat_type="p2p",
+            sender_jid="15550000001@s.whatsapp.net",
+            last_message_id="wamid-1",
+        )
+
+        await channel.send_event(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id="whatsapp_001",
+                source="tool",
+                payload={"question": "请补充更多上下文"},
+            )
+        )
+
+        assert bridge.sent_messages[-1]["target"] == "15550000001@s.whatsapp.net"
+        assert bridge.sent_messages[-1]["text"] == "请补充更多上下文"
+
     @pytest.mark.asyncio
     async def test_send_event_replies_to_known_session(self):
         channel, _, _, bridge = _make_channel()

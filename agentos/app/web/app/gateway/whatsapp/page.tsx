@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Loader2, RefreshCw, Smartphone, ShieldAlert } from 'lucide-react';
+import { Loader2, RefreshCw, Smartphone } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -132,16 +132,6 @@ export default function WhatsAppGatewayPage() {
                     <div>手机号：{status?.phone || '未知'}</div>
                   </div>
                 </div>
-
-                {status?.lastError ? (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 text-red-700 p-5">
-                    <div className="flex items-center gap-2 font-semibold">
-                      <ShieldAlert className="w-4 h-4" />
-                      最近错误
-                    </div>
-                    <p className="mt-2 text-sm break-all">{status.lastError}</p>
-                  </div>
-                ) : null}
 
                 {status?.lastQr && !status?.lastQrDataUrl ? (
                   <div className="rounded-2xl border p-5 bg-muted/20">

@@ -1,8 +1,10 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useNotification } from '@/hooks/useNotification';
+import { useAuth } from '@/contexts/AuthContext';
 import type { PendingInteraction } from '@/components/chat/QuestionDialog';
 import {
   type ChatMessage,
@@ -21,6 +23,7 @@ import {
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 const WS_RECONNECT_INTERVAL_MS = 1000;
 const WS_MAX_RECONNECT_ATTEMPTS = 10;
+const BYPASS_PATHS = ['/login', '/setup'];
 
 // ── Context 值类型 ──
 
@@ -75,6 +78,8 @@ const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
 
 export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
   const { pushNotification } = useNotification();
+  const { isAuthenticated, isLoading } = useAuth();
+  const pathname = usePathname();
 
   // Session 状态
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -104,6 +109,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const pendingCreateMeta = useRef<Record<string, string> | null>(null);
   // 追踪新建但未发消息的空会话，切换离开时自动删除
   const emptySessionIdRef = useRef<string | null>(null);
+  const skipNextResetRef = useRef(false);
+  const shouldActivate = !isLoading && isAuthenticated && !BYPASS_PATHS.includes(pathname || '');
 
   // ── helpers ──
 
@@ -125,6 +132,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   // ── Session 管理 ──
 
   const loadSessionList = useCallback(async () => {
+    if (!shouldActivate) {
+      setSessions([]);
+      return;
+    }
     setLoadingSessions(true);
     try {
       const res = await authFetch(`${API_BASE}/api/sessions`);
@@ -135,9 +146,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     } finally {
       setLoadingSessions(false);
     }
-  }, []);
+  }, [shouldActivate]);
 
   const reloadSessionHistory = useCallback(async (sid: string, shouldBind = true) => {
+    if (!shouldActivate) return;
     setSessionId(sid);
     setMessages([]);
     setIsTyping(false);
@@ -162,7 +174,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       setRightTaskProgress([]);
       toolStepMapRef.current.clear();
     }
-  }, [bindSessionToCurrentSocket]);
+  }, [bindSessionToCurrentSocket, shouldActivate]);
 
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
 
@@ -412,6 +424,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   // ── WebSocket 连接 ──
 
   useEffect(() => {
+    if (!shouldActivate) {
+      setWsConnected(false);
+      return;
+    }
     let cancelled = false;
 
     const scheduleReconnect = () => {
@@ -472,10 +488,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         activeSocket.close();
       }
     };
-  }, [bindSessionToCurrentSocket, loadSessionList]);
+  }, [bindSessionToCurrentSocket, loadSessionList, shouldActivate]);
 
   // 初始加载 session 列表
-  useEffect(() => { loadSessionList(); }, [loadSessionList]);
+  useEffect(() => {
+    if (!shouldActivate) return;
+    loadSessionList();
+  }, [loadSessionList, shouldActivate]);
 
   // ── 对外接口 ──
 

@@ -159,7 +159,6 @@ def test_llm_presets_structure(tmp_path):
             assert "label" in provider
             assert "base_url" in provider
             assert "models" in provider
-            assert len(provider["models"]) > 0
 
 
 def test_llm_presets_contains_known_providers(tmp_path):

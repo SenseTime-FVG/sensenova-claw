@@ -41,7 +41,7 @@ from agentos.platform.config.workspace import (
     ensure_agent_workspace,
     resolve_agentos_home,
 )
-from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api
+from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api, sessions
 from agentos.interfaces.http import cron_api, notification_api
 
 # Token 认证模块（Jupyter-lab 风格）
@@ -138,11 +138,9 @@ async def lifespan(app: FastAPI):
     )
     llm_factory = LLMFactory()
 
-    # v1.0: 初始化 AgentRegistry
-    agent_config_dir = agentos_home / "agents"
-    agent_registry = AgentRegistry(config_dir=agent_config_dir)
+    # v1.0: 初始化 AgentRegistry（config.yml + SYSTEM_PROMPT.md 文件）
+    agent_registry = AgentRegistry(agentos_home=agentos_home)
     agent_registry.load_from_config(config.data)
-    agent_registry.load_from_dir()
 
     # 为所有已注册 agent 初始化 per-agent workspace 和 workdir
     for agent_cfg in agent_registry.list_all():
@@ -374,6 +372,7 @@ app.include_router(files.router)
 app.include_router(config_api.router)
 app.include_router(cron_api.router)
 app.include_router(notification_api.router)
+app.include_router(sessions.router)
 from agentos.interfaces.http import custom_pages
 app.include_router(custom_pages.router)
 
