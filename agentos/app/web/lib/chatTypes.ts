@@ -14,6 +14,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
   timestamp: number;
+  /** 工具消息在无 toolInfo 时展示的工具名（如会话历史回放） */
+  name?: string;
   toolInfo?: ToolInfo;
 }
 

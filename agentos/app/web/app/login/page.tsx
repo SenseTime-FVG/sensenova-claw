@@ -19,7 +19,7 @@ export default function LoginPage() {
     try {
       const valid = await verifyToken(token.trim());
       if (valid) {
-        router.push('/chat');
+        router.push('/');
       } else {
         setError('Token 无效，请检查终端输出的 token');
       }
