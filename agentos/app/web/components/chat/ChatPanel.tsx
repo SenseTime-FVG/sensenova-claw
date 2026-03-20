@@ -67,8 +67,8 @@ export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockA
       <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2 shadow-sm">
         <Bot size={32} />
       </div>
-      <h3 className="text-xl font-semibold text-foreground">How can I help you today?</h3>
-      <p className="text-sm">Type a message below to start a new conversation with AgentOS.</p>
+      <h3 className="text-2xl font-bold text-foreground tracking-tight">How can I help you today?</h3>
+      <p className="text-sm leading-relaxed">Type a message below to start a new conversation with AgentOS.</p>
     </div>
   );
 

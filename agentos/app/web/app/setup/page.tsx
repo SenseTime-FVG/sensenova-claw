@@ -198,7 +198,7 @@ export default function SetupPage() {
         }),
       });
 
-      router.push('/chat?agent=system-admin');
+      router.push('/');
     } catch (e) {
       console.error('保存配置失败:', e);
       setSubmitError('保存配置失败，请稍后重试');
@@ -209,7 +209,7 @@ export default function SetupPage() {
 
   // 跳过
   const handleSkip = () => {
-    router.push('/chat');
+    router.push('/');
   };
 
   // 返回上一步

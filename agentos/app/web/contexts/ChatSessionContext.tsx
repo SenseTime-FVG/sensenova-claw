@@ -40,6 +40,8 @@ export interface ChatSessionContextValue {
   deleteSession: (sessionId: string) => Promise<void>;
   /** 页面挂载时调用：如果是通过 switchSession 跳转过来的则保留会话，否则重置 */
   resetIfNeeded: () => void;
+  /** 清理当前空会话（新建后未发消息） */
+  cleanupEmptySession: () => void;
 
   // 消息
   messages: ChatMessage[];
@@ -105,6 +107,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
   const pendingCreateMeta = useRef<Record<string, string> | null>(null);
+  // 追踪新建但未发消息的空会话，切换离开时自动删除
+  const emptySessionIdRef = useRef<string | null>(null);
   const skipNextResetRef = useRef(false);
   const shouldActivate = !isLoading && isAuthenticated && !BYPASS_PATHS.includes(pathname || '');
 
@@ -250,6 +254,9 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
             timestamp: Date.now() / 1000,
           });
           pendingInputRef.current = null;
+          emptySessionIdRef.current = null;
+        } else {
+          emptySessionIdRef.current = newSid;
         }
         break;
       }
@@ -496,9 +503,19 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
   // ── 对外接口 ──
 
+  const doCleanupEmptySession = useCallback((excludeSid?: string) => {
+    const emptyId = emptySessionIdRef.current;
+    if (emptyId && emptyId !== excludeSid) {
+      emptySessionIdRef.current = null;
+      setSessions(prev => prev.filter(s => s.session_id !== emptyId));
+      authFetch(`${API_BASE}/api/sessions/${emptyId}`, { method: 'DELETE' }).catch(() => {});
+    }
+  }, []);
+
   const switchSession = useCallback(async (sid: string) => {
+    doCleanupEmptySession(sid);
     await reloadSessionHistory(sid);
-  }, [reloadSessionHistory]);
+  }, [reloadSessionHistory, doCleanupEmptySession]);
 
   const createSession = useCallback((agentId: string, taskId?: string) => {
     const meta: Record<string, string> = { title: '新对话' };
@@ -512,6 +529,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   }, [wsSend]);
 
   const startNewChat = useCallback(() => {
+    doCleanupEmptySession();
     setSessionId(null);
     sessionIdRef.current = null;
     setMessages([]);
@@ -521,7 +539,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     setRightSteps([]);
     setRightTaskProgress([]);
     toolStepMapRef.current.clear();
-  }, []);
+  }, [doCleanupEmptySession]);
 
   const deleteSession = useCallback(async (sid: string) => {
     try {
@@ -543,6 +561,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
     if (!content.trim() || !wsConnected) return;
 
+    emptySessionIdRef.current = null;
     addMsg('user', content);
 
     const filePaths = contextFiles?.map(f => f.path) || [];
@@ -633,6 +652,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     deleteSession,
     startNewChat,
     resetIfNeeded,
+    cleanupEmptySession: doCleanupEmptySession,
     messages,
     isTyping,
     sendMessage,
