@@ -400,6 +400,38 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 即使 channel/e2e 都通过，如果 sidecar 的文本解包逻辑过窄，生产环境仍会表现为“登录正常但没有任何回复”；进程内 e2e 不能替代真实协议样本覆盖。
 
+### 2026-03-20 Gateway Channel 失败态补充
+
+成功经验：
+- `/api/gateway/channels` 适合做统一状态汇总层；优先读取 channel 自身、`_runtime`、`_client` 上的 `_agentos_status`，前端就不需要分别理解 `feishu/telegram/wecom` 的内部实现。
+- `/gateway` 的失败态展示可以完全复用 WhatsApp 现有红色视觉 token，只需新增 `status === "failed"` 分支，避免再为每个 channel 做单独样式。
+- Playwright 若只验证前端页面渲染，最好绕开仓库默认 `webServer`，单独启动 `agentos/app/web` 的 `next dev` 并用最小配置执行；否则容易被后端 `uv` 启动链路干扰。
+
+失败/风险经验：
+- 当前环境下默认 Playwright 配置会经过根目录 `npm run dev`，而这条链路里的 `uv` 可能 panic；前端页面级回归不能假设默认配置一定可用。
+- macOS 沙箱下直接启动 Chromium 可能报 `bootstrap_check_in ... Permission denied (1100)`；浏览器级 e2e 需要越权执行。
+
+### 2026-03-20 WhatsApp ask_user 出站补充
+
+成功经验：
+- 当日志停在 `tool.call_requested(ask_user) -> user.question_asked`，而前端能看到问题、IM 渠道没有收到时，优先检查对应 channel 的 `event_filter()` 是否订阅了 `USER_QUESTION_ASKED`，以及 `send_event()` 是否有实际下发逻辑。
+- 对这类 channel 断点，最有效的红绿验证不是先跑整套 e2e，而是直接构造最小 `send_event(EventEnvelope(type=USER_QUESTION_ASKED,...))` 进程内脚本；可以快速区分“事件没订阅”与“底层发送失败”。
+- WhatsApp channel 订阅并转发 `user.question_asked` 后，`ask_user` 的澄清问题就能像普通回复一样发回原始 `chat_jid`，避免出现“Web 会话显示已提问，但用户侧完全无感知”的假象。
+
+失败/风险经验：
+- 仅凭前端 session 出现气泡，不能推断外部 IM 已收到消息；前端可能是 WebSocket 广播收到了 `user.question_asked`，而 channel 因未订阅该事件完全没有出站动作。
+- 当前环境 `.venv` 缺少 `pytest`，`uv run python -m pytest` 又可能在 macOS 上因 `system-configuration` panic；验证新增测试时要准备进程内脚本兜底，不能把测试工具故障误判为业务修复失败。
+
+### 2026-03-20 IM Channel ask_user 对齐补充
+
+成功经验：
+- 对多 IM channel 做相同行为补齐时，最稳的检查清单就是两项：`event_filter()` 是否包含 `USER_QUESTION_ASKED`，`send_event()` 是否把 `payload.question` 走到统一 `_send_reply()`；漏任一项都会出现“前端看得到、外部渠道收不到”。
+- Telegram、WeCom、Feishu 这三类实现虽然底层发送接口不同，但 `ask_user` 出站都可以复用同一条最小规则：“收到 `USER_QUESTION_ASKED` 就原样发送 question 文本”，不需要单独设计新事件或新模板。
+- 在 `pytest` 不可用时，单个进程内脚本同时验证多个 channel 的 `send_event + event_filter`，是做跨渠道回归的高性价比手段。
+
+失败/风险经验：
+- WeCom 之前没有显式 `event_filter()`，默认 `None` 看起来“像是全订阅”，但如果 `send_event()` 不处理 `USER_QUESTION_ASKED`，实际效果仍然是静默丢弃；不能只看订阅层，不看分发层。
+
 ### 2026-03-19 WhatsApp Self Chat 补充
 
 成功经验：
@@ -527,3 +559,12 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `agentos` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
 - 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `AGENTOS_REPO_REF`。
+
+### 2026-03-20 README Channel 文档补充
+
+成功经验：
+- 更新 README 里的 Channel 列表时，先直接对照 `agentos/adapters/plugins/<name>/config.py` 与 `plugin.py` 提取真实配置键，能避免把展示文档写成过时字段。
+- 对 IM 渠道文档，表格里只放“能力简介 + 顶层配置路径”，细节放到各自的 `<details>` 配置块，更适合 README 快速浏览。
+
+失败/风险经验：
+- 用户口头描述里出现拼写近似项（如 `telgram`）时，仍需以仓库真实插件名 `telegram` 为准补文档，否则配置路径很容易写错。

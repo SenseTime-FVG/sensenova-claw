@@ -62,6 +62,15 @@ export default function GatewayPage() {
       };
     }
 
+    if (channel.status === 'failed') {
+      return {
+        status: channel.status,
+        accentClass: 'bg-red-500/40',
+        dotClass: 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.6)]',
+        badgeClass: 'bg-red-500 text-white shadow-sm',
+      };
+    }
+
     const connected = channel.status === 'connected';
     return {
       status: channel.status,
