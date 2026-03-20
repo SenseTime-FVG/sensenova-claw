@@ -45,7 +45,7 @@ function RecentChatItem({
       className={cn(
         'flex items-start gap-2.5 px-3 py-3 rounded-xl cursor-pointer transition-all group',
         isActive
-          ? 'bg-primary/8 text-foreground border border-primary/20 shadow-sm'
+          ? 'bg-blue-100 text-foreground border border-blue-200 shadow-sm dark:bg-blue-900/40 dark:border-blue-800'
           : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
       )}
     >

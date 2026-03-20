@@ -351,7 +351,7 @@ body {
 .json-viewer {
   margin: 0;
   padding: 8px;
-  background: rgba(0, 0, 0, 0.3);
+  background: #F8FAFC;
   border-radius: 4px;
   overflow-x: auto;
   font-size: 10px;
@@ -359,7 +359,7 @@ body {
 }
 
 .json-viewer code {
-  color: #93c5fd;
+  color: #334155;
   font-family: 'JetBrains Mono', monospace;
 }
 
