@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from agentos.adapters.channels.whatsapp.plugin import definition, register
+from agentos.adapters.plugins.whatsapp.plugin import definition, register
 from agentos.adapters.plugins import PluginRegistry
 from agentos.adapters.plugins.base import PluginApi
 from agentos.interfaces.ws.gateway import Gateway
@@ -89,7 +91,7 @@ class TestRegister:
         registry = api._registry
         await register(api)
         channel = registry._pending_channels[0]
-        assert channel._config.auth_dir == "/tmp/custom-auth"
+        assert channel._config.auth_dir == str(Path("/tmp/custom-auth").resolve())
         assert channel._config.group_policy == "allowlist"
         assert channel._config.group_allowlist == ["group-1@g.us"]
         assert channel._config.bridge.command == "node-custom"

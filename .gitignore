@@ -35,6 +35,8 @@ agentos/app/web/.next/
 agentos/app/web/dist/
 agentos/app/web/test-results/
 agentos/app/web/playwright-report/
+*.tsbuildinfo
+test-results/
 
 # ========== 运行时目录 ==========
 .SenseAssistant/
@@ -83,3 +85,8 @@ config.yaml
 *.bak
 *.orig
 pytest_tmp/
+tmp_docs/
+updates/
+
+# ========== Lock 文件（仅保留 npm） ==========
+pnpm-lock.yaml

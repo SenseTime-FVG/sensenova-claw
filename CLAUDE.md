@@ -172,7 +172,7 @@ Skills 通过 YAML 配置定义，支持多步骤编排和条件分支。
 
 ## 配置文件
 
-根目录 `config.yml`（不入库）：
+主配置文件 `~/.agentos/config.yml`（不入库）：
 
 ```yaml
 llm:
@@ -198,7 +198,23 @@ tools:
     api_key: ${TAVILY_API_KEY}
 ```
 
-配置加载优先级: 环境变量 > config.yml > 默认值
+### 配置加载
+
+有两种加载方式（见 `agentos/platform/config/config.py`）：
+
+**1. 传统方式 `Config()`（gateway 实际使用）：**
+- 读取 `~/.agentos/config.yml`（`DEFAULT_CONFIG_PATH`）
+- 与 `DEFAULT_CONFIG` 深度合并
+- 解析 `${ENV_VAR}` 环境变量
+
+**2. 新方式 `Config(project_root=...)`：**
+- 从 `project_root` 向上遍历至文件系统根
+- 沿途收集所有 `config.yml`（遗留格式，从远到近覆盖）
+- 沿途收集所有 `.agentos/config.yaml`（从远到近覆盖）
+- 遗留 `config.yml` 中的顶层 key（如 `OPENAI_API_KEY`）会映射到新结构
+- 解析 `${ENV_VAR}` 环境变量
+
+配置合并优先级（从低到高）: `DEFAULT_CONFIG` < 配置文件 < 环境变量
 
 ## 开发规范
 
@@ -339,7 +355,7 @@ v0.2 新增:
 
 失败/风险经验：
 - 当前后端在第二次 `chat.completions` 请求中，会把上一轮 assistant 的 `tool_calls` 以 `{id,name,arguments}` 回传，但缺少 `tool_calls[*].type=\"function\"`，导致 OpenAI 兼容网关返回 `400 invalid_value`。  
-- v0.5 重构后，后端已从项目根目录启动，自动读取根目录 `config.yml`。
+- v0.5 重构后，后端模块级 `Config()` 读取 `~/.agentos/config.yml`（非项目根目录）。
 
 ### 2026-03-05 Bug修复补充
 

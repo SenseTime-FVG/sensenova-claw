@@ -2,7 +2,7 @@
 """AgentOS 统一 CLI 入口
 
 用法:
-    agentos run [--port 8000] [--frontend-port 3000] [--no-frontend]
+    agentos run [--port 8000] [--frontend-port 3000] [--no-frontend] [--dev]
     agentos cli [--host localhost] [--port 8000] [--agent default] [--session ID] [--debug] [-e MSG]
     agentos version
 """
@@ -18,7 +18,18 @@ import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-WEB_DIR = Path(__file__).resolve().parent / "web"
+
+# 前端目录解析：根据 project_root 定位
+def _resolve_web_dir(project_root: Path) -> Path:
+    web_dir = project_root / "agentos" / "app" / "web"
+    if (web_dir / "node_modules").exists():
+        return web_dir
+    # 回退到 AGENTOS_HOME/app 下的前端（install.sh 安装场景）
+    agentos_home = os.environ.get("AGENTOS_HOME", str(Path.home() / ".agentos"))
+    installed_web = Path(agentos_home) / "app" / "agentos" / "app" / "web"
+    if (installed_web / "node_modules").exists():
+        return installed_web
+    return web_dir
 
 
 def _find_npm() -> str:
@@ -49,6 +60,20 @@ def cmd_run(args: argparse.Namespace) -> int:
     backend_port = args.port
     frontend_port = args.frontend_port
     no_frontend = args.no_frontend
+    dev_mode = args.dev
+
+    # --dev 模式：使用当前工作目录的代码
+    if dev_mode:
+        project_root = Path.cwd().resolve()
+        # 校验当前目录是否是 agentos 项目
+        if not (project_root / "agentos" / "app" / "gateway" / "main.py").exists():
+            print("错误: 当前目录不是 AgentOS 项目根目录", file=sys.stderr)
+            return 1
+        print(f"[dev] 使用本地代码: {project_root}")
+    else:
+        project_root = PROJECT_ROOT
+
+    web_dir = _resolve_web_dir(project_root)
 
     # 端口检查
     if not _check_port(backend_port):
@@ -76,6 +101,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
+    # 构建子进程环境变量
+    env = os.environ.copy()
+    if dev_mode:
+        # 将本地项目根目录置于 PYTHONPATH 最前，确保子进程优先导入本地代码
+        env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
+
     # 启动后端
     backend_cmd = [
         sys.executable, "-m", "uvicorn",
@@ -85,7 +116,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "--port", str(backend_port),
     ]
     print(f"启动后端服务: http://localhost:{backend_port}")
-    backend_proc = subprocess.Popen(backend_cmd, cwd=str(PROJECT_ROOT))
+    backend_proc = subprocess.Popen(backend_cmd, cwd=str(project_root), env=env)
     procs.append(backend_proc)
 
     # 等待后端启动
@@ -100,16 +131,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         npm = _find_npm()
         if not npm:
             print("警告: 未找到 npm，跳过前端启动。安装 Node.js 后可使用前端 dashboard。", file=sys.stderr)
-        elif not (WEB_DIR / "node_modules").exists():
+        elif not (web_dir / "node_modules").exists():
             print("警告: 前端依赖未安装，请先执行 'npm install'。跳过前端启动。", file=sys.stderr)
         else:
             print(f"启动前端 dashboard: http://localhost:{frontend_port}")
-            env = os.environ.copy()
-            env["PORT"] = str(frontend_port)
+            frontend_env = env.copy()
+            frontend_env["PORT"] = str(frontend_port)
             frontend_proc = subprocess.Popen(
                 [npm, "run", "dev"],
-                cwd=str(WEB_DIR),
-                env=env,
+                cwd=str(web_dir),
+                env=frontend_env,
             )
             procs.append(frontend_proc)
 
@@ -119,17 +150,34 @@ def cmd_run(args: argparse.Namespace) -> int:
                 cleanup()
                 return 1
 
+    # 检测 LLM 配置状态
+    try:
+        from agentos.platform.config.config import Config, PROJECT_ROOT as _CFG_ROOT
+        from agentos.platform.config.llm_presets import check_llm_configured
+        _cfg = Config(project_root=_CFG_ROOT)
+        _llm_ok, _ = check_llm_configured(_cfg.data)
+    except Exception:
+        _llm_ok = True  # 检测失败时不误报警告
+
     # 读取后端生成的 token（通过环境变量传递，或从 stdout 解析）
     # 后端会在启动时打印 token URL，这里也提示用户
     print()
     print("=" * 50)
-    print(f"  AgentOS 已启动")
+    print(f"  AgentOS 已启动" + (" (dev mode)" if dev_mode else ""))
     print(f"  后端 API:    http://localhost:{backend_port}")
+    if dev_mode:
+        print(f"  代码目录:    {project_root}")
     if frontend_proc:
         print(f"  Dashboard:   http://localhost:{frontend_port}")
     print(f"  CLI 连接:    agentos cli --port {backend_port}")
     print()
     print("  注意: 后端日志中包含带 token 的访问 URL")
+    if not _llm_ok:
+        print()
+        print("  ⚠️  未检测到可用的 LLM API 配置，当前使用 Mock 模式")
+        if frontend_proc:
+            print(f"     → 访问 http://localhost:{frontend_port} 进行配置")
+        print(f"     → 或使用 agentos cli --port {backend_port} 进行配置")
     print("=" * 50)
     print("按 Ctrl+C 停止所有服务\n")
 
@@ -190,6 +238,7 @@ def main() -> int:
     run_parser.add_argument("--port", type=int, default=8000, help="后端端口 (默认 8000)")
     run_parser.add_argument("--frontend-port", type=int, default=3000, help="前端端口 (默认 3000)")
     run_parser.add_argument("--no-frontend", action="store_true", help="仅启动后端，不启动前端")
+    run_parser.add_argument("--dev", action="store_true", help="开发模式：使用当前目录的代码而非安装目录")
 
     # agentos cli
     cli_parser = subparsers.add_parser("cli", help="启动 CLI 交互客户端")

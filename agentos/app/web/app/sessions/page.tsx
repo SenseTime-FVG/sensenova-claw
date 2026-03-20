@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Filter, MessageSquare, Loader2, Plus, X, Bot } from 'lucide-react';
+import { Search, Filter, MessageSquare, Loader2, Plus, X, Bot, Trash2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   Table,
   TableBody,
@@ -29,6 +30,7 @@ interface Session {
 }
 
 interface AgentOption { id: string; name: string; description: string; }
+type SelectionMode = 'manual' | 'page' | 'filtered_all';
 
 function formatTime(ts: number): string {
   if (!ts) return '-';
@@ -64,13 +66,27 @@ export default function SessionsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [selectionEnabled, setSelectionEnabled] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>('manual');
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [bulkDeleteError, setBulkDeleteError] = useState('');
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  useEffect(() => {
+  const loadSessions = () => {
+    setLoading(true);
     authFetch(`${API_BASE}/api/sessions`)
       .then(res => res.json())
       .then(data => setSessions(data.sessions || []))
       .catch(() => setSessions([]))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadSessions();
   }, []);
 
   const filteredSessions = sessions.filter((s) => {
@@ -87,14 +103,141 @@ export default function SessionsPage() {
     return null;
   };
 
+  const requestDeleteSession = (event: React.MouseEvent, session: Session) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDeleteError('');
+    setSessionToDelete(session);
+  };
+
+  const deleteSession = async () => {
+    if (!sessionToDelete) return;
+    setDeletingSessionId(sessionToDelete.session_id);
+    setDeleteError('');
+    try {
+      const res = await authFetch(`${API_BASE}/api/sessions/${sessionToDelete.session_id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setDeleteError(data.detail || '删除失败');
+        return;
+      }
+      setSessionToDelete(null);
+      loadSessions();
+    } catch {
+      setDeleteError('删除失败');
+    } finally {
+      setDeletingSessionId(null);
+    }
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionEnabled(false);
+    setSelectedSessionIds([]);
+    setSelectionMode('manual');
+    setShowBulkDeleteConfirm(false);
+    setBulkDeleteError('');
+  };
+
+  const toggleSelectionMode = () => {
+    if (selectionEnabled) {
+      exitSelectionMode();
+      return;
+    }
+    setSelectionEnabled(true);
+    setSelectedSessionIds([]);
+    setSelectionMode('manual');
+    setBulkDeleteError('');
+  };
+
+  const toggleSessionSelected = (sessionId: string, checked: boolean) => {
+    setSelectionMode('manual');
+    setSelectedSessionIds((prev) => {
+      if (checked) return Array.from(new Set([...prev, sessionId]));
+      return prev.filter((id) => id !== sessionId);
+    });
+  };
+
+  const selectCurrentPage = () => {
+    setSelectionMode('page');
+    setSelectedSessionIds(filteredSessions.map((session) => session.session_id));
+    setBulkDeleteError('');
+  };
+
+  const selectFilteredAll = () => {
+    setSelectionMode('filtered_all');
+    setSelectedSessionIds([]);
+    setBulkDeleteError('');
+  };
+
+  const clearSelection = () => {
+    setSelectionMode('manual');
+    setSelectedSessionIds([]);
+    setBulkDeleteError('');
+  };
+
+  const openBulkDeleteConfirm = () => {
+    if (selectionMode !== 'filtered_all' && selectedSessionIds.length === 0) return;
+    setBulkDeleteError('');
+    setShowBulkDeleteConfirm(true);
+  };
+
+  const bulkDeleteSessions = async () => {
+    setBulkDeleting(true);
+    setBulkDeleteError('');
+    try {
+      const body = selectionMode === 'filtered_all'
+        ? { filter: { search_term: searchTerm, status: statusFilter } }
+        : { session_ids: selectedSessionIds };
+      const res = await authFetch(`${API_BASE}/api/sessions/bulk-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setBulkDeleteError(data.detail || '批量删除失败');
+        return;
+      }
+      setShowBulkDeleteConfirm(false);
+      exitSelectionMode();
+      loadSessions();
+    } catch {
+      setBulkDeleteError('批量删除失败');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const allVisibleSelected = filteredSessions.length > 0
+    && filteredSessions.every((session) => selectedSessionIds.includes(session.session_id));
+
+  const selectionSummary = selectionMode === 'filtered_all'
+    ? '已选中当前筛选的所有结果'
+    : selectionMode === 'page'
+      ? `已选中当前页面 ${selectedSessionIds.length} 个会话`
+      : `已手动选中 ${selectedSessionIds.length} 个会话`;
+
   return (
     <DashboardLayout>
       <div className="flex-1 space-y-8 p-10 lg:p-12">
         <div className="flex items-center justify-between space-y-2">
           <h2 className="text-4xl font-extrabold tracking-tight text-foreground/90">Sessions History</h2>
-          <Button onClick={() => setShowNewChat(true)} size="lg" className="rounded-xl px-8 font-bold gap-2 shadow-lg shadow-primary/20">
-            <Plus size={20} /> New Conversation
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              data-testid="sessions-selection-toggle"
+              onClick={toggleSelectionMode}
+              variant={selectionEnabled ? 'secondary' : 'outline'}
+              size="lg"
+              className={`rounded-xl px-6 font-bold ${selectionEnabled ? 'ring-2 ring-primary/20' : ''}`}
+            >
+              选择
+            </Button>
+            <Button onClick={() => setShowNewChat(true)} size="lg" className="rounded-xl px-8 font-bold gap-2 shadow-lg shadow-primary/20">
+              <Plus size={20} /> New Conversation
+            </Button>
+          </div>
         </div>
 
         <div className="flex flex-col md:flex-row gap-8 mt-10">
@@ -178,6 +321,35 @@ export default function SessionsPage() {
                     />
                   </div>
                 </div>
+                {selectionEnabled && (
+                  <div data-testid="sessions-bulk-bar" className="mt-6 flex flex-col gap-3 rounded-2xl border border-border/70 bg-background/80 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <p data-testid="sessions-selected-summary" className="text-sm font-semibold text-foreground">
+                        {selectionSummary}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button data-testid="sessions-select-page" variant="outline" size="sm" onClick={selectCurrentPage}>
+                          全选当前页面
+                        </Button>
+                        <Button data-testid="sessions-select-filtered-all" variant="outline" size="sm" onClick={selectFilteredAll}>
+                          全选当前筛选的所有结果
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={clearSelection}>
+                          清空选择
+                        </Button>
+                        <Button
+                          data-testid="sessions-bulk-delete"
+                          variant="destructive"
+                          size="sm"
+                          onClick={openBulkDeleteConfirm}
+                          disabled={selectionMode !== 'filtered_all' && selectedSessionIds.length === 0}
+                        >
+                          删除选中
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </CardHeader>
               <CardContent className="p-0">
                 {loading ? (
@@ -197,12 +369,29 @@ export default function SessionsPage() {
                     <Table>
                       <TableHeader className="bg-muted/50 border-b-2">
                         <TableRow className="hover:bg-transparent">
+                          {selectionEnabled && (
+                            <TableHead className="pl-8 py-5 text-center">
+                              <input
+                                type="checkbox"
+                                checked={allVisibleSelected}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    selectCurrentPage();
+                                  } else {
+                                    clearSelection();
+                                  }
+                                }}
+                                aria-label="全选当前页面"
+                              />
+                            </TableHead>
+                          )}
                           <TableHead className="pl-10 py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Status</TableHead>
                           <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Identity</TableHead>
                           <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Session Title</TableHead>
                           <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Primary Actor</TableHead>
                           <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground">Timestamp</TableHead>
-                          <TableHead className="pr-10 py-5 text-xs font-black uppercase tracking-widest text-muted-foreground text-right">Liveness</TableHead>
+                          <TableHead className="py-5 text-xs font-black uppercase tracking-widest text-muted-foreground text-right">Liveness</TableHead>
+                          <TableHead className="pr-10 py-5 text-xs font-black uppercase tracking-widest text-muted-foreground text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -214,6 +403,18 @@ export default function SessionsPage() {
                               onClick={() => router.push(`/sessions/${session.session_id}`)} 
                               className="group cursor-pointer hover:bg-muted/40 transition-all border-b border-border/40"
                             >
+                              {selectionEnabled && (
+                                <TableCell className="pl-8 py-6 text-center">
+                                  <input
+                                    data-testid={`session-select-${session.session_id}`}
+                                    type="checkbox"
+                                    checked={selectionMode !== 'filtered_all' && selectedSessionIds.includes(session.session_id)}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onChange={(event) => toggleSessionSelected(session.session_id, event.target.checked)}
+                                    aria-label={`选择会话 ${parseTitle(session.meta)}`}
+                                  />
+                                </TableCell>
+                              )}
                               <TableCell className="pl-10 py-6">
                                 <Badge variant={session.status === 'active' ? 'default' : 'secondary'} className={`capitalize font-bold text-[10px] px-3 py-1 shadow-sm ${session.status === 'active' ? 'bg-primary shadow-primary/20' : ''}`}>
                                   {session.status || 'active'}
@@ -232,7 +433,18 @@ export default function SessionsPage() {
                                 )}
                               </TableCell>
                               <TableCell className="text-sm text-muted-foreground font-medium">{formatTime(session.created_at)}</TableCell>
-                              <TableCell className="pr-10 py-6 text-sm text-muted-foreground font-black text-right group-hover:text-foreground transition-colors uppercase tracking-tighter">{timeAgo(session.last_active)}</TableCell>
+                              <TableCell className="py-6 text-sm text-muted-foreground font-black text-right group-hover:text-foreground transition-colors uppercase tracking-tighter">{timeAgo(session.last_active)}</TableCell>
+                              <TableCell className="pr-10 py-6 text-right">
+                                <button
+                                  data-testid={`session-delete-button-${session.session_id}`}
+                                  aria-label={`删除会话 ${parseTitle(session.meta)}`}
+                                  title={`删除会话 ${parseTitle(session.meta)}`}
+                                  onClick={(event) => requestDeleteSession(event, session)}
+                                  className="p-1.5 rounded-lg transition-colors text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </TableCell>
                             </TableRow>
                           );
                         })}
@@ -249,6 +461,79 @@ export default function SessionsPage() {
       {showNewChat && (
         <NewChatModal onClose={() => setShowNewChat(false)} />
       )}
+
+      <Dialog open={!!sessionToDelete} onOpenChange={(open) => {
+        if (!open) {
+          setSessionToDelete(null);
+          setDeleteError('');
+        }
+      }}>
+        <DialogContent data-testid="session-delete-dialog">
+          <DialogHeader>
+            <DialogTitle>确认删除会话</DialogTitle>
+            <DialogDescription>
+              {sessionToDelete
+                ? `确定要删除会话 "${parseTitle(sessionToDelete.meta)}" 吗？如果该会话仍在运行，将被强制终止并删除对应的 session 文件。`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSessionToDelete(null);
+                setDeleteError('');
+              }}
+              disabled={!!deletingSessionId}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="session-delete-confirm"
+              onClick={deleteSession}
+              disabled={!sessionToDelete || !!deletingSessionId}
+              className="gap-2"
+            >
+              {deletingSessionId && <Loader2 size={16} className="animate-spin" />}
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showBulkDeleteConfirm} onOpenChange={(open) => {
+        setShowBulkDeleteConfirm(open);
+        if (!open) setBulkDeleteError('');
+      }}>
+        <DialogContent data-testid="session-bulk-delete-dialog">
+          <DialogHeader>
+            <DialogTitle>确认批量删除会话</DialogTitle>
+            <DialogDescription>
+              {selectionMode === 'filtered_all'
+                ? '确定删除所有符合当前筛选条件的会话吗？这会按当前搜索词和状态筛选条件匹配后端全部命中结果。'
+                : `确定删除选中的 ${selectedSessionIds.length} 个会话吗？如果其中仍有会话在运行，将被强制终止并删除对应的 session 文件。`}
+            </DialogDescription>
+          </DialogHeader>
+          {bulkDeleteError && <p className="text-sm text-destructive">{bulkDeleteError}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBulkDeleteConfirm(false)} disabled={bulkDeleting}>
+              取消
+            </Button>
+            <Button
+              data-testid="session-bulk-delete-confirm"
+              variant="destructive"
+              onClick={bulkDeleteSessions}
+              disabled={bulkDeleting}
+              className="gap-2"
+            >
+              {bulkDeleting && <Loader2 size={16} className="animate-spin" />}
+              删除选中
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

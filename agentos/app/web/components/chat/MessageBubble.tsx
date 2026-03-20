@@ -1,114 +1,138 @@
 'use client';
 
 import { useState } from 'react';
+import { Bot, User, Wrench, ChevronDown } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { isJsonLike, previewText, stringifyContent } from '@/components/chat/messageContent';
-import type { Message } from '@/types/message';
+import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
+import { type ChatMessage, formatArgs } from '@/lib/chatTypes';
 
-function JsonViewer({ data }: { data: unknown }) {
-  try {
-    const jsonString = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-    return (
-      <pre className="json-viewer">
-        <code>{jsonString}</code>
-      </pre>
-    );
-  } catch {
-    return <div className="json-error">无法解析 JSON</div>;
-  }
-}
-
-function CollapsibleContent({ content, maxLength = 500 }: { content: string; maxLength?: number }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const needsCollapse = content.length > maxLength;
-
-  if (!needsCollapse) {
-    return <MarkdownRenderer className="chat-markdown--detail content-text" content={content} />;
-  }
-
-  return (
-    <div className="collapsible-content">
-      {!isExpanded ? <div className="content-text">{previewText(content, maxLength)}</div> : null}
-      {isExpanded ? <MarkdownRenderer className="chat-markdown--detail content-text" content={content} /> : null}
-      <button className="collapse-button" onClick={() => setIsExpanded(!isExpanded)}>
-        {isExpanded ? '收起' : '展开'}
-      </button>
-    </div>
-  );
-}
-
-function ToolInfoDisplay({ message }: { message: Message }) {
-  const { toolInfo } = message;
-  if (!toolInfo) return null;
-
+export function MessageBubble({ msg }: { msg: ChatMessage }) {
   const [showArgs, setShowArgs] = useState(false);
   const [showResult, setShowResult] = useState(false);
 
-  return (
-    <div className="tool-info">
-      <div className="tool-header">
-        <span className="tool-name">{toolInfo.name}</span>
-        <span className={`tool-status ${toolInfo.status}`}>
-          {toolInfo.status === 'running' ? '执行中...' : toolInfo.success ? '成功' : '失败'}
-        </span>
-      </div>
-
-      {/* 参数 */}
-      <div className="tool-section">
-        <button className="section-toggle" onClick={() => setShowArgs(!showArgs)}>
-          {showArgs ? '▼' : '▶'} 参数
-        </button>
-        {showArgs && (
-          <div className="section-content">
-            {isJsonLike(toolInfo.arguments) ? (
-              <JsonViewer data={toolInfo.arguments} />
-            ) : (
-              <CollapsibleContent content={stringifyContent(toolInfo.arguments)} />
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* 结果 */}
-      {toolInfo.status === 'completed' && (
-        <div className="tool-section">
-          <button className="section-toggle" onClick={() => setShowResult(!showResult)}>
-            {showResult ? '▼' : '▶'} 结果
-          </button>
-          {showResult && (
-            <div className="section-content">
-              {toolInfo.error ? (
-                <div className="tool-error">
-                  <MarkdownRenderer className="chat-markdown--detail" content={toolInfo.error} />
-                </div>
-              ) : isJsonLike(toolInfo.result) ? (
-                <JsonViewer data={toolInfo.result} />
-              ) : (
-                <CollapsibleContent content={stringifyContent(toolInfo.result)} maxLength={1000} />
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function MessageBubble({ message }: { message: Message }) {
-  if (message.role === 'tool') {
+  if (msg.role === 'system') {
     return (
-      <div className="bubble tool">
-        <div className="tool-message-content">
-          <MarkdownRenderer className="chat-markdown--detail" content={message.content} />
+      <div className="flex justify-center my-3">
+        <div className="max-w-3xl rounded-2xl border border-border bg-muted/50 px-4 py-2 text-[10px] text-muted-foreground">
+          <MarkdownRenderer className="chat-markdown chat-markdown--system" content={msg.content} />
         </div>
-        <ToolInfoDisplay message={message} />
       </div>
     );
   }
 
+  if (msg.role === 'user') {
+    return (
+      <div className="flex gap-4 max-w-4xl mx-auto flex-row-reverse my-6">
+        <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center shrink-0 border-2 border-border shadow-md">
+          <User size={20} className="text-secondary-foreground" />
+        </div>
+        <div className="flex-1 flex flex-col items-end pt-1">
+          <div className="bg-primary text-primary-foreground text-base md:text-lg p-5 rounded-3xl rounded-tr-sm max-w-[85%] leading-relaxed shadow-lg">
+            <MarkdownRenderer className="chat-markdown chat-markdown--user" content={msg.content} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (msg.role === 'tool' && msg.toolInfo) {
+    const ti = msg.toolInfo;
+    return (
+      <div className="flex gap-3 max-w-3xl mx-auto my-2 overflow-hidden">
+        <div className="w-8 h-8 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
+            <div className="bg-muted px-4 py-2 flex items-center justify-between text-xs border-b">
+              <div className="flex items-center gap-2">
+                <Wrench size={14} className={ti.status === 'completed' ? 'text-green-500' : 'text-amber-500'} />
+                <span className="text-foreground font-mono font-medium">{ti.name}</span>
+              </div>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${ti.status === 'running' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20' : ti.success !== false ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'}`}>
+                {ti.status === 'running' ? 'Executing...' : ti.success !== false ? 'Success' : 'Failed'}
+              </span>
+            </div>
+            <div className="px-4 py-3 space-y-2">
+              <button onClick={() => setShowArgs(!showArgs)} className="text-[11px] font-medium text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+                <ChevronDown size={14} className={`transition-transform duration-200 ${showArgs ? 'rotate-180' : ''}`} /> Payload
+              </button>
+              {showArgs && (
+                isJsonLike(ti.arguments) ? (
+                  <pre className="json-viewer">
+                    <code>{formatArgs(ti.arguments)}</code>
+                  </pre>
+                ) : (
+                  <div className="rounded-md border bg-muted/50 p-3">
+                    <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={stringifyContent(ti.arguments)} />
+                  </div>
+                )
+              )}
+              {ti.status === 'completed' && (
+                <>
+                  <button onClick={() => setShowResult(!showResult)} className="text-[11px] font-medium text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors mt-2">
+                    <ChevronDown size={14} className={`transition-transform duration-200 ${showResult ? 'rotate-180' : ''}`} /> Output
+                  </button>
+                  {showResult && (
+                    ti.error ? (
+                      <div className="rounded-md border border-red-500/20 bg-red-500/10 p-3 text-red-600 dark:text-red-400">
+                        <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={ti.error} />
+                      </div>
+                    ) : isJsonLike(ti.result) ? (
+                      <pre className="json-viewer">
+                        <code>{formatArgs(ti.result)}</code>
+                      </pre>
+                    ) : (
+                      <div className="rounded-md border bg-muted/50 p-3">
+                        <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={stringifyContent(ti.result)} />
+                      </div>
+                    )
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // tool message without toolInfo (e.g. from websocket tool_result)
+  if (msg.role === 'tool') {
+    return (
+      <div className="flex gap-3 max-w-3xl mx-auto my-2 overflow-hidden">
+        <div className="w-8 h-8 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
+            <div className="bg-muted px-4 py-2 flex items-center gap-2 text-xs border-b">
+              <Wrench size={14} className="text-green-500" />
+              <span className="text-muted-foreground uppercase tracking-wider">Tool Result</span>
+              {msg.name ? <span className="ml-auto font-mono text-foreground">{msg.name}</span> : null}
+            </div>
+            <div className="px-4 py-3">
+              {isJsonLike(msg.content) ? (
+                <pre className="json-viewer">
+                  <code>{formatArgs(msg.content)}</code>
+                </pre>
+              ) : (
+                <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={msg.content} />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // assistant
   return (
-    <div className={`bubble ${message.role}`}>
-      <MarkdownRenderer content={message.content} />
+    <div className="flex gap-4 max-w-4xl mx-auto my-8 group overflow-hidden">
+      <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center shrink-0 shadow-lg mt-1 group-hover:scale-105 transition-transform">
+        <Bot size={20} className="text-primary-foreground" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-base md:text-lg text-foreground break-words leading-relaxed font-medium">
+          <MarkdownRenderer className="chat-markdown chat-markdown--assistant" content={msg.content} />
+        </div>
+      </div>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import pytest
 
 telegram = pytest.importorskip("telegram", reason="python-telegram-bot not installed")
 
-from agentos.adapters.channels.telegram.plugin import definition, register
+from agentos.adapters.plugins.telegram.plugin import definition, register
 from agentos.adapters.plugins import PluginRegistry
 from agentos.adapters.plugins.base import PluginApi
 from agentos.interfaces.ws.gateway import Gateway

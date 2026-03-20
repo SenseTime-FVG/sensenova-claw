@@ -92,9 +92,9 @@ def test_list_agents(client):
     resp = client.get("/api/agents")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 2
     ids = {a["id"] for a in data}
     assert "default" in ids
+    assert "system-admin" in ids
     assert "research" in ids
     # 每个 agent 包含基本字段
     for agent in data:

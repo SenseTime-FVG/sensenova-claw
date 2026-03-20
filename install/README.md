@@ -16,6 +16,23 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.
 
 > 如果 PowerShell 提示执行策略限制，先运行: `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`
 
+### 指定安装版本
+
+安装脚本默认拉取 `dev` 分支，也支持通过环境变量显式指定分支或 tag，便于发布验证与回滚。
+
+Linux / macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.sh | AGENTOS_REPO_REF=v0.5.0 bash
+```
+
+Windows（PowerShell）:
+
+```powershell
+$env:AGENTOS_REPO_REF="v0.5.0"
+irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.ps1 | iex
+```
+
 ## 安装脚本做了什么
 
 脚本会自动完成以下步骤：
@@ -29,19 +46,26 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.
 | 5. 克隆仓库 | 将 AgentOS 克隆到 `{安装路径}/app/`（已存在则更新） |
 | 6. 安装依赖 | `npm install` 自动安装 Node.js 和 Python 依赖 |
 | 7. 初始化目录 | 创建 AGENTOS_HOME 目录结构，复制预置 agents 和 skills |
-| 8. 交互配置 | 引导选择 LLM 提供商、输入 API Key，自动生成 `config.yml` |
-| 9. 注册命令 | 注册全局 `agentos` 命令 |
+| 8. 初始化配置 | 从 `config_example.yml` 生成 `config.yml`（已有则跳过） |
+| 9. 注册命令 | 以 editable 模式注册全局 `agentos` 命令，避免 CLI 与安装目录代码漂移 |
 
 ## 安装完成后
 
+**1. 启动服务**
+
 ```bash
-# 启动服务（后端 + 前端 Dashboard）
 agentos run
+```
 
-# 仅启动后端
-agentos run --no-frontend
+**2. 配置 LLM 等设置**
 
-# 启动 CLI 客户端（需先启动服务）
+启动后，打开 Web 界面进行配置：
+
+- Web Dashboard: http://localhost:3000
+
+或使用 CLI 客户端（需先启动服务）：
+
+```bash
 agentos cli
 ```
 

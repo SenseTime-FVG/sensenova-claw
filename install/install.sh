@@ -7,16 +7,20 @@
 # 或本地执行:
 #   bash install/install.sh
 #
+# 开发模式（跳过克隆，使用当前目录代码）:
+#   bash install/install.sh --dev
+#
 set -euo pipefail
 
 # ── 配置 ──
 
 AGENTOS_HOME="${AGENTOS_HOME:-$HOME/.agentos}"
 APP_DIR="$AGENTOS_HOME/app"
-REPO_URL="https://github.com/SenseTime-FVG/agentos.git"
-REPO_BRANCH="dev"
+REPO_URL="${AGENTOS_REPO_URL:-https://github.com/SenseTime-FVG/agentos.git}"
+REPO_REF="${AGENTOS_REPO_REF:-${AGENTOS_REPO_BRANCH:-dev}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
+DEV_MODE=false
 
 # 国内镜像
 CN_NPM_REGISTRY="https://registry.npmmirror.com"
@@ -61,20 +65,6 @@ prompt_input() {
     read -rp "$(echo -e "${BLUE}[?]${NC} ${prompt}: ")" value
     echo "$value"
   fi
-}
-
-prompt_select() {
-  local prompt="$1"
-  shift
-  local options=("$@")
-  echo -e "${BLUE}[?]${NC} ${prompt}"
-  for i in "${!options[@]}"; do
-    echo "    $((i+1))) ${options[$i]}"
-  done
-  local choice
-  read -rp "    请选择 [1]: " choice
-  choice="${choice:-1}"
-  echo "${options[$((choice-1))]}"
 }
 
 # ── 步骤 1: 地区检测 ──
@@ -132,6 +122,39 @@ EOF
 
   # nvm Node 下载镜像
   export NVM_NODEJS_ORG_MIRROR="$CN_NVM_MIRROR"
+}
+
+# ── 步骤 1b: 安装 git ──
+
+install_git() {
+  if command_exists git; then
+    log "git 已安装: $(git --version)"
+    return
+  fi
+
+  info "安装 git..."
+
+  if command_exists apt-get; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq git
+  elif command_exists yum; then
+    sudo yum install -y -q git
+  elif command_exists dnf; then
+    sudo dnf install -y -q git
+  elif command_exists pacman; then
+    sudo pacman -S --noconfirm git
+  elif command_exists brew; then
+    brew install git
+  elif command_exists apk; then
+    sudo apk add --quiet git
+  else
+    fail "无法自动安装 git，请手动安装后重试: https://git-scm.com/downloads"
+  fi
+
+  if command_exists git; then
+    log "git 安装成功: $(git --version)"
+  else
+    fail "git 安装失败，请手动安装: https://git-scm.com/downloads"
+  fi
 }
 
 # ── 步骤 2: 安装 uv + Python ──
@@ -253,19 +276,31 @@ install_node() {
 
 setup_repo() {
   if [ -d "$APP_DIR/.git" ]; then
-    info "更新 AgentOS..."
+    info "更新 AgentOS ($REPO_REF)..."
     cd "$APP_DIR"
-    git fetch origin "$REPO_BRANCH" --quiet
-    git checkout "$REPO_BRANCH" --quiet 2>/dev/null || true
-    git pull origin "$REPO_BRANCH" --ff-only --quiet || {
-      warn "git pull 失败，可能有本地修改，跳过更新"
+    git fetch origin "$REPO_REF" --quiet || {
+      warn "git fetch $REPO_REF 失败，跳过更新"
+      cd - >/dev/null
+      return
     }
+    if git show-ref --verify --quiet "refs/remotes/origin/$REPO_REF"; then
+      git checkout "$REPO_REF" --quiet 2>/dev/null || git checkout -B "$REPO_REF" "origin/$REPO_REF" --quiet
+      git pull origin "$REPO_REF" --ff-only --quiet || {
+        warn "git pull 失败，可能有本地修改，跳过更新"
+      }
+    else
+      git checkout --detach FETCH_HEAD --quiet || {
+        warn "git checkout $REPO_REF 失败，跳过更新"
+        cd - >/dev/null
+        return
+      }
+    fi
     cd - >/dev/null
     log "AgentOS 已更新"
   else
-    info "克隆 AgentOS 仓库..."
+    info "克隆 AgentOS 仓库 ($REPO_REF)..."
     mkdir -p "$(dirname "$APP_DIR")"
-    git clone --branch "$REPO_BRANCH" --depth 1 "$REPO_URL" "$APP_DIR"
+    git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$APP_DIR"
     log "AgentOS 克隆完成"
   fi
 }
@@ -279,8 +314,22 @@ install_deps() {
   # 设置 uv 缓存目录（避免权限问题）
   export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/uv_cache}"
 
+  # 1) Python 依赖
+  info "安装 Python 依赖..."
+  uv sync 2>&1 | tail -5
+  log "Python 依赖安装完成"
+
+  # 2) 根目录 npm 依赖（跳过 postinstall，避免重复）
+  info "安装根目录 npm 依赖..."
+  npm install --ignore-scripts 2>&1 | tail -5
+  log "根目录 npm 依赖安装完成"
+
+  # 3) 前端依赖
+  info "安装前端依赖..."
+  cd "$APP_DIR/agentos/app/web"
   npm install 2>&1 | tail -5
-  log "项目依赖安装完成"
+  cd "$APP_DIR"
+  log "前端依赖安装完成"
 }
 
 # ── 步骤 5b: 构建 AGENTOS_HOME 目录结构 ──
@@ -328,96 +377,26 @@ setup_home_dir() {
   log "AGENTOS_HOME 初始化完成: $AGENTOS_HOME"
 }
 
-# ── 步骤 6: 交互式配置 ──
+# ── 步骤 6: 初始化配置文件 ──
 
 setup_config() {
-  local config_file="$APP_DIR/config.yml"
+  # 配置文件放在 AGENTOS_HOME 根目录，与代码 DEFAULT_CONFIG_PATH 一致
+  local config_file="$AGENTOS_HOME/config.yml"
+  local example_file="$APP_DIR/config_example.yml"
 
   if [ -f "$config_file" ]; then
-    info "检测到已有配置文件"
-    local overwrite
-    overwrite=$(prompt_input "是否重新配置? (y/N)" "N")
-    if [[ ! "$overwrite" =~ ^[yY]$ ]]; then
-      log "保留现有配置"
-      return
-    fi
+    info "检测到已有配置文件，跳过"
+    log "保留现有配置: $config_file"
+    return
   fi
 
-  echo ""
-  info "配置 LLM 服务"
-  echo ""
-
-  local provider
-  provider=$(prompt_select "选择 LLM 提供商:" "openai" "anthropic" "gemini")
-
-  local api_key
-  api_key=$(prompt_input "输入 API Key")
-
-  local default_base_url default_model_key default_model_id
-  case "$provider" in
-    openai)
-      default_base_url="https://api.openai.com/v1"
-      default_model_key="gpt_4o_mini"
-      default_model_id="gpt-4o-mini"
-      ;;
-    anthropic)
-      default_base_url="https://api.anthropic.com"
-      default_model_key="claude_sonnet"
-      default_model_id="claude-sonnet-4-20250514"
-      ;;
-    gemini)
-      default_base_url="https://generativelanguage.googleapis.com"
-      default_model_key="gemini_pro"
-      default_model_id="gemini-2.5-pro"
-      ;;
-  esac
-
-  local base_url
-  base_url=$(prompt_input "API Base URL" "$default_base_url")
-
-  local model_key
-  model_key=$(prompt_input "默认模型 (key)" "$default_model_key")
-
-  # 写入主配置
-  cat > "$config_file" <<EOF
-# AgentOS 配置文件（由安装脚本生成）
-
-system:
-  workspace_dir: ${AGENTOS_HOME}/workspace
-  database_path: ${AGENTOS_HOME}/db/agentos.db
-
-security:
-  auth_enabled: true
-
-llm:
-  providers:
-    ${provider}:
-      api_key: "${api_key}"
-      base_url: "${base_url}"
-      timeout: 60
-      max_retries: 3
-
-  models:
-    ${model_key}:
-      provider: ${provider}
-      model_id: ${default_model_id}
-      timeout: 60
-      max_output_tokens: 8192
-
-  default_model: ${model_key}
-
-agents:
-  default:
-    name: Default Agent
-    description: 默认 AI Agent
-    model: ${model_key}
-    temperature: 0.2
-    system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
-    tools: []
-    skills: []
-EOF
-
-  log "配置已写入 $config_file"
+  if [ -f "$example_file" ]; then
+    cp "$example_file" "$config_file"
+    log "已从 config_example.yml 生成配置文件: $config_file"
+    info "请编辑 $config_file 填入 LLM API Key 等配置"
+  else
+    warn "未找到 config_example.yml，请手动创建 $config_file"
+  fi
 }
 
 # ── 步骤 7: 注册全局命令 ──
@@ -426,7 +405,8 @@ register_command() {
   info "注册 agentos 命令..."
   cd "$APP_DIR"
 
-  uv tool install --from . --force agentos 2>/dev/null || {
+  # 使用 editable 安装，避免 uv tool 环境里残留一份过期代码副本。
+  uv tool install --editable --from . --force agentos 2>/dev/null || {
     # 降级：用 pip install -e
     warn "uv tool install 失败，尝试 pip install..."
     uv pip install -e . 2>/dev/null || pip install -e . 2>/dev/null || {
@@ -457,21 +437,30 @@ print_success() {
   echo -e "${GREEN}  AgentOS 安装完成!${NC}"
   echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
   echo ""
-  echo "  启动服务:"
-  echo "    agentos run"
-  echo ""
-  echo "  启动 CLI 客户端（需先启动服务）:"
-  echo "    agentos cli"
-  echo ""
-  echo "  安装目录: $APP_DIR"
-  echo "  配置文件: $APP_DIR/config.yml"
+  if [ "$DEV_MODE" = "true" ]; then
+    echo "  模式:     开发模式"
+    echo "  代码目录: $APP_DIR"
+  else
+    echo "  安装目录: $APP_DIR"
+    echo "  安装来源: $REPO_URL@$REPO_REF"
+  fi
   echo "  数据目录: $AGENTOS_HOME"
   echo ""
   if [ "$IS_CN" = "true" ]; then
     echo "  已配置国内镜像: npm($CN_NPM_REGISTRY) pip($CN_UV_INDEX)"
     echo ""
   fi
-  echo "  如需重新配置，编辑 $APP_DIR/config.yml"
+  echo -e "  ${YELLOW}下一步:${NC}"
+  echo ""
+  echo "    1. 启动服务:"
+  echo "       agentos run"
+  echo ""
+  echo "    2. 打开 Web 界面进行 LLM 等配置:"
+  echo "       http://localhost:3000"
+  echo ""
+  echo "    或使用 CLI 客户端（需先启动服务）:"
+  echo "       agentos cli"
+  echo ""
   echo "  文档: https://github.com/SenseTime-FVG/agentos"
   echo ""
 }
@@ -479,31 +468,68 @@ print_success() {
 # ── 主流程 ──
 
 main() {
+  # 解析参数
+  for arg in "$@"; do
+    case "$arg" in
+      --dev) DEV_MODE=true ;;
+    esac
+  done
+
   echo ""
   echo -e "${BLUE}╔══════════════════════════════════════════════╗${NC}"
   echo -e "${BLUE}║         AgentOS 一键安装脚本                ║${NC}"
   echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}"
   echo ""
 
-  # 选择安装路径
-  local default_dir="$AGENTOS_HOME"
-  AGENTOS_HOME=$(prompt_input "安装路径" "$default_dir")
-  APP_DIR="$AGENTOS_HOME/app"
-  log "安装到: $AGENTOS_HOME"
-  echo ""
+  if [ "$DEV_MODE" = "true" ]; then
+    # 开发模式：使用当前目录的代码，跳过克隆
+    # 找到 install.sh 所在的仓库根目录
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    APP_DIR="$(cd "$script_dir/.." && pwd)"
 
-  detect_region
-  configure_cn_mirrors
-  install_uv
-  install_python
-  install_nvm
-  install_node
-  setup_repo
-  install_deps
-  setup_home_dir
-  setup_config
-  register_command
-  print_success
+    # 校验是否是 agentos 项目
+    if [ ! -f "$APP_DIR/agentos/app/gateway/main.py" ]; then
+      fail "当前仓库不是 AgentOS 项目，无法使用 --dev 模式"
+    fi
+
+    log "开发模式: 使用本地代码 $APP_DIR"
+    echo ""
+
+    detect_region
+    configure_cn_mirrors
+    install_uv
+    install_python
+    install_nvm
+    install_node
+    # 跳过 setup_repo（不克隆）
+    install_deps
+    setup_home_dir
+    setup_config
+    register_command
+    print_success
+  else
+    # 正常安装模式
+    local default_dir="$AGENTOS_HOME"
+    AGENTOS_HOME=$(prompt_input "安装路径" "$default_dir")
+    APP_DIR="$AGENTOS_HOME/app"
+    log "安装到: $AGENTOS_HOME"
+    echo ""
+
+    detect_region
+    configure_cn_mirrors
+    install_git
+    install_uv
+    install_python
+    install_nvm
+    install_node
+    setup_repo
+    install_deps
+    setup_home_dir
+    setup_config
+    register_command
+    print_success
+  fi
 }
 
 main "$@"

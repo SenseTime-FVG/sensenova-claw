@@ -104,6 +104,22 @@ class AgentRegistry:
             default = self._build_agent_from_dict("default", {}, agent_section)
             self.register(default)
 
+        # 确保 system-admin agent 始终存在
+        if not self.get("system-admin"):
+            system_admin_dict = {
+                "name": "SystemAdmin",
+                "description": "系统运维管理员，负责 AgentOS 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作",
+                "system_prompt": (
+                    "你是 AgentOS 的系统管理员（SystemAdmin）。你的职责是帮助用户管理和配置 AgentOS 平台。\n\n"
+                    "你可以通过读写配置文件和执行系统命令来完成管理任务。操作前请先告知用户你将要执行的操作，等用户确认后再执行。\n\n"
+                    "修改配置文件后，请提醒用户某些配置可能需要重启服务才能生效。"
+                ),
+                "tools": ["read_file", "write_file", "bash_command"],
+                "skills": ["system-admin-skill"],
+            }
+            system_admin = self._build_agent_from_dict("system-admin", system_admin_dict, agent_section)
+            self.register(system_admin)
+
     def _build_agent_from_dict(
         self, agent_id: str, agent_dict: dict[str, Any], fallback: dict[str, Any]
     ) -> AgentConfig:

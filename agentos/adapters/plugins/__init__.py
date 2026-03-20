@@ -23,16 +23,14 @@ logger = logging.getLogger(__name__)
 def _iter_builtin_plugin_modules() -> list[tuple[str, str]]:
     """收集内置插件模块名。
 
-    同时扫描两处目录：
-    - agentos/adapters/plugins/<name>/plugin.py（通用插件）
-    - agentos/adapters/channels/<name>/plugin.py（Channel 插件）
+    仅扫描插件目录：
+    - agentos/adapters/plugins/<name>/plugin.py
     """
     modules: list[tuple[str, str]] = []
     seen: set[str] = set()
 
     scan_roots = (
         (Path(__file__).parent, "agentos.adapters.plugins"),
-        (Path(__file__).resolve().parent.parent / "channels", "agentos.adapters.channels"),
     )
     for root_dir, package_prefix in scan_roots:
         if not root_dir.exists():
@@ -67,7 +65,7 @@ class PluginRegistry:
     ) -> None:
         """
         扫描并加载所有启用的 Plugin。
-        加载顺序: 内置插件(app/plugins/*/) → 用户插件(~/.agentos/plugins/*/)
+        加载顺序: 内置插件(adapters/plugins/*/) → 用户插件(~/.agentos/plugins/*/)
         错误处理: 缺少 definition/register 跳过+警告；register() 异常跳过+错误日志；id 冲突后者覆盖
         """
         # 提前设置引用，使 register() 内可通过 api.get_gateway() 等获取
@@ -78,7 +76,7 @@ class PluginRegistry:
 
         from agentos.adapters.plugins.base import PluginApi
 
-        # 扫描内置插件目录（plugins/ + channels/）
+        # 扫描内置插件目录（plugins/）
         for name, module_name in _iter_builtin_plugin_modules():
             try:
                 module = importlib.import_module(module_name)

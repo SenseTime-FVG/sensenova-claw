@@ -34,30 +34,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  /** 调用后端验证 token 并设置 cookie */
+  /** 调用后端验证 token 并设置 cookie。
+   *  网络错误时 throw，token 无效时返回 false。 */
   const verifyToken = useCallback(async (token: string): Promise<boolean> => {
+    let response: Response;
     try {
-      const response = await fetch(`${API_BASE}/api/auth/verify-token`, {
+      response = await fetch(`${API_BASE}/api/auth/verify-token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ token }),
       });
-
-      if (!response.ok) return false;
-
-      const data = await response.json();
-      if (data.authenticated) {
-        // 同时在前端设置 cookie（确保跨端口场景可用）
-        setCookie(COOKIE_NAME, token);
-        setIsAuthenticated(true);
-        return true;
-      }
-      return false;
     } catch (error) {
       console.error('Token verification failed:', error);
-      return false;
+      throw new Error('无法连接后端服务，请确认后端已启动且端口可访问');
     }
+
+    if (!response.ok) return false;
+
+    const data = await response.json();
+    if (data.authenticated) {
+      // 同时在前端设置 cookie（确保跨端口场景可用）
+      setCookie(COOKIE_NAME, token);
+      setIsAuthenticated(true);
+      return true;
+    }
+    return false;
   }, []);
 
   /** 登出 */

@@ -8,9 +8,9 @@ import pytest
 
 telegram = pytest.importorskip("telegram", reason="python-telegram-bot not installed")
 
-from agentos.adapters.channels.telegram.channel import TelegramChannel
-from agentos.adapters.channels.telegram.config import TelegramConfig
-from agentos.adapters.channels.telegram.models import TelegramInboundMessage
+from agentos.adapters.plugins.telegram.channel import TelegramChannel
+from agentos.adapters.plugins.telegram.config import TelegramConfig
+from agentos.adapters.plugins.telegram.models import TelegramInboundMessage
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope

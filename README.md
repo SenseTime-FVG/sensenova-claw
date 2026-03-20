@@ -62,46 +62,61 @@ ui.user_input → agent.step_started → llm.call_requested → llm.call_complet
 
 ## 📦 Install
 
-**环境要求**:
-- Python 3.12+
-- Node.js 18+
-- npm
+### Option A: 一键安装脚本（推荐）
 
-**安装依赖**:
+脚本自动安装 Python、Node.js 等依赖，克隆仓库并注册全局 `agentos` 命令。
+
+**Linux / macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.ps1 | iex
+```
+
+安装完成后，运行 `agentos run` 启动服务，然后打开 http://localhost:3000 进行 LLM 等配置。
+
+> 详细说明见 [install/README.md](install/README.md)
+>
+> 如需验证某个发布分支或 tag，可在安装前指定 `AGENTOS_REPO_REF`，例如:
+> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.sh | AGENTOS_REPO_REF=v0.5.0 bash`
+
+### Option B: 手动安装
+
+**环境要求**: Python 3.12+ · Node.js 18+ · Git
 
 ```bash
 git clone https://github.com/SenseTime-FVG/agentos.git
 cd agentos
 
-# Python 依赖
-uv sync          # 或 pip install -e .
-
-# 前端依赖
-cd agentos/app/web && npm install && cd -
-
-# 根目录 Playwright（可选，用于前端 e2e 测试）
+# 安装依赖
 npm install
-```
 
-## 🚀 Quick Start
-
-**1. 配置 API Key**
-
-```bash
+# 配置
 cp config_example.yml config.yml
 # 编辑 config.yml，填入 LLM provider 和工具的 API Key
 ```
 
-**2. 一键启动**
+## 🚀 Quick Start
+
+**1. 一键启动**
 
 ```bash
+# 一键安装方式
+agentos run
+
+# 手动安装方式
 npm run dev
 ```
 
 - Web 前端: http://localhost:3000
 - API 后端: http://localhost:8000
 
-**3. 单独启动**
+**2. 单独启动**
 
 ```bash
 # 启动 API 服务
@@ -111,10 +126,11 @@ npm run dev:server
 npm run dev:web
 
 # 启动 CLI 客户端（需后端已运行）
-python3 -m agentos.app.cli.cli_client --port 8000
+agentos cli
+# 或: python3 -m agentos.app.cli.cli_client --port 8000
 ```
 
-**4. 发送第一条消息**
+**3. 发送第一条消息**
 
 打开 http://localhost:3000，在对话框中输入消息即可开始对话。
 
@@ -197,7 +213,8 @@ plugins:
 plugins:
   whatsapp:
     enabled: true
-    auth_dir: ".agentos/data/channels/whatsapp/auth"
+    auth_dir: "~/.agentos/data/plugins/whatsapp/auth"
+    typing_indicator: "none"   # composing / none
     dm_policy: "open"          # 私聊策略: open / allowlist / disabled
     group_policy: "open"       # 群聊策略: open / allowlist / disabled
     allowlist: []              # 私聊允许名单，支持 +15550000001 或 JID
@@ -205,7 +222,7 @@ plugins:
     show_tool_progress: false
     bridge:
       command: "node"
-      entry: "agentos/adapters/channels/whatsapp/bridge/src/index.mjs"
+      entry: "agentos/adapters/plugins/whatsapp/bridge/src/index.mjs"
       startup_timeout_seconds: 30
       send_timeout_seconds: 15
 ```
@@ -213,7 +230,7 @@ plugins:
 安装 sidecar 依赖：
 
 ```bash
-npm install --prefix agentos/adapters/channels/whatsapp/bridge
+npm install --prefix agentos/adapters/plugins/whatsapp/bridge
 ```
 
 当前仓库的 WhatsApp runtime 通过 Node sidecar + Baileys 提供；若未安装 sidecar 依赖，Python channel 只能完成协议层启动，无法真正连接 WhatsApp Web。
