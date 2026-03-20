@@ -559,12 +559,3 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `agentos` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
 - 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `AGENTOS_REPO_REF`。
-
-### 2026-03-20 README Channel 文档补充
-
-成功经验：
-- 更新 README 里的 Channel 列表时，先直接对照 `agentos/adapters/plugins/<name>/config.py` 与 `plugin.py` 提取真实配置键，能避免把展示文档写成过时字段。
-- 对 IM 渠道文档，表格里只放“能力简介 + 顶层配置路径”，细节放到各自的 `<details>` 配置块，更适合 README 快速浏览。
-
-失败/风险经验：
-- 用户口头描述里出现拼写近似项（如 `telgram`）时，仍需以仓库真实插件名 `telegram` 为准补文档，否则配置路径很容易写错。
