@@ -34,7 +34,7 @@ def app(tmp_path):
     # 真实 AgentRegistry，加载 default agent
     agent_config_dir = tmp_path / "agents"
     agent_config_dir.mkdir()
-    agent_registry = AgentRegistry(config_dir=agent_config_dir)
+    agent_registry = AgentRegistry()
     agent_registry.load_from_config(cfg.data)
 
     # 注册一个额外的 research agent 用于测试
@@ -44,7 +44,6 @@ def app(tmp_path):
         provider="openai", model="gpt-4o-mini",
     )
     agent_registry.register(research)
-    agent_registry.save(research)
 
     # 真实 ToolRegistry（自动注册 builtin 工具）
     tool_registry = ToolRegistry()
@@ -94,7 +93,6 @@ def test_list_agents(client):
     data = resp.json()
     ids = {a["id"] for a in data}
     assert "default" in ids
-    assert "system-admin" in ids
     assert "research" in ids
     # 每个 agent 包含基本字段
     for agent in data:

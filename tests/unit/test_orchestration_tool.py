@@ -24,7 +24,7 @@ def agent_registry(tmp_path):
     """创建真实 AgentRegistry（临时目录）"""
     config_dir = tmp_path / "agents"
     config_dir.mkdir()
-    return AgentRegistry(config_dir=config_dir)
+    return AgentRegistry()
 
 
 @pytest.fixture
@@ -115,10 +115,6 @@ class TestExecuteSuccess:
         registered = agent_registry.get("new-agent")
         assert registered is not None
         assert registered.name == "New Agent"
-
-        # 验证已持久化到磁盘
-        saved_file = agent_registry._config_dir / "new-agent" / "config.json"
-        assert saved_file.exists()
 
     async def test_inherit_from_default(self, tool, registry_with_default):
         """未指定 provider/model/temperature 时从 default Agent 继承"""

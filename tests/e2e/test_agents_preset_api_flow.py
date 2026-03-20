@@ -34,23 +34,13 @@ async def _build_app(tmp_path: Path) -> FastAPI:
     cfg = Config(config_path=config_path)
     cfg.set("system.workspace_dir", str(workspace_dir))
 
-    agent_registry = AgentRegistry(config_dir=agent_config_dir)
+    agent_registry = AgentRegistry()
+    # 通过 config 加载预置 agent
+    cfg.data.setdefault("agents", {})["preset-agent"] = {
+        "name": "Preset Agent",
+        "model": "gpt-4o-mini",
+    }
     agent_registry.load_from_config(cfg.data)
-    preset_dir = tmp_path / "preset_agents"
-    (preset_dir / "preset-agent").mkdir(parents=True)
-    (preset_dir / "preset-agent" / "config.json").write_text(
-        json.dumps(
-            {
-                "id": "preset-agent",
-                "name": "Preset Agent",
-                "provider": "openai",
-                "model": "gpt-4o-mini",
-            }
-        ),
-        encoding="utf-8",
-    )
-    agent_registry.load_from_dir(dir_path=preset_dir, source="preset", reserve_ids=True)
-    agent_registry.load_from_dir()
 
     db_path = Path("/tmp") / f"agentos_agents_e2e_{uuid.uuid4().hex}.db"
     repo = Repository(db_path=str(db_path))

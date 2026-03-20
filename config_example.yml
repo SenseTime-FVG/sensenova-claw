@@ -142,14 +142,64 @@ llm:
 # ════════════════════════════════════════════════════
 # Agents 配置
 # ════════════════════════════════════════════════════
+# system_prompt 不在此文件配置，放在 .agentos/agents/<agent_id>/SYSTEM_PROMPT.md 中
 agents:
   default:
     name: Default Agent
     description: 默认 AI Agent
     model: gemini-pro
     temperature: 0.6
-    system_prompt: "你是一个有工具能力的AI助手，请在必要时通过调用工具、使用记忆、或者调用技能来完成任务。"
     tools: []
+    skills: []
+
+  system-admin:
+    name: SystemAdmin
+    description: 系统运维管理员，负责 AgentOS 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作
+    temperature: 0.2
+    tools: [read_file, write_file, bash_command]
+    skills: [system-admin-skill]
+
+  office-main:
+    name: 办公主助手
+    description: 办公任务总调度，负责理解需求并委托给专业 agent
+    temperature: 0.2
+    tools: [send_message, ask_user]
+    skills: []
+    max_delegation_depth: 2
+
+  search-agent:
+    name: 搜索调研助手
+    description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
+    temperature: 0.2
+    tools: [serper_search, fetch_url, read_file, write_file, image_search, send_message, ask_user]
+    skills: [paddleocr-doc-parsing, research-union, union-search-plus]
+
+  ppt-agent:
+    name: PPT 生成助手
+    description: 生成 PPT 演示文稿，支持一句话生成
+    temperature: 0.2
+    tools: [serper_search, fetch_url, read_file, write_file, bash_command, send_message, image_search, ask_user]
+    skills: [ppt-superpower, ppt-asset-plan, ppt-html-gen, ppt-image-selection, ppt-page-assets, ppt-page-html, ppt-page-plan, ppt-page-polish, ppt-research-pack, ppt-review, ppt-source-analysis, ppt-speaker-notes, ppt-story-refine, ppt-storyboard, ppt-style-refine, ppt-style-spec, ppt-task-pack, ppt-template-pack]
+
+  data-analyst:
+    name: 数据分析助手
+    description: 数据分析、可视化和报告生成
+    temperature: 0.2
+    tools: [read_file, write_file, bash_command, send_message, feishu_doc, ask_user]
+    skills: [paddleocr-doc-parsing, openai-whisper-api]
+
+  doc-organizer:
+    name: 文档整理助手
+    description: 处理多种来源的文档，支持格式转换和整理
+    temperature: 0.2
+    tools: [read_file, write_file, bash_command, send_message, feishu_doc, feishu-wiki, feishu-drive, ask_user]
+    skills: [paddleocr-doc-parsing, openai-whisper-api, feishu-doc, feishu-wiki, feishu-drive]
+
+  email-agent:
+    name: 邮件助手
+    description: 邮件收发、管理和定时提醒
+    temperature: 0.2
+    tools: [bash_command, read_file, write_file, send_message, send_email, list_emails, read_email, download_attachment, mark_email, search_emails, ask_user]
     skills: []
 
 # ════════════════════════════════════════════════════

@@ -2,7 +2,7 @@
 
 职责：
 1. 管理 Agent 配置的 CRUD
-2. 从 config.yml 和持久化 JSON 文件加载 Agent 配置
+2. 从 config.yml 加载 Agent 配置（system_prompt 从文件读取）
 3. 提供 Agent 发现机制（供多 Agent 工具使用）
 
 不做：
@@ -11,7 +11,6 @@
 """
 from __future__ import annotations
 
-import json
 import logging
 import time
 from pathlib import Path
@@ -21,12 +20,15 @@ from agentos.capabilities.agents.config import AgentConfig
 
 logger = logging.getLogger(__name__)
 
+# system prompt 文件名
+SYSTEM_PROMPT_FILENAME = "SYSTEM_PROMPT.md"
+
 
 class AgentRegistry:
 
-    def __init__(self, config_dir: Path):
+    def __init__(self, agentos_home: str | Path | None = None):
         self._agents: dict[str, AgentConfig] = {}
-        self._config_dir = config_dir
+        self._agentos_home = Path(agentos_home) if agentos_home else None
 
     # ── CRUD ──────────────────────────────────────────
 
@@ -46,19 +48,7 @@ class AgentRegistry:
         """删除 Agent（不能删除 default）。返回是否成功。"""
         if agent_id == "default":
             return False
-        agent = self._agents.pop(agent_id, None)
-        if agent is None:
-            return False
-        # 删除 agent 目录（新格式）
-        agent_dir = self._config_dir / agent_id
-        if agent_dir.is_dir():
-            import shutil
-            shutil.rmtree(agent_dir)
-        # 兼容删除旧格式扁平文件
-        fp = self._config_dir / f"{agent_id}.json"
-        if fp.exists():
-            fp.unlink()
-        return True
+        return self._agents.pop(agent_id, None) is not None
 
     # ── Agent 发现 ───────────────────────────────────
 
@@ -104,26 +94,26 @@ class AgentRegistry:
             default = self._build_agent_from_dict("default", {}, agent_section)
             self.register(default)
 
-        # 确保 system-admin agent 始终存在
-        if not self.get("system-admin"):
-            system_admin_dict = {
-                "name": "SystemAdmin",
-                "description": "系统运维管理员，负责 AgentOS 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作",
-                "system_prompt": (
-                    "你是 AgentOS 的系统管理员（SystemAdmin）。你的职责是帮助用户管理和配置 AgentOS 平台。\n\n"
-                    "你可以通过读写配置文件和执行系统命令来完成管理任务。操作前请先告知用户你将要执行的操作，等用户确认后再执行。\n\n"
-                    "修改配置文件后，请提醒用户某些配置可能需要重启服务才能生效。"
-                ),
-                "tools": ["read_file", "write_file", "bash_command"],
-                "skills": ["system-admin-skill"],
-            }
-            system_admin = self._build_agent_from_dict("system-admin", system_admin_dict, agent_section)
-            self.register(system_admin)
-
     def _build_agent_from_dict(
         self, agent_id: str, agent_dict: dict[str, Any], fallback: dict[str, Any]
     ) -> AgentConfig:
-        """从配置 dict 构建 AgentConfig，缺失字段从 fallback（agent 段）取默认值"""
+        """从配置 dict 构建 AgentConfig，缺失字段从 fallback（agent 段）取默认值。
+
+        system_prompt 不允许在 config.yml 中配置，必须放在
+        {agentos_home}/agents/{agent_id}/SYSTEM_PROMPT.md 文件中。
+        """
+        if "system_prompt" in agent_dict:
+            raise ValueError(
+                f"Agent '{agent_id}' 的 system_prompt 不应写在 config.yml 中，"
+                f"请移到 agents/{agent_id}/{SYSTEM_PROMPT_FILENAME}"
+            )
+
+        # 从文件读取 system_prompt
+        system_prompt = self._load_system_prompt(agent_id)
+        if not system_prompt:
+            # 回退到 agent 段的全局默认 system_prompt
+            system_prompt = fallback.get("system_prompt", "")
+
         return AgentConfig(
             id=agent_id,
             name=agent_dict.get("name", agent_id.replace("-", " ").title() if agent_id != "default" else "Default Agent"),
@@ -132,7 +122,7 @@ class AgentRegistry:
             model=agent_dict.get("model", fallback.get("model", "mock")),
             temperature=agent_dict.get("temperature", fallback.get("temperature", 0.2)),
             max_tokens=agent_dict.get("max_tokens"),
-            system_prompt=agent_dict.get("system_prompt", fallback.get("system_prompt", "")),
+            system_prompt=system_prompt,
             tools=list(agent_dict.get("tools", [])),
             skills=list(agent_dict.get("skills", [])),
             workdir=agent_dict.get("workdir", ""),
@@ -147,52 +137,25 @@ class AgentRegistry:
             enabled=agent_dict.get("enabled", True),
         )
 
-    # ── 从磁盘加载 / 持久化 ──────────────────────────
-
-    def load_from_dir(self) -> None:
-        """从持久化目录加载 Agent 配置。
-
-        优先读取 agents/{id}/config.json（新格式），
-        同时兼容旧的 agents/{id}.json 扁平文件。
-        """
-        if not self._config_dir.exists():
-            return
-        # 新格式：子目录下的 config.json
-        for agent_dir in self._config_dir.iterdir():
-            if agent_dir.is_dir():
-                fp = agent_dir / "config.json"
-                if fp.exists():
-                    try:
-                        data = json.loads(fp.read_text(encoding="utf-8"))
-                        agent = AgentConfig.from_dict(data)
-                        self.register(agent)
-                        logger.info("Loaded agent from dir: %s", agent_dir.name)
-                    except Exception:
-                        logger.exception("Failed to load agent from %s", fp)
-        # 向后兼容：扁平 JSON 文件
-        for fp in self._config_dir.glob("*.json"):
+    def _load_system_prompt(self, agent_id: str) -> str:
+        """从 {agentos_home}/agents/{agent_id}/SYSTEM_PROMPT.md 读取 system prompt"""
+        if not self._agentos_home:
+            return ""
+        prompt_file = self._agentos_home / "agents" / agent_id / SYSTEM_PROMPT_FILENAME
+        if prompt_file.exists():
             try:
-                data = json.loads(fp.read_text(encoding="utf-8"))
-                agent_id = data.get("id", fp.stem)
-                if agent_id not in self._agents:
-                    agent = AgentConfig.from_dict(data)
-                    self.register(agent)
-                    logger.info("Loaded agent from legacy file: %s", fp.name)
+                content = prompt_file.read_text(encoding="utf-8").strip()
+                if content:
+                    logger.info("Loaded system prompt from %s", prompt_file)
+                    return content
             except Exception:
-                logger.exception("Failed to load agent from %s", fp)
+                logger.warning("Failed to read system prompt: %s", prompt_file, exc_info=True)
+        return ""
 
-    def save(self, agent: AgentConfig) -> None:
-        """持久化 Agent 配置到磁盘（agents/{id}/config.json）"""
-        agent_dir = self._config_dir / agent.id
-        agent_dir.mkdir(parents=True, exist_ok=True)
-        fp = agent_dir / "config.json"
-        fp.write_text(
-            json.dumps(agent.to_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+    # ── 运行时更新 ──────────────────────────────────
 
     def update(self, agent_id: str, updates: dict[str, Any]) -> AgentConfig | None:
-        """部分更新 Agent 配置"""
+        """部分更新 Agent 配置（仅内存，不持久化）"""
         agent = self._agents.get(agent_id)
         if not agent:
             return None
@@ -200,7 +163,4 @@ class AgentRegistry:
             if hasattr(agent, key) and key not in ("id", "created_at"):
                 setattr(agent, key, value)
         agent.updated_at = time.time()
-        # 非 default Agent 持久化到磁盘
-        if agent_id != "default":
-            self.save(agent)
         return agent

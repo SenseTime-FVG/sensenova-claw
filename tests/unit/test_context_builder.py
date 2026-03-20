@@ -55,7 +55,7 @@ class TestContextBuilder:
         assert "ok" in msgs[1]["content"]
 
     def test_delegation_prompt_injected(self, tmp_path):
-        ar = AgentRegistry(config_dir=tmp_path / "a")
+        ar = AgentRegistry()
         ar.register(AgentConfig.create(id="main", name="Main"))
         ar.register(AgentConfig.create(id="helper", name="Helper", description="帮助工具"))
         agent = ar.get("main")
