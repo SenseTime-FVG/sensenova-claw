@@ -142,7 +142,7 @@ function PPTWorkspace() {
         <>
           <h3 className="text-lg font-semibold text-foreground/70 mb-2">创建演示文稿</h3>
           <p className="text-sm text-muted-foreground text-center max-w-sm">
-            在下方输入框描述你的 PPT 需求，或从左侧文件区拖入文件夹 / PPTX 文件预览
+            在下方输入框描述你的 PPT 需求，或从左侧文件区拖入 html 文件夹 / PPTX 文件预览、编辑
           </p>
         </>
       )}
@@ -174,9 +174,8 @@ function PPTWorkspace() {
       )}
 
       <ChatPanel
-        defaultAgentId="ppt_generator"
+        defaultAgentId="ppt-agent"
         lockAgent
-        hideAgentSelector
         emptyState={emptyState}
       />
     </div>
@@ -188,7 +187,7 @@ function PPTWorkspace() {
 export default function PPTPage() {
   return (
     <DashboardLayout>
-      <WorkbenchShell agentFilter="ppt_generator">
+      <WorkbenchShell agentFilter="ppt-agent">
         <PPTWorkspace />
       </WorkbenchShell>
     </DashboardLayout>

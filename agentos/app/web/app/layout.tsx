@@ -5,6 +5,7 @@ import { NotificationProvider } from '@/components/notification/NotificationProv
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ChatSessionProvider } from '@/contexts/ChatSessionContext';
+import { FilePanelProvider } from '@/contexts/FilePanelContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { cn } from "@/lib/utils";
 
@@ -28,9 +29,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <NotificationProvider>
             <AuthProvider>
               <ChatSessionProvider>
-                <ProtectedRoute>
-                  {children}
-                </ProtectedRoute>
+                <FilePanelProvider>
+                  <ProtectedRoute>
+                    {children}
+                  </ProtectedRoute>
+                </FilePanelProvider>
               </ChatSessionProvider>
             </AuthProvider>
           </NotificationProvider>

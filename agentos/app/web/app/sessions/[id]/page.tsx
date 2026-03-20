@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { InteractionDialog, type PendingInteraction } from '@/components/chat/QuestionDialog';
+import { MarkdownContent } from '@/components/chat/MarkdownContent';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
@@ -97,8 +98,8 @@ function MessageBubble({ msg }: { msg: Message }) {
         </div>
         <div className="flex-1 min-w-0 space-y-4">
           {msg.content && (
-            <div className="text-base text-foreground bg-card border border-border p-5 rounded-2xl rounded-tl-none shadow-sm whitespace-pre-wrap break-words leading-relaxed">
-              {msg.content}
+            <div className="text-base text-foreground bg-card border border-border p-5 rounded-2xl rounded-tl-none shadow-sm leading-relaxed">
+              <MarkdownContent content={msg.content} />
             </div>
           )}
           {hasToolCalls && (

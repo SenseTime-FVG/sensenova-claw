@@ -26,14 +26,31 @@ function ResizablePanel({
 
 function ResizableHandle({
   withHandle,
+  invisible,
   className,
   orientation = "horizontal",
   ...props
 }: React.ComponentProps<typeof Separator> & {
   withHandle?: boolean;
+  invisible?: boolean;
   orientation?: "horizontal" | "vertical";
 }) {
   const isVertical = orientation === "vertical";
+
+  if (invisible) {
+    return (
+      <Separator
+        className={cn(
+          "relative flex items-center justify-center bg-transparent",
+          isVertical
+            ? "h-0 w-full cursor-row-resize after:absolute after:left-0 after:h-3 after:w-full after:-translate-y-1/2"
+            : "w-0 h-full cursor-col-resize after:absolute after:inset-y-0 after:left-1/2 after:w-3 after:-translate-x-1/2",
+          className,
+        )}
+        {...props}
+      />
+    );
+  }
 
   return (
     <Separator
