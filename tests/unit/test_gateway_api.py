@@ -122,6 +122,57 @@ def test_list_channels_no_underscore(client, app):
     assert data[0]["id"] == "websocket"
 
 
+def test_list_channels_marks_telegram_failed_when_runtime_has_error(client, app):
+    gw = app.state.services.gateway
+
+    class _Runtime:
+        _agentos_status = {"status": "failed", "error": "polling failed"}
+
+    class _Channel:
+        _runtime = _Runtime()
+
+    gw._channels["telegram"] = _Channel()
+
+    resp = client.get("/api/gateway/channels")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["id"] == "telegram"
+    assert data[0]["status"] == "failed"
+
+
+def test_list_channels_marks_wecom_failed_when_client_has_error(client, app):
+    gw = app.state.services.gateway
+
+    class _Client:
+        _agentos_status = {"status": "failed", "error": "websocket closed"}
+
+    class _Channel:
+        _client = _Client()
+
+    gw._channels["wecom"] = _Channel()
+
+    resp = client.get("/api/gateway/channels")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["id"] == "wecom"
+    assert data[0]["status"] == "failed"
+
+
+def test_list_channels_marks_feishu_failed_when_channel_has_error(client, app):
+    gw = app.state.services.gateway
+
+    class _Channel:
+        _agentos_status = {"status": "failed", "error": "websocket thread crashed"}
+
+    gw._channels["feishu"] = _Channel()
+
+    resp = client.get("/api/gateway/channels")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["id"] == "feishu"
+    assert data[0]["status"] == "failed"
+
+
 def test_whatsapp_status_disabled(client):
     resp = client.get("/api/gateway/whatsapp/status")
     assert resp.status_code == 200

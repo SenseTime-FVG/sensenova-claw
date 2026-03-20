@@ -10,6 +10,21 @@ from agentos.adapters.plugins.whatsapp.status_api import build_whatsapp_status
 router = APIRouter(prefix="/api/gateway", tags=["gateway"])
 
 
+def _read_channel_runtime_status(channel: object) -> str:
+    """从 channel 自身或其内部 runtime/client 上提取统一状态。"""
+    status_sources = (
+        getattr(channel, "_agentos_status", None),
+        getattr(getattr(channel, "_runtime", None), "_agentos_status", None),
+        getattr(getattr(channel, "_client", None), "_agentos_status", None),
+    )
+    for source in status_sources:
+        if isinstance(source, dict):
+            status = str(source.get("status", "")).strip()
+            if status:
+                return status
+    return "connected"
+
+
 @router.get("/stats")
 async def get_gateway_stats(request: Request):
     """获取 Gateway 统计信息"""
@@ -41,7 +56,7 @@ async def list_channels(request: Request):
             "id": channel_id,
             "name": channel_id,
             "type": channel_id.split("_")[0] if "_" in channel_id else channel_id,
-            "status": "connected",
+            "status": _read_channel_runtime_status(channel),
             "config": {},
         })
     return channels

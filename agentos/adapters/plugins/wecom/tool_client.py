@@ -56,11 +56,14 @@ class WecomToolClient:
         self._client_factory = client_factory
         self._options_cls = options_cls
         self._sdk_client: Any | None = None
+        self._agentos_status = {"status": "initialized", "error": None}
 
     async def start(self) -> None:
         """启动 SDK 客户端并注册文本消息回调。"""
         if self._sdk_client is not None:
             return
+
+        self._agentos_status = {"status": "connecting", "error": None}
 
         options_cls = self._options_cls or self._load_options_cls()
         options = options_cls(
@@ -72,6 +75,18 @@ class WecomToolClient:
         factory = self._client_factory or self._load_client_factory()
         self._sdk_client = factory(options)
 
+        @self._sdk_client.on("connected")
+        def _on_connected(*_args: Any) -> None:
+            self._agentos_status = {"status": "connected", "error": None}
+
+        @self._sdk_client.on("disconnected")
+        def _on_disconnected(reason: Any = None) -> None:
+            reason_text = str(reason).strip() if reason is not None else ""
+            self._agentos_status = {
+                "status": "failed",
+                "error": reason_text or "disconnected",
+            }
+
         @self._sdk_client.on("message.text")
         async def _on_text(frame: dict[str, Any]) -> None:
             incoming = self._parse_text_frame(frame)
@@ -81,13 +96,20 @@ class WecomToolClient:
             if hasattr(result, "__await__"):
                 await result
 
-        await self._sdk_client.connect()
+        try:
+            await self._sdk_client.connect()
+            if self._agentos_status.get("status") != "failed":
+                self._agentos_status = {"status": "connected", "error": None}
+        except Exception as exc:
+            self._agentos_status = {"status": "failed", "error": str(exc)}
+            raise
 
     async def stop(self) -> None:
         """停止 SDK 客户端。"""
         if self._sdk_client is None:
             return
         self._sdk_client.disconnect()
+        self._agentos_status = {"status": "stopped", "error": None}
 
     async def send_text(self, target: str, text: str) -> dict:
         """通过 SDK 主动发送 Markdown 文本消息。"""
