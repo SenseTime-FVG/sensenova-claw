@@ -112,7 +112,6 @@ class CreateAgentTool(Tool):
         )
 
         registry.register(agent)
-        registry.save(agent)
         logger.info("Agent created via tool: %s (%s)", agent_id, name)
 
         return {

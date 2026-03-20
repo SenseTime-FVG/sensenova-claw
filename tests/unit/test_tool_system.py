@@ -190,7 +190,7 @@ def _make_worker(
 
     agent_config_dir = tmp_path / "agents"
     agent_config_dir.mkdir(exist_ok=True)
-    agent_registry = AgentRegistry(config_dir=agent_config_dir)
+    agent_registry = AgentRegistry()
     agent_registry.load_from_config(cfg.data)
 
     bus_router = BusRouter(public_bus=public)
