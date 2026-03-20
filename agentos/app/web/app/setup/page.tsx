@@ -7,18 +7,17 @@ import { authGet, authFetch, API_BASE } from '@/lib/authFetch';
 // 步骤类型
 type Step = 'category' | 'provider' | 'config' | 'model';
 
-// 预设数据类型
+// 预设数据类型（后端使用 label 字段，前端同时兼容 name/label）
 interface ProviderPreset {
   key: string;
-  name: string;
+  label: string;
   base_url: string;
-  models: { key: string; name: string; model_id: string }[];
+  models: { key: string; model_id: string }[];
 }
 
 interface CategoryPreset {
   key: string;        // 'openai_compatible' | 'anthropic' | 'gemini'
-  name: string;
-  llm_provider: string; // 提交时使用的 provider key（如 'openai', 'anthropic', 'gemini'）
+  label: string;
   providers: ProviderPreset[];
 }
 
@@ -35,15 +34,19 @@ export default function SetupPage() {
   // 用户选择
   const [selectedCategory, setSelectedCategory] = useState<CategoryPreset | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<ProviderPreset | null>(null);
+  const [customProviderName, setCustomProviderName] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [selectedModelKey, setSelectedModelKey] = useState('');
   const [customModelId, setCustomModelId] = useState('');
+  const [customModelName, setCustomModelName] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
 
   // 提交状态
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // 加载预设数据
   useEffect(() => {
@@ -66,10 +69,12 @@ export default function SetupPage() {
   const handleSelectCategory = (category: CategoryPreset) => {
     setSelectedCategory(category);
     setSelectedProvider(null);
+    setCustomProviderName('');
     setBaseUrl('');
     setApiKey('');
     setSelectedModelKey('');
     setCustomModelId('');
+    setCustomModelName('');
     setUseCustomModel(false);
 
     if (category.providers.length === 1) {
@@ -87,27 +92,31 @@ export default function SetupPage() {
   // 选择具体 provider
   const handleSelectProvider = (provider: ProviderPreset) => {
     setSelectedProvider(provider);
+    setCustomProviderName('');
     setBaseUrl(provider.base_url);
     setApiKey('');
     setSelectedModelKey(provider.models.length > 0 ? provider.models[0].key : '');
     setCustomModelId('');
+    setCustomModelName('');
     setUseCustomModel(false);
     setStep('config');
   };
 
   // 从 config 步骤前进到 model 步骤
+  const isCustomProvider = selectedProvider?.key === 'custom_openai';
   const handleConfigNext = () => {
     if (!apiKey.trim()) return;
+    if (isCustomProvider && !customProviderName.trim()) return;
     setStep('model');
   };
 
-  // 提交配置
-  const handleSubmit = async () => {
-    if (!selectedCategory || !selectedProvider) return;
+  // 解析当前选择的 provider/model 信息
+  const _resolveLLMConfig = () => {
+    if (!selectedCategory || !selectedProvider) return null;
 
     const llmProvider = selectedCategory.key === 'openai_compatible'
       ? 'openai'
-      : selectedCategory.llm_provider;
+      : selectedCategory.key;
 
     let modelId: string;
     let modelKey: string;
@@ -121,7 +130,47 @@ export default function SetupPage() {
       modelKey = selectedModelKey;
     }
 
-    if (!modelId) return;
+    if (!modelId) return null;
+    return { llmProvider, modelId, modelKey };
+  };
+
+  // 测试 LLM 连接
+  const handleTest = async () => {
+    const cfg = _resolveLLMConfig();
+    if (!cfg) return;
+
+    setIsTesting(true);
+    setTestResult(null);
+    setSubmitError('');
+
+    try {
+      const resp = await authFetch(`${API_BASE}/api/config/test-llm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: cfg.llmProvider,
+          api_key: apiKey.trim(),
+          base_url: baseUrl.trim(),
+          model_id: cfg.modelId,
+        }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        setTestResult({ success: true, message: data.message || '连接成功' });
+      } else {
+        setTestResult({ success: false, message: data.error || '连接失败' });
+      }
+    } catch (e) {
+      setTestResult({ success: false, message: '请求失败，请检查网络连接' });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  // 保存配置并跳转
+  const handleSubmit = async () => {
+    const cfg = _resolveLLMConfig();
+    if (!cfg) return;
 
     setIsSubmitting(true);
     setSubmitError('');
@@ -133,7 +182,7 @@ export default function SetupPage() {
         body: JSON.stringify({
           llm: {
             providers: {
-              [llmProvider]: {
+              [cfg.llmProvider]: {
                 api_key: apiKey.trim(),
                 base_url: baseUrl.trim(),
                 timeout: 60,
@@ -141,11 +190,11 @@ export default function SetupPage() {
               },
             },
             models: {
-              [modelKey]: { provider: llmProvider, model_id: modelId },
+              [cfg.modelKey]: { provider: cfg.llmProvider, model_id: cfg.modelId },
             },
-            default_model: modelKey,
+            default_model: cfg.modelKey,
           },
-          agent: { model: modelKey },
+          agent: { model: cfg.modelKey },
         }),
       });
 
@@ -191,14 +240,14 @@ export default function SetupPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-6 p-8 bg-white rounded-lg shadow-md">
+      <div className="max-w-xl w-full space-y-6 p-8 bg-white rounded-lg shadow-md">
         {/* 标题 */}
         <div>
           <h2 className="text-center text-3xl font-extrabold text-gray-900">
             AgentOS
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            配置 LLM 服务以开始使用
+            配置第一个 LLM 服务后，即可使用运维 Agent 智能完成其余配置
           </p>
         </div>
 
@@ -213,7 +262,7 @@ export default function SetupPage() {
                   onClick={() => handleSelectCategory(category)}
                   className="w-full text-left px-4 py-3 border border-gray-300 rounded-md hover:border-blue-500 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
                 >
-                  <span className="font-medium text-gray-800">{category.name}</span>
+                  <span className="font-medium text-gray-800">{category.label}</span>
                 </button>
               ))}
             </div>
@@ -237,7 +286,7 @@ export default function SetupPage() {
                   onClick={() => handleSelectProvider(provider)}
                   className="w-full text-left px-4 py-3 border border-gray-300 rounded-md hover:border-blue-500 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
                 >
-                  <span className="font-medium text-gray-800">{provider.name}</span>
+                  <span className="font-medium text-gray-800">{provider.label}</span>
                   {provider.base_url && (
                     <span className="block text-xs text-gray-400 mt-0.5 truncate">{provider.base_url}</span>
                   )}
@@ -249,8 +298,9 @@ export default function SetupPage() {
 
         {/* 步骤：填写配置 */}
         {step === 'config' && selectedProvider && (
-          <div className="space-y-4">
+          <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleConfigNext(); }}>
             <button
+              type="button"
               onClick={handleBack}
               className="text-sm text-blue-600 hover:text-blue-800 focus:outline-none"
             >
@@ -259,6 +309,21 @@ export default function SetupPage() {
             <h3 className="text-lg font-medium text-gray-900">填写连接配置</h3>
 
             <div className="space-y-4">
+              {selectedProvider.key === 'custom_openai' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    服务商名称 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={customProviderName}
+                    onChange={(e) => setCustomProviderName(e.target.value)}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    placeholder="例如: SiliconFlow、Groq"
+                    autoFocus
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700">
                   Base URL
@@ -283,18 +348,19 @@ export default function SetupPage() {
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm font-mono"
                   placeholder="sk-..."
                   autoFocus
+                  autoComplete="off"
                 />
               </div>
             </div>
 
             <button
-              onClick={handleConfigNext}
-              disabled={!apiKey.trim()}
+              type="submit"
+              disabled={!apiKey.trim() || (isCustomProvider && !customProviderName.trim())}
               className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
               下一步
             </button>
-          </div>
+          </form>
         )}
 
         {/* 步骤：选择模型 */}
@@ -330,8 +396,7 @@ export default function SetupPage() {
                       }}
                       className="mr-3 text-blue-600"
                     />
-                    <span className="font-medium text-gray-800 text-sm">{model.name}</span>
-                    <span className="ml-2 text-xs text-gray-400">{model.model_id}</span>
+                    <span className="font-medium text-gray-800 text-sm">{model.model_id}</span>
                   </label>
                 ))}
 
@@ -357,18 +422,43 @@ export default function SetupPage() {
 
             {/* 自定义模型输入框（无预设模型时始终显示） */}
             {(useCustomModel || selectedProvider.models.length === 0) && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  模型 ID <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={customModelId}
-                  onChange={(e) => setCustomModelId(e.target.value)}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm font-mono"
-                  placeholder="gpt-4o-mini"
-                  autoFocus
-                />
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    模型 ID <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={customModelId}
+                    onChange={(e) => setCustomModelId(e.target.value)}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm font-mono"
+                    placeholder="gpt-4o-mini"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    模型名称
+                  </label>
+                  <input
+                    type="text"
+                    value={customModelName}
+                    onChange={(e) => setCustomModelName(e.target.value)}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    placeholder="仅用于显示，留空则使用模型 ID"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* 测试结果 */}
+            {testResult && (
+              <div className={`px-4 py-3 rounded text-sm border ${
+                testResult.success
+                  ? 'bg-green-50 border-green-200 text-green-700'
+                  : 'bg-red-50 border-red-200 text-red-700'
+              }`}>
+                {testResult.success ? '✓ ' : '✗ '}{testResult.message}
               </div>
             )}
 
@@ -378,18 +468,32 @@ export default function SetupPage() {
               </div>
             )}
 
-            <button
-              onClick={handleSubmit}
-              disabled={
-                isSubmitting ||
-                (useCustomModel || selectedProvider.models.length === 0
-                  ? !customModelId.trim()
-                  : !selectedModelKey)
-              }
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {isSubmitting ? '保存中...' : '完成配置'}
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={handleTest}
+                disabled={
+                  isTesting || isSubmitting ||
+                  (useCustomModel || selectedProvider.models.length === 0
+                    ? !customModelId.trim()
+                    : !selectedModelKey)
+                }
+                className="flex-1 flex justify-center py-2 px-4 border border-blue-600 rounded-md shadow-sm text-sm font-medium text-blue-600 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed"
+              >
+                {isTesting ? '测试中...' : '测试连接'}
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={
+                  isSubmitting || isTesting ||
+                  (useCustomModel || selectedProvider.models.length === 0
+                    ? !customModelId.trim()
+                    : !selectedModelKey)
+                }
+                className="flex-1 flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {isSubmitting ? '保存中...' : '完成配置'}
+              </button>
+            </div>
           </div>
         )}
 
@@ -407,45 +511,44 @@ export default function SetupPage() {
   );
 }
 
-// 内置默认预设（当接口不可用时使用）
+// 内置默认预设（当接口不可用时使用，字段名与后端 llm_presets.py 一致）
 const DEFAULT_PRESETS: CategoryPreset[] = [
   {
     key: 'openai_compatible',
-    name: 'OpenAI 兼容',
-    llm_provider: 'openai',
+    label: 'OpenAI 兼容',
     providers: [
       {
         key: 'openai',
-        name: 'OpenAI',
+        label: 'OpenAI',
         base_url: 'https://api.openai.com/v1',
         models: [
-          { key: 'gpt_4o', name: 'GPT-4o', model_id: 'gpt-4o' },
-          { key: 'gpt_4o_mini', name: 'GPT-4o Mini', model_id: 'gpt-4o-mini' },
-          { key: 'gpt_4_turbo', name: 'GPT-4 Turbo', model_id: 'gpt-4-turbo' },
+          { key: 'gpt_4o', model_id: 'gpt-4o' },
+          { key: 'gpt_4o_mini', model_id: 'gpt-4o-mini' },
+          { key: 'gpt_4_turbo', model_id: 'gpt-4-turbo' },
         ],
       },
       {
         key: 'qwen',
-        name: '通义千问',
+        label: '通义千问(Qwen)',
         base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         models: [
-          { key: 'qwen_max', name: 'Qwen Max', model_id: 'qwen-max' },
-          { key: 'qwen_plus', name: 'Qwen Plus', model_id: 'qwen-plus' },
-          { key: 'qwen_turbo', name: 'Qwen Turbo', model_id: 'qwen-turbo' },
+          { key: 'qwen_max', model_id: 'qwen-max' },
+          { key: 'qwen_plus', model_id: 'qwen-plus' },
+          { key: 'qwen_turbo', model_id: 'qwen-turbo' },
         ],
       },
       {
         key: 'deepseek',
-        name: 'DeepSeek',
+        label: 'DeepSeek',
         base_url: 'https://api.deepseek.com/v1',
         models: [
-          { key: 'deepseek_chat', name: 'DeepSeek Chat', model_id: 'deepseek-chat' },
-          { key: 'deepseek_reasoner', name: 'DeepSeek Reasoner', model_id: 'deepseek-reasoner' },
+          { key: 'deepseek_chat', model_id: 'deepseek-chat' },
+          { key: 'deepseek_reasoner', model_id: 'deepseek-reasoner' },
         ],
       },
       {
-        key: 'other',
-        name: '其他',
+        key: 'custom_openai',
+        label: '其他（自定义）',
         base_url: '',
         models: [],
       },
@@ -453,34 +556,32 @@ const DEFAULT_PRESETS: CategoryPreset[] = [
   },
   {
     key: 'anthropic',
-    name: 'Anthropic (Claude)',
-    llm_provider: 'anthropic',
+    label: 'Anthropic (Claude)',
     providers: [
       {
         key: 'anthropic',
-        name: 'Anthropic',
+        label: 'Anthropic',
         base_url: 'https://api.anthropic.com',
         models: [
-          { key: 'claude_3_5_sonnet', name: 'Claude 3.5 Sonnet', model_id: 'claude-3-5-sonnet-20241022' },
-          { key: 'claude_3_5_haiku', name: 'Claude 3.5 Haiku', model_id: 'claude-3-5-haiku-20241022' },
-          { key: 'claude_3_opus', name: 'Claude 3 Opus', model_id: 'claude-3-opus-20240229' },
+          { key: 'claude_3_5_sonnet', model_id: 'claude-3-5-sonnet-20241022' },
+          { key: 'claude_3_5_haiku', model_id: 'claude-3-5-haiku-20241022' },
+          { key: 'claude_3_opus', model_id: 'claude-3-opus-20240229' },
         ],
       },
     ],
   },
   {
     key: 'gemini',
-    name: 'Google Gemini',
-    llm_provider: 'gemini',
+    label: 'Google Gemini',
     providers: [
       {
         key: 'gemini',
-        name: 'Google Gemini',
+        label: 'Google Gemini',
         base_url: 'https://generativelanguage.googleapis.com/v1beta',
         models: [
-          { key: 'gemini_2_0_flash', name: 'Gemini 2.0 Flash', model_id: 'gemini-2.0-flash' },
-          { key: 'gemini_1_5_pro', name: 'Gemini 1.5 Pro', model_id: 'gemini-1.5-pro' },
-          { key: 'gemini_1_5_flash', name: 'Gemini 1.5 Flash', model_id: 'gemini-1.5-flash' },
+          { key: 'gemini_2_0_flash', model_id: 'gemini-2.0-flash' },
+          { key: 'gemini_1_5_pro', model_id: 'gemini-1.5-pro' },
+          { key: 'gemini_1_5_flash', model_id: 'gemini-1.5-flash' },
         ],
       },
     ],
