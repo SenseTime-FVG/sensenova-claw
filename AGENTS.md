@@ -559,3 +559,22 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `agentos` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
 - 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `AGENTOS_REPO_REF`。
+
+### 2026-03-20 飞书 Wiki token 兼容修复补充
+
+成功经验：
+- `lark-oapi 1.5.3` 的 `Client` 已不再暴露 `_token_manager`；排查这类 SDK 漂移问题时，直接读当前 `.venv` 里的包源码比猜测文档更快，能马上确认真实可用入口是 `TokenManager.get_self_tenant_token(client._config)`。
+- 对兼容性修复，保留“旧路径优先、新路径兜底”最稳：既兼容历史 `_token_manager` 形态，也兼容新版只有 `_config` 的 `Client`。
+- 当前环境即使缺少 `pytest`，也可以先用最小复现脚本验证红灯（复现 `AttributeError`），再用最小脚本验证绿灯，避免在环境问题下盲改。
+
+失败/风险经验：
+- 当前仓库 `.venv` 未安装 `pytest`，而 `uv run --extra dev ...` 在本机会触发 Rust `system-configuration` panic；新增测试文件后不能直接宣称已完成 pytest 回归，需要在完整依赖环境补跑。
+
+### 2026-03-20 飞书 api_tool 接口兼容补充
+
+成功经验：
+- 当某个旧能力决定下线但配置接口要兼容保留时，最稳做法不是删配置，而是统一清理“描述/注释/测试”三处语义，让运行时能力和对外声明一致。
+- 对“保留接口但不生效”的约束，补一条回归测试直接断言 `api_tool.enabled=True` 时也不会注册 `feishu_api`，能防止后续有人误恢复半套旧逻辑。
+
+失败/风险经验：
+- 当前环境仍缺少 `pytest`，这类轻量修复只能先用内联断言脚本和 `py_compile` 做最小验证；正式 pytest 回归仍要在完整依赖环境补跑。

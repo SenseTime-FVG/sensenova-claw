@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from lark_oapi.core.token import TokenManager
 
 
 class FeishuToolError(RuntimeError):
@@ -25,9 +26,14 @@ class FeishuToolClient:
         client = self._channel._client
         if not client:
             raise FeishuToolError("Feishu client not initialized")
-        return await asyncio.to_thread(
-            lambda: client._token_manager.get_tenant_access_token()
-        )
+        token_manager = getattr(client, "_token_manager", None)
+        if token_manager is not None:
+            return await asyncio.to_thread(token_manager.get_tenant_access_token)
+
+        config = getattr(client, "_config", None)
+        if config is None:
+            raise FeishuToolError("Feishu client missing SDK config")
+        return await asyncio.to_thread(TokenManager.get_self_tenant_token, config)
 
     async def request_json(
         self,
