@@ -2,7 +2,7 @@
 # AgentOS 一键安装脚本（Linux/macOS）
 #
 # 用法:
-#   curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/main/install/install.sh | bash
 #
 # 或本地执行:
 #   bash install/install.sh
@@ -17,7 +17,7 @@ set -euo pipefail
 AGENTOS_HOME="${AGENTOS_HOME:-$HOME/.agentos}"
 APP_DIR="$AGENTOS_HOME/app"
 REPO_URL="${AGENTOS_REPO_URL:-https://github.com/SenseTime-FVG/agentos.git}"
-REPO_REF="${AGENTOS_REPO_REF:-${AGENTOS_REPO_BRANCH:-dev}}"
+REPO_REF="${AGENTOS_REPO_REF:-${AGENTOS_REPO_BRANCH:-main}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
 DEV_MODE=false
