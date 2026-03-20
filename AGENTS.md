@@ -559,3 +559,52 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `agentos` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
 - 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `AGENTOS_REPO_REF`。
+
+### 2026-03-20 飞书 Wiki token 兼容修复补充
+
+成功经验：
+- `lark-oapi 1.5.3` 的 `Client` 已不再暴露 `_token_manager`；排查这类 SDK 漂移问题时，直接读当前 `.venv` 里的包源码比猜测文档更快，能马上确认真实可用入口是 `TokenManager.get_self_tenant_token(client._config)`。
+- 对兼容性修复，保留“旧路径优先、新路径兜底”最稳：既兼容历史 `_token_manager` 形态，也兼容新版只有 `_config` 的 `Client`。
+- 当前环境即使缺少 `pytest`，也可以先用最小复现脚本验证红灯（复现 `AttributeError`），再用最小脚本验证绿灯，避免在环境问题下盲改。
+
+失败/风险经验：
+- 当前仓库 `.venv` 未安装 `pytest`，而 `uv run --extra dev ...` 在本机会触发 Rust `system-configuration` panic；新增测试文件后不能直接宣称已完成 pytest 回归，需要在完整依赖环境补跑。
+
+### 2026-03-20 飞书 api_tool 接口兼容补充
+
+成功经验：
+- 当某个旧能力决定下线但配置接口要兼容保留时，最稳做法不是删配置，而是统一清理“描述/注释/测试”三处语义，让运行时能力和对外声明一致。
+- 对“保留接口但不生效”的约束，补一条回归测试直接断言 `api_tool.enabled=True` 时也不会注册 `feishu_api`，能防止后续有人误恢复半套旧逻辑。
+
+失败/风险经验：
+- 当前环境仍缺少 `pytest`，这类轻量修复只能先用内联断言脚本和 `py_compile` 做最小验证；正式 pytest 回归仍要在完整依赖环境补跑。
+
+### 2026-03-20 飞书 ask_user 文本闭环补充
+
+成功经验：
+- 对 IM 渠道补 `ask_user`，第一版先做“待回答问题存在时，下一条文本优先解释为回答”最稳；不需要先引入按钮卡片回调，也能把 `USER_QUESTION_ASKED -> USER_QUESTION_ANSWERED` 主链路接通。
+- 渠道侧最小状态就是 `session_id -> question_id`；收到回答后立刻清理状态，后续消息自然回到普通 `USER_INPUT` 流，不容易和日常对话串台。
+- 这类闭环最关键的回归测试是两条：一条断言回答消息被转成 `USER_QUESTION_ANSWERED`，一条断言回答完成后下一条消息重新走 `USER_INPUT`。
+
+失败/风险经验：
+- 当前飞书第一版只支持文本回答，不校验 `options/multi_select` 合法性，也不支持飞书按钮/多选卡片交互；如果后续需要更强约束，必须补事件回调与结构化解析。
+
+### 2026-03-20 多渠道 ask_user 闭环补充
+
+成功经验：
+- `telegram/wecom/whatsapp` 可以直接复用飞书的最小闭环模式：各自 channel 内维护 `pending_questions`，在入站消息路径优先分流成 `USER_QUESTION_ANSWERED`，实现一致且改动面小。
+- 对多渠道并行补同一行为时，测试也要成对补齐：每个 channel 都应同时覆盖“回答优先分流”和“回答后恢复普通 `USER_INPUT`”，否则很容易只在一个渠道上闭环。
+- 渠道层实现保持“无待回答问题时完全不改原路径”，最利于控制回归范围；完整跑 `telegram/wecom/wecom_outbound/whatsapp` 四组单测能快速验证这一点。
+
+失败/风险经验：
+- 文本闭环虽然统一了，但仍然只是“下一条文本即回答”；`options/multi_select` 的结构化校验、取消操作和按钮回调在三个渠道上都还没落。
+
+### 2026-03-20 chat think 展示补充
+
+成功经验：
+- 对“模型把思考内容包在 `<think>...</think>` 里”的前端支持，最稳的做法是“双通道”：非流式/历史消息直接解析正文里的 `<think>` 标签，流式阶段额外消费 `llm_result.reasoning_details`，这样历史回放和实时展示都能覆盖。
+- `/chat` 里如果要避免 `llm_result` 与 `turn_completed` 产生重复 assistant 气泡，消息结构里需要显式保存 `turnId`，并在上下文层做 upsert，而不是每次都 append。
+- Playwright 在 Next dev 下 mock 全局 `WebSocket` 时，替身必须补上 `addEventListener/removeEventListener`，并且只把业务 `/ws` 连接暴露成 `__mockWs`；否则很容易误打到 HMR socket，导致测试看起来“事件没生效”。
+
+失败/风险经验：
+- 当前 `/chat` 页面的 mock e2e 不能再只靠 `localStorage access_token`；实际鉴权链路依赖 `agentos_token` cookie 和 `/api/auth/status`、`/api/config/llm-status`，漏掉任一项都会让页面停在登录/配置检查流程，导致断言偏离真实问题。

@@ -12,7 +12,7 @@ from agentos.adapters.plugins.wecom.config import WecomConfig
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import USER_INPUT
+from agentos.kernel.events.types import USER_INPUT, USER_QUESTION_ANSWERED, USER_QUESTION_ASKED
 from agentos.kernel.runtime.publisher import EventPublisher
 
 
@@ -187,3 +187,100 @@ class TestInbound:
 
         assert collected == []
         assert gateway._session_bindings == {}
+
+    @pytest.mark.asyncio
+    async def test_answers_pending_question_before_user_input(self):
+        channel, _, bus, client = _make_channel()
+        session_id = "wecom_ask_001"
+        channel._chat_sessions["dm:user-1"] = session_id
+        from agentos.adapters.plugins.wecom.channel import WecomSessionMeta
+        channel._session_meta[session_id] = WecomSessionMeta(
+            chat_id="chat-1",
+            chat_type="p2p",
+            sender_id="user-1",
+            last_message_id="msg-0",
+        )
+
+        await channel.send_event(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=session_id,
+                payload={"question_id": "q_wc_1", "question": "请选择环境"},
+            )
+        )
+        assert client.sent_messages[-1]["text"] == "请选择环境"
+
+        async def collect():
+            async for event in bus.subscribe():
+                if event.type == USER_QUESTION_ANSWERED:
+                    return event
+
+        task = asyncio.create_task(collect())
+        await asyncio.sleep(0.05)
+        await channel.handle_incoming_text(
+            text="生产环境",
+            chat_id="chat-1",
+            chat_type="p2p",
+            sender_id="user-1",
+            message_id="msg-1",
+        )
+        event = await asyncio.wait_for(task, timeout=2)
+        assert event.type == USER_QUESTION_ANSWERED
+        assert event.payload["question_id"] == "q_wc_1"
+        assert event.payload["answer"] == "生产环境"
+
+    @pytest.mark.asyncio
+    async def test_restores_user_input_after_answering_pending_question(self):
+        channel, _, bus, _ = _make_channel()
+        from agentos.adapters.plugins.wecom.channel import WecomSessionMeta
+
+        session_id = "wecom_ask_002"
+        channel._chat_sessions["dm:user-2"] = session_id
+        channel._session_meta[session_id] = WecomSessionMeta(
+            chat_id="chat-2",
+            chat_type="p2p",
+            sender_id="user-2",
+            last_message_id="msg-0",
+        )
+        await channel.send_event(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=session_id,
+                payload={"question_id": "q_wc_2", "question": "补充说明"},
+            )
+        )
+
+        async def collect_answer():
+            async for event in bus.subscribe():
+                if event.type == USER_QUESTION_ANSWERED:
+                    return event
+
+        answer_task = asyncio.create_task(collect_answer())
+        await asyncio.sleep(0.05)
+        await channel.handle_incoming_text(
+            text="第一次回答",
+            chat_id="chat-2",
+            chat_type="p2p",
+            sender_id="user-2",
+            message_id="msg-a",
+        )
+        first_event = await asyncio.wait_for(answer_task, timeout=2)
+        assert first_event.type == USER_QUESTION_ANSWERED
+
+        async def collect_input():
+            async for event in bus.subscribe():
+                if event.type == USER_INPUT:
+                    return event
+
+        input_task = asyncio.create_task(collect_input())
+        await asyncio.sleep(0.05)
+        await channel.handle_incoming_text(
+            text="新的普通消息",
+            chat_id="chat-2",
+            chat_type="p2p",
+            sender_id="user-2",
+            message_id="msg-b",
+        )
+        second_event = await asyncio.wait_for(input_task, timeout=2)
+        assert second_event.type == USER_INPUT
+        assert second_event.payload["content"] == "新的普通消息"

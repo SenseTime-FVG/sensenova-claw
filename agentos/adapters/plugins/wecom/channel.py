@@ -8,7 +8,14 @@ from dataclasses import dataclass
 
 from agentos.adapters.channels.base import Channel
 from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED, USER_INPUT, USER_QUESTION_ASKED
+from agentos.kernel.events.types import (
+    AGENT_STEP_COMPLETED,
+    ERROR_RAISED,
+    TOOL_CALL_STARTED,
+    USER_INPUT,
+    USER_QUESTION_ANSWERED,
+    USER_QUESTION_ASKED,
+)
 
 from .config import WecomConfig
 from .tool_client import WecomToolClient
@@ -26,6 +33,12 @@ class WecomSessionMeta:
     last_message_id: str
 
 
+@dataclass
+class WecomPendingQuestion:
+    question_id: str
+    question: str
+
+
 class WecomChannel(Channel):
     """企业微信 Channel 第一版骨架。"""
 
@@ -39,6 +52,7 @@ class WecomChannel(Channel):
         )
         self._chat_sessions: dict[str, str] = {}
         self._session_meta: dict[str, WecomSessionMeta] = {}
+        self._pending_questions: dict[str, WecomPendingQuestion] = {}
 
     def get_channel_id(self) -> str:
         return "wecom"
@@ -68,6 +82,10 @@ class WecomChannel(Channel):
         elif event.type == USER_QUESTION_ASKED:
             question = event.payload.get("question", "")
             if question:
+                self._pending_questions[event.session_id] = WecomPendingQuestion(
+                    question_id=str(event.payload.get("question_id", "")).strip(),
+                    question=question,
+                )
                 await self._send_reply(event.session_id, question)
         elif event.type == TOOL_CALL_STARTED and self._config.show_tool_progress:
             tool_name = event.payload.get("tool_name", "")
@@ -117,6 +135,22 @@ class WecomChannel(Channel):
 
         gateway = self._plugin_api.get_gateway()
         gateway.bind_session(session_id, "wecom")
+        pending_question = self._pending_questions.pop(session_id, None)
+        if pending_question is not None:
+            await gateway.publish_from_channel(
+                EventEnvelope(
+                    type=USER_QUESTION_ANSWERED,
+                    session_id=session_id,
+                    turn_id=f"turn_{uuid.uuid4().hex[:12]}",
+                    source="wecom",
+                    payload={
+                        "question_id": pending_question.question_id,
+                        "answer": text,
+                        "cancelled": False,
+                    },
+                )
+            )
+            return
         await gateway.publish_from_channel(
             EventEnvelope(
                 type=USER_INPUT,

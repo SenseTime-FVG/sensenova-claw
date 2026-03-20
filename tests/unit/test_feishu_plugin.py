@@ -75,6 +75,9 @@ class TestPluginDefinition:
     def test_description_not_empty(self):
         assert len(definition.description) > 0
 
+    def test_description_does_not_claim_removed_api_tool(self):
+        assert "API 调用" not in definition.description
+
 
 # ---- register() 测试 ----
 
@@ -120,6 +123,20 @@ class TestRegister:
         await register(api)
         # MessageTool + DocTool + WikiTool + DriveTool + PermTool = 5
         assert len(registry._pending_tools) == 5
+
+    async def test_api_tool_config_is_kept_for_compat_but_not_registered(self):
+        api = _make_plugin_api({
+            "enabled": True,
+            "api_tool": {
+                "enabled": True,
+                "allowed_methods": ["GET", "POST"],
+                "allowed_path_prefixes": ["/open-apis/wiki/v2/spaces"],
+            },
+        })
+        registry = api._registry
+        await register(api)
+        names = [tool.name for tool in registry._pending_tools]
+        assert "feishu_api" not in names
 
     async def test_channel_config_passthrough(self):
         """Channel 应使用 FeishuConfig 中的配置值"""

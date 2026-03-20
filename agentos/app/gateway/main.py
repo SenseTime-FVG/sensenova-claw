@@ -217,7 +217,7 @@ async def lifespan(app: FastAPI):
         )
         tool_registry.register(send_message_tool)
 
-    # v0.9: 加载插件（飞书 Channel + MessageTool + FeishuApiTool 等）
+    # v0.9: 加载插件（飞书 Channel、MessageTool 与各类渠道/专用工具）
     plugin_registry = PluginRegistry()
     await plugin_registry.load_plugins(
         config.data, gateway=gateway, publisher=publisher,

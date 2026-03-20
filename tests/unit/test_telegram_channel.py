@@ -14,7 +14,14 @@ from agentos.adapters.plugins.telegram.models import TelegramInboundMessage
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED, USER_INPUT, USER_QUESTION_ASKED
+from agentos.kernel.events.types import (
+    AGENT_STEP_COMPLETED,
+    ERROR_RAISED,
+    TOOL_CALL_STARTED,
+    USER_INPUT,
+    USER_QUESTION_ANSWERED,
+    USER_QUESTION_ASKED,
+)
 from agentos.kernel.runtime.publisher import EventPublisher
 
 
@@ -284,6 +291,118 @@ class TestInbound:
 
         assert collected == []
         assert gateway._session_bindings == {}
+
+    @pytest.mark.asyncio
+    async def test_answers_pending_question_before_user_input(self):
+        channel, _, bus, runtime = _make_channel()
+        session_id = "telegram_ask_001"
+        channel._chat_sessions["dm:1001"] = session_id
+        channel._session_meta[session_id] = channel._session_meta_model(
+            chat_id="1001",
+            chat_type="p2p",
+            sender_id="1001",
+            sender_username="alice",
+            last_message_id=10,
+        )
+
+        await channel.send_event(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=session_id,
+                source="tool",
+                payload={"question_id": "q_tg_1", "question": "请选择环境"},
+            )
+        )
+        assert runtime.sent_messages[-1]["text"] == "请选择环境"
+
+        collected: list[EventEnvelope] = []
+
+        async def collect():
+            async for event in bus.subscribe():
+                collected.append(event)
+                if event.type == USER_QUESTION_ANSWERED:
+                    break
+
+        task = asyncio.create_task(collect())
+        await asyncio.sleep(0.05)
+
+        await channel.handle_incoming_message(
+            TelegramInboundMessage(
+                text="生产环境",
+                chat_id="1001",
+                chat_type="p2p",
+                sender_id="1001",
+                sender_username="alice",
+                message_id=11,
+            )
+        )
+
+        await asyncio.wait_for(task, timeout=2)
+        assert collected[-1].type == USER_QUESTION_ANSWERED
+        assert collected[-1].payload["question_id"] == "q_tg_1"
+        assert collected[-1].payload["answer"] == "生产环境"
+
+    @pytest.mark.asyncio
+    async def test_restores_user_input_after_answering_pending_question(self):
+        channel, _, bus, _ = _make_channel()
+        session_id = "telegram_ask_002"
+        channel._chat_sessions["dm:1002"] = session_id
+        channel._session_meta[session_id] = channel._session_meta_model(
+            chat_id="1002",
+            chat_type="p2p",
+            sender_id="1002",
+            sender_username="bob",
+            last_message_id=20,
+        )
+        await channel.send_event(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=session_id,
+                source="tool",
+                payload={"question_id": "q_tg_2", "question": "补充说明"},
+            )
+        )
+
+        async def collect_answer():
+            async for event in bus.subscribe():
+                if event.type == USER_QUESTION_ANSWERED:
+                    return event
+
+        answer_task = asyncio.create_task(collect_answer())
+        await asyncio.sleep(0.05)
+        await channel.handle_incoming_message(
+            TelegramInboundMessage(
+                text="第一次回答",
+                chat_id="1002",
+                chat_type="p2p",
+                sender_id="1002",
+                sender_username="bob",
+                message_id=21,
+            )
+        )
+        first_event = await asyncio.wait_for(answer_task, timeout=2)
+        assert first_event.type == USER_QUESTION_ANSWERED
+
+        async def collect_input():
+            async for event in bus.subscribe():
+                if event.type == USER_INPUT:
+                    return event
+
+        input_task = asyncio.create_task(collect_input())
+        await asyncio.sleep(0.05)
+        await channel.handle_incoming_message(
+            TelegramInboundMessage(
+                text="新的普通消息",
+                chat_id="1002",
+                chat_type="p2p",
+                sender_id="1002",
+                sender_username="bob",
+                message_id=22,
+            )
+        )
+        second_event = await asyncio.wait_for(input_task, timeout=2)
+        assert second_event.type == USER_INPUT
+        assert second_event.payload["content"] == "新的普通消息"
 
 
 class TestOutbound:
