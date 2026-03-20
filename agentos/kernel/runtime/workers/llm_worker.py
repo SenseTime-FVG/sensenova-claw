@@ -48,6 +48,7 @@ class LLMSessionWorker(SessionWorker):
         tools = event.payload.get("tools")
         temperature = float(event.payload.get("temperature", config.get("agent.temperature", 0.2)))
         max_tokens = event.payload.get("max_tokens")
+        extra_body = event.payload.get("extra_body") or {}
 
         logger.debug(
             "LLM call input | provider=%s model=%s llm_call_id=%s messages=%s tools=%s",
@@ -73,6 +74,7 @@ class LLMSessionWorker(SessionWorker):
                 tools=tools,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                extra_body=extra_body if extra_body else None,
             )
             await self.bus.publish(
                 EventEnvelope(

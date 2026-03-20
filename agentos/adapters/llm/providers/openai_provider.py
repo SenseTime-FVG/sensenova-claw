@@ -25,6 +25,7 @@ class OpenAIProvider(LLMProvider):
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         max_tokens: int | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_messages = self._normalize_messages(messages)
         req: dict[str, Any] = {
@@ -36,6 +37,8 @@ class OpenAIProvider(LLMProvider):
             req["tools"] = [{"type": "function", "function": t} for t in tools]
         if max_tokens:
             req["max_tokens"] = max_tokens
+        if extra_body:
+            req["extra_body"] = extra_body
 
         response = await self.client.chat.completions.create(**req)
         choice = response.choices[0]

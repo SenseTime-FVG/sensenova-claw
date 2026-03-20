@@ -37,7 +37,7 @@ class TestAgentConfig:
         d = a.to_dict()
         expected_keys = {
             "id", "name", "description", "provider", "model",
-            "temperature", "max_tokens", "system_prompt", "tools",
+            "temperature", "max_tokens", "extra_body", "system_prompt", "tools",
             "skills", "workdir", "can_delegate_to", "max_delegation_depth",
             "max_pingpong_turns",
             "enabled", "created_at", "updated_at",

@@ -25,6 +25,7 @@ class AnthropicProvider(LLMProvider):
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         max_tokens: int | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         system_messages = [m for m in messages if m.get("role") == "system"]
         non_system_messages = [m for m in messages if m.get("role") != "system"]
@@ -45,6 +46,10 @@ class AnthropicProvider(LLMProvider):
 
         if tools:
             req["tools"] = [self._convert_tool(t) for t in tools]
+
+        # 合并 extra_body 到请求参数（Anthropic SDK 直接接受关键字参数）
+        if extra_body:
+            req.update(extra_body)
 
         response = await self.client.messages.create(**req)
 
