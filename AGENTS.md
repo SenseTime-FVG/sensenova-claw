@@ -371,3 +371,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境浏览器级 Playwright 仍缺系统库 `libnspr4.so`，即使越权能拉起 web server，也会在 Chromium 启动阶段失败；这类前端 e2e 结果不能作为功能缺陷依据，只能记录为环境阻塞。
 - `npx tsc --noEmit` 与 `next build` 仍会先被仓库既有问题 `components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入挡住；验证时必须区分“本次新增错误已清零”和“仓库老错误仍在”。
+
+### 2026-03-20 MinerU 渠道选择 Skill 设计补充
+
+成功经验：
+- 对“保留旧 skill + 新增选择型 skill”的需求，先把“是否改旧 skill”“是否包含网页”“结果是否统一落盘”三条边界问清，再写 spec，能明显减少后续实现分叉。
+- 使用官方 `mineru-open-api` CLI 的方案时，skill 文档最重要的不是安装说明，而是把“每次先 ask_user 选渠道、免费失败不自动切换、输出目录固定到 workspace”这几个行为约束写死。
+- 对这类远程 API CLI，资源要求说明应基于官方产品形态谨慎表述为“通常较轻量”，不要虚构 CPU/内存硬指标。
+- 若需求要求“CLI 未安装时由 skill 负责安装”，实现上不能把该 skill 用 `metadata.agentos.requires.bins` 做硬门控隐藏；否则 skill 在缺失 CLI 时不会被发现，也就无法触发安装流程。
+
+失败/风险经验：
+- 当前会话环境没有可调用的 spec reviewer 子代理能力；设计文档阶段只能采用人工自检退化方案，并需要在产物里显式注明，避免误称已完成完整 reviewer loop。
+- `docs/superpowers/specs/` 受 `.gitignore` 影响，后续提交 spec 时要记得 `git add -f`，否则文件会留在工作区但不会进入提交。
