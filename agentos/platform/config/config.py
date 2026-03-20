@@ -501,6 +501,25 @@ class Config:
         logger.warning("未知的模型 key: %s，使用 mock provider", model_key)
         return "mock", model_key
 
+    def get_model_extra_body(self, model_key: str | None = None) -> dict:
+        """获取模型配置中的 extra_body（透传给 LLM API 请求体的额外参数）。
+
+        Args:
+            model_key: llm.models 中的 key，为 None 时使用 llm.default_model。
+        Returns:
+            extra_body dict，无配置时返回空 dict
+        """
+        if not model_key:
+            model_key = self.get("llm.default_model", "mock")
+        models = self.get("llm.models", {})
+        if model_key in models:
+            return dict(models[model_key].get("extra_body", {}))
+        # 向后兼容：反查 model_id
+        for _key, entry in models.items():
+            if isinstance(entry, dict) and entry.get("model_id") == model_key:
+                return dict(entry.get("extra_body", {}))
+        return {}
+
 
 config = Config()
 logger.info("Config loaded: %s", config)
