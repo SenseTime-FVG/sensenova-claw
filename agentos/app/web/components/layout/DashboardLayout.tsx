@@ -113,7 +113,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
             <GlobalReminderBell />
             <Avatar className="h-8 w-8 cursor-pointer">
-              <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
+              <AvatarImage src="/icon.png" alt="AgentOS" />
               <AvatarFallback>AO</AvatarFallback>
             </Avatar>
           </div>
