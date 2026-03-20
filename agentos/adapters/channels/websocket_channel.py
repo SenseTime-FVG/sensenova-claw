@@ -18,6 +18,7 @@ from agentos.kernel.events.types import (
     LLM_CALL_REQUESTED,
     NOTIFICATION_PUSH,
     NOTIFICATION_SESSION,
+    SESSION_CREATED,
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
     TOOL_CONFIRMATION_REQUESTED,
@@ -304,6 +305,7 @@ class WebSocketChannel(Channel):
 
         # 部分事件为连接级广播（不依赖 session 绑定）
         if event.type in {
+            SESSION_CREATED,
             TOOL_CONFIRMATION_REQUESTED,
             USER_QUESTION_ASKED,
             USER_QUESTION_ANSWERED,
@@ -325,6 +327,16 @@ class WebSocketChannel(Channel):
 
     def _map(self, event: EventEnvelope) -> dict[str, Any] | None:
         """将事件映射为前端消息格式"""
+        if event.type == SESSION_CREATED:
+            return {
+                "type": "session_list_changed",
+                "session_id": event.session_id,
+                "payload": {
+                    "agent_id": event.payload.get("agent_id"),
+                    "reason": "send_message",
+                },
+                "timestamp": event.ts,
+            }
         if event.type == AGENT_STEP_STARTED:
             return {
                 "type": "agent_thinking",

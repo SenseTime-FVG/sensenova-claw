@@ -5,6 +5,7 @@ import { Bot, User, Wrench, ChevronDown } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
 import { type ChatMessage, formatArgs } from '@/lib/chatTypes';
+import { MarkdownContent } from './MarkdownContent';
 
 export function MessageBubble({ msg }: { msg: ChatMessage }) {
   const [showArgs, setShowArgs] = useState(false);
@@ -129,8 +130,8 @@ export function MessageBubble({ msg }: { msg: ChatMessage }) {
         <Bot size={20} className="text-primary-foreground" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-base md:text-lg text-foreground break-words leading-relaxed font-medium">
-          <MarkdownRenderer className="chat-markdown chat-markdown--assistant" content={msg.content} />
+        <div className="text-base md:text-lg text-foreground leading-relaxed">
+          <MarkdownContent content={msg.content || ''} />
         </div>
       </div>
     </div>

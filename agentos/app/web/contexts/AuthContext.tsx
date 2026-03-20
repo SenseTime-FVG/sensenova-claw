@@ -81,11 +81,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const urlToken = params.get('token');
       const pathname = window.location.pathname;
 
-      // 根路径统一跳转到 /chat，让 /chat?token=... 成为唯一带 token 入口。
+      // 根路径带 token 时，原地验证后清除 token 参数，保持在工作台页面
       if (pathname === '/' && urlToken) {
-        const targetUrl = params.toString() ? `/chat?${params.toString()}` : '/chat';
-        window.location.replace(targetUrl);
-        return;
+        const valid = await verifyToken(urlToken);
+        if (valid) {
+          params.delete('token');
+          const newUrl = params.toString() ? `/?${params.toString()}` : '/';
+          window.history.replaceState({}, '', newUrl);
+          setIsLoading(false);
+          return;
+        }
       }
 
       if (urlToken) {

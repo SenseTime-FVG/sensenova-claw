@@ -65,22 +65,22 @@ function AutomationEmptyState() {
   useEffect(() => { fetchRuns(); }, [fetchRuns]);
 
   return (
-    <div className="flex-1 flex flex-col p-6">
+    <div className="flex-1 flex flex-col p-8">
       <div className="max-w-3xl mx-auto w-full">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shadow-sm">
               <Bell className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground">定时提醒记录</h2>
+              <h2 className="text-lg font-bold text-foreground">定时提醒记录</h2>
               <p className="text-xs text-muted-foreground">通过 cron_manage 创建的定时任务提醒消息</p>
             </div>
           </div>
           <button
             onClick={fetchRuns}
             disabled={loading}
-            className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
           >
             <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
           </button>
@@ -98,21 +98,21 @@ function AutomationEmptyState() {
             <p className="text-xs text-muted-foreground/40 mt-1">在下方输入框使用对话创建定时提醒</p>
           </div>
         ) : (
-          <div className="space-y-2 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
+          <div className="space-y-2.5 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
             {runs.map((run) => (
               <div
                 key={run.id}
                 className={cn(
-                  'flex items-start gap-3 rounded-xl px-4 py-3 border transition-colors',
+                  'flex items-start gap-3 rounded-xl px-5 py-3.5 border transition-all',
                   run.status === 'error'
                     ? 'border-destructive/20 bg-destructive/5'
-                    : 'border-border/40 bg-card/60 hover:bg-muted/40',
+                    : 'border-border/60 bg-card hover:bg-muted/30 hover:shadow-sm',
                 )}
               >
                 <StatusIcon status={run.status} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-foreground truncate">{run.job_name}</span>
+                    <span className="text-sm font-bold text-foreground truncate">{run.job_name}</span>
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 shrink-0">
                       {run.status || 'unknown'}
                     </Badge>

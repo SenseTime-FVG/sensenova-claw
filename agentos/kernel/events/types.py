@@ -55,3 +55,6 @@ NOTIFICATION_SESSION = "notification.session"
 AGENT_MESSAGE_REQUESTED = "agent.message_requested"
 AGENT_MESSAGE_COMPLETED = "agent.message_completed"
 AGENT_MESSAGE_FAILED = "agent.message_failed"
+
+# 会话生命周期事件
+SESSION_CREATED = "session.created"

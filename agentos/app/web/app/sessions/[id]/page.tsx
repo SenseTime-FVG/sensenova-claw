@@ -8,6 +8,7 @@ import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { InteractionDialog, type PendingInteraction } from '@/components/chat/QuestionDialog';
+import { MarkdownContent } from '@/components/chat/MarkdownContent';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
@@ -99,8 +100,8 @@ function MessageBubble({ msg }: { msg: Message }) {
         </div>
         <div className="flex-1 min-w-0 space-y-4">
           {msg.content && (
-            <div className="text-base text-foreground bg-card border border-border p-5 rounded-2xl rounded-tl-none shadow-sm break-words leading-relaxed">
-              <MarkdownRenderer className="chat-markdown chat-markdown--assistant" content={msg.content} />
+            <div className="text-base text-foreground bg-card border border-border p-5 rounded-2xl rounded-tl-none shadow-sm leading-relaxed">
+              <MarkdownContent content={msg.content} />
             </div>
           )}
           {hasToolCalls && (
