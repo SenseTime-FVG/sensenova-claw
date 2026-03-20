@@ -26,7 +26,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _LLM_DEBUG = os.environ.get("AGENTOS_DEBUG_LLM", "").strip() not in ("", "0", "false")
-_DEBUG_BASE = Path("var/debug/llm")
+
+
+def _get_debug_base() -> Path:
+    """获取 debug 日志根目录: $AGENTOS_HOME/logs/debug/llm"""
+    from agentos.platform.config.workspace import resolve_agentos_home
+    return resolve_agentos_home() / "logs" / "debug" / "llm"
 
 
 def _save_llm_debug(
@@ -41,10 +46,10 @@ def _save_llm_debug(
 ) -> None:
     """将单次 LLM 调用的输入输出保存为 JSON 文件。
 
-    目录结构: var/debug/llm/{date}/{session_id}/{llm_call_id}.json
+    目录结构: $AGENTOS_HOME/logs/debug/llm/{date}/{session_id}/{llm_call_id}.json
     """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    out_dir = _DEBUG_BASE / today / session_id
+    out_dir = _get_debug_base() / today / session_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
     record = {
