@@ -37,7 +37,7 @@ class TestAgentConfig:
         d = a.to_dict()
         expected_keys = {
             "id", "name", "description", "provider", "model",
-            "temperature", "max_tokens", "system_prompt", "tools",
+            "temperature", "max_tokens", "extra_body", "system_prompt", "tools",
             "skills", "workdir", "can_delegate_to", "max_delegation_depth",
             "max_pingpong_turns",
             "enabled", "created_at", "updated_at",
@@ -68,6 +68,23 @@ class TestAgentConfig:
         assert a.can_send_message_to == ["writer"]
         assert a.max_send_depth == 4
         assert a.max_pingpong_turns == 7
+
+    def test_extra_body_default_empty(self):
+        a = AgentConfig(id="x", name="X")
+        assert a.extra_body == {}
+
+    def test_extra_body_roundtrip(self):
+        eb = {"thinking": {"type": "adaptive"}, "reasoning_effort": "high"}
+        a = AgentConfig.create(id="x", name="X", extra_body=eb)
+        d = a.to_dict()
+        assert d["extra_body"] == eb
+        b = AgentConfig.from_dict(d)
+        assert b.extra_body == eb
+
+    def test_extra_body_from_dict_missing(self):
+        """extra_body 未配置时默认为空 dict"""
+        a = AgentConfig.from_dict({"id": "x"})
+        assert a.extra_body == {}
 
     def test_workdir_default_empty(self):
         a = AgentConfig(id="x", name="X")

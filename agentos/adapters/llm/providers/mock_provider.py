@@ -13,8 +13,9 @@ class MockProvider(LLMProvider):
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         max_tokens: int | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        _ = (model, temperature, max_tokens)
+        _ = (model, temperature, max_tokens, extra_body)
         last = messages[-1] if messages else {"content": ""}
         content = str(last.get("content", ""))
 

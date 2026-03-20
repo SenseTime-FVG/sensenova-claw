@@ -85,6 +85,14 @@ class AgentSessionWorker(SessionWorker):
             return self.agent_config.temperature
         return config.get("agent.temperature", 0.2)
 
+    def _get_extra_body(self) -> dict:
+        """获取 extra_body：agent 级别覆盖 model 级别"""
+        model_key = self._get_model_key()
+        model_extra = config.get_model_extra_body(model_key)
+        if self.agent_config and self.agent_config.extra_body:
+            model_extra.update(self.agent_config.extra_body)
+        return model_extra
+
     def _get_filtered_tools(self) -> list[dict]:
         """根据 Agent 配置过滤可用工具"""
         all_tools = self.rt.tool_registry.as_llm_tools()
@@ -281,6 +289,7 @@ class AgentSessionWorker(SessionWorker):
                     "messages": messages,
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
+                    "extra_body": self._get_extra_body(),
                 },
             )
         )
@@ -459,6 +468,7 @@ class AgentSessionWorker(SessionWorker):
                     "messages": state.messages,
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
+                    "extra_body": self._get_extra_body(),
                 },
             )
         )

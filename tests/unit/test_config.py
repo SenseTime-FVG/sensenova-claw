@@ -51,3 +51,44 @@ class TestConfig:
         cfg = Config(config_path=tmp_path / "nonexist.yml")
         cfg.set("agent.model", "claude-opus")
         assert cfg.get("agent.model") == "claude-opus"
+
+    def test_get_model_extra_body(self, tmp_path):
+        yml = tmp_path / "config.yml"
+        yml.write_text(
+            "llm:\n"
+            "  models:\n"
+            "    o3:\n"
+            "      provider: openai\n"
+            "      model_id: o3\n"
+            "      extra_body:\n"
+            "        reasoning_effort: high\n"
+            "    gpt-4o:\n"
+            "      provider: openai\n"
+            "      model_id: gpt-4o\n",
+            encoding="utf-8",
+        )
+        cfg = Config(config_path=yml)
+        # 有 extra_body 的模型
+        assert cfg.get_model_extra_body("o3") == {"reasoning_effort": "high"}
+        # 无 extra_body 的模型
+        assert cfg.get_model_extra_body("gpt-4o") == {}
+        # 不存在的模型
+        assert cfg.get_model_extra_body("nonexist") == {}
+
+    def test_get_model_extra_body_nested(self, tmp_path):
+        yml = tmp_path / "config.yml"
+        yml.write_text(
+            "llm:\n"
+            "  models:\n"
+            "    claude-thinking:\n"
+            "      provider: anthropic\n"
+            "      model_id: claude-opus-4-6\n"
+            "      extra_body:\n"
+            "        thinking:\n"
+            "          type: adaptive\n",
+            encoding="utf-8",
+        )
+        cfg = Config(config_path=yml)
+        assert cfg.get_model_extra_body("claude-thinking") == {
+            "thinking": {"type": "adaptive"}
+        }
