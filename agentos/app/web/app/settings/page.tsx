@@ -8,9 +8,17 @@ import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface ProviderConfig {
   api_key: string;
+  api_key_meta?: SecretValueStatus | null;
+  api_key_touched?: boolean;
   base_url: string;
   timeout: number;
   max_retries: number;
+}
+
+interface SecretValueStatus {
+  configured: boolean;
+  masked_value?: string | null;
+  source: string;
 }
 
 interface ModelConfig {
@@ -49,7 +57,7 @@ export default function SettingsPage() {
       .then(res => res.json())
       .then(data => {
         const llm = data?.llm || {};
-        const p = llm.providers || {};
+        const p = normalizeProviders(llm.providers || {});
         // 过滤掉 mock provider
         const { mock, ...realProviders } = p;
         setProviders(realProviders);
@@ -69,7 +77,10 @@ export default function SettingsPage() {
     try {
       // 重新组装完整的 llm section（包含 mock）
       const llm = {
-        providers: { mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 }, ...providers },
+        providers: {
+          mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          ...buildProviderPayloads(providers),
+        },
         models: { mock: { provider: 'mock', model_id: 'mock-agent-v1' }, ...models },
         default_model: defaultModel,
       };
@@ -96,7 +107,11 @@ export default function SettingsPage() {
   const updateProvider = (name: string, field: keyof ProviderConfig, value: string | number) => {
     setProviders(prev => ({
       ...prev,
-      [name]: { ...prev[name], [field]: value },
+      [name]: {
+        ...prev[name],
+        [field]: value,
+        ...(field === 'api_key' ? { api_key_touched: true } : {}),
+      },
     }));
   };
 
@@ -114,7 +129,7 @@ export default function SettingsPage() {
     if (!name || providers[name]) return;
     setProviders(prev => ({
       ...prev,
-      [name]: { api_key: '', base_url: '', timeout: 60, max_retries: 3 },
+      [name]: { api_key: '', api_key_meta: null, api_key_touched: true, base_url: '', timeout: 60, max_retries: 3 },
     }));
     setExpandedProviders(prev => ({ ...prev, [name]: true }));
     setNewProviderName('');
@@ -150,12 +165,6 @@ export default function SettingsPage() {
     setExpandedModels(prev => ({ ...prev, [name]: true }));
     setNewModelName('');
     setShowNewModel(false);
-  };
-
-  const maskApiKey = (key: string) => {
-    if (!key || key.startsWith('${')) return key;
-    if (key.length <= 8) return '••••••••';
-    return key.slice(0, 4) + '••••••••' + key.slice(-4);
   };
 
   const providerNames = Object.keys(providers);
@@ -261,7 +270,7 @@ export default function SettingsPage() {
                         </div>
                         <span className="text-sm font-bold text-foreground flex-1">{name}</span>
                         <span className="text-xs text-muted-foreground font-mono">
-                          {providers[name]?.api_key ? maskApiKey(providers[name].api_key) : 'No key'}
+                          {providerSecretSummary(providers[name])}
                         </span>
                         <button onClick={e => { e.stopPropagation(); removeProvider(name); }}
                           className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-destructive/10 text-destructive/40 hover:text-destructive transition-all">
@@ -410,4 +419,56 @@ function FieldInput({ label, value, onChange, type = 'text' }: {
         className="w-full bg-background border border-input rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm" />
     </div>
   );
+}
+
+function normalizeProviders(input: Record<string, any>): Record<string, ProviderConfig> {
+  return Object.fromEntries(
+    Object.entries(input).map(([name, value]) => {
+      const provider = value && typeof value === 'object' ? value : {};
+      const apiKeyValue = provider.api_key;
+      const hasMeta = apiKeyValue && typeof apiKeyValue === 'object' && 'configured' in apiKeyValue;
+      return [
+        name,
+        {
+          api_key: hasMeta ? '' : String(apiKeyValue || ''),
+          api_key_meta: hasMeta ? apiKeyValue as SecretValueStatus : null,
+          api_key_touched: false,
+          base_url: String(provider.base_url || ''),
+          timeout: Number(provider.timeout || 60),
+          max_retries: Number(provider.max_retries || 3),
+        },
+      ];
+    }),
+  );
+}
+
+function buildProviderPayloads(providers: Record<string, ProviderConfig>): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(
+    Object.entries(providers).map(([name, provider]) => {
+      const payload: Record<string, unknown> = {
+        base_url: provider.base_url,
+        timeout: provider.timeout,
+        max_retries: provider.max_retries,
+      };
+      if (provider.api_key_touched) {
+        payload.api_key = provider.api_key;
+      } else if (!provider.api_key_meta?.configured) {
+        payload.api_key = provider.api_key;
+      }
+      return [name, payload];
+    }),
+  );
+}
+
+function providerSecretSummary(provider?: ProviderConfig): string {
+  if (!provider) return 'No key';
+  if (provider.api_key) return maskApiKey(provider.api_key);
+  if (provider.api_key_meta?.configured) return provider.api_key_meta.masked_value || 'Configured';
+  return 'No key';
+}
+
+function maskApiKey(key: string): string {
+  if (!key || key.startsWith('${')) return key;
+  if (key.length <= 8) return '••••••••';
+  return key.slice(0, 4) + '••••••••' + key.slice(-4);
 }

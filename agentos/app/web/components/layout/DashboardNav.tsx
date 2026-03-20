@@ -24,6 +24,7 @@ export const builtinFeatureNavItems = [
 export const adminNavItems = [
   { path: '/agents', label: 'Dashboard' },
   { path: '/sessions', label: 'Sessions' },
+  { path: '/llms', label: 'LLMs' },
   { path: '/gateway', label: 'Gateway' },
   { path: '/tools', label: 'Tools' },
   { path: '/skills', label: 'Skills' },

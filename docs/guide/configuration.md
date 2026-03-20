@@ -1,17 +1,17 @@
 # 配置指南
 
-AgentOS 通过 `config.yml` 配置文件进行全局配置，支持环境变量覆盖。本文档详细说明所有配置项及其用法。
+AgentOS 通过 `config.yml` 配置文件进行全局配置，支持环境变量和系统密钥环引用。本文档详细说明所有配置项及其用法。
 
 ## 配置加载优先级
 
 AgentOS 配置加载遵循以下优先级（从高到低）：
 
 ```
-环境变量 > config.yml > 默认值
+环境变量覆盖值 > config.yml 中声明的来源（明文 / ${ENV} / ${secret:...}） > 默认值
 ```
 
-- **环境变量**: 最高优先级，适合在 CI/CD 或容器环境中覆盖敏感配置
-- **config.yml**: 项目根目录下的配置文件，适合本地开发
+- **环境变量覆盖值**: 最高优先级，适合在 CI/CD 或容器环境中覆盖敏感配置
+- **config.yml**: 项目根目录下的配置文件，适合本地开发；敏感字段推荐写成 `${secret:...}` 引用
 - **默认值**: 代码中预设的默认值，确保无配置时也能正常启动（使用 mock provider）
 
 ## 配置文件位置
@@ -25,7 +25,7 @@ agentos/
 └── ...
 ```
 
-> **安全提示**: `config.yml` 包含 API 密钥等敏感信息，已在 `.gitignore` 中排除，请勿提交到版本库。
+> **安全提示**: 新增或更新敏感字段时，推荐使用系统 keyring 存储，`config.yml` 仅保留 `${secret:...}` 引用；不要将明文密钥提交到版本库。
 
 ## 完整配置结构
 
@@ -432,15 +432,25 @@ memory:
 
 ## 配置变量引用
 
-在 `config.yml` 中可以使用 `${VAR_NAME}` 语法引用其他配置项或环境变量：
+在 `config.yml` 中可以使用两种引用语法：
 
 ```yaml
-SERPER_API_KEY: your-key-here
-
 tools:
   serper_search:
-    api_key: ${SERPER_API_KEY}   # 引用顶层配置的值
+    api_key: ${SERPER_API_KEY}   # 从环境变量读取
+
+llm:
+  providers:
+    openai:
+      api_key: ${secret:agentos/llm.providers.openai.api_key}  # 从系统 keyring 读取
 ```
+
+说明：
+
+- `${VAR_NAME}`：从环境变量读取
+- `${secret:agentos/<dotted_path>}`：从系统 keyring 读取
+- 第一版敏感字段默认覆盖 `llm.providers.*.api_key`、`tools.*.api_key`、`tools.email.password`、`plugins.feishu.app_secret`、`plugins.wecom.secret`
+- 如果 keyring backend 不可用，secret 写入会失败，不会自动回退到明文
 
 ## 下一步
 

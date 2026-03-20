@@ -9,6 +9,9 @@ from typing import Any
 
 import yaml
 
+from agentos.platform.secrets.refs import is_secret_ref, parse_secret_ref
+from agentos.platform.secrets.store import KeyringSecretStore
+
 logger = logging.getLogger(__name__)
 
 # agentos/platform/config/config.py -> 往上 3 层到项目根目录
@@ -288,7 +291,9 @@ class Config:
         *,
         project_root: Path | None = None,
         user_config_dir: Path | None = None,
+        secret_store: Any | None = None,
     ):
+        self._secret_store = secret_store or KeyringSecretStore()
         # 新方式：通过 project_root 自动发现配置
         if project_root is not None:
             self._project_root = Path(project_root).resolve()
@@ -443,11 +448,20 @@ class Config:
         if isinstance(obj, list):
             return [self._resolve_env(v) for v in obj]
         if isinstance(obj, str):
-            pattern = re.compile(r"\$\{([^}]+)\}")
-            for env_name in pattern.findall(obj):
-                obj = obj.replace(f"${{{env_name}}}", os.getenv(env_name, ""))
-            return obj
+            return self._resolve_string_value(obj)
         return obj
+
+    def _resolve_string_value(self, value: str) -> str:
+        if is_secret_ref(value):
+            if self._secret_store is None:
+                return ""
+            ref = parse_secret_ref(value)
+            secret = self._secret_store.get(ref)
+            return secret or ""
+        pattern = re.compile(r"\$\{([^}]+)\}")
+        for env_name in pattern.findall(value):
+            value = value.replace(f"${{{env_name}}}", os.getenv(env_name, ""))
+        return value
 
     def get(self, path: str, default: Any = None) -> Any:
         value: Any = self.data

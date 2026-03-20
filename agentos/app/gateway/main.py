@@ -41,6 +41,7 @@ from agentos.platform.config.workspace import (
     ensure_agent_workspace,
     resolve_agentos_home,
 )
+from agentos.platform.secrets.store import KeyringSecretStore
 from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api, sessions
 from agentos.interfaces.http import cron_api, notification_api
 
@@ -76,6 +77,8 @@ class Services:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    secret_store = getattr(config, "_secret_store", None) or KeyringSecretStore()
+    config._secret_store = secret_store
 
     # 解析 AGENTOS_HOME（默认 ~/.agentos）
     from agentos.platform.config.config import PROJECT_ROOT
@@ -274,6 +277,7 @@ async def lifespan(app: FastAPI):
     app.state.skill_registry = skill_registry
     app.state.agent_registry = agent_registry
     app.state.config = config
+    app.state.secret_store = secret_store
     app.state.agentos_home = agentos_home_str
     app.state.market_service = market_service
 

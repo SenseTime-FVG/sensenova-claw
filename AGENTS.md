@@ -608,3 +608,35 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前 `/chat` 页面的 mock e2e 不能再只靠 `localStorage access_token`；实际鉴权链路依赖 `agentos_token` cookie 和 `/api/auth/status`、`/api/config/llm-status`，漏掉任一项都会让页面停在登录/配置检查流程，导致断言偏离真实问题。
+
+### 2026-03-21 Secret Store 接入补充
+
+成功经验：
+- 为通用 secret 机制先落 `SecretStore + SecretRef + SecretRegistry` 三层最稳，后续把 `Config` 解析和 `config_store` 持久化都接到同一抽象上，比在各 API 里散落 `if api_key` 判断更可控。
+- `persist_path_updates()` 这类统一写回入口非常适合承接 secret 逻辑；在这里把 `cfg._secret_store` 回填好，能顺手修复“写入后 reload 读不回 secret”的问题。
+- `/api/config/sections` 一旦开始返回脱敏结构，前端设置页必须同步改成“secret 元数据 + draft/touched”双轨状态；否则保存全量 provider 配置时会把原有 secret 误清空。
+
+失败/风险经验：
+- 当前环境下 `python3 -m pytest` 可用，但 `.venv/bin/python -m pytest` 不一定有 `pytest`；回归命令优先直接用系统 `python3 -m pytest` 更稳。
+- `npx tsc --noEmit -p agentos/app/web/tsconfig.json` 在本环境没有及时返回有效结果，前端静态类型回归不能在这次任务里作为通过依据；需要在本地完整 Node/Next 环境继续确认。
+- 虽然已接入 `python-keyring` 抽象并把默认 store 指向 `KeyringSecretStore`，但真实 keyring backend 可用性仍取决于宿主机环境；当前只完成了进程内/注入式测试，未做真实系统 keyring e2e。
+
+### 2026-03-21 LLM 管理页补充
+
+成功经验：
+- 对“新增独立管理页但不改后端协议”的需求，直接复用 `/api/config/sections` 的 `llm.providers/models/default_model` 最稳；前端只需做一次 `provider -> models[]` 视图映射，就能实现按 provider 管理 llm。
+- 若 Playwright 默认配置会联动根目录 `npm run dev`，而根脚本又依赖 `uv`，优先复用仓库里无 `webServer` 的备用配置（如 `playwright.gateway.config.ts`）配合手动启动前端服务，可避开与当前任务无关的启动链问题。
+- 在当前 macOS 受限环境里，前端浏览器级 e2e 往往需要“两段式验证”：先越权启动 `next dev` 监听端口，再越权运行 `npx playwright test` 启动 Chromium；两者任一不放开，都会被误判成页面功能失败。
+
+失败/风险经验：
+- 对 provider / llm “重命名”这类 key 级编辑，若输入框直接绑定对象 key，测试和实现都容易受重新渲染影响；当前实现虽然可用，但后续若要增强交互稳定性，可考虑引入 draft state 再在 blur/submit 时提交 rename。
+
+### 2026-03-21 LLM 管理页折叠与 secret 删除补充
+
+成功经验：
+- 对 secret-aware 配置写回，`persist_path_updates()` 在处理空字符串时不能无条件 `delete()`；先检查原始配置值是否真的是 secret ref，再决定是否删 secret，才能兼容 `mock.api_key=''` 这类普通空值路径。
+- provider 折叠卡片的头部最好拆成“左侧 toggle 按钮 + 右侧操作按钮”，不要把删除按钮嵌进整卡 toggle 按钮里；否则 HTML 语义和浏览器点击行为都容易出问题。
+- 这类“后端写回 + 前端交互”组合修复，最稳的回归组合是“一条 pytest 单测锁 secret 删除条件 + 一条 Playwright 用例锁 UI 折叠与保存主流程”。
+
+失败/风险经验：
+- 即使前端 payload 看起来合理，secret store 后端的删除语义也可能更严格；像 keyring 删除不存在条目会报错，这类行为必须在仓库内抽象层显式兜底，不能假设底层实现天然幂等。

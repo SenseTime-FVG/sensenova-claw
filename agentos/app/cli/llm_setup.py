@@ -12,6 +12,7 @@ import yaml
 from rich.console import Console
 from rich.panel import Panel
 
+from agentos.platform.secrets.refs import build_secret_ref
 from agentos.platform.config.llm_presets import LLM_PROVIDER_CATEGORIES
 
 console = Console()
@@ -72,6 +73,7 @@ def _write_config(
     model_key: str,
     model_id: str,
     category_key: str,
+    secret_store=None,
 ) -> None:
     """将 LLM 配置写入 config.yml（深度合并，保留已有配置）。
 
@@ -94,13 +96,18 @@ def _write_config(
 
     # OpenAI 兼容提供商统一用 "openai" 作为 provider 存储键
     storage_provider_key = "openai" if category_key == "openai_compatible" else provider_key
+    api_key_value = api_key
+    if secret_store is not None:
+        secret_ref = f"agentos/llm.providers.{storage_provider_key}.api_key"
+        secret_store.set(secret_ref, api_key)
+        api_key_value = build_secret_ref(secret_ref)
 
     # 构造新配置片段
     patch: dict = {
         "llm": {
             "providers": {
                 storage_provider_key: {
-                    "api_key": api_key,
+                    "api_key": api_key_value,
                     "base_url": base_url,
                 },
             },
