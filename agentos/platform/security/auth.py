@@ -1,7 +1,8 @@
-"""Token 认证模块（Jupyter-lab 风格）
+"""Token 认证模块
 
-服务启动时生成随机 token，通过 URL 或手动输入验证身份，cookie 持久化。
-Token 同时写入 ~/.agentos/token 供 CLI 等本地工具自动读取。
+首次启动生成随机 token 并持久化到文件，后续重启自动复用已有 token。
+通过 URL 或手动输入验证身份，cookie 持久化。
+Token 存储在 ~/.agentos/token 供 CLI 等本地工具自动读取。
 """
 
 from __future__ import annotations
@@ -23,17 +24,23 @@ TOKEN_FILENAME = "token"
 
 
 class TokenAuthService:
-    """基于启动 token 的认证服务（每次启动重新生成）"""
+    """基于持久化 token 的认证服务（首次生成，后续复用）"""
 
     def __init__(self, agentos_home: str | Path | None = None) -> None:
-        self.token = secrets.token_urlsafe(32)
         self._token_file: Path | None = None
 
-        # 写入 token 文件供 CLI 读取
-        if agentos_home:
-            self._write_token_file(Path(agentos_home))
-
-        logger.info("TokenAuthService initialized (token generated)")
+        # 优先从已有 token 文件读取，保证重启后 token 不变
+        existing_token = read_token_file(agentos_home) if agentos_home else None
+        if existing_token:
+            self.token = existing_token
+            self._token_file = Path(agentos_home) / TOKEN_FILENAME
+            logger.info("TokenAuthService initialized (token loaded from file)")
+        else:
+            self.token = secrets.token_urlsafe(32)
+            # 写入 token 文件供 CLI 读取及下次启动复用
+            if agentos_home:
+                self._write_token_file(Path(agentos_home))
+            logger.info("TokenAuthService initialized (new token generated)")
 
     def verify(self, token: str) -> bool:
         """验证 token 是否匹配"""

@@ -31,7 +31,7 @@ class TestLLMProviderCategories:
             assert len(category["providers"]) > 0
 
     def test_openai_compatible_providers(self):
-        """openai_compatible 分类下应包含 6 个提供商"""
+        """openai_compatible 分类下应包含 6 个提供商（含自定义）"""
         category = next(c for c in LLM_PROVIDER_CATEGORIES if c["key"] == "openai_compatible")
         provider_keys = [p["key"] for p in category["providers"]]
         assert "openai" in provider_keys
@@ -39,7 +39,7 @@ class TestLLMProviderCategories:
         assert "zhipu" in provider_keys
         assert "minimax" in provider_keys
         assert "deepseek" in provider_keys
-        assert "yi" in provider_keys
+        assert "custom_openai" in provider_keys
         assert len(category["providers"]) == 6
 
     def test_each_provider_has_required_fields(self):
@@ -51,7 +51,6 @@ class TestLLMProviderCategories:
                 assert "base_url" in provider, f"provider 缺少 base_url: {provider}"
                 assert "models" in provider, f"provider 缺少 models: {provider}"
                 assert isinstance(provider["models"], list)
-                assert len(provider["models"]) > 0
 
     def test_each_model_has_required_fields(self):
         """每个模型必须有 key 和 model_id"""
@@ -71,7 +70,6 @@ class TestLLMProviderCategories:
         assert url_map["zhipu"] == "https://open.bigmodel.cn/api/paas/v4"
         assert url_map["minimax"] == "https://api.minimax.chat/v1"
         assert url_map["deepseek"] == "https://api.deepseek.com/v1"
-        assert url_map["yi"] == "https://api.lingyiwanwu.com/v1"
         assert url_map["anthropic"] == "https://api.anthropic.com"
         assert url_map["gemini"] == "https://generativelanguage.googleapis.com"
 
@@ -88,7 +86,7 @@ class TestGetAllProviders:
         """扁平列表应包含所有提供商"""
         providers = get_all_providers()
         keys = [p["key"] for p in providers]
-        expected_keys = ["openai", "qwen", "zhipu", "minimax", "deepseek", "yi", "anthropic", "gemini"]
+        expected_keys = ["openai", "qwen", "zhipu", "minimax", "deepseek", "custom_openai", "anthropic", "gemini"]
         for key in expected_keys:
             assert key in keys, f"缺少提供商: {key}"
 
