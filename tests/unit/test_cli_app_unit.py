@@ -88,7 +88,7 @@ async def _create_ws_server(tmp_path, provider_name: str = "mock"):
 
     agent_config_dir = tmp_path / "agents"
     agent_config_dir.mkdir()
-    agent_registry = AgentRegistry(config_dir=agent_config_dir)
+    agent_registry = AgentRegistry()
     agent_registry.load_from_config(cfg.data)
 
     tool_registry = ToolRegistry()

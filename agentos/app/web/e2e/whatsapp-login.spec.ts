@@ -171,3 +171,72 @@ test('whatsapp 未授权时访问普通页面不会自动跳转', async ({ page,
 
   await expect(page).toHaveURL(/\/chat/);
 });
+
+test('gateway 页面中 telegram 失败时显示红色状态', async ({ page, context }) => {
+  await context.addCookies([
+    {
+      name: 'agentos_token',
+      value: 'test-token',
+      domain: 'localhost',
+      path: '/',
+      httpOnly: false,
+      secure: false,
+      sameSite: 'Lax',
+    },
+  ]);
+
+  await page.route('**/api/auth/status', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ authenticated: true }),
+    });
+  });
+
+  await page.route('**/api/gateway/stats', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        totalChannels: 1,
+        activeChannels: 0,
+        totalConnections: 0,
+        totalSessions: 0,
+      }),
+    });
+  });
+
+  await page.route('**/api/gateway/channels', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'telegram',
+          name: 'telegram',
+          type: 'telegram',
+          status: 'failed',
+          config: {},
+        },
+      ]),
+    });
+  });
+
+  await page.route('**/api/gateway/whatsapp/status', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        enabled: false,
+        authorized: false,
+        state: 'not_initialized',
+      }),
+    });
+  });
+
+  await page.goto('/gateway');
+
+  const failedBadge = page.getByText('failed').first();
+  await expect(failedBadge).toBeVisible();
+  await expect(failedBadge).toHaveClass(/bg-red-500/);
+});

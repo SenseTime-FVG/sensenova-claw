@@ -187,6 +187,8 @@ tools:
 | **Web** | Next.js 14 前端，WebSocket 实时通信 | 默认启用 |
 | **CLI** | 命令行交互客户端 | `python3 -m agentos.app.cli.cli_client` |
 | **飞书** | 企业 IM 集成，支持私聊/群聊 | `config.yml` plugins.feishu |
+| **Telegram** | Telegram Bot Channel，支持私聊/群组消息接入 | `config.yml` plugins.telegram |
+| **企微** | 企业微信消息 Channel，支持私聊/群聊接入 | `config.yml` plugins.wecom |
 | **WhatsApp** | 核心版 WhatsApp Web 文本接入 | `config.yml` plugins.whatsapp |
 
 <details>
@@ -202,7 +204,56 @@ plugins:
     group_policy: "mention"    # 群聊策略: mention / open / disabled
 ```
 
+[怎么获取飞书api_secret/创建飞书应用](docs/channel/feishu.md)
+
 启动 Gateway 后飞书机器人自动连接。
+
+</details>
+
+<details>
+<summary><b>Telegram 配置</b></summary>
+
+```yaml
+plugins:
+  telegram:
+    enabled: true
+    bot_token: "123456:telegram-bot-token"
+    mode: "polling"              # polling / webhook
+    dm_policy: "open"            # open / allowlist / disabled
+    group_policy: "allowlist"    # open / allowlist / disabled
+    allowlist: []                # 私聊允许名单，支持用户 ID / 用户名
+    group_allowlist: []          # 群组允许名单，支持 chat ID
+    require_mention: true
+    reply_to_message: true
+    show_tool_progress: false
+```
+
+[怎么获取telegram bot_token](docs/channel/telegram.md)
+
+默认支持 polling 模式；如需公网回调，可切换 `mode: webhook` 并补充 `webhook_url`、`webhook_secret` 等字段。
+
+</details>
+
+<details>
+<summary><b>企微配置</b></summary>
+
+```yaml
+plugins:
+  wecom:
+    enabled: true
+    bot_id: "wbcbot-xxx"
+    secret: "xxx"
+    websocket_url: "wss://openws.work.weixin.qq.com"
+    dm_policy: "open"          # open / allowlist / disabled
+    group_policy: "open"       # open / allowlist / disabled
+    allowlist: []              # 私聊允许名单，支持 userid
+    group_allowlist: []        # 群聊允许名单，支持 chatid
+    show_tool_progress: false
+```
+
+[怎么创建企微bot](docs/channel/wecom.md)
+
+启动 Gateway 后会使用企微官方 WebSocket 地址建立连接；需要先在企微侧创建机器人并获取 `bot_id` 与 `secret`。
 
 </details>
 
@@ -227,13 +278,19 @@ plugins:
       send_timeout_seconds: 15
 ```
 
-安装 sidecar 依赖：
+安装 sidecar 依赖（必需）：
 
 ```bash
 npm install --prefix agentos/adapters/plugins/whatsapp/bridge
 ```
 
-当前仓库的 WhatsApp runtime 通过 Node sidecar + Baileys 提供；若未安装 sidecar 依赖，Python channel 只能完成协议层启动，无法真正连接 WhatsApp Web。
+启动后通过web端(管理-Gateway-whatsapp)，点击`授权`进行扫码授权  
+
+> tips: whatsapp联系人少的话，频繁聊天会限制账户
+
+<!-- 当前仓库的 WhatsApp runtime 通过 Node sidecar + Baileys 提供；若未安装 sidecar 依赖，Python channel 只能完成协议层启动，无法真正连接 WhatsApp Web。 -->
+
+
 
 </details>
 

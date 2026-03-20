@@ -27,6 +27,7 @@ from agentos.kernel.events.types import (
     CRON_DELIVERY_REQUESTED,
     ERROR_RAISED,
     TOOL_CALL_STARTED,
+    USER_QUESTION_ASKED,
 )
 from agentos.kernel.runtime.publisher import EventPublisher
 from agentos.interfaces.ws.gateway import Gateway
@@ -142,6 +143,7 @@ class TestChannelBasics:
         assert AGENT_STEP_COMPLETED in flt
         assert ERROR_RAISED in flt
         assert CRON_DELIVERY_REQUESTED in flt
+        assert USER_QUESTION_ASKED in flt
         assert TOOL_CALL_STARTED not in flt
 
     def test_event_filter_with_tool_progress(self):
@@ -495,6 +497,25 @@ class TestSendEvent:
         await ch.send_event(event)
         assert len(calls) == 1
         assert "boom" in calls[0][1]
+
+    async def test_user_question_asked(self):
+        """USER_QUESTION_ASKED 事件应发送提问内容"""
+        ch, _ = _make_channel()
+        calls: list[tuple[str, str]] = []
+
+        async def tracking_send_reply(session_id: str, text: str) -> None:
+            calls.append((session_id, text))
+
+        ch._send_reply = tracking_send_reply
+
+        event = EventEnvelope(
+            type=USER_QUESTION_ASKED,
+            session_id="s1",
+            payload={"question": "请补充更多上下文"},
+        )
+        await ch.send_event(event)
+        assert len(calls) == 1
+        assert calls[0] == ("s1", "请补充更多上下文")
 
     async def test_tool_call_started(self):
         """TOOL_CALL_STARTED 事件应发送工具进度"""

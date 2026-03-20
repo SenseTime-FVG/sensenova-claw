@@ -255,7 +255,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "description": "默认 AI Agent",
             "model": "mock",
             "temperature": 0.2,
-            "system_prompt": "你是一个有工具能力的AI助手，请在必要时调用工具。",
             "tools": [],
             "skills": [],
         },
