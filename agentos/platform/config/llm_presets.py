@@ -69,14 +69,10 @@ LLM_PROVIDER_CATEGORIES = [
                 ],
             },
             {
-                "key": "yi",
-                "label": "零一万物(Yi)",
-                "base_url": "https://api.lingyiwanwu.com/v1",
-                "models": [
-                    {"key": "yi_large", "model_id": "yi-large"},
-                    {"key": "yi_medium", "model_id": "yi-medium"},
-                    {"key": "yi_spark", "model_id": "yi-spark"},
-                ],
+                "key": "custom_openai",
+                "label": "其他（自定义）",
+                "base_url": "",
+                "models": [],
             },
         ],
     },
