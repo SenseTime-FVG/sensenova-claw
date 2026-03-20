@@ -47,11 +47,7 @@ class AnthropicProvider(LLMProvider):
         if tools:
             req["tools"] = [self._convert_tool(t) for t in tools]
 
-        # 合并 extra_body 到请求参数（Anthropic SDK 直接接受关键字参数）
-        if extra_body:
-            req.update(extra_body)
-
-        response = await self.client.messages.create(**req)
+        response = await self.client.messages.create(**req, extra_body=extra_body)
 
         content_text = ""
         tool_calls: list[dict[str, Any]] = []

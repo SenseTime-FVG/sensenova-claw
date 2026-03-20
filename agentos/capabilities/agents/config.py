@@ -23,7 +23,7 @@ class AgentConfig:
     model: str = "gpt-4o-mini"                        # 模型名称
     temperature: float = 0.2                          # 温度参数
     max_tokens: int | None = None                     # 最大 token 数
-    extra_body: dict = field(default_factory=dict)    # 透传给 LLM API 的额外参数
+    extra_body: dict[str, Any] = field(default_factory=dict)  # 透传给 LLM API 的额外参数
 
     # 行为配置
     system_prompt: str = ""                           # 系统提示词
