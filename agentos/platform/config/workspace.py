@@ -1,7 +1,7 @@
 """AgentOS Home 目录管理
 
 管理 AGENTOS_HOME（默认 ~/.agentos/）目录结构：
-- agents/{agent_id}/   — per-agent 配置（AGENTS.md、USER.md、config.json）
+- agents/{agent_id}/   — per-agent 配置（SYSTEM_PROMPT.md、AGENTS.md、USER.md）
 - workdir/{agent_id}/  — per-agent 工作目录（bash_command 默认 cwd）
 - data/                — 数据库
 - skills/              — 用户安装的 skills
