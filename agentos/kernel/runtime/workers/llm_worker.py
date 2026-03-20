@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
-from typing import TYPE_CHECKING
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from agentos.platform.config.config import config
 from agentos.kernel.events.bus import PrivateEventBus
@@ -19,6 +24,56 @@ if TYPE_CHECKING:
     from agentos.kernel.runtime.llm_runtime import LLMRuntime
 
 logger = logging.getLogger(__name__)
+
+_LLM_DEBUG = os.environ.get("AGENTOS_DEBUG_LLM", "").strip() not in ("", "0", "false")
+
+
+def _get_debug_base() -> Path:
+    """获取 debug 日志根目录: $AGENTOS_HOME/logs/debug/llm"""
+    from agentos.platform.config.workspace import resolve_agentos_home
+    return resolve_agentos_home() / "logs" / "debug" / "llm"
+
+
+def _save_llm_debug(
+    session_id: str,
+    llm_call_id: str,
+    provider: str,
+    model: str,
+    input_data: dict[str, Any],
+    output_data: dict[str, Any],
+    duration_ms: int,
+    error: str | None = None,
+) -> None:
+    """将单次 LLM 调用的输入输出保存为 JSON 文件。
+
+    目录结构: $AGENTOS_HOME/logs/debug/llm/{date}/{session_id}/{llm_call_id}.json
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    out_dir = _get_debug_base() / today / session_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "session_id": session_id,
+        "llm_call_id": llm_call_id,
+        "provider": provider,
+        "model": model,
+        "duration_ms": duration_ms,
+        "input": input_data,
+        "output": output_data,
+    }
+    if error:
+        record["error"] = error
+
+    filepath = out_dir / f"{llm_call_id}.json"
+    try:
+        filepath.write_text(
+            json.dumps(record, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        logger.debug("LLM debug log saved: %s", filepath)
+    except Exception:
+        logger.warning("Failed to save LLM debug log: %s", filepath, exc_info=True)
 
 
 class LLMSessionWorker(SessionWorker):
@@ -66,7 +121,16 @@ class LLMSessionWorker(SessionWorker):
             )
         )
 
+        input_data = {
+            "messages": messages,
+            "tools": tools,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "extra_body": extra_body,
+        }
+
         provider = self.rt.factory.get_provider(provider_name)
+        t0 = time.monotonic()
         try:
             resp = await provider.call(
                 model=model,
@@ -76,6 +140,19 @@ class LLMSessionWorker(SessionWorker):
                 max_tokens=max_tokens,
                 extra_body=extra_body,
             )
+            duration_ms = int((time.monotonic() - t0) * 1000)
+
+            if _LLM_DEBUG:
+                _save_llm_debug(
+                    session_id=event.session_id,
+                    llm_call_id=llm_call_id,
+                    provider=provider_name,
+                    model=model,
+                    input_data=input_data,
+                    output_data=resp,
+                    duration_ms=duration_ms,
+                )
+
             await self.bus.publish(
                 EventEnvelope(
                     type=LLM_CALL_RESULT,
@@ -107,8 +184,21 @@ class LLMSessionWorker(SessionWorker):
                 )
             )
         except Exception as exc:  # noqa: BLE001
+            duration_ms = int((time.monotonic() - t0) * 1000)
             logger.exception("llm call failed")
             error_message = str(exc).strip() or type(exc).__name__
+
+            if _LLM_DEBUG:
+                _save_llm_debug(
+                    session_id=event.session_id,
+                    llm_call_id=llm_call_id,
+                    provider=provider_name,
+                    model=model,
+                    input_data=input_data,
+                    output_data={},
+                    duration_ms=duration_ms,
+                    error=error_message,
+                )
             await self.bus.publish(
                 EventEnvelope(
                     type=ERROR_RAISED,
