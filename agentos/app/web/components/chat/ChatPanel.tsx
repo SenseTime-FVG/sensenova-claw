@@ -76,6 +76,13 @@ export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockA
 
   return (
     <div className="flex flex-col h-full">
+      {/* Session ID 栏 */}
+      {currentSessionId && (
+        <div className="px-4 py-1.5 border-b border-border/40 flex items-center">
+          <span className="text-[10px] text-muted-foreground/60">Session: </span>
+          <span className="text-[10px] text-muted-foreground/60 font-mono select-all">{currentSessionId}</span>
+        </div>
+      )}
       {/* 消息区域 */}
       <div className="flex-1 overflow-y-auto p-4 md:p-8">
         {messages.length === 0 && !currentSessionId ? (
