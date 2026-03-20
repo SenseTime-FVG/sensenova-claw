@@ -328,6 +328,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         }));
         break;
       }
+      case 'session_list_changed': {
+        // 后端通知有新 session（如 send_message 创建），刷新列表
+        loadSessionList();
+        break;
+      }
       case 'session_deleted': {
         const deletedSid = String(payload.session_id || '');
         if (deletedSid) {

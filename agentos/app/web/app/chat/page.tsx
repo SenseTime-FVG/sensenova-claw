@@ -361,6 +361,14 @@ function ChatContent() {
     }
   }, [agents, selectedAgentId]);
 
+  // 切换 agent 时刷新 session 列表
+  useEffect(() => {
+    if (selectedAgentId) {
+      refreshTaskGroups();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAgentId]);
+
   const selectedSessions = selectedAgentId
     ? (sessionsByAgent[selectedAgentId] || []).sort((a, b) => b.last_active - a.last_active)
     : [];
