@@ -49,8 +49,8 @@ export default function SetupPage() {
   useEffect(() => {
     const fetchPresets = async () => {
       try {
-        const data = await authGet<CategoryPreset[]>(`${API_BASE}/api/config/llm-presets`);
-        setPresets(data);
+        const data = await authGet<{ categories: CategoryPreset[] }>(`${API_BASE}/api/config/llm-presets`);
+        setPresets(Array.isArray(data) ? data : data.categories ?? []);
       } catch (e) {
         console.error('加载 LLM 预设失败:', e);
         // 使用内置默认值，避免因接口不存在导致页面无法使用

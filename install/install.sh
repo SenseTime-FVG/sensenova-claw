@@ -7,6 +7,9 @@
 # 或本地执行:
 #   bash install/install.sh
 #
+# 开发模式（跳过克隆，使用当前目录代码）:
+#   bash install/install.sh --dev
+#
 set -euo pipefail
 
 # ── 配置 ──
@@ -17,6 +20,7 @@ REPO_URL="${AGENTOS_REPO_URL:-https://github.com/SenseTime-FVG/agentos.git}"
 REPO_REF="${AGENTOS_REPO_REF:-${AGENTOS_REPO_BRANCH:-dev}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
+DEV_MODE=false
 
 # 国内镜像
 CN_NPM_REGISTRY="https://registry.npmmirror.com"
@@ -433,9 +437,14 @@ print_success() {
   echo -e "${GREEN}  AgentOS 安装完成!${NC}"
   echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
   echo ""
-  echo "  安装目录: $APP_DIR"
+  if [ "$DEV_MODE" = "true" ]; then
+    echo "  模式:     开发模式"
+    echo "  代码目录: $APP_DIR"
+  else
+    echo "  安装目录: $APP_DIR"
+    echo "  安装来源: $REPO_URL@$REPO_REF"
+  fi
   echo "  数据目录: $AGENTOS_HOME"
-  echo "  安装来源: $REPO_URL@$REPO_REF"
   echo ""
   if [ "$IS_CN" = "true" ]; then
     echo "  已配置国内镜像: npm($CN_NPM_REGISTRY) pip($CN_UV_INDEX)"
@@ -459,32 +468,68 @@ print_success() {
 # ── 主流程 ──
 
 main() {
+  # 解析参数
+  for arg in "$@"; do
+    case "$arg" in
+      --dev) DEV_MODE=true ;;
+    esac
+  done
+
   echo ""
   echo -e "${BLUE}╔══════════════════════════════════════════════╗${NC}"
   echo -e "${BLUE}║         AgentOS 一键安装脚本                ║${NC}"
   echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}"
   echo ""
 
-  # 选择安装路径
-  local default_dir="$AGENTOS_HOME"
-  AGENTOS_HOME=$(prompt_input "安装路径" "$default_dir")
-  APP_DIR="$AGENTOS_HOME/app"
-  log "安装到: $AGENTOS_HOME"
-  echo ""
+  if [ "$DEV_MODE" = "true" ]; then
+    # 开发模式：使用当前目录的代码，跳过克隆
+    # 找到 install.sh 所在的仓库根目录
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    APP_DIR="$(cd "$script_dir/.." && pwd)"
 
-  detect_region
-  configure_cn_mirrors
-  install_git
-  install_uv
-  install_python
-  install_nvm
-  install_node
-  setup_repo
-  install_deps
-  setup_home_dir
-  setup_config
-  register_command
-  print_success
+    # 校验是否是 agentos 项目
+    if [ ! -f "$APP_DIR/agentos/app/gateway/main.py" ]; then
+      fail "当前仓库不是 AgentOS 项目，无法使用 --dev 模式"
+    fi
+
+    log "开发模式: 使用本地代码 $APP_DIR"
+    echo ""
+
+    detect_region
+    configure_cn_mirrors
+    install_uv
+    install_python
+    install_nvm
+    install_node
+    # 跳过 setup_repo（不克隆）
+    install_deps
+    setup_home_dir
+    setup_config
+    register_command
+    print_success
+  else
+    # 正常安装模式
+    local default_dir="$AGENTOS_HOME"
+    AGENTOS_HOME=$(prompt_input "安装路径" "$default_dir")
+    APP_DIR="$AGENTOS_HOME/app"
+    log "安装到: $AGENTOS_HOME"
+    echo ""
+
+    detect_region
+    configure_cn_mirrors
+    install_git
+    install_uv
+    install_python
+    install_nvm
+    install_node
+    setup_repo
+    install_deps
+    setup_home_dir
+    setup_config
+    register_command
+    print_success
+  fi
 }
 
 main "$@"
