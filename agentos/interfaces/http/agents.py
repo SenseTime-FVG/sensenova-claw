@@ -263,7 +263,6 @@ async def create_agent(body: AgentCreate, request: Request):
         max_delegation_depth=body.max_delegation_depth,
     )
     registry.register(agent)
-    registry.save(agent)
 
     # 初始化 per-agent workspace 目录（AGENTS.md / USER.md + workdir）
     from agentos.platform.config.workspace import ensure_agent_workspace

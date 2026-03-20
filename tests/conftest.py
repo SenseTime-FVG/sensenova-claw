@@ -112,7 +112,7 @@ async def test_app(tmp_path):
     # 初始化 AgentRegistry（含 default Agent）
     agent_config_dir = tmp_path / "agents"
     agent_config_dir.mkdir()
-    agent_registry = AgentRegistry(config_dir=agent_config_dir)
+    agent_registry = AgentRegistry()
     agent_registry.load_from_config(cfg.data)
 
     # 初始化 ToolRegistry（自动注册 builtin 工具）
