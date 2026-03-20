@@ -14,11 +14,13 @@ import {
   type TaskProgressItem,
   type ContextFileRef,
   makeId,
+  formatArgs,
   truncateResult,
   rebuildMessagesFromEvents,
   rebuildStepsFromEvents,
   groupSessionsToTasks,
 } from '@/lib/chatTypes';
+import { extractThinkContentFromReasoningDetails } from '@/lib/assistantThink';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 const WS_RECONNECT_INTERVAL_MS = 1000;
@@ -122,6 +124,42 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
   function addMsg(role: ChatMessage['role'], content: string) {
     setMessages(prev => [...prev, { id: makeId(), role, content, timestamp: Date.now() }]);
+  }
+
+  function upsertAssistantMessage(message: {
+    turnId?: string;
+    content: string;
+    thinkingContent?: string;
+    thinkingState?: 'streaming' | 'collapsed';
+  }) {
+    const { turnId, content, thinkingContent, thinkingState } = message;
+    setMessages((prev) => {
+      if (turnId) {
+        const existingIndex = prev.findIndex((item) => item.role === 'assistant' && item.turnId === turnId);
+        if (existingIndex !== -1) {
+          const next = [...prev];
+          next[existingIndex] = {
+            ...next[existingIndex],
+            content,
+            thinkingContent,
+            thinkingState,
+          };
+          return next;
+        }
+      }
+      return [
+        ...prev,
+        {
+          id: makeId(),
+          role: 'assistant',
+          content,
+          timestamp: Date.now(),
+          turnId,
+          thinkingContent,
+          thinkingState,
+        },
+      ];
+    });
   }
 
   const bindSessionToCurrentSocket = useCallback((sid: string | null) => {
@@ -275,7 +313,16 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         break;
       case 'llm_result': {
         const content = String(payload.content || '');
-        if (content) addMsg('assistant', content);
+        const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
+        const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
+        if (content || thinkingContent) {
+          upsertAssistantMessage({
+            turnId,
+            content,
+            thinkingContent,
+            thinkingState: thinkingContent ? 'streaming' : undefined,
+          });
+        }
         break;
       }
       case 'tool_execution': {
@@ -302,6 +349,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const mid = toolCallMapRef.current.get(toolCallId);
         if (mid) {
           setMessages(prev => prev.map(m => m.id === mid ? { ...m, content: `Tool Finished: ${toolName}`, toolInfo: { name: toolName, arguments: m.toolInfo?.arguments || {}, result, success, error, status: 'completed' } } : m));
+        } else {
+          const fallbackContent = typeof result === 'string'
+            ? result
+            : formatArgs(result);
+          setMessages(prev => [...prev, {
+            id: makeId(),
+            role: 'tool',
+            name: toolName,
+            content: fallbackContent,
+            timestamp: Date.now(),
+          }]);
         }
         const stepIdx = toolStepMapRef.current.get(toolCallId);
         if (stepIdx !== undefined) {
@@ -317,7 +375,14 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       }
       case 'turn_completed': {
         const final = String(payload.final_response || '');
-        if (final) addMsg('assistant', final);
+        const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
+        if (final) {
+          upsertAssistantMessage({
+            turnId,
+            content: final,
+            thinkingState: 'collapsed',
+          });
+        }
         setIsTyping(false);
         clearInteractions();
         break;

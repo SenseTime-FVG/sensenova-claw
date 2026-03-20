@@ -598,3 +598,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 文本闭环虽然统一了，但仍然只是“下一条文本即回答”；`options/multi_select` 的结构化校验、取消操作和按钮回调在三个渠道上都还没落。
+
+### 2026-03-20 chat think 展示补充
+
+成功经验：
+- 对“模型把思考内容包在 `<think>...</think>` 里”的前端支持，最稳的做法是“双通道”：非流式/历史消息直接解析正文里的 `<think>` 标签，流式阶段额外消费 `llm_result.reasoning_details`，这样历史回放和实时展示都能覆盖。
+- `/chat` 里如果要避免 `llm_result` 与 `turn_completed` 产生重复 assistant 气泡，消息结构里需要显式保存 `turnId`，并在上下文层做 upsert，而不是每次都 append。
+- Playwright 在 Next dev 下 mock 全局 `WebSocket` 时，替身必须补上 `addEventListener/removeEventListener`，并且只把业务 `/ws` 连接暴露成 `__mockWs`；否则很容易误打到 HMR socket，导致测试看起来“事件没生效”。
+
+失败/风险经验：
+- 当前 `/chat` 页面的 mock e2e 不能再只靠 `localStorage access_token`；实际鉴权链路依赖 `agentos_token` cookie 和 `/api/auth/status`、`/api/config/llm-status`，漏掉任一项都会让页面停在登录/配置检查流程，导致断言偏离真实问题。
