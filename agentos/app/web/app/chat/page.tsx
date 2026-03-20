@@ -50,7 +50,9 @@ function AgentContactItem({
       onClick={onClick}
       className={cn(
         'flex items-start gap-3 px-4 py-3.5 cursor-pointer transition-all border-b border-border/60',
-        isSelected ? 'bg-primary/5 shadow-sm' : 'hover:bg-muted/50',
+        isSelected
+          ? 'bg-blue-100 shadow-md border-l-[3px] border-l-blue-500 dark:bg-blue-900/40'
+          : 'hover:bg-muted/50',
       )}
     >
       <div className={cn(
@@ -86,12 +88,13 @@ function AgentContactItem({
 /* ── Session 列表项（中栏） ── */
 
 function SessionListItem({
-  session, isActive, onClick, onDelete,
+  session, isActive, onClick, onDelete, index,
 }: {
   session: SessionItem;
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
+  index: number;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -111,8 +114,10 @@ function SessionListItem({
       onClick={onClick}
       className={cn(
         'flex items-center gap-2.5 px-3 py-2.5 mx-2 rounded-xl cursor-pointer transition-all text-sm group relative',
+        'animate-in fade-in slide-in-from-left-2 duration-200',
         isActive ? 'bg-primary/8 text-foreground shadow-sm border border-primary/15' : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
       )}
+      style={{ animationDelay: `${index * 30}ms`, animationFillMode: 'both' }}
     >
       <MessageSquare className={cn(
         'w-4 h-4 shrink-0',
@@ -367,14 +372,15 @@ function ChatContent() {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-0.5">
-                    {selectedSessions.map(session => (
+                  <div key={selectedAgentId} className="space-y-0.5">
+                    {selectedSessions.map((session, idx) => (
                       <SessionListItem
                         key={session.session_id}
                         session={session}
                         isActive={currentSessionId === session.session_id}
                         onClick={() => switchSession(session.session_id)}
                         onDelete={() => deleteSession(session.session_id)}
+                        index={idx}
                       />
                     ))}
                   </div>
