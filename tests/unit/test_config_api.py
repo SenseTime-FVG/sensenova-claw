@@ -146,3 +146,24 @@ def test_list_models_accepts_openai_compatible_provider_keys(client, monkeypatch
         "models": [{"id": "MiniMax-M2.7-highspeed", "owned_by": "minimax"}],
     }
     mocked.assert_awaited_once_with("sk-minimax", "https://api.minimax.chat/v1")
+
+
+# ── 必配清单检查 ──
+
+
+def test_required_check_all_missing(client):
+    """未配置搜索工具和邮箱时，两项都返回 configured=false"""
+    resp = client.get("/api/config/required-check")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["search_tool"]["configured"] is False
+    assert data["email"]["configured"] is False
+
+
+def test_required_check_search_configured(client, app):
+    """配置了搜索工具 API key 后，search_tool 返回 configured=true"""
+    app.state.config.data.setdefault("tools", {}).setdefault("serper_search", {})["api_key"] = "sk-test"
+    resp = client.get("/api/config/required-check")
+    data = resp.json()
+    assert data["search_tool"]["configured"] is True
+    assert data["email"]["configured"] is False
