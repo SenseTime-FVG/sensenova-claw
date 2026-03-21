@@ -3,9 +3,11 @@
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from agentos.kernel.runtime.context_compressor import (
+    ContextCompressor,
     TokenCounter,
     parse_turn_boundaries,
     save_original_messages,
@@ -135,3 +137,170 @@ class TestSaveOriginalMessages:
             data = json.loads(Path(path).read_text())
             assert data["phase"] == 2
             assert "chunk0" in Path(path).name
+
+
+# ── ContextCompressor 测试辅助 ──────────────────────────────
+
+
+def _make_config(overrides: dict | None = None) -> MagicMock:
+    defaults = {
+        "context_compression.max_context_tokens": 1000,
+        "context_compression.phase1_threshold": 0.8,
+        "context_compression.phase2_trigger": 0.6,
+        "context_compression.phase2_chunk_ratio": 0.3,
+        "context_compression.user_input_max_tokens": 50,
+        "context_compression.tool_summary_max_tokens": 100,
+        "context_compression.phase2_merge_max_tokens": 80,
+    }
+    if overrides:
+        defaults.update(overrides)
+    mock_config = MagicMock()
+    mock_config.get = lambda path, default=None: defaults.get(path, default)
+    return mock_config
+
+
+def _make_llm_provider(summary_text: str = "摘要内容") -> AsyncMock:
+    provider = AsyncMock()
+    provider.call = AsyncMock(return_value={
+        "content": summary_text,
+        "tool_calls": [],
+    })
+    return provider
+
+
+def _make_llm_factory(provider: AsyncMock) -> MagicMock:
+    factory = MagicMock()
+    factory.get_provider = MagicMock(return_value=provider)
+    return factory
+
+
+class TestPhase1Compression:
+    @pytest.mark.asyncio
+    async def test_no_compression_needed(self):
+        cfg = _make_config({"context_compression.max_context_tokens": 100000})
+        provider = _make_llm_provider()
+        factory = _make_llm_factory(provider)
+        compressor = ContextCompressor(
+            config=cfg, llm_factory=factory,
+            provider_name="mock", model="mock-v1",
+            agentos_home="/tmp/test", agent_id="default",
+        )
+        history = [
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello"},
+        ]
+        result = await compressor.compress_if_needed("sess1", history)
+        assert result == history
+        provider.call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_phase1_compresses_old_turns(self):
+        cfg = _make_config({
+            "context_compression.max_context_tokens": 100,
+            "context_compression.phase1_threshold": 0.5,
+            "context_compression.user_input_max_tokens": 5,
+            "context_compression.tool_summary_max_tokens": 10,
+        })
+        provider = _make_llm_provider("压缩后的内容")
+        factory = _make_llm_factory(provider)
+        compressor = ContextCompressor(
+            config=cfg, llm_factory=factory,
+            provider_name="mock", model="mock-v1",
+            agentos_home="/tmp/test", agent_id="default",
+        )
+        history = [
+            {"role": "user", "content": "A" * 300},
+            {"role": "assistant", "content": "B" * 300},
+            {"role": "user", "content": "C" * 300},
+            {"role": "assistant", "content": "D" * 300},
+            {"role": "user", "content": "latest question"},
+            {"role": "assistant", "content": "latest answer"},
+        ]
+        result = await compressor.compress_if_needed("sess1", history)
+        # 压缩后 LLM 被调用，且结果中包含压缩标记
+        assert provider.call.call_count > 0
+        # 压缩后总 token 数应减少
+        counter = TokenCounter()
+        original_tokens = counter.count_messages(history)
+        compressed_tokens = counter.count_messages(result)
+        assert compressed_tokens < original_tokens
+
+    @pytest.mark.asyncio
+    async def test_phase1_skips_already_compressed(self):
+        cfg = _make_config({
+            "context_compression.max_context_tokens": 100,
+            "context_compression.phase1_threshold": 0.5,
+        })
+        provider = _make_llm_provider("摘要")
+        factory = _make_llm_factory(provider)
+        compressor = ContextCompressor(
+            config=cfg, llm_factory=factory,
+            provider_name="mock", model="mock-v1",
+            agentos_home="/tmp/test", agent_id="default",
+        )
+        history = [
+            {"role": "user", "content": "A" * 300},
+            {"role": "assistant", "content": "B" * 300},
+            {"role": "user", "content": "latest"},
+            {"role": "assistant", "content": "answer"},
+        ]
+        result1 = await compressor.compress_if_needed("sess1", history)
+        call_count_1 = provider.call.call_count
+        result2 = await compressor.compress_if_needed("sess1", result1)
+        call_count_2 = provider.call.call_count
+        assert call_count_2 >= call_count_1
+
+
+class TestPhase2Compression:
+    @pytest.mark.asyncio
+    async def test_phase2_merges_turns(self):
+        cfg = _make_config({
+            "context_compression.max_context_tokens": 100,
+            "context_compression.phase1_threshold": 0.3,
+            "context_compression.phase2_trigger": 0.5,
+            "context_compression.phase2_chunk_ratio": 0.3,
+            "context_compression.phase2_merge_max_tokens": 20,
+        })
+        provider = _make_llm_provider("合并摘要")
+        factory = _make_llm_factory(provider)
+        compressor = ContextCompressor(
+            config=cfg, llm_factory=factory,
+            provider_name="mock", model="mock-v1",
+            agentos_home="/tmp/test", agent_id="default",
+        )
+        history = []
+        for i in range(6):
+            history.append({"role": "user", "content": f"问题{i} " + "x" * 200})
+            history.append({"role": "assistant", "content": f"回答{i} " + "y" * 200})
+        history.append({"role": "user", "content": "最新问题"})
+        history.append({"role": "assistant", "content": "最新回答"})
+
+        result = await compressor.compress_if_needed("sess2", history)
+        # 压缩后总 token 数应减少
+        counter = TokenCounter()
+        original_tokens = counter.count_messages(history)
+        compressed_tokens = counter.count_messages(result)
+        assert compressed_tokens < original_tokens
+
+    @pytest.mark.asyncio
+    async def test_phase2_not_triggered_when_under_threshold(self):
+        cfg = _make_config({
+            "context_compression.max_context_tokens": 100000,
+            "context_compression.phase1_threshold": 0.01,
+            "context_compression.phase2_trigger": 0.99,
+        })
+        provider = _make_llm_provider("短摘要")
+        factory = _make_llm_factory(provider)
+        compressor = ContextCompressor(
+            config=cfg, llm_factory=factory,
+            provider_name="mock", model="mock-v1",
+            agentos_home="/tmp/test", agent_id="default",
+        )
+        history = [
+            {"role": "user", "content": "Q"},
+            {"role": "assistant", "content": "A"},
+            {"role": "user", "content": "latest"},
+            {"role": "assistant", "content": "answer"},
+        ]
+        result = await compressor.compress_if_needed("sess3", history)
+        assert len(result) == len(history)
