@@ -131,6 +131,9 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
   await expect(page.getByRole('heading', { name: 'LLM 配置' })).toBeVisible();
   await expect(page.getByTestId('provider-card-openai')).toBeVisible();
   await expect(page.getByTestId('provider-card-anthropic')).toBeVisible();
+  await expect(page.getByTestId('provider-body-openai')).not.toBeVisible();
+  await page.getByTestId('provider-toggle-openai').click();
+  await expect(page.getByTestId('provider-body-openai')).toBeVisible();
   await expect(page.getByTestId('llm-card-gpt-4o-mini')).toBeVisible();
   await expect(page.getByTestId('provider-api-key-input-openai')).toHaveValue('******');
   await page.getByTestId('provider-api-key-toggle-openai').click();
@@ -156,6 +159,8 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
   await page.getByTestId('llm-model-id-input-gpt-4.1-mini').fill('gpt-4.1-mini');
   await page.getByTestId('llm-max-output-tokens-input-gpt-4.1-mini').fill('16384');
 
+  await page.getByTestId('provider-toggle-anthropic').click();
+  await expect(page.getByTestId('provider-body-anthropic')).toBeVisible();
   await page.getByTestId('delete-llm-button-claude-3-5-haiku').click();
 
   await page.getByTestId('add-provider-button').click();

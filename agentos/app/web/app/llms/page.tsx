@@ -58,7 +58,7 @@ export default function LlmsPage() {
         setModels(realModels);
         setDefaultModel(llm.default_model || '');
         setExpandedProviders(
-          Object.fromEntries(Object.keys(realProviders).map((name) => [name, true])),
+          Object.fromEntries(Object.keys(realProviders).map((name) => [name, false])),
         );
       })
       .catch(() => {})
