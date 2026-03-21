@@ -248,7 +248,7 @@ class TestPhase1Compression:
         call_count_1 = provider.call.call_count
         result2 = await compressor.compress_if_needed("sess1", result1)
         call_count_2 = provider.call.call_count
-        assert call_count_2 >= call_count_1
+        assert call_count_2 == call_count_1
 
 
 class TestPhase2Compression:
@@ -304,3 +304,143 @@ class TestPhase2Compression:
         ]
         result = await compressor.compress_if_needed("sess3", history)
         assert len(result) == len(history)
+
+
+class TestReSummarizePath:
+    @pytest.mark.asyncio
+    async def test_re_summarize_when_summary_too_long(self):
+        """当 LLM 首次返回的摘要超出 max_tokens 时，应再次调用 LLM 精简摘要。
+
+        通过直接测试 _llm_summarize 方法来精确验证 re-summarize 逻辑：
+        首次调用返回超长摘要，第二次调用返回精简后的短摘要。
+        """
+        cfg = _make_config()
+        # 首次调用返回超长文本（>5 tokens），第二次调用返回短文本
+        long_summary = "A" * 200
+        short_summary = "精简后的短摘要"
+        provider = AsyncMock()
+        provider.call = AsyncMock(side_effect=[
+            {"content": long_summary, "tool_calls": []},   # 首次：过长摘要
+            {"content": short_summary, "tool_calls": []},  # 再次：精简后摘要
+        ])
+        factory = _make_llm_factory(provider)
+        compressor = ContextCompressor(
+            config=cfg, llm_factory=factory,
+            provider_name="mock", model="mock-v1",
+            agentos_home="/tmp/test", agent_id="default",
+        )
+        # max_tokens=5 确保长度 200 的摘要超出限制，触发 re-summarize
+        result = await compressor._llm_summarize(
+            "{content}", "原始内容", max_tokens=5,
+        )
+        # LLM 应被调用两次：首次摘要 + 一次精简
+        assert provider.call.call_count == 2
+        # 最终结果应是精简后的短摘要
+        assert result == short_summary
+
+
+class TestLLMFailureGracefulDegradation:
+    @pytest.mark.asyncio
+    async def test_llm_failure_returns_truncated_content(self):
+        """LLM 调用抛出异常时，压缩器应返回截断内容而不是崩溃。"""
+        cfg = _make_config({
+            "context_compression.max_context_tokens": 100,
+            "context_compression.phase1_threshold": 0.5,
+            "context_compression.user_input_max_tokens": 5,
+            "context_compression.tool_summary_max_tokens": 10,
+        })
+        provider = AsyncMock()
+        provider.call = AsyncMock(side_effect=RuntimeError("LLM 服务不可用"))
+        factory = _make_llm_factory(provider)
+        compressor = ContextCompressor(
+            config=cfg, llm_factory=factory,
+            provider_name="mock", model="mock-v1",
+            agentos_home="/tmp/test", agent_id="default",
+        )
+        history = [
+            {"role": "user", "content": "A" * 300},
+            {"role": "assistant", "content": "B" * 300},
+            {"role": "user", "content": "latest"},
+            {"role": "assistant", "content": "answer"},
+        ]
+        # 不应抛出异常
+        result = await compressor.compress_if_needed("sess_fail", history)
+        assert result is not None
+        assert len(result) > 0
+        # 结果中应含有截断标记
+        all_content = " ".join(m.get("content") or "" for m in result)
+        assert "[截断]" in all_content
+
+
+class TestLastTurnNeverCompressed:
+    @pytest.mark.asyncio
+    async def test_last_turn_messages_survive_unchanged(self):
+        """第一阶段压缩不应修改最后一个 turn 的消息内容。"""
+        cfg = _make_config({
+            "context_compression.max_context_tokens": 100,
+            "context_compression.phase1_threshold": 0.5,
+            "context_compression.user_input_max_tokens": 5,
+            "context_compression.tool_summary_max_tokens": 10,
+        })
+        provider = _make_llm_provider("摘要")
+        factory = _make_llm_factory(provider)
+        compressor = ContextCompressor(
+            config=cfg, llm_factory=factory,
+            provider_name="mock", model="mock-v1",
+            agentos_home="/tmp/test", agent_id="default",
+        )
+        last_user_content = "最新的用户问题，绝对不能被压缩"
+        last_assistant_content = "最新的助手回答，绝对不能被压缩"
+        history = [
+            {"role": "user", "content": "A" * 300},
+            {"role": "assistant", "content": "B" * 300},
+            {"role": "user", "content": last_user_content},
+            {"role": "assistant", "content": last_assistant_content},
+        ]
+        result = await compressor.compress_if_needed("sess_last_turn", history)
+        # 最后两条消息的内容应完全保留
+        assert result[-2]["content"] == last_user_content
+        assert result[-1]["content"] == last_assistant_content
+
+
+class TestPhase2AfterPhase1:
+    @pytest.mark.asyncio
+    async def test_phase2_handles_phase1_compressed_turns(self):
+        """先执行第一阶段压缩，再验证第二阶段能正确处理已压缩的 turn。"""
+        cfg = _make_config({
+            "context_compression.max_context_tokens": 100,
+            "context_compression.phase1_threshold": 0.3,
+            "context_compression.phase2_trigger": 0.5,
+            "context_compression.phase2_chunk_ratio": 0.3,
+            "context_compression.phase2_merge_max_tokens": 20,
+        })
+        provider = _make_llm_provider("合并摘要内容")
+        factory = _make_llm_factory(provider)
+        compressor = ContextCompressor(
+            config=cfg, llm_factory=factory,
+            provider_name="mock", model="mock-v1",
+            agentos_home="/tmp/test", agent_id="default",
+        )
+        # 构造足够多的 turn，使第一阶段和第二阶段都会触发
+        history = []
+        for i in range(6):
+            history.append({"role": "user", "content": f"问题{i} " + "x" * 200})
+            history.append({"role": "assistant", "content": f"回答{i} " + "y" * 200})
+        history.append({"role": "user", "content": "最新问题"})
+        history.append({"role": "assistant", "content": "最新回答"})
+
+        # 第一次压缩（应触发 Phase 1，可能触发 Phase 2）
+        result1 = await compressor.compress_if_needed("sess_p1p2", history)
+        call_count_after_phase1 = provider.call.call_count
+        assert call_count_after_phase1 > 0
+
+        # 第二次压缩：已压缩的 turn 不会再被 Phase 1 重复处理，
+        # 但 Phase 2 可能会再次触发（取决于 token 数）。
+        result2 = await compressor.compress_if_needed("sess_p1p2", result1)
+        # 两次压缩后 token 数均应小于原始
+        counter = TokenCounter()
+        original_tokens = counter.count_messages(history)
+        compressed_tokens_1 = counter.count_messages(result1)
+        compressed_tokens_2 = counter.count_messages(result2)
+        assert compressed_tokens_1 < original_tokens
+        assert compressed_tokens_2 <= compressed_tokens_1
