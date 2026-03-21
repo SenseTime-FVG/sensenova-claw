@@ -10,8 +10,10 @@ from typing import Any
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
-from agentos.interfaces.http.config_store import persist_section_updates
+from agentos.interfaces.http.config_store import load_raw_config, persist_path_updates
 from agentos.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
+from agentos.platform.secrets.refs import is_secret_ref
+from agentos.platform.secrets.registry import is_secret_path
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +39,14 @@ class TestLLMBody(BaseModel):
 async def get_config_sections(request: Request):
     """返回 llm / agent / plugins 三个 section 的当前值"""
     cfg = request.app.state.config
+    raw_config = load_raw_config(cfg)
     result: dict[str, Any] = {}
     for key in EDITABLE_SECTIONS:
-        result[key] = deepcopy(cfg.data.get(key, {}))
+        result[key] = _sanitize_section(
+            path=key,
+            resolved=deepcopy(cfg.data.get(key, {})),
+            raw=deepcopy(raw_config.get(key, {})),
+        )
     return result
 
 
@@ -53,7 +60,11 @@ async def update_config_sections(body: SectionsUpdateBody, request: Request):
         raise HTTPException(400, "未提供任何更新内容")
 
     try:
-        data = persist_section_updates(cfg, updates)
+        data = persist_path_updates(
+            cfg,
+            _flatten_updates(updates),
+            secret_store=getattr(request.app.state, "secret_store", None),
+        )
     except Exception as e:
         raise HTTPException(500, f"写入配置文件失败: {e}")
 
@@ -61,9 +72,65 @@ async def update_config_sections(body: SectionsUpdateBody, request: Request):
 
     # 返回更新后的 sections
     result: dict[str, Any] = {}
+    raw_config = load_raw_config(cfg)
     for key in EDITABLE_SECTIONS:
-        result[key] = deepcopy(data.get(key, {}))
+        result[key] = _sanitize_section(
+            path=key,
+            resolved=deepcopy(data.get(key, {})),
+            raw=deepcopy(raw_config.get(key, {})),
+        )
     return {"status": "saved", "sections": result}
+
+
+def _flatten_updates(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in data.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            result.update(_flatten_updates(value, path))
+        else:
+            result[path] = value
+    return result
+
+
+def _sanitize_section(path: str, resolved: Any, raw: Any) -> Any:
+    if is_secret_path(path):
+        return {
+            "configured": bool(resolved),
+            "masked_value": _mask_secret(resolved),
+            "source": _detect_secret_source(raw),
+        }
+    if isinstance(resolved, dict):
+        raw_dict = raw if isinstance(raw, dict) else {}
+        return {
+            key: _sanitize_section(
+                path=f"{path}.{key}",
+                resolved=value,
+                raw=raw_dict.get(key),
+            )
+            for key, value in resolved.items()
+        }
+    if isinstance(resolved, list):
+        return resolved
+    return resolved
+
+
+def _mask_secret(secret: Any) -> str | None:
+    if not isinstance(secret, str) or not secret:
+        return None
+    if len(secret) <= 8:
+        return f"{secret[:2]}...{secret[-2:]}"
+    return f"{secret[:4]}...{secret[-4:]}"
+
+
+def _detect_secret_source(raw_value: Any) -> str:
+    if not raw_value:
+        return "empty"
+    if isinstance(raw_value, str) and is_secret_ref(raw_value):
+        return "secret"
+    if isinstance(raw_value, str) and raw_value.startswith("${") and raw_value.endswith("}"):
+        return "env"
+    return "plain"
 
 
 @router.get("/llm-status")

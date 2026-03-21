@@ -57,7 +57,7 @@ cd -
 cp config.example.yml config.yml
 ```
 
-编辑 `config.yml`，填入必要的配置：
+编辑 `config.yml`，填入必要的配置。敏感值推荐写成环境变量引用或 `${secret:...}` 引用：
 
 ```yaml
 # LLM 提供商配置
@@ -97,7 +97,16 @@ tools:
     max_results: 5
 ```
 
-配置加载优先级：**环境变量 > config.yml > 默认值**
+也可以把敏感值放入系统 keyring，然后在 `config.yml` 中只保留引用：
+
+```yaml
+llm:
+  providers:
+    openai:
+      api_key: ${secret:agentos/llm.providers.openai.api_key}
+```
+
+配置加载优先级：**环境变量覆盖值 > config.yml 中声明的来源 > 默认值**
 
 ---
 

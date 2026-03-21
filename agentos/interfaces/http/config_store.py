@@ -12,6 +12,8 @@ from typing import Any
 import yaml
 
 from agentos.platform.config.config import Config
+from agentos.platform.secrets.refs import build_secret_ref, is_secret_ref
+from agentos.platform.secrets.registry import is_secret_path
 
 
 def get_config_path(cfg: Config) -> Path:
@@ -88,10 +90,28 @@ def persist_section_updates(cfg: Config, updates: dict[str, Any]) -> dict[str, A
     return reload_config(cfg)
 
 
-def persist_path_updates(cfg: Config, updates: dict[str, Any]) -> dict[str, Any]:
+def persist_path_updates(
+    cfg: Config,
+    updates: dict[str, Any],
+    *,
+    secret_store: Any | None = None,
+) -> dict[str, Any]:
     """按 dotted path 写入配置并热重载。"""
+    if secret_store is not None:
+        setattr(cfg, "_secret_store", secret_store)
     raw_config = load_raw_config(cfg)
     for path, value in updates.items():
-        set_nested_value(raw_config, path, value)
+        if is_secret_path(path) and secret_store is not None:
+            ref = f"agentos/{path}"
+            if value:
+                secret_store.set(ref, value)
+                set_nested_value(raw_config, path, build_secret_ref(ref))
+            else:
+                existing_raw = get_nested_value(raw_config, path)
+                if isinstance(existing_raw, str) and is_secret_ref(existing_raw):
+                    secret_store.delete(ref)
+                set_nested_value(raw_config, path, "")
+        else:
+            set_nested_value(raw_config, path, value)
     write_raw_config(cfg, raw_config)
     return reload_config(cfg)

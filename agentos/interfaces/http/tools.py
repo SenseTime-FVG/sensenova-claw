@@ -13,7 +13,8 @@ import httpx
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
-from agentos.interfaces.http.config_store import persist_path_updates
+from agentos.interfaces.http.config_store import load_raw_config, persist_path_updates
+from agentos.platform.secrets.refs import is_secret_ref
 
 logger = logging.getLogger(__name__)
 
@@ -94,18 +95,40 @@ def _mask_secret(secret: str | None) -> str | None:
 
 
 def _api_key_status(cfg) -> dict[str, dict[str, Any]]:
+    raw_config = load_raw_config(cfg)
     result: dict[str, dict[str, Any]] = {}
     for tool_name, spec in TOOL_API_KEY_SPECS.items():
         value = cfg.get(spec["config_path"], "")
+        raw_value = _read_raw_value(raw_config, spec["config_path"])
         result[tool_name] = {
             "configured": bool(value),
             "masked_key": _mask_secret(value),
+            "source": _detect_secret_source(raw_value),
             "docs_url": spec["docs_url"],
             "description": spec["description"],
             "setup_guide": spec["setup_guide"],
             "example_format": spec["example_format"],
         }
     return result
+
+
+def _read_raw_value(raw_config: dict[str, Any], dotted_path: str) -> Any:
+    current: Any = raw_config
+    for key in dotted_path.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _detect_secret_source(raw_value: Any) -> str:
+    if not raw_value:
+        return "empty"
+    if isinstance(raw_value, str) and is_secret_ref(raw_value):
+        return "secret"
+    if isinstance(raw_value, str) and raw_value.startswith("${") and raw_value.endswith("}"):
+        return "env"
+    return "plain"
 
 
 async def _validate_serper(api_key: str) -> tuple[bool, str]:
@@ -243,7 +266,11 @@ async def update_tool_api_keys(body: dict[str, str | None], request: Request):
         path_updates[spec["config_path"]] = api_key or ""
 
     try:
-        persist_path_updates(request.app.state.config, path_updates)
+        persist_path_updates(
+            request.app.state.config,
+            path_updates,
+            secret_store=getattr(request.app.state, "secret_store", None),
+        )
     except Exception as exc:
         raise HTTPException(500, f"Failed to save API keys: {exc}")
 

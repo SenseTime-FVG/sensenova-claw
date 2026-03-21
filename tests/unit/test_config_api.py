@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from agentos.interfaces.http.config_api import router
 from agentos.platform.config.config import Config
+from agentos.platform.secrets.store import InMemorySecretStore
 
 
 @pytest.fixture
@@ -28,8 +29,10 @@ def app(tmp_path):
     }
     config_path.write_text(yaml.dump(initial), encoding="utf-8")
 
-    cfg = Config(config_path=config_path)
+    secret_store = InMemorySecretStore()
+    cfg = Config(config_path=config_path, secret_store=secret_store)
     app.state.config = cfg
+    app.state.secret_store = secret_store
     return app
 
 
@@ -50,6 +53,8 @@ def test_get_sections(client):
     assert "agent" in data
     assert "plugins" in data
     assert data["agent"]["model"] == "gpt-5.4"
+    assert data["llm"]["providers"]["openai"]["api_key"]["configured"] is True
+    assert data["llm"]["providers"]["openai"]["api_key"]["source"] == "plain"
 
 
 def test_get_sections_has_defaults(client, app):
@@ -85,8 +90,14 @@ def test_update_sections_multiple(client, app):
     })
     assert resp.status_code == 200
     raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
-    assert "anthropic" in raw["llm"]["providers"]
+    assert raw["llm"]["providers"]["anthropic"]["api_key"] == (
+        "${secret:agentos/llm.providers.anthropic.api_key}"
+    )
+    assert app.state.secret_store.get("agentos/llm.providers.anthropic.api_key") == "sk-yyy"
     assert raw["plugins"]["search"]["enabled"] is True
+    sections = resp.json()["sections"]
+    assert sections["llm"]["providers"]["anthropic"]["api_key"]["configured"] is True
+    assert sections["llm"]["providers"]["anthropic"]["api_key"]["source"] == "secret"
 
 
 def test_update_sections_empty_body(client):

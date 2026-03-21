@@ -35,6 +35,16 @@ class TestConfig:
         finally:
             os.environ.pop("TEST_AGENTOS_KEY", None)
 
+    def test_env_substitution_still_works_with_secret_store(self, tmp_path):
+        yml = tmp_path / "config.yml"
+        yml.write_text("OPENAI_API_KEY: ${TEST_AGENTOS_KEY}\n", encoding="utf-8")
+        os.environ["TEST_AGENTOS_KEY"] = "sk-test-env-secret"
+        try:
+            cfg = Config(config_path=yml, secret_store=object())
+            assert cfg.get("OPENAI_API_KEY") == "sk-test-env-secret"
+        finally:
+            os.environ.pop("TEST_AGENTOS_KEY", None)
+
     def test_deep_merge(self, tmp_path):
         yml = tmp_path / "config.yml"
         yml.write_text(

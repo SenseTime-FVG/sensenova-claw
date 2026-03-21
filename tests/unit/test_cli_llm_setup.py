@@ -6,11 +6,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agentos.app.cli.llm_setup import _write_config, run_llm_setup_sync
+from agentos.platform.secrets.store import InMemorySecretStore
 
 
 def test_write_config_creates_file(tmp_path):
     """测试 _write_config 在文件不存在时能正确创建文件并写入配置"""
     config_path = tmp_path / "config.yml"
+    secret_store = InMemorySecretStore()
     _write_config(
         config_path=config_path,
         provider_key="qwen",
@@ -19,11 +21,13 @@ def test_write_config_creates_file(tmp_path):
         model_key="qwen-plus",
         model_id="qwen-plus",
         category_key="openai_compatible",
+        secret_store=secret_store,
     )
     assert config_path.exists()
     data = yaml.safe_load(config_path.read_text())
     # OpenAI 兼容提供商统一用 "openai" 作为存储键
-    assert data["llm"]["providers"]["openai"]["api_key"] == "sk-test"
+    assert data["llm"]["providers"]["openai"]["api_key"] == "${secret:agentos/llm.providers.openai.api_key}"
+    assert secret_store.get("agentos/llm.providers.openai.api_key") == "sk-test"
     assert data["llm"]["default_model"] == "qwen-plus"
     assert data["agent"]["model"] == "qwen-plus"
 
@@ -32,6 +36,7 @@ def test_write_config_preserves_existing(tmp_path):
     """测试 _write_config 不会覆盖已有配置的其他字段"""
     config_path = tmp_path / "config.yml"
     config_path.write_text(yaml.dump({"tools": {"bash_command": {"enabled": True}}}))
+    secret_store = InMemorySecretStore()
     _write_config(
         config_path=config_path,
         provider_key="anthropic",
@@ -40,12 +45,14 @@ def test_write_config_preserves_existing(tmp_path):
         model_key="claude-sonnet",
         model_id="claude-sonnet-4-6",
         category_key="anthropic",
+        secret_store=secret_store,
     )
     data = yaml.safe_load(config_path.read_text())
     # 已有配置被保留
     assert data["tools"]["bash_command"]["enabled"] is True
     # 新配置被写入（anthropic 分类用 "anthropic" 作为存储键）
-    assert data["llm"]["providers"]["anthropic"]["api_key"] == "sk-ant"
+    assert data["llm"]["providers"]["anthropic"]["api_key"] == "${secret:agentos/llm.providers.anthropic.api_key}"
+    assert secret_store.get("agentos/llm.providers.anthropic.api_key") == "sk-ant"
     assert data["llm"]["default_model"] == "claude-sonnet"
     assert data["agent"]["model"] == "claude-sonnet"
 
@@ -53,6 +60,7 @@ def test_write_config_preserves_existing(tmp_path):
 def test_write_config_model_entry(tmp_path):
     """测试 _write_config 正确写入 llm.models 条目"""
     config_path = tmp_path / "config.yml"
+    secret_store = InMemorySecretStore()
     _write_config(
         config_path=config_path,
         provider_key="deepseek",
@@ -61,6 +69,7 @@ def test_write_config_model_entry(tmp_path):
         model_key="deepseek_chat",
         model_id="deepseek-chat",
         category_key="openai_compatible",
+        secret_store=secret_store,
     )
     data = yaml.safe_load(config_path.read_text())
     model_entry = data["llm"]["models"]["deepseek_chat"]
@@ -71,6 +80,7 @@ def test_write_config_model_entry(tmp_path):
 def test_write_config_anthropic_provider_key(tmp_path):
     """测试 Anthropic 分类使用 anthropic 作为 provider 存储键"""
     config_path = tmp_path / "config.yml"
+    secret_store = InMemorySecretStore()
     _write_config(
         config_path=config_path,
         provider_key="anthropic",
@@ -79,6 +89,7 @@ def test_write_config_anthropic_provider_key(tmp_path):
         model_key="claude_3_5_sonnet",
         model_id="claude-3-5-sonnet-20241022",
         category_key="anthropic",
+        secret_store=secret_store,
     )
     data = yaml.safe_load(config_path.read_text())
     assert "anthropic" in data["llm"]["providers"]
@@ -88,6 +99,7 @@ def test_write_config_anthropic_provider_key(tmp_path):
 def test_write_config_gemini_provider_key(tmp_path):
     """测试 Gemini 分类使用 gemini 作为 provider 存储键"""
     config_path = tmp_path / "config.yml"
+    secret_store = InMemorySecretStore()
     _write_config(
         config_path=config_path,
         provider_key="gemini",
@@ -96,6 +108,7 @@ def test_write_config_gemini_provider_key(tmp_path):
         model_key="gemini_2_0_flash",
         model_id="gemini-2.0-flash",
         category_key="gemini",
+        secret_store=secret_store,
     )
     data = yaml.safe_load(config_path.read_text())
     assert "gemini" in data["llm"]["providers"]
