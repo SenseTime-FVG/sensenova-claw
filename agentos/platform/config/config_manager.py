@@ -44,13 +44,20 @@ class ConfigManager:
         async with self._lock:
             raw_config = self._load_raw_yaml()
 
+            # 展平为 dotted path 用于 secret 处理
+            flat_updates = _flatten(data, prefix=section)
+
+            # 在合并前捕获原始 secret ref（用于后续判断是否需要删除 secret）
+            original_raw_values = {
+                path: _get_nested(raw_config, path)
+                for path in flat_updates
+                if is_secret_path(path)
+            }
+
             # 深度合并
             if section not in raw_config or not isinstance(raw_config[section], dict):
                 raw_config[section] = {}
             _deep_merge(raw_config[section], data)
-
-            # 展平为 dotted path 用于 secret 处理
-            flat_updates = _flatten(data, prefix=section)
 
             # 处理 secret 路径
             for path, value in flat_updates.items():
@@ -65,7 +72,8 @@ class ConfigManager:
                             _set_nested(raw_config, path, value)
                     else:
                         ref = f"agentos/{path}"
-                        existing_raw = _get_nested(raw_config, path)
+                        # 使用合并前的原始值判断是否需要删除 secret
+                        existing_raw = original_raw_values.get(path)
                         if isinstance(existing_raw, str) and is_secret_ref(existing_raw):
                             try:
                                 self._secret_store.delete(ref)
