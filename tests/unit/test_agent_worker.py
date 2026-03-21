@@ -47,6 +47,7 @@ class _SimpleAgentRuntime:
         self.tool_registry = tool_registry
         self.memory_manager = memory_manager
         self.jsonl_writer = None
+        self.context_compressor = None
 
 
 # ── Fixtures ─────────────────────────────────────────────
