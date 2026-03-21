@@ -252,7 +252,6 @@ export default function SetupPage() {
             },
             default_model: cfg.modelKey,
           },
-          agent: { model: cfg.modelKey },
         }),
       });
 
