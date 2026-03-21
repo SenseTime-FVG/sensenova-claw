@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ import yaml
 from agentos.platform.config.config import Config
 from agentos.platform.secrets.refs import build_secret_ref, is_secret_ref
 from agentos.platform.secrets.registry import is_secret_path
+
+logger = logging.getLogger(__name__)
 
 
 def get_config_path(cfg: Config) -> Path:
@@ -103,13 +106,18 @@ def persist_path_updates(
     for path, value in updates.items():
         if is_secret_path(path) and secret_store is not None:
             ref = f"agentos/{path}"
+            logger.debug("persist_path_updates secret path: %s value_present=%s", path, bool(value))
             if value:
                 secret_store.set(ref, value)
                 set_nested_value(raw_config, path, build_secret_ref(ref))
             else:
                 existing_raw = get_nested_value(raw_config, path)
+                logger.debug("persist_path_updates clearing secret path: %s existing_raw=%r", path, existing_raw)
                 if isinstance(existing_raw, str) and is_secret_ref(existing_raw):
-                    secret_store.delete(ref)
+                    try:
+                        secret_store.delete(ref)
+                    except Exception as exc:
+                        logger.warning("删除 secret 失败，按缺失 secret 继续清空配置: %s (%s)", ref, exc)
                 set_nested_value(raw_config, path, "")
         else:
             set_nested_value(raw_config, path, value)

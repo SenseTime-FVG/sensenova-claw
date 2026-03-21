@@ -37,10 +37,12 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
     };
 
     const putBodies: unknown[] = [];
+    let secretRevealCalls = 0;
 
     Object.assign(window, {
       __llmPutBodies: putBodies,
       __llmSections: state,
+      __secretRevealCalls: secretRevealCalls,
     });
 
     window.confirm = () => true;
@@ -102,6 +104,22 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
         });
       }
 
+      if (url.includes('/api/config/secret') && method === 'GET') {
+        secretRevealCalls += 1;
+        (window as typeof window & { __secretRevealCalls: number }).__secretRevealCalls = secretRevealCalls;
+        const parsed = new URL(url);
+        if (parsed.searchParams.get('path') === 'llm.providers.openai.api_key') {
+          return new Response(JSON.stringify({ path: 'llm.providers.openai.api_key', value: 'sk-real-openai-key' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ detail: 'Not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       return nativeFetch(input, init);
     };
   });
@@ -114,11 +132,17 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
   await expect(page.getByTestId('provider-card-openai')).toBeVisible();
   await expect(page.getByTestId('provider-card-anthropic')).toBeVisible();
   await expect(page.getByTestId('llm-card-gpt-4o-mini')).toBeVisible();
+  await expect(page.getByTestId('provider-api-key-input-openai')).toHaveValue('******');
+  await page.getByTestId('provider-api-key-toggle-openai').click();
+  await expect(page.getByTestId('provider-api-key-input-openai')).toHaveValue('sk-real-openai-key');
 
   await page.getByTestId('provider-toggle-openai').click();
   await expect(page.getByTestId('provider-body-openai')).not.toBeVisible();
   await page.getByTestId('provider-toggle-openai').click();
   await expect(page.getByTestId('provider-body-openai')).toBeVisible();
+  await expect.poll(async () => {
+    return page.evaluate(() => (window as typeof window & { __secretRevealCalls?: number }).__secretRevealCalls ?? 0);
+  }).toBe(1);
 
   await page.getByTestId('provider-name-input-openai').fill('openai-compatible');
   await page.getByTestId('provider-base-url-input-openai-compatible').fill('https://proxy.example.com/v1');
@@ -156,7 +180,6 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
   expect(lastBody).toEqual({
     llm: {
       providers: {
-        mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
         'openai-compatible': {
           base_url: 'https://proxy.example.com/v1',
           timeout: 90,
@@ -170,7 +193,6 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
         },
       },
       models: {
-        mock: { provider: 'mock', model_id: 'mock-agent-v1' },
         'gpt-4o-mini': {
           provider: 'openai-compatible',
           model_id: 'gpt-4o-mini',

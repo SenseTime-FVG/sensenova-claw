@@ -35,6 +35,18 @@ class TestLLMBody(BaseModel):
     model_id: str
 
 
+@router.get("/secret")
+async def get_secret_value(path: str, request: Request):
+    """按路径读取敏感配置的真实值，仅允许注册过的 secret path。"""
+    if not path:
+        raise HTTPException(400, "缺少 path")
+    if not is_secret_path(path):
+        raise HTTPException(400, f"不允许读取非敏感路径: {path}")
+
+    cfg = request.app.state.config
+    return {"path": path, "value": cfg.get(path, "") or ""}
+
+
 @router.get("/sections")
 async def get_config_sections(request: Request):
     """返回 llm / agent / plugins 三个 section 的当前值"""
@@ -59,10 +71,14 @@ async def update_config_sections(body: SectionsUpdateBody, request: Request):
     if not updates:
         raise HTTPException(400, "未提供任何更新内容")
 
+    logger.debug("Config sections update request: %s", updates)
+    flattened_updates = _flatten_updates(updates)
+    logger.debug("Config sections flattened updates: %s", flattened_updates)
+
     try:
         data = persist_path_updates(
             cfg,
-            _flatten_updates(updates),
+            flattened_updates,
             secret_store=getattr(request.app.state, "secret_store", None),
         )
     except Exception as e:

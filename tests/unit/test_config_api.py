@@ -118,3 +118,16 @@ def test_update_sections_preserves_other_keys(client, app):
     assert resp.status_code == 200
     written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
     assert written["custom_key"] == "keep_me"
+
+
+def test_get_secret_reveals_sensitive_value(client):
+    """通用 secret reveal API 返回敏感路径的真实值。"""
+    resp = client.get("/api/config/secret", params={"path": "llm.providers.openai.api_key"})
+    assert resp.status_code == 200
+    assert resp.json() == {"path": "llm.providers.openai.api_key", "value": "sk-xxx"}
+
+
+def test_get_secret_rejects_non_secret_path(client):
+    """非敏感路径不能通过 reveal API 读取。"""
+    resp = client.get("/api/config/secret", params={"path": "agent.model"})
+    assert resp.status_code == 400

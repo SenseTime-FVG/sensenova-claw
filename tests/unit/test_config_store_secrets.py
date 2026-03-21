@@ -88,3 +88,27 @@ def test_persist_path_updates_skips_secret_delete_when_path_is_not_secret_ref(tm
 
     written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert written["llm"]["providers"]["mock"]["api_key"] == ""
+
+
+def test_persist_path_updates_ignores_missing_secret_on_delete(tmp_path):
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "llm:\n  providers:\n    mock:\n      api_key: ${secret:agentos/llm.providers.mock.api_key}\n",
+        encoding="utf-8",
+    )
+
+    class MissingSecretDeleteStore(InMemorySecretStore):
+        def delete(self, ref: str) -> None:
+            raise RuntimeError(f"missing secret: {ref}")
+
+    store = MissingSecretDeleteStore()
+    cfg = Config(config_path=config_path, secret_store=store)
+
+    persist_path_updates(
+        cfg,
+        {"llm.providers.mock.api_key": ""},
+        secret_store=store,
+    )
+
+    written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["providers"]["mock"]["api_key"] == ""

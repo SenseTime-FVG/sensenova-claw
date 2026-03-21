@@ -640,3 +640,31 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 即使前端 payload 看起来合理，secret store 后端的删除语义也可能更严格；像 keyring 删除不存在条目会报错，这类行为必须在仓库内抽象层显式兜底，不能假设底层实现天然幂等。
+
+### 2026-03-21 通用 secret reveal 补充
+
+成功经验：
+- 对“默认掩码、按需展示真实值”的需求，首屏接口不应直接下发真实 secret；新增受保护的通用 `/api/config/secret?path=...` 并限制到 `is_secret_path(path)`，前端点击眼睛后再按需读取，安全边界和复用性都更好。
+- reveal 接口直接返回 `config.get(path)` 的解析结果最省事，能同时兼容 secret ref、环境变量和明文配置，不需要前端关心底层来源。
+- 前端 secret 输入框若需要“默认显示 `******` 但又保留未修改状态”，最稳的是把“展示值”和“真实 draft”分开：未 touch 且未 reveal 时显示 `******`，点击眼睛后再把真实值拉进本地状态，但继续保持 `api_key_touched=false`，这样保存时不会误把原 secret 全量回传。
+
+失败/风险经验：
+- 当前 `test_config_api.py` 在本机直接运行会受全局 `~/.agentos/config.yml` 影响；涉及 `config_api` 的 pytest 回归在本环境应显式用临时 `HOME` 隔离，避免导入阶段误读真实 secret 配置。
+
+### 2026-03-21 LLM 管理页 mock 回传补充
+
+成功经验：
+- 像 `/llms` 这种“只管理用户可见子集”的页面，保存时不应把隐藏保留项（如 `mock` provider/model）一并全量回传；按页面实际可编辑集合组 payload，更符合职责边界，也能避开历史脏配置触发的副作用。
+- 当后端采用 dotted-path merge 写配置时，前端省略未编辑字段通常比回传默认值更安全；缺失字段会保留原配置，而“默认值回传”可能意外触发 secret 删除、覆盖或热重载副作用。
+
+失败/风险经验：
+- 即使后端已经对 secret 删除做了保护，只要前端还在无意义地回传 `mock.api_key=''`，用户历史配置若存在异常状态仍可能触发问题；这类 bug 需要同时检查前后端边界，而不是只修一侧。
+
+### 2026-03-21 Secret 删除幂等补充
+
+成功经验：
+- 清空 secret 字段时，`config_store` 不应把“底层 secret 已缺失”视为致命错误；即使 `delete()` 失败，也应继续把 config 中的该字段置空并完成保存，这样历史脏状态才能被自愈。
+- 对这类问题，最有效的单测是直接构造“raw config 仍是 secret ref，但 secret store.delete() 抛错”的场景；它比只测普通空值或正常 delete 更贴近真实用户故障。
+
+失败/风险经验：
+- 仅依赖前端不回传某些字段不够稳；一旦用户浏览器缓存了旧前端，或历史配置里已存在异常 secret ref，后端仍会再次踩到删除异常。对 secret 清空链路，后端必须保证幂等。

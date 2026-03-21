@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Cpu, Loader2, Plus, Save, Server, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, Save, Server, Trash2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { authFetch, API_BASE } from '@/lib/authFetch';
@@ -42,6 +42,8 @@ export default function LlmsPage() {
   const [newModelDrafts, setNewModelDrafts] = useState<Record<string, string>>({});
   const [openNewModelForms, setOpenNewModelForms] = useState<Record<string, boolean>>({});
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
+  const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<string, boolean>>({});
+  const [apiKeyLoading, setApiKeyLoading] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     authFetch(`${API_BASE}/api/config/sections`)
@@ -248,14 +250,8 @@ export default function LlmsPage() {
     setSaveMsg('');
     try {
       const llm = {
-        providers: {
-          mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
-          ...buildProviderPayloads(providers),
-        },
-        models: {
-          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
-          ...models,
-        },
+        providers: buildProviderPayloads(providers),
+        models,
         default_model: defaultModel,
       };
       const res = await authFetch(`${API_BASE}/api/config/sections`, {
@@ -275,6 +271,64 @@ export default function LlmsPage() {
       setSaving(false);
       setTimeout(() => setSaveMsg(''), 3000);
     }
+  };
+
+  const revealSecret = async (path: string) => {
+    const res = await authFetch(`${API_BASE}/api/config/secret?path=${encodeURIComponent(path)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || '读取 secret 失败');
+    }
+    return res.json() as Promise<{ path: string; value: string }>;
+  };
+
+  const toggleProviderApiKey = async (providerName: string) => {
+    if (apiKeyVisibility[providerName]) {
+      setApiKeyVisibility((prev) => ({ ...prev, [providerName]: false }));
+      return;
+    }
+
+    const provider = providers[providerName];
+    const needReveal = provider?.api_key_meta?.configured && !provider.api_key && !provider.api_key_touched;
+    if (!needReveal) {
+      setApiKeyVisibility((prev) => ({ ...prev, [providerName]: true }));
+      return;
+    }
+
+    try {
+      setApiKeyLoading((prev) => ({ ...prev, [providerName]: true }));
+      const secret = await revealSecret(`llm.providers.${providerName}.api_key`);
+      setProviders((prev) => ({
+        ...prev,
+        [providerName]: {
+          ...prev[providerName],
+          api_key: secret.value || '',
+          api_key_touched: false,
+        },
+      }));
+      setApiKeyVisibility((prev) => ({ ...prev, [providerName]: true }));
+    } catch (error) {
+      setSaveMsg(error instanceof Error ? error.message : '读取 secret 失败');
+    } finally {
+      setApiKeyLoading((prev) => ({ ...prev, [providerName]: false }));
+    }
+  };
+
+  const providerApiKeyValue = (providerName: string) => {
+    const provider = providers[providerName];
+    if (!provider) {
+      return '';
+    }
+    if (provider.api_key_touched) {
+      return provider.api_key;
+    }
+    if (apiKeyVisibility[providerName]) {
+      return provider.api_key;
+    }
+    if (provider.api_key_meta?.configured) {
+      return '******';
+    }
+    return provider.api_key;
   };
 
   if (loading) {
@@ -399,14 +453,32 @@ export default function LlmsPage() {
                         dataTestId={`provider-name-input-${providerName}`}
                         onChange={(value) => renameProvider(providerName, value)}
                       />
-                      <FieldInput
-                        label="API Key"
-                        type="password"
-                        value={providers[providerName]?.api_key || ''}
-                        dataTestId={`provider-api-key-input-${providerName}`}
-                        placeholder={providers[providerName]?.api_key_meta?.configured ? (providers[providerName]?.api_key_meta?.masked_value || 'Configured') : ''}
-                        onChange={(value) => updateProviderField(providerName, 'api_key', value)}
-                      />
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground">API Key</label>
+                        <div className="flex gap-2">
+                          <input
+                            type={apiKeyVisibility[providerName] ? 'text' : 'password'}
+                            value={providerApiKeyValue(providerName)}
+                            data-testid={`provider-api-key-input-${providerName}`}
+                            onChange={(e) => updateProviderField(providerName, 'api_key', e.target.value)}
+                            className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          />
+                          <button
+                            type="button"
+                            data-testid={`provider-api-key-toggle-${providerName}`}
+                            onClick={() => void toggleProviderApiKey(providerName)}
+                            className="flex h-10 w-10 items-center justify-center rounded-xl border border-input bg-background text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            {apiKeyLoading[providerName] ? (
+                              <Loader2 size={16} className="animate-spin" />
+                            ) : apiKeyVisibility[providerName] ? (
+                              <EyeOff size={16} />
+                            ) : (
+                              <Eye size={16} />
+                            )}
+                          </button>
+                        </div>
+                      </div>
                       <FieldInput
                         label="Base URL"
                         value={providers[providerName]?.base_url || ''}
