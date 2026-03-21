@@ -115,6 +115,11 @@ export default function SetupPage() {
     setFetchingModels(true);
     setFetchModelsError('');
     setFetchedModels([]);
+
+    const listProvider = selectedProvider?.key === 'custom_openai'
+      ? (customProviderName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'openai')
+      : (selectedProvider?.key || (selectedCategory?.key === 'anthropic' ? 'anthropic' : 'openai'));
+
     try {
       const resp = await authFetch(`${API_BASE}/api/config/list-models`, {
         method: 'POST',
@@ -122,7 +127,7 @@ export default function SetupPage() {
         body: JSON.stringify({
           api_key: apiKey.trim(),
           base_url: baseUrl.trim(),
-          provider: selectedCategory?.key === 'anthropic' ? 'anthropic' : 'openai',
+          provider: listProvider,
         }),
       });
       const data = await resp.json();
@@ -145,6 +150,7 @@ export default function SetupPage() {
 
   // 从 config 步骤前进到 model 步骤
   const isCustomProvider = selectedProvider?.key === 'custom_openai';
+  const needsCustomModelInput = useCustomModel || (!fetchingModels && fetchedModels.length === 0);
   const handleConfigNext = () => {
     if (!apiKey.trim()) return;
     if (isCustomProvider && !customProviderName.trim()) return;
@@ -168,15 +174,14 @@ export default function SetupPage() {
 
     if (useCustomModel || (fetchedModels.length === 0 && selectedProvider.models.length === 0)) {
       modelId = customModelId.trim();
-      modelKey = modelId.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase() || 'custom_model';
+      modelKey = modelId || 'custom_model';
     } else if (fetchedModels.length > 0) {
-      // 从动态获取的模型列表选择
       modelId = selectedModelKey;
-      modelKey = modelId.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+      modelKey = modelId;
     } else {
       const found = selectedProvider.models.find(m => m.key === selectedModelKey);
       modelId = found ? found.model_id : selectedModelKey;
-      modelKey = selectedModelKey;
+      modelKey = modelId;
     }
 
     if (!modelId) return null;
@@ -585,9 +590,7 @@ export default function SetupPage() {
                 onClick={handleTest}
                 disabled={
                   isTesting || isSubmitting || fetchingModels ||
-                  (useCustomModel || (fetchedModels.length === 0 && selectedProvider.models.length === 0)
-                    ? !customModelId.trim()
-                    : !selectedModelKey)
+                  (needsCustomModelInput ? !customModelId.trim() : !selectedModelKey)
                 }
                 className="flex-1 flex justify-center py-2 px-4 border border-blue-600 rounded-md shadow-sm text-sm font-medium text-blue-600 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed"
               >
@@ -597,9 +600,7 @@ export default function SetupPage() {
                 onClick={handleSubmit}
                 disabled={
                   isSubmitting || isTesting ||
-                  (useCustomModel || selectedProvider.models.length === 0
-                    ? !customModelId.trim()
-                    : !selectedModelKey)
+                  (needsCustomModelInput ? !customModelId.trim() : !selectedModelKey)
                 }
                 className="flex-1 flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
