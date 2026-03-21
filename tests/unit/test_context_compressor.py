@@ -12,6 +12,28 @@ from agentos.kernel.runtime.context_compressor import (
     parse_turn_boundaries,
     save_original_messages,
 )
+from agentos.kernel.runtime.state import SessionStateStore
+
+
+class TestSessionStateStoreReplace:
+    def test_replace_history(self):
+        store = SessionStateStore()
+        store._session_history["sess1"] = [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old_answer"},
+        ]
+        new_history = [
+            {"role": "user", "content": "compressed"},
+            {"role": "assistant", "content": "compressed_answer"},
+        ]
+        store.replace_history("sess1", new_history)
+        assert store.get_session_history("sess1") == new_history
+
+    def test_replace_history_nonexistent_session(self):
+        store = SessionStateStore()
+        new_history = [{"role": "user", "content": "new"}]
+        store.replace_history("sess_new", new_history)
+        assert store.get_session_history("sess_new") == new_history
 
 
 class TestTokenCounter:
