@@ -41,6 +41,7 @@ export default function SetupPage() {
   const [customModelId, setCustomModelId] = useState('');
   const [customModelName, setCustomModelName] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
+  const [multimodalInput, setMultimodalInput] = useState<string[]>([]);
 
   // 动态模型列表
   const [fetchedModels, setFetchedModels] = useState<{ id: string; owned_by: string }[]>([]);
@@ -104,6 +105,7 @@ export default function SetupPage() {
     setCustomModelId('');
     setCustomModelName('');
     setUseCustomModel(false);
+    setMultimodalInput([]);
     setStep('config');
   };
 
@@ -176,7 +178,7 @@ export default function SetupPage() {
     }
 
     if (!modelId) return null;
-    return { llmProvider, modelId, modelKey };
+    return { llmProvider, modelId, modelKey, multimodalInput };
   };
 
   // 测试 LLM 连接
@@ -235,7 +237,11 @@ export default function SetupPage() {
               },
             },
             models: {
-              [cfg.modelKey]: { provider: cfg.llmProvider, model_id: cfg.modelId },
+              [cfg.modelKey]: {
+                provider: cfg.llmProvider,
+                model_id: cfg.modelId,
+                ...(cfg.multimodalInput.length > 0 ? { multimodal_input: cfg.multimodalInput } : {}),
+              },
             },
             default_model: cfg.modelKey,
           },
@@ -519,6 +525,39 @@ export default function SetupPage() {
                 </div>
               </div>
             )}
+
+            {/* 多模态输入 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                多模态输入
+              </label>
+              <div className="flex gap-2">
+                {[
+                  { key: 'image', label: '图像' },
+                ].map((option) => {
+                  const active = multimodalInput.includes(option.key);
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => {
+                        setMultimodalInput(prev =>
+                          active ? prev.filter(k => k !== option.key) : [...prev, option.key]
+                        );
+                      }}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                        active
+                          ? 'bg-blue-100 border-blue-400 text-blue-700'
+                          : 'bg-gray-100 border-gray-300 text-gray-500 hover:border-gray-400'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-xs text-gray-400">选择该模型支持的输入类型</p>
+            </div>
 
             {/* 测试结果 */}
             {testResult && (
