@@ -157,9 +157,11 @@ export default function SetupPage() {
   const _resolveLLMConfig = () => {
     if (!selectedCategory || !selectedProvider) return null;
 
-    const llmProvider = selectedCategory.key === 'openai_compatible'
-      ? 'openai'
-      : selectedCategory.key;
+    // 使用实际选择的 provider key（如 minimax、qwen、deepseek），
+    // 而非统一用 openai，确保 api_key 写入正确的 provider 配置
+    const llmProvider = selectedProvider.key === 'custom_openai'
+      ? (customProviderName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'openai')
+      : selectedProvider.key;
 
     let modelId: string;
     let modelKey: string;
