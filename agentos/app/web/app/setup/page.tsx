@@ -623,79 +623,30 @@ export default function SetupPage() {
   );
 }
 
-// 内置默认预设（当接口不可用时使用，字段名与后端 llm_presets.py 一致）
+// 内置默认预设（当接口不可用时使用，模型列表为空，统一走动态获取）
 const DEFAULT_PRESETS: CategoryPreset[] = [
   {
     key: 'openai_compatible',
     label: 'OpenAI 兼容',
     providers: [
-      {
-        key: 'openai',
-        label: 'OpenAI',
-        base_url: 'https://api.openai.com/v1',
-        models: [
-          { key: 'gpt_4o', model_id: 'gpt-4o' },
-          { key: 'gpt_4o_mini', model_id: 'gpt-4o-mini' },
-          { key: 'gpt_4_turbo', model_id: 'gpt-4-turbo' },
-        ],
-      },
-      {
-        key: 'qwen',
-        label: '通义千问(Qwen)',
-        base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-        models: [
-          { key: 'qwen_max', model_id: 'qwen-max' },
-          { key: 'qwen_plus', model_id: 'qwen-plus' },
-          { key: 'qwen_turbo', model_id: 'qwen-turbo' },
-        ],
-      },
-      {
-        key: 'deepseek',
-        label: 'DeepSeek',
-        base_url: 'https://api.deepseek.com/v1',
-        models: [
-          { key: 'deepseek_chat', model_id: 'deepseek-chat' },
-          { key: 'deepseek_reasoner', model_id: 'deepseek-reasoner' },
-        ],
-      },
-      {
-        key: 'custom_openai',
-        label: '其他（自定义）',
-        base_url: '',
-        models: [],
-      },
+      { key: 'openai', label: 'OpenAI', base_url: 'https://api.openai.com/v1', models: [] },
+      { key: 'qwen', label: '通义千问(Qwen)', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: [] },
+      { key: 'deepseek', label: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: [] },
+      { key: 'custom_openai', label: '其他（自定义）', base_url: '', models: [] },
     ],
   },
   {
     key: 'anthropic',
     label: 'Anthropic (Claude)',
     providers: [
-      {
-        key: 'anthropic',
-        label: 'Anthropic',
-        base_url: 'https://api.anthropic.com',
-        models: [
-          { key: 'claude_3_5_sonnet', model_id: 'claude-3-5-sonnet-20241022' },
-          { key: 'claude_3_5_haiku', model_id: 'claude-3-5-haiku-20241022' },
-          { key: 'claude_3_opus', model_id: 'claude-3-opus-20240229' },
-        ],
-      },
+      { key: 'anthropic', label: 'Anthropic', base_url: 'https://api.anthropic.com', models: [] },
     ],
   },
   {
     key: 'gemini',
     label: 'Google Gemini',
     providers: [
-      {
-        key: 'gemini',
-        label: 'Google Gemini',
-        base_url: 'https://generativelanguage.googleapis.com/v1beta',
-        models: [
-          { key: 'gemini_2_0_flash', model_id: 'gemini-2.0-flash' },
-          { key: 'gemini_1_5_pro', model_id: 'gemini-1.5-pro' },
-          { key: 'gemini_1_5_flash', model_id: 'gemini-1.5-flash' },
-        ],
-      },
+      { key: 'gemini', label: 'Google Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta', models: [] },
     ],
   },
 ];
