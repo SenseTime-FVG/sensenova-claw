@@ -11,6 +11,7 @@ from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.types import USER_INPUT
 from agentos.kernel.events.router import BusRouter
 from agentos.kernel.runtime.context_builder import ContextBuilder
+from agentos.kernel.runtime.context_compressor import ContextCompressor
 from agentos.kernel.runtime.state import SessionStateStore
 from agentos.kernel.runtime.workers.agent_worker import AgentSessionWorker
 from agentos.capabilities.tools.registry import ToolRegistry
@@ -34,6 +35,7 @@ class AgentRuntime:
         agent_registry: AgentRegistry | None = None,
         memory_manager: Any = None,
         jsonl_writer: SessionJsonlWriter | None = None,
+        context_compressor: ContextCompressor | None = None,
     ):
         self.bus_router = bus_router
         self.repo = repo
@@ -43,6 +45,7 @@ class AgentRuntime:
         self.agent_registry = agent_registry
         self.memory_manager = memory_manager  # 可能为 None（记忆系统未启用）
         self.jsonl_writer = jsonl_writer  # 可能为 None（JSONL 导出未启用）
+        self.context_compressor = context_compressor  # 可能为 None（上下文压缩未启用）
         self._workers: dict[str, AgentSessionWorker] = {}
 
     async def start(self) -> None:
@@ -84,11 +87,14 @@ class AgentRuntime:
         )
 
     async def _on_session_destroy(self, session_id: str) -> None:
-        """GC 回调：清理 Worker"""
+        """GC 回调：清理 Worker 及相关资源"""
         worker = self._workers.pop(session_id, None)
         if worker:
             await worker.stop()
             logger.info("Cleaned up AgentSessionWorker for session %s", session_id)
+        # 清理上下文压缩器中该会话的锁，防止内存泄漏
+        if self.context_compressor:
+            self.context_compressor.cleanup_session(session_id)
 
     async def spawn_agent_session(
         self,

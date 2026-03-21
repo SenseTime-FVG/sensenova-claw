@@ -137,6 +137,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "extra_dirs": [],
         "entries": {},
     },
+    "context_compression": {
+        "max_context_tokens": 128000,
+        "phase1_threshold": 0.8,
+        "phase2_trigger": 0.6,
+        "phase2_chunk_ratio": 0.3,
+        "user_input_max_tokens": 1000,
+        "tool_summary_max_tokens": 3000,
+        "phase2_merge_max_tokens": 2000,
+    },
     "session": {
         "maintenance": {
             "prune_after_days": 30,

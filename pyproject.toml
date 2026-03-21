@@ -23,6 +23,7 @@ dependencies = [
   "croniter>=2.0.0",
   "python-multipart>=0.0.6",
   "keyring>=25.0.0",
+  "tiktoken>=0.7.0",
   "watchdog>=4.0.0",
 ]
 
