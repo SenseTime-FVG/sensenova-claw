@@ -34,6 +34,15 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
 
     const checkLlmConfig = async () => {
       try {
+        // Setup 刚完成时跳过检查，避免因 secret store 延迟导致误跳回
+        const justConfigured = sessionStorage.getItem('llm_just_configured');
+        if (justConfigured) {
+          sessionStorage.removeItem('llm_just_configured');
+          setLlmConfigured(true);
+          setLlmChecked(true);
+          return;
+        }
+
         const data = await authGet<{ configured: boolean }>(`${API_BASE}/api/config/llm-status`);
         if (!data.configured) {
           setLlmConfigured(false);
