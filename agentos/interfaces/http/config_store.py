@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ import yaml
 from agentos.platform.config.config import Config
 from agentos.platform.secrets.refs import build_secret_ref, is_secret_ref
 from agentos.platform.secrets.registry import is_secret_path
+
+logger = logging.getLogger(__name__)
 
 
 def get_config_path(cfg: Config) -> Path:
@@ -104,12 +107,20 @@ def persist_path_updates(
         if is_secret_path(path) and secret_store is not None:
             ref = f"agentos/{path}"
             if value:
-                secret_store.set(ref, value)
-                set_nested_value(raw_config, path, build_secret_ref(ref))
+                try:
+                    secret_store.set(ref, value)
+                    set_nested_value(raw_config, path, build_secret_ref(ref))
+                except Exception:
+                    # keyring 不可用时降级为明文写入
+                    logger.warning("secret store 不可用，%s 将明文写入 config.yml", path)
+                    set_nested_value(raw_config, path, value)
             else:
-                existing_raw = get_nested_value(raw_config, path)
-                if isinstance(existing_raw, str) and is_secret_ref(existing_raw):
-                    secret_store.delete(ref)
+                try:
+                    existing_raw = get_nested_value(raw_config, path)
+                    if isinstance(existing_raw, str) and is_secret_ref(existing_raw):
+                        secret_store.delete(ref)
+                except Exception:
+                    logger.warning("secret store 不可用，跳过删除 %s", path)
                 set_nested_value(raw_config, path, "")
         else:
             set_nested_value(raw_config, path, value)

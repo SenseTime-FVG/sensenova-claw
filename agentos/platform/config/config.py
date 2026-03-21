@@ -95,7 +95,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     # agent 段保留作为所有 agent 的后备默认值
     "agent": {
-        "model": "mock",
         "temperature": 0.2,
         "max_turns_per_session": 50,
         "system_prompt": "你是一个有工具能力的AI助手，请在必要时调用工具。",
@@ -411,12 +410,14 @@ class Config:
             if "provider" in agent:
                 errors.append(
                     "'agent.provider' 已废弃。"
-                    "请使用 'agent.model' 引用 llm.models 中的 key，provider 由系统自动解析。"
+                    "请在 agents.<id>.model 中引用 llm.models 中的 key，provider 由系统自动解析。"
                 )
             if "default_model" in agent:
                 errors.append(
-                    "'agent.default_model' 已废弃，请改为 'agent.model'。"
+                    "'agent.default_model' 已废弃，请改为 'llm.default_model'。"
                 )
+            if "model" in agent:
+                logger.warning("'agent.model' 已废弃，请改为 'llm.default_model'。")
             if "default_temperature" in agent:
                 errors.append(
                     "'agent.default_temperature' 已废弃，请改为 'agent.temperature'。"

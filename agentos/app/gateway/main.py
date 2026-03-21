@@ -247,7 +247,7 @@ async def lifespan(app: FastAPI):
     await cron_runtime.start()
     await heartbeat_runtime.start()
 
-    # Token 认证服务（Jupyter-lab 风格，每次启动生成新 token）
+    # Token 认证服务（首次生成，后续复用持久化 token）
     auth_service = TokenAuthService(agentos_home=agentos_home)
 
     # WebSocketChannel（注入 auth_service 用于连接认证）
@@ -293,7 +293,7 @@ async def lifespan(app: FastAPI):
     print("  AgentOS Token Authentication")
     print(f"  访问地址: http://localhost:{frontend_port}/?token={auth_service.token}")
     print(f"  API 地址: http://localhost:{server_port}")
-    print("  (token 每次启动重新生成)")
+    print("  (token 已持久化，重启后自动复用)")
     print("=" * 60)
     print()
 

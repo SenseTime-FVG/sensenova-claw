@@ -304,11 +304,7 @@ class MemoryManager:
         from agentos.platform.config.config import config
 
         if not model:
-            model = (
-                config.get("agent.model")
-                or config.get("agent.default_model")
-                or config.get("llm.default_model")
-            )
+            model = config.get("llm.default_model")
         resolved_provider, resolved_model = config.resolve_model(model)
         provider_name = provider_name or resolved_provider
         model = resolved_model

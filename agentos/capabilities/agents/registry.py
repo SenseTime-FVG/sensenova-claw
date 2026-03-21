@@ -119,7 +119,7 @@ class AgentRegistry:
             name=agent_dict.get("name", agent_id.replace("-", " ").title() if agent_id != "default" else "Default Agent"),
             description=agent_dict.get("description", "默认 AI Agent" if agent_id == "default" else ""),
             provider="",  # provider 现在由 model key 通过 resolve_model 动态解析
-            model=agent_dict.get("model", fallback.get("model", "mock")),
+            model=agent_dict.get("model", ""),
             temperature=agent_dict.get("temperature", fallback.get("temperature", 0.2)),
             max_tokens=agent_dict.get("max_tokens"),
             system_prompt=system_prompt,

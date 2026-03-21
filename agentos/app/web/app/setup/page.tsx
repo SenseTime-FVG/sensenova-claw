@@ -41,6 +41,12 @@ export default function SetupPage() {
   const [customModelId, setCustomModelId] = useState('');
   const [customModelName, setCustomModelName] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
+  const [multimodalInput, setMultimodalInput] = useState<string[]>([]);
+
+  // 动态模型列表
+  const [fetchedModels, setFetchedModels] = useState<{ id: string; owned_by: string }[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchModelsError, setFetchModelsError] = useState('');
 
   // 提交状态
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -99,39 +105,87 @@ export default function SetupPage() {
     setCustomModelId('');
     setCustomModelName('');
     setUseCustomModel(false);
+    setMultimodalInput([]);
     setStep('config');
+  };
+
+  // 获取可用模型列表
+  const fetchModelList = async () => {
+    if (!apiKey.trim()) return;
+    setFetchingModels(true);
+    setFetchModelsError('');
+    setFetchedModels([]);
+
+    const listProvider = selectedProvider?.key === 'custom_openai'
+      ? (customProviderName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'openai')
+      : (selectedProvider?.key || (selectedCategory?.key === 'anthropic' ? 'anthropic' : 'openai'));
+
+    try {
+      const resp = await authFetch(`${API_BASE}/api/config/list-models`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: apiKey.trim(),
+          base_url: baseUrl.trim(),
+          provider: listProvider,
+        }),
+      });
+      const data = await resp.json();
+      if (data.success && Array.isArray(data.models) && data.models.length > 0) {
+        setFetchedModels(data.models);
+        // 自动选中第一个模型
+        setSelectedModelKey(data.models[0].id);
+        setUseCustomModel(false);
+      } else {
+        setFetchModelsError(data.error || '未获取到可用模型');
+        setUseCustomModel(true);
+      }
+    } catch {
+      setFetchModelsError('获取模型列表失败，请手动输入');
+      setUseCustomModel(true);
+    } finally {
+      setFetchingModels(false);
+    }
   };
 
   // 从 config 步骤前进到 model 步骤
   const isCustomProvider = selectedProvider?.key === 'custom_openai';
+  const needsCustomModelInput = useCustomModel || (!fetchingModels && fetchedModels.length === 0);
   const handleConfigNext = () => {
     if (!apiKey.trim()) return;
     if (isCustomProvider && !customProviderName.trim()) return;
     setStep('model');
+    // 自动获取模型列表
+    fetchModelList();
   };
 
   // 解析当前选择的 provider/model 信息
   const _resolveLLMConfig = () => {
     if (!selectedCategory || !selectedProvider) return null;
 
-    const llmProvider = selectedCategory.key === 'openai_compatible'
-      ? 'openai'
-      : selectedCategory.key;
+    // 使用实际选择的 provider key（如 minimax、qwen、deepseek），
+    // 而非统一用 openai，确保 api_key 写入正确的 provider 配置
+    const llmProvider = selectedProvider.key === 'custom_openai'
+      ? (customProviderName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'openai')
+      : selectedProvider.key;
 
     let modelId: string;
     let modelKey: string;
 
-    if (useCustomModel || selectedProvider.models.length === 0) {
+    if (useCustomModel || (fetchedModels.length === 0 && selectedProvider.models.length === 0)) {
       modelId = customModelId.trim();
-      modelKey = modelId.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase() || 'custom_model';
+      modelKey = modelId || 'custom_model';
+    } else if (fetchedModels.length > 0) {
+      modelId = selectedModelKey;
+      modelKey = modelId;
     } else {
       const found = selectedProvider.models.find(m => m.key === selectedModelKey);
       modelId = found ? found.model_id : selectedModelKey;
-      modelKey = selectedModelKey;
+      modelKey = modelId;
     }
 
     if (!modelId) return null;
-    return { llmProvider, modelId, modelKey };
+    return { llmProvider, modelId, modelKey, multimodalInput };
   };
 
   // 测试 LLM 连接
@@ -190,14 +244,19 @@ export default function SetupPage() {
               },
             },
             models: {
-              [cfg.modelKey]: { provider: cfg.llmProvider, model_id: cfg.modelId },
+              [cfg.modelKey]: {
+                provider: cfg.llmProvider,
+                model_id: cfg.modelId,
+                ...(cfg.multimodalInput.length > 0 ? { multimodal_input: cfg.multimodalInput } : {}),
+              },
             },
             default_model: cfg.modelKey,
           },
-          agent: { model: cfg.modelKey },
         }),
       });
 
+      // 标记已完成配置，避免 ProtectedRoute 再次跳回 setup
+      sessionStorage.setItem('llm_just_configured', '1');
       router.push('/');
     } catch (e) {
       console.error('保存配置失败:', e);
@@ -374,31 +433,42 @@ export default function SetupPage() {
             </button>
             <h3 className="text-lg font-medium text-gray-900">选择模型</h3>
 
-            {selectedProvider.models.length > 0 && (
+            {/* 加载中 */}
+            {fetchingModels && (
+              <div className="flex items-center gap-2 px-4 py-3 text-sm text-gray-500">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                正在获取可用模型列表...
+              </div>
+            )}
+
+            {/* 动态获取的模型列表 */}
+            {!fetchingModels && fetchedModels.length > 0 && (
               <div className="space-y-2">
-                {selectedProvider.models.map((model) => (
-                  <label
-                    key={model.key}
-                    className={`flex items-center px-4 py-3 border rounded-md cursor-pointer transition-colors ${
-                      !useCustomModel && selectedModelKey === model.key
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-300 hover:border-blue-300'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="model"
-                      value={model.key}
-                      checked={!useCustomModel && selectedModelKey === model.key}
-                      onChange={() => {
-                        setSelectedModelKey(model.key);
-                        setUseCustomModel(false);
-                      }}
-                      className="mr-3 text-blue-600"
-                    />
-                    <span className="font-medium text-gray-800 text-sm">{model.model_id}</span>
-                  </label>
-                ))}
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  {fetchedModels.map((model) => (
+                    <label
+                      key={model.id}
+                      className={`flex items-center px-4 py-3 border rounded-md cursor-pointer transition-colors ${
+                        !useCustomModel && selectedModelKey === model.id
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-300 hover:border-blue-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="model"
+                        value={model.id}
+                        checked={!useCustomModel && selectedModelKey === model.id}
+                        onChange={() => {
+                          setSelectedModelKey(model.id);
+                          setUseCustomModel(false);
+                        }}
+                        className="mr-3 text-blue-600"
+                      />
+                      <span className="font-medium text-gray-800 text-sm">{model.id}</span>
+                    </label>
+                  ))}
+                </div>
 
                 {/* 自定义模型选项 */}
                 <label
@@ -420,8 +490,21 @@ export default function SetupPage() {
               </div>
             )}
 
-            {/* 自定义模型输入框（无预设模型时始终显示） */}
-            {(useCustomModel || selectedProvider.models.length === 0) && (
+            {/* 获取失败提示 */}
+            {!fetchingModels && fetchedModels.length === 0 && fetchModelsError && (
+              <div className="px-4 py-3 rounded text-sm border bg-yellow-50 border-yellow-200 text-yellow-700">
+                {fetchModelsError}，请手动输入模型 ID
+                <button
+                  onClick={fetchModelList}
+                  className="ml-2 text-blue-600 hover:text-blue-800 underline"
+                >
+                  重试
+                </button>
+              </div>
+            )}
+
+            {/* 自定义模型输入框 */}
+            {(useCustomModel || (!fetchingModels && fetchedModels.length === 0)) && (
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
@@ -451,6 +534,39 @@ export default function SetupPage() {
               </div>
             )}
 
+            {/* 多模态输入 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                多模态输入
+              </label>
+              <div className="flex gap-2">
+                {[
+                  { key: 'image', label: '图像' },
+                ].map((option) => {
+                  const active = multimodalInput.includes(option.key);
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => {
+                        setMultimodalInput(prev =>
+                          active ? prev.filter(k => k !== option.key) : [...prev, option.key]
+                        );
+                      }}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                        active
+                          ? 'bg-blue-100 border-blue-400 text-blue-700'
+                          : 'bg-gray-100 border-gray-300 text-gray-500 hover:border-gray-400'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-xs text-gray-400">选择该模型支持的输入类型</p>
+            </div>
+
             {/* 测试结果 */}
             {testResult && (
               <div className={`px-4 py-3 rounded text-sm border ${
@@ -472,10 +588,8 @@ export default function SetupPage() {
               <button
                 onClick={handleTest}
                 disabled={
-                  isTesting || isSubmitting ||
-                  (useCustomModel || selectedProvider.models.length === 0
-                    ? !customModelId.trim()
-                    : !selectedModelKey)
+                  isTesting || isSubmitting || fetchingModels ||
+                  (needsCustomModelInput ? !customModelId.trim() : !selectedModelKey)
                 }
                 className="flex-1 flex justify-center py-2 px-4 border border-blue-600 rounded-md shadow-sm text-sm font-medium text-blue-600 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed"
               >
@@ -485,9 +599,7 @@ export default function SetupPage() {
                 onClick={handleSubmit}
                 disabled={
                   isSubmitting || isTesting ||
-                  (useCustomModel || selectedProvider.models.length === 0
-                    ? !customModelId.trim()
-                    : !selectedModelKey)
+                  (needsCustomModelInput ? !customModelId.trim() : !selectedModelKey)
                 }
                 className="flex-1 flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
@@ -511,79 +623,30 @@ export default function SetupPage() {
   );
 }
 
-// 内置默认预设（当接口不可用时使用，字段名与后端 llm_presets.py 一致）
+// 内置默认预设（当接口不可用时使用，模型列表为空，统一走动态获取）
 const DEFAULT_PRESETS: CategoryPreset[] = [
   {
     key: 'openai_compatible',
     label: 'OpenAI 兼容',
     providers: [
-      {
-        key: 'openai',
-        label: 'OpenAI',
-        base_url: 'https://api.openai.com/v1',
-        models: [
-          { key: 'gpt_4o', model_id: 'gpt-4o' },
-          { key: 'gpt_4o_mini', model_id: 'gpt-4o-mini' },
-          { key: 'gpt_4_turbo', model_id: 'gpt-4-turbo' },
-        ],
-      },
-      {
-        key: 'qwen',
-        label: '通义千问(Qwen)',
-        base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-        models: [
-          { key: 'qwen_max', model_id: 'qwen-max' },
-          { key: 'qwen_plus', model_id: 'qwen-plus' },
-          { key: 'qwen_turbo', model_id: 'qwen-turbo' },
-        ],
-      },
-      {
-        key: 'deepseek',
-        label: 'DeepSeek',
-        base_url: 'https://api.deepseek.com/v1',
-        models: [
-          { key: 'deepseek_chat', model_id: 'deepseek-chat' },
-          { key: 'deepseek_reasoner', model_id: 'deepseek-reasoner' },
-        ],
-      },
-      {
-        key: 'custom_openai',
-        label: '其他（自定义）',
-        base_url: '',
-        models: [],
-      },
+      { key: 'openai', label: 'OpenAI', base_url: 'https://api.openai.com/v1', models: [] },
+      { key: 'qwen', label: '通义千问(Qwen)', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: [] },
+      { key: 'deepseek', label: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', models: [] },
+      { key: 'custom_openai', label: '其他（自定义）', base_url: '', models: [] },
     ],
   },
   {
     key: 'anthropic',
     label: 'Anthropic (Claude)',
     providers: [
-      {
-        key: 'anthropic',
-        label: 'Anthropic',
-        base_url: 'https://api.anthropic.com',
-        models: [
-          { key: 'claude_3_5_sonnet', model_id: 'claude-3-5-sonnet-20241022' },
-          { key: 'claude_3_5_haiku', model_id: 'claude-3-5-haiku-20241022' },
-          { key: 'claude_3_opus', model_id: 'claude-3-opus-20240229' },
-        ],
-      },
+      { key: 'anthropic', label: 'Anthropic', base_url: 'https://api.anthropic.com', models: [] },
     ],
   },
   {
     key: 'gemini',
     label: 'Google Gemini',
     providers: [
-      {
-        key: 'gemini',
-        label: 'Google Gemini',
-        base_url: 'https://generativelanguage.googleapis.com/v1beta',
-        models: [
-          { key: 'gemini_2_0_flash', model_id: 'gemini-2.0-flash' },
-          { key: 'gemini_1_5_pro', model_id: 'gemini-1.5-pro' },
-          { key: 'gemini_1_5_flash', model_id: 'gemini-1.5-flash' },
-        ],
-      },
+      { key: 'gemini', label: 'Google Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta', models: [] },
     ],
   },
 ];

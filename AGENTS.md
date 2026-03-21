@@ -640,3 +640,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 即使前端 payload 看起来合理，secret store 后端的删除语义也可能更严格；像 keyring 删除不存在条目会报错，这类行为必须在仓库内抽象层显式兜底，不能假设底层实现天然幂等。
+
+### 2026-03-21 Setup 动态模型列表补充
+
+成功经验：
+- setup 页如果要支持不同 OpenAI 兼容厂商的专用模型发现逻辑，前端请求 `/api/config/list-models` 时必须透传具体 `provider key`（如 `minimax`），不能统一压成 `openai`；否则后端新增的 provider 分支永远不会被命中。
+- 对“动态模型列表取回后仍无法继续”的问题，要同时检查显示逻辑和按钮禁用逻辑；当前 setup 页曾用 `selectedProvider.models.length` 控制 `测试连接/完成配置`，会把“远端已成功返回模型但预设为空”的场景错误判成必须手填模型。
+- 这类 setup 向导问题最适合补一条 Playwright 回归：直接 mock `/llm-presets` 与 `/list-models`，断言请求体里的 `provider` 和最终渲染的模型列表，能同时锁住根因和用户可见行为。
+
+失败/风险经验：
+- Playwright 浏览器安装路径必须与测试运行时的 `PLAYWRIGHT_BROWSERS_PATH` 保持一致；只执行 `npx playwright install chromium` 而不带同样的环境变量，测试仍会报“Executable doesn't exist”。
