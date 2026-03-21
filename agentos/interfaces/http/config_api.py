@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from agentos.interfaces.http.config_store import load_raw_config, persist_path_updates
 from agentos.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
+from agentos.platform.secrets.migration import migrate_plaintext_secrets
 from agentos.platform.secrets.refs import is_secret_ref
 from agentos.platform.secrets.registry import is_secret_path
 
@@ -51,6 +52,18 @@ async def get_secret_value(path: str, request: Request):
 
     cfg = request.app.state.config
     return {"path": path, "value": cfg.get(path, "") or ""}
+
+
+@router.post("/migrate-secrets")
+async def migrate_secrets(request: Request):
+    """将 config.yml 中的明文敏感字段迁移到 secret store。"""
+    secret_store = getattr(request.app.state, "secret_store", None)
+    if secret_store is None:
+        raise HTTPException(500, "secret store 未初始化")
+    try:
+        return migrate_plaintext_secrets(request.app.state.config, secret_store=secret_store)
+    except Exception as exc:
+        raise HTTPException(500, f"迁移 secret 失败: {exc}")
 
 
 @router.get("/sections")

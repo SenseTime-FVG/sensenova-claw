@@ -615,11 +615,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 为通用 secret 机制先落 `SecretStore + SecretRef + SecretRegistry` 三层最稳，后续把 `Config` 解析和 `config_store` 持久化都接到同一抽象上，比在各 API 里散落 `if api_key` 判断更可控。
 - `persist_path_updates()` 这类统一写回入口非常适合承接 secret 逻辑；在这里把 `cfg._secret_store` 回填好，能顺手修复“写入后 reload 读不回 secret”的问题。
 - `/api/config/sections` 一旦开始返回脱敏结构，前端设置页必须同步改成“secret 元数据 + draft/touched”双轨状态；否则保存全量 provider 配置时会把原有 secret 误清空。
+- 明文迁移能力最适合做成独立迁移器（扫描 raw config 的叶子路径，再按 `SecretRegistry` 过滤）；这样 HTTP API 和 CLI 命令都能复用同一份迁移逻辑，行为不会分叉。
 
 失败/风险经验：
 - 当前环境下 `python3 -m pytest` 可用，但 `.venv/bin/python -m pytest` 不一定有 `pytest`；回归命令优先直接用系统 `python3 -m pytest` 更稳。
 - `npx tsc --noEmit -p agentos/app/web/tsconfig.json` 在本环境没有及时返回有效结果，前端静态类型回归不能在这次任务里作为通过依据；需要在本地完整 Node/Next 环境继续确认。
 - 虽然已接入 `python-keyring` 抽象并把默认 store 指向 `KeyringSecretStore`，但真实 keyring backend 可用性仍取决于宿主机环境；当前只完成了进程内/注入式测试，未做真实系统 keyring e2e。
+- 全局 `config = Config()` 这类模块级初始化一旦遇到用户本机已有 `${secret:...}` 配置，会在 import 时就触发 secret 解析；默认 store 不可用时必须先走 `is_available()` 兜底，否则测试导入阶段就会直接崩。
 
 ### 2026-03-21 LLM 管理页补充
 
