@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 
 from agentos.capabilities.tools.registry import ToolRegistry
 from agentos.interfaces.http.tools import router, VALIDATORS
+from agentos.kernel.events.bus import PublicEventBus
 from agentos.platform.config.config import Config
+from agentos.platform.config.config_manager import ConfigManager
 from agentos.platform.secrets.store import InMemorySecretStore
 
 
@@ -30,11 +32,15 @@ def app(tmp_path):
     }
     config_path.write_text(yaml.dump(initial), encoding="utf-8")
 
-    cfg = Config(config_path=config_path)
+    secret_store = InMemorySecretStore()
+    cfg = Config(config_path=config_path, secret_store=secret_store)
+    bus = PublicEventBus()
+    config_manager = ConfigManager(config=cfg, event_bus=bus, secret_store=secret_store)
     app.state.config = cfg
     app.state.tool_registry = ToolRegistry()
     app.state.agentos_home = str(tmp_path)
-    app.state.secret_store = InMemorySecretStore()
+    app.state.secret_store = secret_store
+    app.state.config_manager = config_manager
     return app
 
 
