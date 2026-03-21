@@ -118,8 +118,8 @@ class BusRouter:
         async for event in self._public_bus.subscribe():
             if not event.session_id:
                 continue
-            # system.* 事件不路由到私有总线
-            if event.type.startswith("system."):
+            # system.* 和 config.* 事件不路由到私有总线
+            if event.type.startswith("system.") or event.type.startswith("config."):
                 continue
 
             # 跳过从 PrivateEventBus 回流的事件：
