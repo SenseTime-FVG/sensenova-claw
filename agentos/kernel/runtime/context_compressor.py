@@ -165,25 +165,26 @@ class ContextCompressor:
         provider_name: str,
         model: str,
         agentos_home: str,
-        agent_id: str,
     ):
         self._config = config
         self._llm_factory = llm_factory
         self._provider_name = provider_name
         self._model = model
         self._agentos_home = agentos_home
-        self._agent_id = agent_id
         self._token_counter = TokenCounter()
         self._locks: dict[str, asyncio.Lock] = {}
-        self._compressed_turns: dict[str, set[int]] = {}
 
     def _get_lock(self, session_id: str) -> asyncio.Lock:
         if session_id not in self._locks:
             self._locks[session_id] = asyncio.Lock()
         return self._locks[session_id]
 
-    def _get_save_dir(self) -> str:
-        return str(Path(self._agentos_home) / "agents" / self._agent_id / "sessions")
+    def cleanup_session(self, session_id: str) -> None:
+        """清理会话相关资源（锁），防止内存泄漏。"""
+        self._locks.pop(session_id, None)
+
+    def _get_save_dir(self, agent_id: str) -> str:
+        return str(Path(self._agentos_home) / "agents" / agent_id / "sessions")
 
     def _cfg(self, key: str, default: Any = None) -> Any:
         return self._config.get(f"context_compression.{key}", default)
@@ -192,26 +193,29 @@ class ContextCompressor:
         self,
         session_id: str,
         history: list[dict[str, Any]],
+        agent_id: str = "default",
     ) -> list[dict[str, Any]]:
         """LLM 调用前兜底：检查并压缩，返回处理后的 history"""
         lock = self._get_lock(session_id)
         async with lock:
-            return await self._do_compress(session_id, history)
+            return await self._do_compress(session_id, history, agent_id)
 
     async def compress_async(
         self,
         session_id: str,
         history: list[dict[str, Any]],
+        agent_id: str = "default",
     ) -> list[dict[str, Any]]:
         """轮末异步压缩"""
         lock = self._get_lock(session_id)
         async with lock:
-            return await self._do_compress(session_id, history)
+            return await self._do_compress(session_id, history, agent_id)
 
     async def _do_compress(
         self,
         session_id: str,
         history: list[dict[str, Any]],
+        agent_id: str = "default",
     ) -> list[dict[str, Any]]:
         max_tokens = self._cfg("max_context_tokens", 128000)
         total_tokens = self._token_counter.count_messages(history)
@@ -224,12 +228,12 @@ class ContextCompressor:
             return history
 
         # 第一阶段
-        history = await self._phase1_compress(session_id, history, turns, max_tokens)
+        history = await self._phase1_compress(session_id, history, turns, max_tokens, agent_id)
 
         # 检查第二阶段
         total_tokens = self._token_counter.count_messages(history)
         if total_tokens > max_tokens * self._cfg("phase2_trigger", 0.6):
-            history = await self._phase2_compress(session_id, history, max_tokens)
+            history = await self._phase2_compress(session_id, history, max_tokens, agent_id)
 
         return history
 
@@ -239,25 +243,27 @@ class ContextCompressor:
         history: list[dict[str, Any]],
         turns: list[dict[str, Any]],
         max_tokens: int,
+        agent_id: str = "default",
     ) -> list[dict[str, Any]]:
         """第一阶段：Turn 级压缩
 
         IMPORTANT: 由于压缩会改变 history 长度，需要从前往后逐个处理，
         每次压缩后重新计算后续 turn 的索引偏移。
+        使用 __compressed__ 标记已压缩的 turn，避免基于索引跟踪的问题。
         """
         threshold = max_tokens * self._cfg("phase1_threshold", 0.8)
         user_max = self._cfg("user_input_max_tokens", 1000)
         tool_max = self._cfg("tool_summary_max_tokens", 3000)
 
-        compressed_set = self._compressed_turns.get(session_id, set())
-
         # 从最早的 turn 开始累计 token，找到需要压缩的 turn
+        # 跳过已压缩的 turn（首条消息带有 __compressed__ 标记）
         cumulative = 0
         turns_to_compress: list[int] = []
         for i, turn in enumerate(turns[:-1]):  # 不压缩最后一个 turn
             turn_tokens = self._token_counter.count_messages(turn["messages"])
             cumulative += turn_tokens
-            if i not in compressed_set:
+            first_msg = turn["messages"][0] if turn["messages"] else {}
+            if not first_msg.get("__compressed__"):
                 turns_to_compress.append(i)
             if cumulative > threshold:
                 break
@@ -268,7 +274,7 @@ class ContextCompressor:
         # 从前往后处理，跟踪累积偏移量
         new_history = list(history)
         offset = 0
-        save_dir = self._get_save_dir()
+        save_dir = self._get_save_dir(agent_id)
 
         for turn_idx in turns_to_compress:
             turn = turns[turn_idx]
@@ -291,9 +297,9 @@ class ContextCompressor:
                     summary = await self._llm_summarize(
                         PROMPT_SUMMARIZE_USER_INPUT, user_content, user_max,
                     )
-                    compressed_msgs.append({"role": "user", "content": summary})
+                    compressed_msgs.append({"role": "user", "content": summary, "__compressed__": True})
                 else:
-                    compressed_msgs.append(um)
+                    compressed_msgs.append({**um, "__compressed__": True})
 
             # 压缩 assistant + tool 部分
             if non_user_msgs:
@@ -327,9 +333,6 @@ class ContextCompressor:
             # 更新偏移量
             offset += len(compressed_msgs) - (end - start)
 
-            compressed_set.add(turn_idx)
-
-        self._compressed_turns[session_id] = compressed_set
         return new_history
 
     async def _phase2_compress(
@@ -337,6 +340,7 @@ class ContextCompressor:
         session_id: str,
         history: list[dict[str, Any]],
         max_tokens: int,
+        agent_id: str = "default",
     ) -> list[dict[str, Any]]:
         """第二阶段：合并压缩"""
         chunk_ratio = self._cfg("phase2_chunk_ratio", 0.3)
@@ -369,7 +373,7 @@ class ContextCompressor:
 
         # 合并压缩每个 chunk
         new_history: list[dict[str, Any]] = []
-        save_dir = self._get_save_dir()
+        save_dir = self._get_save_dir(agent_id)
 
         for ci, chunk in enumerate(chunks):
             original_msgs = chunk["messages"]
@@ -400,9 +404,6 @@ class ContextCompressor:
 
         # 追加最后一个 turn
         new_history.extend(last_turn["messages"])
-
-        # 清除压缩标记
-        self._compressed_turns.pop(session_id, None)
 
         return new_history
 

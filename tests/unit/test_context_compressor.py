@@ -205,7 +205,7 @@ class TestPhase1Compression:
         compressor = ContextCompressor(
             config=cfg, llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test", agent_id="default",
+            agentos_home="/tmp/test",
         )
         history = [
             {"role": "user", "content": "Hi"},
@@ -228,7 +228,7 @@ class TestPhase1Compression:
         compressor = ContextCompressor(
             config=cfg, llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test", agent_id="default",
+            agentos_home="/tmp/test",
         )
         history = [
             {"role": "user", "content": "A" * 300},
@@ -258,7 +258,7 @@ class TestPhase1Compression:
         compressor = ContextCompressor(
             config=cfg, llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test", agent_id="default",
+            agentos_home="/tmp/test",
         )
         history = [
             {"role": "user", "content": "A" * 300},
@@ -288,7 +288,7 @@ class TestPhase2Compression:
         compressor = ContextCompressor(
             config=cfg, llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test", agent_id="default",
+            agentos_home="/tmp/test",
         )
         history = []
         for i in range(6):
@@ -316,7 +316,7 @@ class TestPhase2Compression:
         compressor = ContextCompressor(
             config=cfg, llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test", agent_id="default",
+            agentos_home="/tmp/test",
         )
         history = [
             {"role": "user", "content": "Q"},
@@ -349,7 +349,7 @@ class TestReSummarizePath:
         compressor = ContextCompressor(
             config=cfg, llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test", agent_id="default",
+            agentos_home="/tmp/test",
         )
         # max_tokens=5 确保长度 200 的摘要超出限制，触发 re-summarize
         result = await compressor._llm_summarize(
@@ -377,7 +377,7 @@ class TestLLMFailureGracefulDegradation:
         compressor = ContextCompressor(
             config=cfg, llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test", agent_id="default",
+            agentos_home="/tmp/test",
         )
         history = [
             {"role": "user", "content": "A" * 300},
@@ -409,7 +409,7 @@ class TestLastTurnNeverCompressed:
         compressor = ContextCompressor(
             config=cfg, llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test", agent_id="default",
+            agentos_home="/tmp/test",
         )
         last_user_content = "最新的用户问题，绝对不能被压缩"
         last_assistant_content = "最新的助手回答，绝对不能被压缩"
@@ -441,7 +441,7 @@ class TestPhase2AfterPhase1:
         compressor = ContextCompressor(
             config=cfg, llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test", agent_id="default",
+            agentos_home="/tmp/test",
         )
         # 构造足够多的 turn，使第一阶段和第二阶段都会触发
         history = []

@@ -38,7 +38,7 @@ class TestEndToEndCompression:
             config=_make_config(max_tokens=200),
             llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test_integration", agent_id="default",
+            agentos_home="/tmp/test_integration",
         )
 
         history = []
@@ -64,7 +64,7 @@ class TestEndToEndCompression:
             config=_make_config(max_tokens=200),
             llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test_integration2", agent_id="default",
+            agentos_home="/tmp/test_integration2",
         )
 
         history = [
@@ -95,7 +95,7 @@ class TestEndToEndCompression:
             config=_make_config(max_tokens=100),
             llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test_failure", agent_id="default",
+            agentos_home="/tmp/test_failure",
         )
 
         history = [
@@ -118,7 +118,7 @@ class TestEndToEndCompression:
             config=_make_config(max_tokens=100),
             llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test_concurrent", agent_id="default",
+            agentos_home="/tmp/test_concurrent",
         )
 
         history = [

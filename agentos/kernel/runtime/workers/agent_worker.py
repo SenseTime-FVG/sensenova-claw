@@ -241,8 +241,9 @@ class AgentSessionWorker(SessionWorker):
         # 上下文压缩：LLM 调用前兜底
         if self.rt.context_compressor:
             try:
+                _agent_id = self.agent_config.id if self.agent_config else "default"
                 history = await self.rt.context_compressor.compress_if_needed(
-                    self.session_id, history,
+                    self.session_id, history, agent_id=_agent_id,
                 )
                 self.rt.state_store.replace_history(self.session_id, history)
             except Exception:
@@ -434,8 +435,9 @@ class AgentSessionWorker(SessionWorker):
             history = self.rt.state_store.get_session_history(session_id)
             if not history:
                 return
+            _agent_id = self.agent_config.id if self.agent_config else "default"
             compressed = await self.rt.context_compressor.compress_async(
-                session_id, history,
+                session_id, history, agent_id=_agent_id,
             )
             self.rt.state_store.replace_history(session_id, compressed)
         except Exception:

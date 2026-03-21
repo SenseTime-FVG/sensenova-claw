@@ -192,7 +192,6 @@ async def lifespan(app: FastAPI):
         provider_name=default_provider,
         model=default_model,
         agentos_home=agentos_home_str,
-        agent_id="default",
     )
 
     # Runtime 使用 BusRouter（管理者模式）

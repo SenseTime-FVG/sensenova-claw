@@ -87,11 +87,14 @@ class AgentRuntime:
         )
 
     async def _on_session_destroy(self, session_id: str) -> None:
-        """GC 回调：清理 Worker"""
+        """GC 回调：清理 Worker 及相关资源"""
         worker = self._workers.pop(session_id, None)
         if worker:
             await worker.stop()
             logger.info("Cleaned up AgentSessionWorker for session %s", session_id)
+        # 清理上下文压缩器中该会话的锁，防止内存泄漏
+        if self.context_compressor:
+            self.context_compressor.cleanup_session(session_id)
 
     async def spawn_agent_session(
         self,
