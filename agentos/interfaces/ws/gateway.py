@@ -167,7 +167,7 @@ class Gateway:
         """启动 Gateway 和所有 Channel"""
         for channel in self._channels.values():
             await channel.start()
-        self._task = asyncio.create_task(self._loop())
+        self._task = asyncio.create_task(self._event_loop())
         logger.info("Gateway started")
 
     async def stop(self) -> None:
@@ -180,10 +180,17 @@ class Gateway:
             await channel.stop()
         logger.info("Gateway stopped")
 
-    async def _loop(self) -> None:
+    async def _event_loop(self) -> None:
         """订阅 PublicEventBus 并分发事件到对应的 Channel"""
         async for event in self.publisher.bus.subscribe():
-            await self._dispatch_event(event)
+            if event.type.startswith("config."):
+                for channel in self._channels.values():
+                    try:
+                        await channel.send_event(event)
+                    except Exception as exc:
+                        logger.error("Failed to broadcast config event to channel: %s", exc)
+            else:
+                await self._dispatch_event(event)
 
     async def _resolve_channel_by_parent_chain(
         self,

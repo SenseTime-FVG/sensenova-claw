@@ -99,6 +99,9 @@ async def lifespan(app: FastAPI):
     await maintenance.run_maintenance()
 
     bus = PublicEventBus()
+    from agentos.platform.config.config_manager import ConfigManager
+    config_manager = ConfigManager(config=config, event_bus=bus, secret_store=secret_store)
+    config_manager.start_file_watcher()
     publisher = EventPublisher(bus=bus)
     notification_service = NotificationService(bus=bus)
 
@@ -259,6 +262,13 @@ async def lifespan(app: FastAPI):
     await cron_runtime.start()
     await heartbeat_runtime.start()
 
+    # 配置变更监听
+    import asyncio
+    asyncio.create_task(llm_factory.start_config_listener(bus))
+    asyncio.create_task(agent_registry.start_config_listener(bus, config))
+    if memory_manager:
+        asyncio.create_task(memory_manager.start_config_listener(bus, lambda: config.data))
+
     # Token 认证服务（首次生成，后续复用持久化 token）
     auth_service = TokenAuthService(agentos_home=agentos_home)
 
@@ -292,6 +302,7 @@ async def lifespan(app: FastAPI):
     app.state.secret_store = secret_store
     app.state.agentos_home = agentos_home_str
     app.state.market_service = market_service
+    app.state.config_manager = config_manager
 
     # 注册认证路由
     auth_router = create_auth_router(auth_service=auth_service)
@@ -314,7 +325,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        # 关闭顺序：market_service → cron/heartbeat → runtimes → gateway → bus_router → persister
+        # 关闭顺序：config_manager → market_service → cron/heartbeat → runtimes → gateway → bus_router → persister
+        config_manager.stop_file_watcher()
         await market_service.shutdown()
         await cron_runtime.stop()
         await heartbeat_runtime.stop()

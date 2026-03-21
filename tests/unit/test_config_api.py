@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 from agentos.interfaces.http import config_api
 from agentos.interfaces.http.config_api import router
 from agentos.platform.config.config import Config
+from agentos.platform.config.config_manager import ConfigManager
 from agentos.platform.secrets.store import InMemorySecretStore
+from agentos.kernel.events.bus import PublicEventBus
 
 
 @pytest.fixture
@@ -33,8 +35,11 @@ def app(tmp_path):
 
     secret_store = InMemorySecretStore()
     cfg = Config(config_path=config_path, secret_store=secret_store)
+    bus = PublicEventBus()
+    config_manager = ConfigManager(config=cfg, event_bus=bus, secret_store=secret_store)
     app.state.config = cfg
     app.state.secret_store = secret_store
+    app.state.config_manager = config_manager
     return app
 
 
