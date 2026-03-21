@@ -152,11 +152,10 @@ class TestConfigHelpers:
         temp = worker._get_temperature()
         assert isinstance(temp, (int, float))
 
-    def test_get_model_key_fallback_to_legacy_agent_default_model(self, private_bus, runtime):
+    def test_get_model_key_fallback_to_llm_default_model(self, private_bus, runtime):
         original = copy.deepcopy(config.data)
         try:
-            config.data["agent"]["model"] = ""
-            config.data["agent"]["default_model"] = "mock-agent-v1"
+            config.data["llm"]["default_model"] = "mock"
             worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=None)
             assert worker._get_model() == "mock-agent-v1"
             assert worker._get_provider() == "mock"

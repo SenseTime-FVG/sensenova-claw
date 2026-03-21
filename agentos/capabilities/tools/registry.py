@@ -61,7 +61,7 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def _is_llm_exposed(self, tool: Tool) -> bool:
-        provider_name, _model_id = config.resolve_model(config.get("agent.model"))
+        provider_name, _model_id = config.resolve_model(config.get("llm.default_model"))
         if provider_name == "mock":
             return True
         if tool.name in {"serper_search", "brave_search", "baidu_search", "tavily_search"}:

@@ -106,18 +106,21 @@ def persist_path_updates(
     for path, value in updates.items():
         if is_secret_path(path) and secret_store is not None:
             ref = f"agentos/{path}"
-            logger.debug("persist_path_updates secret path: %s value_present=%s", path, bool(value))
             if value:
-                secret_store.set(ref, value)
-                set_nested_value(raw_config, path, build_secret_ref(ref))
+                try:
+                    secret_store.set(ref, value)
+                    set_nested_value(raw_config, path, build_secret_ref(ref))
+                except Exception:
+                    # keyring 不可用时降级为明文写入
+                    logger.warning("secret store 不可用，%s 将明文写入 config.yml", path)
+                    set_nested_value(raw_config, path, value)
             else:
-                existing_raw = get_nested_value(raw_config, path)
-                logger.debug("persist_path_updates clearing secret path: %s existing_raw=%r", path, existing_raw)
-                if isinstance(existing_raw, str) and is_secret_ref(existing_raw):
-                    try:
+                try:
+                    existing_raw = get_nested_value(raw_config, path)
+                    if isinstance(existing_raw, str) and is_secret_ref(existing_raw):
                         secret_store.delete(ref)
-                    except Exception as exc:
-                        logger.warning("删除 secret 失败，按缺失 secret 继续清空配置: %s (%s)", ref, exc)
+                except Exception:
+                    logger.warning("secret store 不可用，跳过删除 %s", path)
                 set_nested_value(raw_config, path, "")
         else:
             set_nested_value(raw_config, path, value)

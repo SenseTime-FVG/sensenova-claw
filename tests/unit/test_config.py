@@ -8,7 +8,6 @@ class TestConfig:
     def test_default_values(self, tmp_path):
         """无 config.yml 时使用默认值"""
         cfg = Config(config_path=tmp_path / "nonexist.yml")
-        assert cfg.get("agent.model") == "mock"
         assert cfg.get("llm.default_model") == "mock"
         assert cfg.get("server.port") == 8000
 
