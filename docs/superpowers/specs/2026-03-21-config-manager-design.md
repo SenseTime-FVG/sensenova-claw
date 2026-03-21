@@ -191,7 +191,7 @@ ConfigManager.update()
 
 **BusRouter 改造** (`kernel/events/router.py`):
 
-在 `_route_loop` 中将 `config.*` 加入跳过列表，避免无意义的私有总线查找：
+在 `_route_loop` 中将 `config.*` 加入跳过列表，避免无意义的私有总线查找（与现有 `system.*` 同一位置）：
 
 ```python
 async def _route_loop(self) -> None:
@@ -206,7 +206,7 @@ async def _route_loop(self) -> None:
 
 **Gateway 广播改造** (`interfaces/ws/gateway.py`):
 
-在 Gateway 的事件循环中（`_event_loop` 方法），新增 `config.*` 前缀的广播分支。完整改造如下：
+在 Gateway 的事件循环中，新增 `config.*` 前缀的广播分支。注意：当前方法名为 `_loop`，改造时重命名为 `_event_loop` 以更清晰地表达职责。完整改造如下：
 
 ```python
 async def _event_loop(self) -> None:
@@ -255,7 +255,7 @@ class ConfigFileWatcher:
    - 相同 → 跳过（无实质变更，或是 ConfigManager 自写）
    - 不同 → 视为外部变更，触发回调，更新 hash
 
-   ConfigManager 写文件后也更新 `_last_written_hash`，watcher 的 `_last_known_hash` 与之同步。这样 ConfigManager 自写的文件，hash 一致，自然跳过。
+   ConfigManager 写文件后更新 `_last_written_hash`。ConfigFileWatcher 独立计算文件 hash 存入 `_last_known_hash`。两者不直接同步——都是从同一个文件独立计算 hash，因此 ConfigManager 自写后两边的 hash 自然一致，watcher 会跳过。
 
 **线程→asyncio 桥接**:
 
@@ -276,6 +276,9 @@ def _on_debounced(self):
         logger.warning("config.yml YAML 解析失败，跳过本次变更")
         return
 
+    # _diff_sections: 将 new_config 与 self._cached_config（上次成功解析的完整配置）
+    # 逐 section 比较，返回 {section_name: {changed_paths}} 字典。
+    # 比较后更新 self._cached_config = new_config。
     changed_sections = self._diff_sections(new_config)
     if changed_sections:
         asyncio.run_coroutine_threadsafe(
