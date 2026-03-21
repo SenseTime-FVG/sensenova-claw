@@ -16,6 +16,7 @@ from agentos.capabilities.memory.index import MemoryIndex, MemorySearchResult
 
 if TYPE_CHECKING:
     from agentos.adapters.llm.factory import LLMFactory
+    from agentos.kernel.events.bus import PublicEventBus
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,15 @@ class MemoryManager:
         self.embedding_service = EmbeddingService(config)
         self.llm_factory = llm_factory
         self._index_lock = asyncio.Lock()
+
+    async def start_config_listener(self, bus: PublicEventBus, config_data_getter) -> None:
+        """订阅 config.updated 事件，memory section 变更时重建 MemoryConfig"""
+        from agentos.kernel.events.types import CONFIG_UPDATED
+        async for event in bus.subscribe():
+            if event.type == CONFIG_UPDATED and event.payload.get("section") == "memory":
+                new_config = MemoryConfig.from_dict(config_data_getter())
+                self.config = new_config
+                logger.info("MemoryManager: config reloaded due to config change")
 
     async def load_memory_md(self, agent_id: str | None = None) -> str | None:
         """读取 MEMORY.md 和 agent 专属记忆，格式化为 system prompt 片段

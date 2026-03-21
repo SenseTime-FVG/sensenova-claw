@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 from agentos.platform.config.config import config
 from agentos.adapters.llm.base import LLMProvider
 from agentos.adapters.llm.providers.mock_provider import MockProvider
+
+logger = logging.getLogger(__name__)
 
 
 def _has_api_key(provider_key: str) -> bool:
@@ -71,3 +74,14 @@ class LLMFactory:
             return provider
 
         return self._providers["mock"]
+
+    async def start_config_listener(self, bus) -> None:
+        """订阅 config.updated 事件，llm section 变更时重建 provider 表"""
+        from agentos.kernel.events.bus import PublicEventBus  # noqa: F401
+        from agentos.kernel.events.types import CONFIG_UPDATED
+        async for event in bus.subscribe():
+            if event.type == CONFIG_UPDATED and event.payload.get("section") == "llm":
+                self._providers = {"mock": MockProvider()}
+                self._lazy.clear()
+                self._register_providers()
+                logger.info("LLMFactory: providers reloaded due to config change")
