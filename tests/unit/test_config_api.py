@@ -2,10 +2,12 @@
 import pytest
 import yaml
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from agentos.interfaces.http import config_api
 from agentos.interfaces.http.config_api import router
 from agentos.platform.config.config import Config
 from agentos.platform.secrets.store import InMemorySecretStore
@@ -118,3 +120,24 @@ def test_update_sections_preserves_other_keys(client, app):
     assert resp.status_code == 200
     written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
     assert written["custom_key"] == "keep_me"
+
+
+def test_list_models_accepts_openai_compatible_provider_keys(client, monkeypatch):
+    """OpenAI 兼容 provider 应透传具体 key，后端仍按 OpenAI 兼容方式处理"""
+    mocked = AsyncMock(return_value=[
+        {"id": "MiniMax-M2.7-highspeed", "owned_by": "minimax"},
+    ])
+    monkeypatch.setattr(config_api, "_list_models_openai", mocked)
+
+    resp = client.post("/api/config/list-models", json={
+        "provider": "minimax",
+        "api_key": "sk-minimax",
+        "base_url": "https://api.minimax.chat/v1",
+    })
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "success": True,
+        "models": [{"id": "MiniMax-M2.7-highspeed", "owned_by": "minimax"}],
+    }
+    mocked.assert_awaited_once_with("sk-minimax", "https://api.minimax.chat/v1")

@@ -31,7 +31,7 @@ class SectionsUpdateBody(BaseModel):
 class ListModelsBody(BaseModel):
     api_key: str
     base_url: str = ""
-    provider: str = "openai"  # 'openai' | 'anthropic' | 'gemini'
+    provider: str = "openai"  # 'openai' | 'anthropic' | 'gemini' | 任意 OpenAI 兼容 provider key
 
 
 class TestLLMBody(BaseModel):
@@ -157,6 +157,7 @@ async def get_llm_presets():
 async def list_models(body: ListModelsBody):
     """通过 OpenAI 兼容的 GET /models 接口获取可用模型列表"""
     try:
+        logger.debug("List models request: provider=%s base_url=%s", body.provider, body.base_url)
         if body.provider == "anthropic":
             models = await _list_models_anthropic(body.api_key, body.base_url)
         else:
