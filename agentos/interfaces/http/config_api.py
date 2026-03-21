@@ -28,6 +28,12 @@ class SectionsUpdateBody(BaseModel):
     plugins: dict[str, Any] | None = None
 
 
+class ListModelsBody(BaseModel):
+    api_key: str
+    base_url: str = ""
+    provider: str = "openai"  # 'openai' | 'anthropic' | 'gemini'
+
+
 class TestLLMBody(BaseModel):
     provider: str       # 'openai' | 'anthropic' | 'gemini'
     api_key: str
@@ -145,6 +151,52 @@ async def get_llm_status(request: Request):
 async def get_llm_presets():
     """返回所有 LLM 提供商预设分类列表，供前端展示使用"""
     return {"categories": LLM_PROVIDER_CATEGORIES}
+
+
+@router.post("/list-models")
+async def list_models(body: ListModelsBody):
+    """通过 OpenAI 兼容的 GET /models 接口获取可用模型列表"""
+    try:
+        if body.provider == "anthropic":
+            models = await _list_models_anthropic(body.api_key, body.base_url)
+        else:
+            models = await _list_models_openai(body.api_key, body.base_url)
+        return {"success": True, "models": models}
+    except Exception as e:
+        logger.warning("List models failed: %s", e)
+        return {"success": False, "error": str(e), "models": []}
+
+
+async def _list_models_openai(api_key: str, base_url: str) -> list[dict]:
+    """通过 OpenAI SDK 的 models.list() 获取模型列表"""
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url or None,
+        timeout=15,
+    )
+    response = await client.models.list()
+    models = []
+    for model in response.data:
+        models.append({"id": model.id, "owned_by": getattr(model, "owned_by", "")})
+    models.sort(key=lambda m: m["id"])
+    return models
+
+
+async def _list_models_anthropic(api_key: str, base_url: str) -> list[dict]:
+    """通过 Anthropic SDK 获取模型列表"""
+    import anthropic
+    client = anthropic.AsyncAnthropic(
+        api_key=api_key,
+        base_url=base_url or None,
+        timeout=15,
+    )
+    response = await client.models.list(limit=100)
+    models = []
+    for model in response.data:
+        models.append({"id": model.id, "owned_by": "anthropic"})
+    models.sort(key=lambda m: m["id"])
+    return models
 
 
 @router.post("/test-llm")

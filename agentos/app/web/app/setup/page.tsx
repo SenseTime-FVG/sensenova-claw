@@ -42,6 +42,11 @@ export default function SetupPage() {
   const [customModelName, setCustomModelName] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
 
+  // 动态模型列表
+  const [fetchedModels, setFetchedModels] = useState<{ id: string; owned_by: string }[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchModelsError, setFetchModelsError] = useState('');
+
   // 提交状态
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -102,12 +107,48 @@ export default function SetupPage() {
     setStep('config');
   };
 
+  // 获取可用模型列表
+  const fetchModelList = async () => {
+    if (!apiKey.trim()) return;
+    setFetchingModels(true);
+    setFetchModelsError('');
+    setFetchedModels([]);
+    try {
+      const resp = await authFetch(`${API_BASE}/api/config/list-models`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: apiKey.trim(),
+          base_url: baseUrl.trim(),
+          provider: selectedCategory?.key === 'anthropic' ? 'anthropic' : 'openai',
+        }),
+      });
+      const data = await resp.json();
+      if (data.success && Array.isArray(data.models) && data.models.length > 0) {
+        setFetchedModels(data.models);
+        // 自动选中第一个模型
+        setSelectedModelKey(data.models[0].id);
+        setUseCustomModel(false);
+      } else {
+        setFetchModelsError(data.error || '未获取到可用模型');
+        setUseCustomModel(true);
+      }
+    } catch {
+      setFetchModelsError('获取模型列表失败，请手动输入');
+      setUseCustomModel(true);
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
   // 从 config 步骤前进到 model 步骤
   const isCustomProvider = selectedProvider?.key === 'custom_openai';
   const handleConfigNext = () => {
     if (!apiKey.trim()) return;
     if (isCustomProvider && !customProviderName.trim()) return;
     setStep('model');
+    // 自动获取模型列表
+    fetchModelList();
   };
 
   // 解析当前选择的 provider/model 信息
@@ -121,9 +162,13 @@ export default function SetupPage() {
     let modelId: string;
     let modelKey: string;
 
-    if (useCustomModel || selectedProvider.models.length === 0) {
+    if (useCustomModel || (fetchedModels.length === 0 && selectedProvider.models.length === 0)) {
       modelId = customModelId.trim();
       modelKey = modelId.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase() || 'custom_model';
+    } else if (fetchedModels.length > 0) {
+      // 从动态获取的模型列表选择
+      modelId = selectedModelKey;
+      modelKey = modelId.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
     } else {
       const found = selectedProvider.models.find(m => m.key === selectedModelKey);
       modelId = found ? found.model_id : selectedModelKey;
@@ -374,31 +419,42 @@ export default function SetupPage() {
             </button>
             <h3 className="text-lg font-medium text-gray-900">选择模型</h3>
 
-            {selectedProvider.models.length > 0 && (
+            {/* 加载中 */}
+            {fetchingModels && (
+              <div className="flex items-center gap-2 px-4 py-3 text-sm text-gray-500">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                正在获取可用模型列表...
+              </div>
+            )}
+
+            {/* 动态获取的模型列表 */}
+            {!fetchingModels && fetchedModels.length > 0 && (
               <div className="space-y-2">
-                {selectedProvider.models.map((model) => (
-                  <label
-                    key={model.key}
-                    className={`flex items-center px-4 py-3 border rounded-md cursor-pointer transition-colors ${
-                      !useCustomModel && selectedModelKey === model.key
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-300 hover:border-blue-300'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="model"
-                      value={model.key}
-                      checked={!useCustomModel && selectedModelKey === model.key}
-                      onChange={() => {
-                        setSelectedModelKey(model.key);
-                        setUseCustomModel(false);
-                      }}
-                      className="mr-3 text-blue-600"
-                    />
-                    <span className="font-medium text-gray-800 text-sm">{model.model_id}</span>
-                  </label>
-                ))}
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  {fetchedModels.map((model) => (
+                    <label
+                      key={model.id}
+                      className={`flex items-center px-4 py-3 border rounded-md cursor-pointer transition-colors ${
+                        !useCustomModel && selectedModelKey === model.id
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-300 hover:border-blue-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="model"
+                        value={model.id}
+                        checked={!useCustomModel && selectedModelKey === model.id}
+                        onChange={() => {
+                          setSelectedModelKey(model.id);
+                          setUseCustomModel(false);
+                        }}
+                        className="mr-3 text-blue-600"
+                      />
+                      <span className="font-medium text-gray-800 text-sm">{model.id}</span>
+                    </label>
+                  ))}
+                </div>
 
                 {/* 自定义模型选项 */}
                 <label
@@ -420,8 +476,21 @@ export default function SetupPage() {
               </div>
             )}
 
-            {/* 自定义模型输入框（无预设模型时始终显示） */}
-            {(useCustomModel || selectedProvider.models.length === 0) && (
+            {/* 获取失败提示 */}
+            {!fetchingModels && fetchedModels.length === 0 && fetchModelsError && (
+              <div className="px-4 py-3 rounded text-sm border bg-yellow-50 border-yellow-200 text-yellow-700">
+                {fetchModelsError}，请手动输入模型 ID
+                <button
+                  onClick={fetchModelList}
+                  className="ml-2 text-blue-600 hover:text-blue-800 underline"
+                >
+                  重试
+                </button>
+              </div>
+            )}
+
+            {/* 自定义模型输入框 */}
+            {(useCustomModel || (!fetchingModels && fetchedModels.length === 0)) && (
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
@@ -472,8 +541,8 @@ export default function SetupPage() {
               <button
                 onClick={handleTest}
                 disabled={
-                  isTesting || isSubmitting ||
-                  (useCustomModel || selectedProvider.models.length === 0
+                  isTesting || isSubmitting || fetchingModels ||
+                  (useCustomModel || (fetchedModels.length === 0 && selectedProvider.models.length === 0)
                     ? !customModelId.trim()
                     : !selectedModelKey)
                 }
