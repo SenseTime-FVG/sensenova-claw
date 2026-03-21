@@ -25,10 +25,53 @@ AgentOS 的安全模块提供 Token 认证、系统路径保护等能力。
 
 AgentOS 采用 Jupyter-lab 风格的 Token 认证：
 
-- 每次启动生成新 token
+- 首次启动生成随机 token，持久化到 `~/.agentos/token` 文件
+- 后续重启自动复用已有 token，无需重新登录
 - HTTP 请求通过 `Authorization: Bearer <token>` 或 URL 参数 `?token=<token>` 认证
-- WebSocket 连接通过首条消息携带 token 认证
+- WebSocket 连接通过 URL 参数 `?token=<token>` 认证
 - 健康检查、认证相关端点在白名单中免认证
+
+---
+
+## Secret Store（API Key 安全存储）
+
+AgentOS 通过 Setup 页面保存 API Key 时，优先使用 **keyring** 安全存储，config.yml 中只写入引用（如 `secret:agentos/llm.providers.openai.api_key`），密钥本身不出现在配置文件中。
+
+如果 keyring 不可用，会自动降级为明文写入 config.yml。
+
+### 启用 keyring
+
+**Linux 服务器（无桌面环境，推荐）：**
+
+```bash
+pip install keyrings.alt
+```
+
+安装后 secret 存储在 `~/.local/share/python_keyring/` 下的加密文件中。
+
+**Linux 桌面环境：**
+
+```bash
+# GNOME
+sudo apt install gnome-keyring libsecret-1-dev
+pip install secretstorage
+
+# KDE
+sudo apt install kwalletmanager
+```
+
+**验证 keyring 是否可用：**
+
+```bash
+python3 -c "
+import keyring
+keyring.set_password('test', 'key', 'value')
+print(keyring.get_password('test', 'key'))  # 输出 value 表示可用
+keyring.delete_password('test', 'key')
+"
+```
+
+安装后重启 AgentOS，新保存的 API Key 会自动使用 keyring 存储。
 
 ---
 
