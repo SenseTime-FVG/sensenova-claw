@@ -183,6 +183,18 @@ async def lifespan(app: FastAPI):
     from agentos.adapters.storage.session_jsonl import SessionJsonlWriter
     jsonl_writer = SessionJsonlWriter(base_dir=agentos_home / "agents")
 
+    # 上下文压缩器
+    from agentos.kernel.runtime.context_compressor import ContextCompressor
+    default_provider, default_model = config.resolve_model()
+    context_compressor = ContextCompressor(
+        config=config,
+        llm_factory=llm_factory,
+        provider_name=default_provider,
+        model=default_model,
+        agentos_home=agentos_home_str,
+        agent_id="default",
+    )
+
     # Runtime 使用 BusRouter（管理者模式）
     agent_runtime = AgentRuntime(
         bus_router=bus_router,
@@ -193,6 +205,7 @@ async def lifespan(app: FastAPI):
         agent_registry=agent_registry,
         memory_manager=memory_manager,
         jsonl_writer=jsonl_writer,
+        context_compressor=context_compressor,
     )
     llm_runtime = LLMRuntime(bus_router=bus_router, factory=llm_factory)
     tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry,

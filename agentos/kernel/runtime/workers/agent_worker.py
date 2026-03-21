@@ -238,6 +238,16 @@ class AgentSessionWorker(SessionWorker):
             self.session_id, self.rt.repo,
         )
 
+        # 上下文压缩：LLM 调用前兜底
+        if self.rt.context_compressor:
+            try:
+                history = await self.rt.context_compressor.compress_if_needed(
+                    self.session_id, history,
+                )
+                self.rt.state_store.replace_history(self.session_id, history)
+            except Exception:
+                logger.warning("上下文压缩失败，使用原始历史 session=%s", self.session_id, exc_info=True)
+
         # v0.6: 加载 MEMORY.md 注入 system prompt
         memory_context = None
         if self.rt.memory_manager:
@@ -394,6 +404,10 @@ class AgentSessionWorker(SessionWorker):
         # 注意：消息已在 _handle_user_input / _handle_llm_result / _handle_tool_result
         # 中增量持久化到 SQLite，此处无需再批量保存
 
+        # 上下文压缩：轮末异步压缩
+        if self.rt.context_compressor:
+            asyncio.create_task(self._compress_history_safe(event.session_id))
+
         await self.bus.publish(
             EventEnvelope(
                 type=AGENT_STEP_COMPLETED,
@@ -413,6 +427,19 @@ class AgentSessionWorker(SessionWorker):
             asyncio.create_task(
                 self._summarize_turn_safe(state.messages, agent_id=agent_id)
             )
+
+    async def _compress_history_safe(self, session_id: str) -> None:
+        """异步执行上下文压缩，不影响主流程。"""
+        try:
+            history = self.rt.state_store.get_session_history(session_id)
+            if not history:
+                return
+            compressed = await self.rt.context_compressor.compress_async(
+                session_id, history,
+            )
+            self.rt.state_store.replace_history(session_id, compressed)
+        except Exception:
+            logger.warning("轮末上下文压缩失败 session=%s", session_id, exc_info=True)
 
     async def _handle_tool_result(self, event: EventEnvelope) -> None:
         """处理工具返回结果，收集结果并在所有工具完成后触发下一轮 LLM 调用"""
