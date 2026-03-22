@@ -119,6 +119,7 @@ def _write_config(
             },
             "default_model": model_key,
         },
+        # 兼容仍读取 agent.model 的旧链路，后续由配置校验提示迁移。
         "agent": {
             "model": model_key,
         },

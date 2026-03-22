@@ -13,7 +13,6 @@ import httpx
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
-from agentos.interfaces.http.config_store import load_raw_config, persist_path_updates
 from agentos.platform.secrets.refs import is_secret_ref
 
 logger = logging.getLogger(__name__)
@@ -94,8 +93,11 @@ def _mask_secret(secret: str | None) -> str | None:
     return f"{secret[:4]}...{secret[-4:]}"
 
 
-def _api_key_status(cfg) -> dict[str, dict[str, Any]]:
-    raw_config = load_raw_config(cfg)
+def _api_key_status(request) -> dict[str, dict[str, Any]]:
+    """获取工具 API key 状态"""
+    cfg = request.app.state.config
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
     result: dict[str, dict[str, Any]] = {}
     for tool_name, spec in TOOL_API_KEY_SPECS.items():
         value = cfg.get(spec["config_path"], "")
@@ -249,7 +251,7 @@ async def toggle_tool(tool_name: str, body: EnablePayload, request: Request):
 @router.get("/api-keys")
 async def get_tool_api_keys(request: Request):
     """返回工具 API key 状态与配置指南。"""
-    return _api_key_status(request.app.state.config)
+    return _api_key_status(request)
 
 
 @router.put("/api-keys")
@@ -265,17 +267,24 @@ async def update_tool_api_keys(body: dict[str, str | None], request: Request):
             raise HTTPException(404, f"Tool API key config not found: {tool_name}")
         path_updates[spec["config_path"]] = api_key or ""
 
+    # Convert flat path_updates to nested dict for ConfigManager
+    tools_nested: dict[str, Any] = {}
+    for path, value in path_updates.items():
+        keys = path.split(".")
+        sub_path = keys[1:]  # Remove "tools." prefix
+        current = tools_nested
+        for k in sub_path[:-1]:
+            current = current.setdefault(k, {})
+        current[sub_path[-1]] = value
+
+    config_manager = request.app.state.config_manager
     try:
-        persist_path_updates(
-            request.app.state.config,
-            path_updates,
-            secret_store=getattr(request.app.state, "secret_store", None),
-        )
+        await config_manager.update("tools", tools_nested)
     except Exception as exc:
         raise HTTPException(500, f"Failed to save API keys: {exc}")
 
     logger.info("Updated tool API keys: %s", list(body.keys()))
-    return {"status": "saved", "api_keys": _api_key_status(request.app.state.config)}
+    return {"status": "saved", "api_keys": _api_key_status(request)}
 
 
 @router.post("/api-keys/{tool_name}/validate")

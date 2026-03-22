@@ -47,6 +47,7 @@ class _SimpleAgentRuntime:
         self.tool_registry = tool_registry
         self.memory_manager = memory_manager
         self.jsonl_writer = None
+        self.context_compressor = None
 
 
 # ── Fixtures ─────────────────────────────────────────────
@@ -126,10 +127,18 @@ class TestConfigHelpers:
     """配置读取辅助方法测试"""
 
     def test_get_provider_from_agent_config(self, private_bus, runtime):
-        # model key "claude-sonnet" → provider 应为 "anthropic"
-        agent_cfg = AgentConfig(id="test", name="test", model="claude-sonnet")
-        worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
-        assert worker._get_provider() == "anthropic"
+        # 显式固定 config，避免受本机 ~/.agentos/config.yml 覆盖影响。
+        original = copy.deepcopy(config.data)
+        try:
+            config.data["llm"]["models"]["claude-sonnet"] = {
+                "provider": "anthropic",
+                "model_id": "claude-sonnet-4-6",
+            }
+            agent_cfg = AgentConfig(id="test", name="test", model="claude-sonnet")
+            worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
+            assert worker._get_provider() == "anthropic"
+        finally:
+            config.data = original
 
     def test_get_provider_fallback_to_global(self, private_bus, runtime):
         worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=None)
@@ -483,6 +492,12 @@ class TestHandleLLMCompleted:
             model="gpt-4o-mini",
             agent_id="planner",
         )
+
+    def test_get_provider_prefers_agent_provider_for_direct_model_id(self, private_bus, runtime):
+        agent_cfg = AgentConfig(id="test", name="test", provider="openai", model="gpt-4o-mini")
+        worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
+        assert worker._get_provider() == "openai"
+        assert worker._get_model() == "gpt-4o-mini"
 
 
 # ── TOOL_CALL_RESULT 处理测试 ─────────────────────────────
