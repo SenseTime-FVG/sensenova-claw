@@ -67,6 +67,41 @@ async def get_llm_presets():
     return {"categories": LLM_PROVIDER_CATEGORIES}
 
 
+@router.get("/required-check")
+async def check_required_config(request: Request):
+    """检查必配项状态：搜索工具（至少一个）、邮箱配置"""
+    cfg = request.app.state.config
+
+    # 搜索工具：serper / brave / baidu / tavily 至少配一个
+    search_keys = [
+        "tools.serper_search.api_key",
+        "tools.brave_search.api_key",
+        "tools.baidu_search.api_key",
+        "tools.tavily_search.api_key",
+    ]
+    search_configured = any(
+        bool(cfg.get(k, "")) and not str(cfg.get(k, "")).startswith("${")
+        for k in search_keys
+    )
+
+    # 邮箱：enabled + smtp_host + username 都有值
+    email_enabled = cfg.get("tools.email.enabled", False)
+    email_smtp = cfg.get("tools.email.smtp_host", "")
+    email_user = cfg.get("tools.email.username", "")
+    email_configured = bool(email_enabled and email_smtp and email_user)
+
+    return {
+        "search_tool": {
+            "configured": search_configured,
+            "message": "搜索工具未配置（serper/brave/baidu/tavily 至少需要配置一个）",
+        },
+        "email": {
+            "configured": email_configured,
+            "message": "邮箱未配置（需要配置 SMTP/IMAP 信息）",
+        },
+    }
+
+
 @router.post("/list-models")
 async def list_models(body: ListModelsBody):
     """通过 OpenAI 兼容的 GET /models 接口获取可用模型列表"""
