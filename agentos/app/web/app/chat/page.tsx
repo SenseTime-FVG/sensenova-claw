@@ -10,7 +10,9 @@ import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { type SessionItem, type ContextFileRef, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
 import { MessageBubble } from '@/components/chat/MessageBubble';
+import { ThinkingProcess } from '@/components/chat/ThinkingProcess';
 import { TypingIndicator } from '@/components/chat/TypingIndicator';
+import { type ChatMessage } from '@/lib/chatTypes';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { InteractionDialog } from '@/components/chat/QuestionDialog';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -142,6 +144,73 @@ function SessionListItem({
       </button>
     </div>
   );
+}
+
+/* ── 消息按 Turn 分组 ── */
+
+type MessageGroup =
+  | { type: 'single'; key: string; messages: ChatMessage[] }
+  | { type: 'turn'; key: string; thinkingSteps: ChatMessage[]; finalAnswer: ChatMessage | null };
+
+/**
+ * 将扁平消息列表按 turn 分组：
+ * - user/system 消息作为独立项
+ * - 同一 turn 内的 assistant+tool 消息分组：
+ *   最后一条 assistant 是最终回复，其余（中间 assistant thinking + tool calls）归入思考过程
+ */
+function groupMessagesByTurn(messages: ChatMessage[]): MessageGroup[] {
+  const groups: MessageGroup[] = [];
+  let i = 0;
+
+  while (i < messages.length) {
+    const msg = messages[i];
+
+    // user/system 消息独立显示
+    if (msg.role === 'user' || msg.role === 'system') {
+      groups.push({ type: 'single', key: msg.id, messages: [msg] });
+      i++;
+      continue;
+    }
+
+    // 从当前位置收集连续的 assistant+tool 消息（同一个 turn 的处理过程）
+    const turnMessages: ChatMessage[] = [];
+    while (i < messages.length && (messages[i].role === 'assistant' || messages[i].role === 'tool')) {
+      turnMessages.push(messages[i]);
+      i++;
+    }
+
+    // 只有一条 assistant 且没有 tool → 直接显示
+    if (turnMessages.length === 1 && turnMessages[0].role === 'assistant') {
+      groups.push({ type: 'single', key: turnMessages[0].id, messages: turnMessages });
+      continue;
+    }
+
+    // 多条消息：找最后一条 assistant 作为最终回复
+    let finalAnswerIdx = -1;
+    for (let j = turnMessages.length - 1; j >= 0; j--) {
+      if (turnMessages[j].role === 'assistant') {
+        finalAnswerIdx = j;
+        break;
+      }
+    }
+
+    const finalAnswer = finalAnswerIdx >= 0 ? turnMessages[finalAnswerIdx] : null;
+    const thinkingSteps = turnMessages.filter((_, idx) => idx !== finalAnswerIdx);
+
+    // 如果没有 thinking steps，直接显示 final answer
+    if (thinkingSteps.length === 0 && finalAnswer) {
+      groups.push({ type: 'single', key: finalAnswer.id, messages: [finalAnswer] });
+    } else {
+      groups.push({
+        type: 'turn',
+        key: `turn-${turnMessages[0].id}`,
+        thinkingSteps,
+        finalAnswer,
+      });
+    }
+  }
+
+  return groups;
 }
 
 /* ── 主体内容 ── */
@@ -458,7 +527,22 @@ function ChatContent() {
                   </div>
                 ) : (
                   <>
-                    {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+                    {groupMessagesByTurn(messages).map(group => {
+                      if (group.type === 'single') {
+                        return <MessageBubble key={group.messages[0].id} msg={group.messages[0]} />;
+                      }
+                      // turn group: thinking steps + final answer
+                      return (
+                        <div key={group.key}>
+                          {group.thinkingSteps.length > 0 && (
+                            <ThinkingProcess steps={group.thinkingSteps} />
+                          )}
+                          {group.finalAnswer && (
+                            <MessageBubble msg={group.finalAnswer} />
+                          )}
+                        </div>
+                      );
+                    })}
                     {isTyping && <TypingIndicator />}
                     <div ref={chatEndRef} />
                   </>
