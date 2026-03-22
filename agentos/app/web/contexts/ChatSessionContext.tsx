@@ -137,6 +137,25 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       if (turnId) {
         const existingIndex = prev.findIndex((item) => item.role === 'assistant' && item.turnId === turnId);
         if (existingIndex !== -1) {
+          // 检查该 assistant 消息之后是否已经插入了 tool 消息
+          // 如果有，说明这是新一轮 LLM 调用的结果，应创建新消息而不是覆盖
+          const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
+          if (hasToolAfter) {
+            // 新一轮 LLM 思考，追加新的 assistant 消息
+            return [
+              ...prev,
+              {
+                id: makeId(),
+                role: 'assistant' as const,
+                content,
+                timestamp: Date.now(),
+                turnId: `${turnId}_${Date.now()}`,
+                thinkingContent,
+                thinkingState,
+              },
+            ];
+          }
+          // 同一轮 LLM 调用的流式更新，原地更新
           const next = [...prev];
           next[existingIndex] = {
             ...next[existingIndex],
