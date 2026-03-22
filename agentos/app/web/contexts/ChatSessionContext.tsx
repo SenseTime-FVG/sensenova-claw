@@ -394,12 +394,19 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       }
       case 'turn_completed': {
         const final = String(payload.final_response || '');
-        const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
         if (final) {
-          upsertAssistantMessage({
-            turnId,
-            content: final,
-            thinkingState: 'collapsed',
+          // 更新最后一条 assistant 消息的内容（不创建新消息）
+          setMessages((prev) => {
+            // 从后往前找最后一条 assistant 消息
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i].role === 'assistant') {
+                const next = [...prev];
+                next[i] = { ...next[i], content: final, thinkingState: 'collapsed' };
+                return next;
+              }
+            }
+            // 没找到 assistant 消息（理论上不会发生），追加一条
+            return [...prev, { id: makeId(), role: 'assistant', content: final, timestamp: Date.now() }];
           });
         }
         setIsTyping(false);
