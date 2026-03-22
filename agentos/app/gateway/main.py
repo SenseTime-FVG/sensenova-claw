@@ -237,7 +237,7 @@ async def lifespan(app: FastAPI):
     await gateway.start()
 
     # v0.8: Cron 定时任务 + Heartbeat 心跳巡检
-    cron_runtime = CronRuntime(bus=bus, repo=repo, gateway=gateway, notification_service=notification_service)
+    cron_runtime = CronRuntime(bus=bus, repo=repo, gateway=gateway, notification_service=notification_service, agent_runtime=agent_runtime)
     heartbeat_runtime = HeartbeatRuntime(bus=bus, repo=repo, notification_service=notification_service)
     if config.get("cron.enabled", True):
         tool_registry.register(CronTool(cron_runtime))

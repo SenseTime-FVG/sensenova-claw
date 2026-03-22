@@ -571,3 +571,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `agentos` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
 - 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `AGENTOS_REPO_REF`。
+
+### 2026-03-20 办公 Team 覆盖评估补充
+
+成功经验：
+- 办公 team 当前主链路是清晰的：`office-main` 负责编排，`search-agent / ppt-agent / data-analyst / doc-organizer / email-agent` 负责专业任务；`can_send_message_to` 为空在运行时代表“可发给所有启用 agent”，不是禁用协作。
+- 根配置里 `serper_search` 与飞书插件都已开启，搜索调研与飞书文档读写更接近“当前可用能力”，不只是设计文档里的预留项。
+- PPT 体系现在应按“HTML slides 工件流”理解，不是原生 `.pptx`；评估办公覆盖时，把它归类为“汇报材料生成”更准确。
+
+失败/风险经验：
+- `send_message` 会受 `max_send_depth` 约束；当前 `ppt-agent / data-analyst / doc-organizer / email-agent / search-agent` 都配置为 `1`，这意味着子 agent 会话里基本无法再继续新建子会话，设计文档里的“subagent 互相委托”在现配置下并不稳。
+- `doc-organizer` 配置里写的是 `feishu-wiki` / `feishu-drive`，但实际工具名是 `feishu_wiki` / `feishu_drive`；由于 prompt 注入按精确工具名过滤，这两项能力可能实现了却不会正确暴露给模型。
+- 运行时实际加载的 skills 比配置声明少：`paddleocr-doc-parsing`、`openai-whisper-api`、`mineru-document-extractor-choice` 等并未都进入默认 skill 注册表，扫描 PDF / OCR / 音频转写场景不能按 prompt 文案直接视为已覆盖。
+- `tools.email.enabled=true` 不等于邮件可用；如果 `EMAIL_USERNAME` / `EMAIL_PASSWORD` 没有实际注入，邮件工具会在运行时直接报“配置不完整”。
+- 当前权限配置只自动放行 `low`；而 `send_message`、`write_file`、`feishu_doc`、`send_email`、`download_attachment`、`cron_manage` 等常见办公动作都是 `medium` 或更高，真实体验更像“半自动办公助手”而不是全自动流水线。

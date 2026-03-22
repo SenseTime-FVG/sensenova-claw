@@ -24,17 +24,30 @@ class SendMessageTool(Tool):
     description = (
         "向指定 Agent 发送消息。"
         "可新建子会话发起任务，也可复用已有子会话继续对话。"
+        "支持 targets 参数同时向多个 Agent 并行发送消息。"
     )
     parameters = {
         "type": "object",
         "properties": {
             "target_agent": {
                 "type": "string",
-                "description": "目标 Agent 的 ID",
+                "description": "目标 Agent 的 ID（单目标模式）",
             },
             "message": {
                 "type": "string",
-                "description": "要发送的消息内容",
+                "description": "要发送的消息内容（单目标模式）",
+            },
+            "targets": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "target_agent": {"type": "string", "description": "目标 Agent ID"},
+                        "message": {"type": "string", "description": "消息内容"},
+                    },
+                    "required": ["target_agent", "message"],
+                },
+                "description": "多目标并行模式：同时向多个 Agent 发送消息，全部完成后返回结果集。与 target_agent+message 互斥。",
             },
             "session_id": {
                 "type": "string",
@@ -55,7 +68,7 @@ class SendMessageTool(Tool):
                 "description": "可选。失败后的自动重试次数，默认使用系统配置。",
             },
         },
-        "required": ["target_agent", "message"],
+        "required": [],
     }
     risk_level = ToolRiskLevel.MEDIUM
 
@@ -76,6 +89,59 @@ class SendMessageTool(Tool):
         self._default_max_retries = default_max_retries
 
     async def execute(self, **kwargs: Any) -> Any:
+        # 多目标并行模式
+        targets = kwargs.get("targets")
+        if targets and isinstance(targets, list) and len(targets) > 0:
+            return await self._execute_parallel(targets, kwargs)
+
+        # 单目标模式（原有逻辑）
+        return await self._execute_single(kwargs)
+
+    async def _execute_parallel(self, targets: list[dict], kwargs: dict[str, Any]) -> Any:
+        """多目标并行执行：同时向多个 Agent 发送消息，全部完成后返回结果集。"""
+        if len(targets) < 2:
+            # 只有一个目标时退化为单目标模式
+            single = dict(kwargs)
+            single["target_agent"] = targets[0].get("target_agent", "")
+            single["message"] = targets[0].get("message", "")
+            single.pop("targets", None)
+            return await self._execute_single(single)
+
+        timeout_seconds = kwargs.get("timeout_seconds") or self._timeout
+
+        async def _send_one(target: dict) -> dict[str, Any]:
+            single_kwargs = dict(kwargs)
+            single_kwargs["target_agent"] = target.get("target_agent", "")
+            single_kwargs["message"] = target.get("message", "")
+            single_kwargs["mode"] = "sync"
+            single_kwargs["timeout_seconds"] = timeout_seconds
+            single_kwargs.pop("targets", None)
+            single_kwargs.pop("session_id", None)  # 并行模式不支持复用会话
+            try:
+                result = await self._execute_single(single_kwargs)
+                return {
+                    "target_agent": target.get("target_agent", ""),
+                    "status": "completed",
+                    "result": result,
+                }
+            except Exception as exc:
+                return {
+                    "target_agent": target.get("target_agent", ""),
+                    "status": "failed",
+                    "error": str(exc),
+                }
+
+        logger.info(
+            "send_message parallel: %d targets [%s]",
+            len(targets),
+            ", ".join(t.get("target_agent", "?") for t in targets),
+        )
+
+        results = await asyncio.gather(*[_send_one(t) for t in targets])
+        return list(results)
+
+    async def _execute_single(self, kwargs: dict[str, Any]) -> Any:
+        """单目标执行（原有逻辑）。"""
         target_id = str(kwargs.get("target_agent", "")).strip()
         message = str(kwargs.get("message", "")).strip()
         child_session_id = kwargs.get("session_id")
