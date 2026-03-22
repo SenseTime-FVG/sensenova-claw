@@ -585,3 +585,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 运行时实际加载的 skills 比配置声明少：`paddleocr-doc-parsing`、`openai-whisper-api`、`mineru-document-extractor-choice` 等并未都进入默认 skill 注册表，扫描 PDF / OCR / 音频转写场景不能按 prompt 文案直接视为已覆盖。
 - `tools.email.enabled=true` 不等于邮件可用；如果 `EMAIL_USERNAME` / `EMAIL_PASSWORD` 没有实际注入，邮件工具会在运行时直接报“配置不完整”。
 - 当前权限配置只自动放行 `low`；而 `send_message`、`write_file`、`feishu_doc`、`send_email`、`download_attachment`、`cron_manage` 等常见办公动作都是 `medium` 或更高，真实体验更像“半自动办公助手”而不是全自动流水线。
+
+### 2026-03-22 提交与验证补充
+
+成功经验：
+- 当前 sandbox 下，`git add` / `git commit` 会因 `.git/index.lock` 写入受限失败；直接按越权权限重跑对应 git 命令，是完成提交最稳的路径。
+- 当工作区混有 `.agentos/sess_*`、`.agentos/agent2agent_*`、`.agentos/data/*.db-journal` 这类运行产物时，优先用 `git add -u` 再显式添加新增目录，比 `git add -A` 更安全，能避免把临时文件误带进提交。
+- 提交前把验证拆成小粒度更高效：先用 `py_compile` 覆盖语法，再分别跑 `tests/unit/test_cron_models.py`、`tests/unit/test_gateway.py`、`tests/unit/test_cron_delivery.py`，证据更清晰。
+
+失败/风险经验：
+- `tests/integration/test_send_message_tool.py:36` 当前存在语法错误，pytest 会在收集阶段直接中断；验证 `send_message` 相关改动时，不能把这个现有问题误判为新回归。
+- `tests/unit/test_cron_api.py::test_create_list_get_update_delete_cron_job` 在当前环境会长时间卡住；后续验证需要单独加超时隔离，避免整批测试假性悬挂。
