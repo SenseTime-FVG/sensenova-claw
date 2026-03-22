@@ -65,7 +65,8 @@ def _save_llm_debug(
     if error:
         record["error"] = error
 
-    filepath = out_dir / f"{llm_call_id}.json"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filepath = out_dir / f"llm_{ts}_{llm_call_id}.json"
     try:
         filepath.write_text(
             json.dumps(record, ensure_ascii=False, indent=2),
