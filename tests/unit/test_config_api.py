@@ -154,3 +154,62 @@ def test_get_secret_rejects_non_secret_path(client):
     """非敏感路径不能通过 reveal API 读取。"""
     resp = client.get("/api/config/secret", params={"path": "agent.model"})
     assert resp.status_code == 400
+
+
+def test_update_single_provider_and_rename_models(client, app):
+    """单项更新 provider 时允许改名，并联动迁移其下模型的 provider 引用。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["providers"]["openai"]["base_url"] = "https://api.openai.com/v1"
+    raw["llm"]["providers"]["openai"]["timeout"] = 60
+    raw["llm"]["providers"]["openai"]["max_retries"] = 3
+    raw["llm"]["models"]["gpt-4o-mini"] = {
+        "provider": "openai",
+        "model_id": "gpt-4o-mini",
+        "timeout": 60,
+        "max_output_tokens": 8192,
+    }
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.put("/api/config/llm/providers/openai", json={
+        "name": "openai-compatible",
+        "base_url": "https://proxy.example.com/v1",
+        "timeout": 90,
+        "max_retries": 5,
+    })
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert "openai-compatible" in written["llm"]["providers"]
+    assert "openai" not in written["llm"]["providers"]
+    assert written["llm"]["providers"]["openai-compatible"]["base_url"] == "https://proxy.example.com/v1"
+    assert written["llm"]["models"]["gpt-4o-mini"]["provider"] == "openai-compatible"
+
+
+def test_update_single_model_and_rename_default_model(client, app):
+    """单项更新 llm 时允许改名，并联动 default_model。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["models"]["gpt-4o-mini"] = {
+        "provider": "openai",
+        "model_id": "gpt-4o-mini",
+        "timeout": 60,
+        "max_output_tokens": 8192,
+    }
+    raw["llm"]["default_model"] = "gpt-4o-mini"
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.put("/api/config/llm/models/gpt-4o-mini", json={
+        "name": "gpt-4.1-mini",
+        "provider": "openai",
+        "model_id": "gpt-4.1-mini",
+        "timeout": 75,
+        "max_output_tokens": 16384,
+    })
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert "gpt-4.1-mini" in written["llm"]["models"]
+    assert "gpt-4o-mini" not in written["llm"]["models"]
+    assert written["llm"]["models"]["gpt-4.1-mini"]["model_id"] == "gpt-4.1-mini"
+    assert written["llm"]["default_model"] == "gpt-4.1-mini"

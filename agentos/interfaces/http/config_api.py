@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
-from agentos.interfaces.http.config_store import load_raw_config, persist_path_updates
+from agentos.interfaces.http.config_store import load_raw_config, persist_path_updates, persist_section_updates
 from agentos.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
 from agentos.platform.secrets.migration import migrate_plaintext_secrets
 from agentos.platform.secrets.refs import is_secret_ref
@@ -40,6 +40,22 @@ class TestLLMBody(BaseModel):
     api_key: str
     base_url: str = ""
     model_id: str
+
+
+class ProviderUpdateBody(BaseModel):
+    name: str | None = None
+    api_key: str | None = None
+    base_url: str = ""
+    timeout: int = 60
+    max_retries: int = 3
+
+
+class ModelUpdateBody(BaseModel):
+    name: str | None = None
+    provider: str
+    model_id: str
+    timeout: int = 60
+    max_output_tokens: int = 8192
 
 
 @router.get("/secret")
@@ -115,6 +131,115 @@ async def update_config_sections(body: SectionsUpdateBody, request: Request):
             raw=deepcopy(raw_config.get(key, {})),
         )
     return {"status": "saved", "sections": result}
+
+
+@router.put("/llm/providers/{provider_name}")
+async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, request: Request):
+    cfg = request.app.state.config
+    secret_store = getattr(request.app.state, "secret_store", None)
+    raw_config = load_raw_config(cfg)
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    providers = deepcopy(llm_section.get("providers", {}))
+    models = deepcopy(llm_section.get("models", {}))
+
+    if provider_name not in providers:
+        raise HTTPException(404, f"Provider 不存在: {provider_name}")
+
+    next_name = (body.name or provider_name).strip().lower()
+    if not next_name:
+        raise HTTPException(400, "Provider 名称不能为空")
+    if next_name != provider_name and next_name in providers:
+        raise HTTPException(400, f"Provider 已存在: {next_name}")
+
+    existing = providers.pop(provider_name)
+    provider_payload = {
+        "base_url": body.base_url,
+        "timeout": body.timeout,
+        "max_retries": body.max_retries,
+    }
+    providers[next_name] = provider_payload
+    llm_section["providers"] = providers
+
+    if next_name != provider_name:
+        for model in models.values():
+            if isinstance(model, dict) and model.get("provider") == provider_name:
+                model["provider"] = next_name
+        llm_section["models"] = models
+
+    if body.api_key is not None:
+        api_key_path = f"llm.providers.{next_name}.api_key"
+        try:
+            persist_path_updates(
+                cfg,
+                {api_key_path: body.api_key},
+                secret_store=secret_store,
+            )
+        except Exception as exc:
+            raise HTTPException(500, f"写入配置文件失败: {exc}")
+        raw_config = load_raw_config(cfg)
+        llm_section = deepcopy(raw_config.get("llm", {}))
+        providers = deepcopy(llm_section.get("providers", {}))
+        providers[next_name] = {
+            **providers.get(next_name, {}),
+            **provider_payload,
+        }
+        llm_section["providers"] = providers
+    else:
+        current_raw = existing if isinstance(existing, dict) else {}
+        if "api_key" in current_raw:
+            provider_payload["api_key"] = current_raw["api_key"]
+            providers[next_name] = provider_payload
+            llm_section["providers"] = providers
+
+    try:
+        data = persist_section_updates(cfg, {"llm": llm_section})
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
+
+    return {"status": "saved", "provider": _sanitize_section(
+        path=f"llm.providers.{next_name}",
+        resolved=deepcopy(data.get("llm", {}).get("providers", {}).get(next_name, {})),
+        raw=deepcopy(load_raw_config(cfg).get("llm", {}).get("providers", {}).get(next_name, {})),
+    )}
+
+
+@router.put("/llm/models/{model_name}")
+async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Request):
+    cfg = request.app.state.config
+    raw_config = load_raw_config(cfg)
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    models = deepcopy(llm_section.get("models", {}))
+
+    if model_name not in models:
+        raise HTTPException(404, f"Model 不存在: {model_name}")
+
+    next_name = (body.name or model_name).strip()
+    if not next_name:
+        raise HTTPException(400, "Model 名称不能为空")
+    if next_name != model_name and next_name in models:
+        raise HTTPException(400, f"Model 已存在: {next_name}")
+
+    models.pop(model_name)
+    models[next_name] = {
+        "provider": body.provider,
+        "model_id": body.model_id,
+        "timeout": body.timeout,
+        "max_output_tokens": body.max_output_tokens,
+    }
+    llm_section["models"] = models
+    if llm_section.get("default_model") == model_name:
+        llm_section["default_model"] = next_name
+
+    try:
+        data = persist_section_updates(cfg, {"llm": llm_section})
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
+
+    return {"status": "saved", "model": _sanitize_section(
+        path=f"llm.models.{next_name}",
+        resolved=deepcopy(data.get("llm", {}).get("models", {}).get(next_name, {})),
+        raw=deepcopy(load_raw_config(cfg).get("llm", {}).get("models", {}).get(next_name, {})),
+    )}
 
 
 def _flatten_updates(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:

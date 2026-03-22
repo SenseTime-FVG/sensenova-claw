@@ -28,6 +28,20 @@ interface ModelConfig {
   max_output_tokens: number;
 }
 
+interface ProviderDraft extends ProviderConfig {
+  name: string;
+}
+
+interface ModelDraft extends ModelConfig {
+  name: string;
+}
+
+interface GlobalDraft {
+  providers: Record<string, ProviderDraft>;
+  models: Record<string, ModelDraft>;
+  defaultModel: string;
+}
+
 export default function LlmsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -44,8 +58,14 @@ export default function LlmsPage() {
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
   const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<string, boolean>>({});
   const [apiKeyLoading, setApiKeyLoading] = useState<Record<string, boolean>>({});
+  const [editingAll, setEditingAll] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  const [editingModel, setEditingModel] = useState<string | null>(null);
+  const [providerDrafts, setProviderDrafts] = useState<Record<string, ProviderDraft>>({});
+  const [modelDrafts, setModelDrafts] = useState<Record<string, ModelDraft>>({});
+  const [globalDraft, setGlobalDraft] = useState<GlobalDraft | null>(null);
 
-  useEffect(() => {
+  const loadConfig = () => {
     authFetch(`${API_BASE}/api/config/sections`)
       .then((res) => res.json())
       .then((data) => {
@@ -60,26 +80,105 @@ export default function LlmsPage() {
         setExpandedProviders(
           Object.fromEntries(Object.keys(realProviders).map((name) => [name, false])),
         );
+        setEditingAll(false);
+        setEditingProvider(null);
+        setEditingModel(null);
+        setProviderDrafts({});
+        setModelDrafts({});
+        setGlobalDraft(null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadConfig();
   }, []);
 
-  const providerNames = useMemo(() => Object.keys(providers), [providers]);
-  const modelNames = useMemo(() => Object.keys(models), [models]);
+  const activeProviders = useMemo(() => {
+    if (!editingAll || !globalDraft) return providers;
+    return Object.fromEntries(Object.entries(globalDraft.providers).map(([key, draft]) => [
+      key,
+      {
+        api_key: draft.api_key,
+        api_key_meta: draft.api_key_meta,
+        api_key_touched: draft.api_key_touched,
+        base_url: draft.base_url,
+        timeout: draft.timeout,
+        max_retries: draft.max_retries,
+      },
+    ]));
+  }, [editingAll, globalDraft, providers]);
+
+  const activeModels = useMemo(() => {
+    if (!editingAll || !globalDraft) return models;
+    return Object.fromEntries(Object.entries(globalDraft.models).map(([key, draft]) => [
+      key,
+      {
+        provider: draft.provider,
+        model_id: draft.model_id,
+        timeout: draft.timeout,
+        max_output_tokens: draft.max_output_tokens,
+      },
+    ]));
+  }, [editingAll, globalDraft, models]);
+
+  const providerNames = useMemo(() => Object.keys(activeProviders), [activeProviders]);
+  const modelNames = useMemo(() => Object.keys(activeModels), [activeModels]);
 
   const groupedModels = useMemo(() => {
     return providerNames.reduce<Record<string, string[]>>((acc, providerName) => {
-      acc[providerName] = modelNames.filter((modelName) => models[modelName]?.provider === providerName);
+      acc[providerName] = modelNames.filter((modelName) => activeModels[modelName]?.provider === providerName);
       return acc;
     }, {});
-  }, [modelNames, models, providerNames]);
+  }, [activeModels, modelNames, providerNames]);
+
+  const cloneProvidersToDrafts = (source: Record<string, ProviderConfig>): Record<string, ProviderDraft> => (
+    Object.fromEntries(Object.entries(source).map(([name, provider]) => [
+      name,
+      { ...provider, name },
+    ]))
+  );
+
+  const cloneModelsToDrafts = (source: Record<string, ModelConfig>): Record<string, ModelDraft> => (
+    Object.fromEntries(Object.entries(source).map(([name, model]) => [
+      name,
+      { ...model, name },
+    ]))
+  );
+
+  const isProviderEditable = (name: string) => editingAll || editingProvider === name;
+  const isModelEditable = (name: string) => editingAll || editingModel === name;
+
+  const getProviderDraft = (name: string): ProviderDraft => {
+    if (editingAll && globalDraft) return globalDraft.providers[name];
+    return providerDrafts[name] || { ...providers[name], name };
+  };
+
+  const getModelDraft = (name: string): ModelDraft => {
+    if (editingAll && globalDraft) return globalDraft.models[name];
+    return modelDrafts[name] || { ...models[name], name };
+  };
 
   const updateProviderField = (name: string, field: keyof ProviderConfig, value: string | number) => {
-    setProviders((prev) => ({
+    if (editingAll && globalDraft) {
+      setGlobalDraft({
+        ...globalDraft,
+        providers: {
+          ...globalDraft.providers,
+          [name]: {
+            ...globalDraft.providers[name],
+            [field]: value,
+            ...(field === 'api_key' ? { api_key_touched: true } : {}),
+          },
+        },
+      });
+      return;
+    }
+    setProviderDrafts((prev) => ({
       ...prev,
       [name]: {
-        ...prev[name],
+        ...(prev[name] || { ...providers[name], name }),
         [field]: value,
         ...(field === 'api_key' ? { api_key_touched: true } : {}),
       },
@@ -136,20 +235,33 @@ export default function LlmsPage() {
 
   const addProvider = () => {
     const name = newProviderName.trim().toLowerCase();
-    if (!name || providers[name]) {
+    const providerSource = editingAll && globalDraft ? globalDraft.providers : cloneProvidersToDrafts(providers);
+    if (!name || providerSource[name]) {
       return;
     }
-    setProviders((prev) => ({
-      ...prev,
-      [name]: {
+    const nextProvider: ProviderDraft = {
         api_key: '',
         api_key_meta: null,
         api_key_touched: true,
         base_url: '',
         timeout: 60,
         max_retries: 3,
-      },
-    }));
+        name,
+      };
+    if (editingAll && globalDraft) {
+      setGlobalDraft({
+        ...globalDraft,
+        providers: {
+          ...globalDraft.providers,
+          [name]: nextProvider,
+        },
+      });
+    } else {
+      setProviders((prev) => ({
+        ...prev,
+        [name]: nextProvider,
+      }));
+    }
     setShowNewProvider(false);
     setNewProviderName('');
     setExpandedProviders((prev) => ({ ...prev, [name]: true }));
@@ -161,33 +273,61 @@ export default function LlmsPage() {
     }
 
     const removedModels = groupedModels[name] || [];
-    setProviders((prev) => {
-      const next = { ...prev };
-      delete next[name];
-      return next;
-    });
-    setModels((prev) => {
-      const next = { ...prev };
+    if (editingAll && globalDraft) {
+      const nextProviders = { ...globalDraft.providers };
+      delete nextProviders[name];
+      const nextModels = { ...globalDraft.models };
       removedModels.forEach((modelName) => {
-        delete next[modelName];
+        delete nextModels[modelName];
       });
-      return next;
-    });
+      setGlobalDraft({
+        ...globalDraft,
+        providers: nextProviders,
+        models: nextModels,
+        defaultModel: removedModels.includes(globalDraft.defaultModel) ? '' : globalDraft.defaultModel,
+      });
+    } else {
+      setProviders((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+      setModels((prev) => {
+        const next = { ...prev };
+        removedModels.forEach((modelName) => {
+          delete next[modelName];
+        });
+        return next;
+      });
+    }
     setExpandedProviders((prev) => {
       const next = { ...prev };
       delete next[name];
       return next;
     });
-    if (removedModels.includes(defaultModel)) {
+    if (!editingAll && removedModels.includes(defaultModel)) {
       setDefaultModel('');
     }
   };
 
   const updateModelField = (name: string, field: keyof ModelConfig, value: string | number) => {
-    setModels((prev) => ({
+    if (editingAll && globalDraft) {
+      setGlobalDraft({
+        ...globalDraft,
+        models: {
+          ...globalDraft.models,
+          [name]: {
+            ...globalDraft.models[name],
+            [field]: value,
+          },
+        },
+      });
+      return;
+    }
+    setModelDrafts((prev) => ({
       ...prev,
       [name]: {
-        ...prev[name],
+        ...(prev[name] || { ...models[name], name }),
         [field]: value,
       },
     }));
@@ -214,19 +354,31 @@ export default function LlmsPage() {
 
   const addModel = (providerName: string) => {
     const nextName = (newModelDrafts[providerName] || '').trim();
-    if (!nextName || models[nextName]) {
+    const modelSource = editingAll && globalDraft ? globalDraft.models : cloneModelsToDrafts(models);
+    if (!nextName || modelSource[nextName]) {
       return;
     }
-
-    setModels((prev) => ({
-      ...prev,
-      [nextName]: {
+    const nextModel: ModelDraft = {
         provider: providerName,
         model_id: '',
         timeout: 60,
         max_output_tokens: 8192,
-      },
-    }));
+        name: nextName,
+      };
+    if (editingAll && globalDraft) {
+      setGlobalDraft({
+        ...globalDraft,
+        models: {
+          ...globalDraft.models,
+          [nextName]: nextModel,
+        },
+      });
+    } else {
+      setModels((prev) => ({
+        ...prev,
+        [nextName]: nextModel,
+      }));
+    }
     setNewModelDrafts((prev) => ({ ...prev, [providerName]: '' }));
     setOpenNewModelForms((prev) => ({ ...prev, [providerName]: false }));
   };
@@ -235,12 +387,22 @@ export default function LlmsPage() {
     if (!confirm(`确定删除 llm "${name}" 吗？`)) {
       return;
     }
-    setModels((prev) => {
-      const next = { ...prev };
-      delete next[name];
-      return next;
-    });
-    if (defaultModel === name) {
+    if (editingAll && globalDraft) {
+      const nextModels = { ...globalDraft.models };
+      delete nextModels[name];
+      setGlobalDraft({
+        ...globalDraft,
+        models: nextModels,
+        defaultModel: globalDraft.defaultModel === name ? '' : globalDraft.defaultModel,
+      });
+    } else {
+      setModels((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+    }
+    if (!editingAll && defaultModel === name) {
       setDefaultModel('');
     }
   };
@@ -249,10 +411,12 @@ export default function LlmsPage() {
     setSaving(true);
     setSaveMsg('');
     try {
+      const sourceProviders = editingAll && globalDraft ? globalDraft.providers : cloneProvidersToDrafts(providers);
+      const sourceModels = editingAll && globalDraft ? globalDraft.models : cloneModelsToDrafts(models);
       const llm = {
-        providers: buildProviderPayloads(providers),
-        models,
-        default_model: defaultModel,
+        providers: buildProviderPayloadsFromDrafts(sourceProviders),
+        models: buildModelPayloadsFromDrafts(sourceModels),
+        default_model: editingAll && globalDraft ? globalDraft.defaultModel : defaultModel,
       };
       const res = await authFetch(`${API_BASE}/api/config/sections`, {
         method: 'PUT',
@@ -265,6 +429,7 @@ export default function LlmsPage() {
         return;
       }
       setSaveMsg('已保存');
+      loadConfig();
     } catch {
       setSaveMsg('保存失败');
     } finally {
@@ -298,14 +463,37 @@ export default function LlmsPage() {
     try {
       setApiKeyLoading((prev) => ({ ...prev, [providerName]: true }));
       const secret = await revealSecret(`llm.providers.${providerName}.api_key`);
-      setProviders((prev) => ({
-        ...prev,
-        [providerName]: {
-          ...prev[providerName],
-          api_key: secret.value || '',
-          api_key_touched: false,
-        },
-      }));
+      if (editingAll && globalDraft) {
+        setGlobalDraft({
+          ...globalDraft,
+          providers: {
+            ...globalDraft.providers,
+            [providerName]: {
+              ...globalDraft.providers[providerName],
+              api_key: secret.value || '',
+              api_key_touched: false,
+            },
+          },
+        });
+      } else if (editingProvider === providerName) {
+        setProviderDrafts((prev) => ({
+          ...prev,
+          [providerName]: {
+            ...(prev[providerName] || { ...providers[providerName], name: providerName }),
+            api_key: secret.value || '',
+            api_key_touched: false,
+          },
+        }));
+      } else {
+        setProviders((prev) => ({
+          ...prev,
+          [providerName]: {
+            ...prev[providerName],
+            api_key: secret.value || '',
+            api_key_touched: false,
+          },
+        }));
+      }
       setApiKeyVisibility((prev) => ({ ...prev, [providerName]: true }));
     } catch (error) {
       setSaveMsg(error instanceof Error ? error.message : '读取 secret 失败');
@@ -316,19 +504,121 @@ export default function LlmsPage() {
 
   const providerApiKeyValue = (providerName: string) => {
     const provider = providers[providerName];
-    if (!provider) {
+    const currentProvider = editingAll && globalDraft ? globalDraft.providers[providerName] : editingProvider === providerName ? getProviderDraft(providerName) : provider;
+    if (!currentProvider) {
       return '';
     }
-    if (provider.api_key_touched) {
-      return provider.api_key;
+    if (currentProvider.api_key_touched) {
+      return currentProvider.api_key;
     }
     if (apiKeyVisibility[providerName]) {
-      return provider.api_key;
+      return currentProvider.api_key;
     }
-    if (provider.api_key_meta?.configured) {
+    if (currentProvider.api_key_meta?.configured) {
       return '******';
     }
-    return provider.api_key;
+    return currentProvider.api_key;
+  };
+
+  const startEditProvider = (name: string) => {
+    setEditingModel(null);
+    setEditingProvider(name);
+    setProviderDrafts((prev) => ({
+      ...prev,
+      [name]: { ...providers[name], name },
+    }));
+  };
+
+  const cancelEditProvider = (name: string) => {
+    setEditingProvider((prev) => (prev === name ? null : prev));
+    setProviderDrafts((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+  };
+
+  const saveProvider = async (name: string) => {
+    const draft = getProviderDraft(name);
+    setSaveMsg('');
+    const payload: Record<string, unknown> = {
+      name: draft.name,
+      base_url: draft.base_url,
+      timeout: draft.timeout,
+      max_retries: draft.max_retries,
+    };
+    if (draft.api_key_touched) {
+      payload.api_key = draft.api_key;
+    }
+    const res = await authFetch(`${API_BASE}/api/config/llm/providers/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setSaveMsg(err.detail || '保存失败');
+      return;
+    }
+    setSaveMsg('已保存');
+    loadConfig();
+  };
+
+  const startEditModel = (name: string) => {
+    setEditingProvider(null);
+    setEditingModel(name);
+    setModelDrafts((prev) => ({
+      ...prev,
+      [name]: { ...models[name], name },
+    }));
+  };
+
+  const cancelEditModel = (name: string) => {
+    setEditingModel((prev) => (prev === name ? null : prev));
+    setModelDrafts((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+  };
+
+  const saveModel = async (name: string) => {
+    const draft = getModelDraft(name);
+    setSaveMsg('');
+    const res = await authFetch(`${API_BASE}/api/config/llm/models/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: draft.name,
+        provider: draft.provider,
+        model_id: draft.model_id,
+        timeout: draft.timeout,
+        max_output_tokens: draft.max_output_tokens,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setSaveMsg(err.detail || '保存失败');
+      return;
+    }
+    setSaveMsg('已保存');
+    loadConfig();
+  };
+
+  const startEditAll = () => {
+    setEditingProvider(null);
+    setEditingModel(null);
+    setEditingAll(true);
+    setGlobalDraft({
+      providers: cloneProvidersToDrafts(providers),
+      models: cloneModelsToDrafts(models),
+      defaultModel,
+    });
+  };
+
+  const cancelEditAll = () => {
+    setEditingAll(false);
+    setGlobalDraft(null);
   };
 
   if (loading) {
@@ -360,16 +650,38 @@ export default function LlmsPage() {
                 {saveMsg}
               </span>
             )}
-            <button
-              type="button"
-              data-testid="save-llm-config"
-              onClick={saveConfig}
-              disabled={saving}
-              className="flex items-center gap-2.5 rounded-xl bg-primary px-6 py-2.5 font-bold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-50"
-            >
-              {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-              保存
-            </button>
+            {editingAll ? (
+              <>
+                <button
+                  type="button"
+                  data-testid="cancel-edit-all-llm-config"
+                  onClick={cancelEditAll}
+                  className="rounded-xl border border-border px-4 py-2.5 text-sm font-bold text-foreground transition-all hover:bg-muted/40"
+                >
+                  取消编辑所有
+                </button>
+                <button
+                  type="button"
+                  data-testid="save-all-llm-config"
+                  onClick={saveConfig}
+                  disabled={saving}
+                  className="flex items-center gap-2.5 rounded-xl bg-primary px-6 py-2.5 font-bold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                  保存所有
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                data-testid="edit-all-llm-config"
+                onClick={startEditAll}
+                disabled={Boolean(editingProvider || editingModel)}
+                className="rounded-xl bg-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-50"
+              >
+                编辑所有配置
+              </button>
+            )}
           </div>
         </div>
 
@@ -384,9 +696,13 @@ export default function LlmsPage() {
             <CardContent className="space-y-3">
               <select
                 data-testid="default-model-select"
-                value={defaultModel}
-                onChange={(e) => setDefaultModel(e.target.value)}
-                className="w-full cursor-pointer rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                value={editingAll && globalDraft ? globalDraft.defaultModel : defaultModel}
+                onChange={(e) => {
+                  if (!editingAll || !globalDraft) return;
+                  setGlobalDraft({ ...globalDraft, defaultModel: e.target.value });
+                }}
+                disabled={!editingAll}
+                className="w-full cursor-pointer rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
                 <option value="">未设置</option>
                 {modelNames.map((name) => (
@@ -442,6 +758,36 @@ export default function LlmsPage() {
                   >
                     <Trash2 size={16} />
                   </button>
+                  {editingAll ? null : editingProvider === providerName ? (
+                    <>
+                      <button
+                        type="button"
+                        data-testid={`provider-cancel-${providerName}`}
+                        onClick={() => cancelEditProvider(providerName)}
+                        className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40"
+                      >
+                        取消编辑
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`provider-save-${providerName}`}
+                        onClick={() => void saveProvider(providerName)}
+                        className="rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
+                      >
+                        保存
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      data-testid={`provider-edit-${providerName}`}
+                      onClick={() => startEditProvider(providerName)}
+                      disabled={Boolean(editingModel)}
+                      className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
+                    >
+                      编辑
+                    </button>
+                  )}
                 </div>
 
                 {expandedProviders[providerName] && (
@@ -449,9 +795,25 @@ export default function LlmsPage() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <FieldInput
                         label="Provider 名称"
-                        value={providerName}
+                        value={getProviderDraft(providerName).name}
                         dataTestId={`provider-name-input-${providerName}`}
-                        onChange={(value) => renameProvider(providerName, value)}
+                        disabled={!isProviderEditable(providerName)}
+                        onChange={(value) => {
+                          if (editingAll && globalDraft) {
+                            setGlobalDraft({
+                              ...globalDraft,
+                              providers: {
+                                ...globalDraft.providers,
+                                [providerName]: { ...globalDraft.providers[providerName], name: value },
+                              },
+                            });
+                            return;
+                          }
+                          setProviderDrafts((prev) => ({
+                            ...prev,
+                            [providerName]: { ...(prev[providerName] || { ...providers[providerName], name: providerName }), name: value },
+                          }));
+                        }}
                       />
                       <div className="space-y-1.5">
                         <label className="text-xs font-semibold text-muted-foreground">API Key</label>
@@ -461,7 +823,8 @@ export default function LlmsPage() {
                             value={providerApiKeyValue(providerName)}
                             data-testid={`provider-api-key-input-${providerName}`}
                             onChange={(e) => updateProviderField(providerName, 'api_key', e.target.value)}
-                            className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            disabled={!isProviderEditable(providerName)}
+                            className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                           />
                           <button
                             type="button"
@@ -481,22 +844,25 @@ export default function LlmsPage() {
                       </div>
                       <FieldInput
                         label="Base URL"
-                        value={providers[providerName]?.base_url || ''}
+                        value={getProviderDraft(providerName).base_url || ''}
                         dataTestId={`provider-base-url-input-${providerName}`}
+                        disabled={!isProviderEditable(providerName)}
                         onChange={(value) => updateProviderField(providerName, 'base_url', value)}
                       />
                       <FieldInput
                         label="Timeout (s)"
                         type="number"
-                        value={String(providers[providerName]?.timeout || 60)}
+                        value={String(getProviderDraft(providerName).timeout || 60)}
                         dataTestId={`provider-timeout-input-${providerName}`}
+                        disabled={!isProviderEditable(providerName)}
                         onChange={(value) => updateProviderField(providerName, 'timeout', parseInt(value, 10) || 60)}
                       />
                       <FieldInput
                         label="Max Retries"
                         type="number"
-                        value={String(providers[providerName]?.max_retries || 3)}
+                        value={String(getProviderDraft(providerName).max_retries || 3)}
                         dataTestId={`provider-max-retries-input-${providerName}`}
+                        disabled={!isProviderEditable(providerName)}
                         onChange={(value) => updateProviderField(providerName, 'max_retries', parseInt(value, 10) || 3)}
                       />
                     </div>
@@ -549,32 +915,81 @@ export default function LlmsPage() {
                             <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
                               <FieldInput
                                 label="LLM 名称"
-                                value={modelName}
+                                value={getModelDraft(modelName).name}
                                 dataTestId={`llm-name-input-${modelName}`}
-                                onChange={(value) => renameModel(modelName, value)}
+                                disabled={!isModelEditable(modelName)}
+                                onChange={(value) => {
+                                  if (editingAll && globalDraft) {
+                                    setGlobalDraft({
+                                      ...globalDraft,
+                                      models: {
+                                        ...globalDraft.models,
+                                        [modelName]: { ...globalDraft.models[modelName], name: value },
+                                      },
+                                    });
+                                    return;
+                                  }
+                                  setModelDrafts((prev) => ({
+                                    ...prev,
+                                    [modelName]: { ...(prev[modelName] || { ...models[modelName], name: modelName }), name: value },
+                                  }));
+                                }}
                               />
                               <FieldInput
                                 label="Model ID"
-                                value={models[modelName]?.model_id || ''}
+                                value={getModelDraft(modelName).model_id || ''}
                                 dataTestId={`llm-model-id-input-${modelName}`}
+                                disabled={!isModelEditable(modelName)}
                                 onChange={(value) => updateModelField(modelName, 'model_id', value)}
                               />
                               <FieldInput
                                 label="Timeout (s)"
                                 type="number"
-                                value={String(models[modelName]?.timeout || 60)}
+                                value={String(getModelDraft(modelName).timeout || 60)}
                                 dataTestId={`llm-timeout-input-${modelName}`}
+                                disabled={!isModelEditable(modelName)}
                                 onChange={(value) => updateModelField(modelName, 'timeout', parseInt(value, 10) || 60)}
                               />
                               <FieldInput
                                 label="Max Output Tokens"
                                 type="number"
-                                value={String(models[modelName]?.max_output_tokens || 8192)}
+                                value={String(getModelDraft(modelName).max_output_tokens || 8192)}
                                 dataTestId={`llm-max-output-tokens-input-${modelName}`}
+                                disabled={!isModelEditable(modelName)}
                                 onChange={(value) => updateModelField(modelName, 'max_output_tokens', parseInt(value, 10) || 8192)}
                               />
                             </div>
                             <div className="flex items-start justify-end md:justify-center">
+                              {editingAll ? null : editingModel === modelName ? (
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    data-testid={`llm-cancel-${modelName}`}
+                                    onClick={() => cancelEditModel(modelName)}
+                                    className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40"
+                                  >
+                                    取消编辑
+                                  </button>
+                                  <button
+                                    type="button"
+                                    data-testid={`llm-save-${modelName}`}
+                                    onClick={() => void saveModel(modelName)}
+                                    className="rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
+                                  >
+                                    保存
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  data-testid={`llm-edit-${modelName}`}
+                                  onClick={() => startEditModel(modelName)}
+                                  disabled={Boolean(editingProvider)}
+                                  className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
+                                >
+                                  编辑
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 data-testid={`delete-llm-button-${modelName}`}
@@ -668,6 +1083,7 @@ function FieldInput({
   type = 'text',
   dataTestId,
   placeholder,
+  disabled = false,
 }: {
   label: string;
   value: string;
@@ -675,6 +1091,7 @@ function FieldInput({
   type?: string;
   dataTestId?: string;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="space-y-1.5">
@@ -684,8 +1101,9 @@ function FieldInput({
         value={value}
         data-testid={dataTestId}
         placeholder={placeholder}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
       />
     </div>
   );
@@ -744,5 +1162,37 @@ function buildProviderPayloads(providers: Record<string, ProviderConfig>): Recor
       }
       return [name, payload];
     }),
+  );
+}
+
+function buildProviderPayloadsFromDrafts(providers: Record<string, ProviderDraft>): Record<string, Record<string, unknown>> {
+  return buildProviderPayloads(
+    Object.fromEntries(
+      Object.entries(providers).map(([_, draft]) => [
+        draft.name,
+        {
+          api_key: draft.api_key,
+          api_key_meta: draft.api_key_meta,
+          api_key_touched: draft.api_key_touched,
+          base_url: draft.base_url,
+          timeout: draft.timeout,
+          max_retries: draft.max_retries,
+        },
+      ]),
+    ),
+  );
+}
+
+function buildModelPayloadsFromDrafts(models: Record<string, ModelDraft>): Record<string, ModelConfig> {
+  return Object.fromEntries(
+    Object.entries(models).map(([_, draft]) => [
+      draft.name,
+      {
+        provider: draft.provider,
+        model_id: draft.model_id,
+        timeout: draft.timeout,
+        max_output_tokens: draft.max_output_tokens,
+      },
+    ]),
   );
 }
