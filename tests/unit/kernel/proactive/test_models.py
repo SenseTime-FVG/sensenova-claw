@@ -71,3 +71,61 @@ def test_parse_duration_ms():
     assert parse_duration_ms("2d") == 172_800_000
     with pytest.raises(ValueError):
         parse_duration_ms("invalid")
+
+
+# ---------- DB 操作测试 ----------
+
+import asyncio
+from agentos.adapters.storage.repository import Repository
+
+
+@pytest.fixture
+async def repo(tmp_path):
+    r = Repository(str(tmp_path / "test.db"))
+    await r.init()
+    return r
+
+
+@pytest.mark.asyncio
+async def test_create_and_get_proactive_job(repo):
+    job = ProactiveJob(
+        id="pj-1", name="测试", agent_id="proactive-agent",
+        trigger=TimeTrigger(cron="0 9 * * *"),
+        task=ProactiveTask(prompt="test"),
+        delivery=DeliveryConfig(channels=["web"]),
+        safety=SafetyConfig(), state=JobState(),
+    )
+    row = job_to_db_row(job)
+    await repo.create_proactive_job(row)
+    result = await repo.get_proactive_job("pj-1")
+    assert result is not None
+    assert result["name"] == "测试"
+
+
+@pytest.mark.asyncio
+async def test_list_enabled_proactive_jobs(repo):
+    for i in range(3):
+        job = ProactiveJob(
+            id=f"pj-{i}", name=f"job-{i}", agent_id="proactive-agent",
+            enabled=(i != 1),
+            trigger=TimeTrigger(cron="0 9 * * *"),
+            task=ProactiveTask(prompt="test"),
+            delivery=DeliveryConfig(channels=["web"]),
+            safety=SafetyConfig(), state=JobState(),
+        )
+        await repo.create_proactive_job(job_to_db_row(job))
+    jobs = await repo.list_proactive_jobs(enabled_only=True)
+    assert len(jobs) == 2
+
+
+@pytest.mark.asyncio
+async def test_create_and_list_proactive_runs(repo):
+    await repo.create_proactive_run({
+        "id": "pr-1", "job_id": "pj-1", "session_id": "s-1",
+        "status": "running", "triggered_by": "time",
+        "started_at_ms": 1000, "completed_at_ms": None,
+        "result_summary": None, "error_message": None,
+    })
+    runs = await repo.list_proactive_runs("pj-1")
+    assert len(runs) == 1
+    assert runs[0]["status"] == "running"
