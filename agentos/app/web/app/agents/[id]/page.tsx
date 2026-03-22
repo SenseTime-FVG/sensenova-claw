@@ -18,7 +18,6 @@ interface AgentDetail {
   name: string;
   status: string;
   description: string;
-  provider: string;
   model: string;
   systemPrompt: string;
   temperature: number;
@@ -252,7 +251,7 @@ export default function AgentDetailPage() {
             </CardHeader>
             <CardContent>
               <div className={`text-4xl font-black capitalize ${agent.status === 'active' ? 'text-green-600 dark:text-green-500' : ''}`}>{agent.status}</div>
-              <p className="text-sm font-medium text-muted-foreground mt-2">{agent.provider} / {agent.model}</p>
+              <p className="text-sm font-medium text-muted-foreground mt-2">{agent.model}</p>
             </CardContent>
           </Card>
           <Card className="shadow-lg border-border/60">
