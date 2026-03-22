@@ -155,8 +155,9 @@ type MessageGroup =
 /**
  * 将扁平消息列表按 turn 分组：
  * - user/system 消息作为独立项
- * - 同一 turn 内的 assistant+tool 消息分组：
- *   最后一条 assistant 是最终回复，其余（中间 assistant thinking + tool calls）归入思考过程
+ * - 连续的 assistant+tool 消息分组为一个 turn：
+ *   所有中间 assistant thinking、tool calls、以及最终 assistant 的 thinking
+ *   都归入思考过程块；只有最终 assistant 的 answer 内容正常展示
  */
 function groupMessagesByTurn(messages: ChatMessage[]): MessageGroup[] {
   const groups: MessageGroup[] = [];
@@ -179,8 +180,9 @@ function groupMessagesByTurn(messages: ChatMessage[]): MessageGroup[] {
       i++;
     }
 
-    // 只有一条 assistant 且没有 tool → 直接显示
-    if (turnMessages.length === 1 && turnMessages[0].role === 'assistant') {
+    // 只有一条 assistant 且没有 tool 且没有 thinking → 直接显示
+    if (turnMessages.length === 1 && turnMessages[0].role === 'assistant' &&
+        !turnMessages[0].thinkingContent) {
       groups.push({ type: 'single', key: turnMessages[0].id, messages: turnMessages });
       continue;
     }
@@ -195,17 +197,33 @@ function groupMessagesByTurn(messages: ChatMessage[]): MessageGroup[] {
     }
 
     const finalAnswer = finalAnswerIdx >= 0 ? turnMessages[finalAnswerIdx] : null;
-    const thinkingSteps = turnMessages.filter((_, idx) => idx !== finalAnswerIdx);
 
-    // 如果没有 thinking steps，直接显示 final answer
-    if (thinkingSteps.length === 0 && finalAnswer) {
-      groups.push({ type: 'single', key: finalAnswer.id, messages: [finalAnswer] });
+    // 思考过程 = 所有非 finalAnswer 的消息 + finalAnswer 的 thinking 部分
+    // 如果 finalAnswer 有 thinkingContent，为它创建一个"仅 thinking"的虚拟消息放入思考过程
+    const thinkingSteps: ChatMessage[] = turnMessages.filter((_, idx) => idx !== finalAnswerIdx);
+    if (finalAnswer?.thinkingContent) {
+      thinkingSteps.push({
+        ...finalAnswer,
+        id: `${finalAnswer.id}_thinking`,
+        content: '',  // 不显示 answer 内容，只显示 thinking
+      });
+    }
+
+    // finalAnswer 去掉 thinking（已放入思考过程块）
+    const cleanFinalAnswer = finalAnswer ? {
+      ...finalAnswer,
+      thinkingContent: undefined,
+      thinkingState: undefined,
+    } : null;
+
+    if (thinkingSteps.length === 0 && cleanFinalAnswer) {
+      groups.push({ type: 'single', key: cleanFinalAnswer.id, messages: [cleanFinalAnswer] });
     } else {
       groups.push({
         type: 'turn',
         key: `turn-${turnMessages[0].id}`,
         thinkingSteps,
-        finalAnswer,
+        finalAnswer: cleanFinalAnswer,
       });
     }
   }
