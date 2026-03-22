@@ -36,13 +36,13 @@ ProactiveRuntime
   │     ├── 条件评估（可选，LLM 轻量调用）
   │     └── _spawn_session → 创建 proactive-agent 隔离会话
   ├── _spawn_session(job)
-  │     ├── 创建 proactive-agent 会话
+  │     ├── 委托 AgentRuntime.spawn_agent_session() 创建隔离会话
   │     ├── 注入 task.prompt + memory（可选）+ safety 约束
   │     ├── proactive-agent LLM 推理，决定是否 send_message 给其他 agent
-  │     └── 监听 AGENT_STEP_COMPLETED 等待完成
+  │     └── 监听 AGENT_STEP_COMPLETED 等待完成（带 max_duration_ms 超时）
   ├── _deliver_result(job, result)
-  │     ├── Web: 通过 WebSocketChannel 推送 proactive.result 事件
-  │     └── 飞书: 通过 FeishuChannel 发送卡片消息
+  │     ├── 通过 NotificationService 统一投递（支持 Web/飞书/浏览器通知等）
+  │     └── 同时发布 proactive.job_completed 事件到 PublicEventBus
   └── stop() → 取消 timer，清理运行中会话
 ```
 
@@ -86,9 +86,10 @@ class ProactiveJob:
 ```python
 @dataclass
 class TimeTrigger:
-    """时间触发：cron 表达式或固定间隔"""
+    """时间触发：cron 表达式"""
     kind: Literal["time"] = "time"
-    schedule: str                    # cron 表达式 "0 9 * * *" 或间隔 "every 30m"
+    cron: str | None = None          # cron 表达式 "0 9 * * *"（与 EveryTrigger 二选一）
+    every: str | None = None         # 间隔 "30m"（与 cron 二选一）
     condition: str | None = None     # 可选前置条件（自然语言，由 LLM 评估）
 
 @dataclass
@@ -97,7 +98,7 @@ class EventTrigger:
     kind: Literal["event"] = "event"
     event_type: str                  # 如 "email.received", "agent.step_completed"
     filter: dict | None = None       # payload 过滤条件 {"source": "email-agent"}
-    debounce_ms: int = 5000          # 防抖：5秒内重复事件只触发一次
+    debounce_ms: int = 5000          # 防抖（leading-edge：立即触发，抑制后续）
     condition: str | None = None     # 可选附加条件
 
 @dataclass
@@ -134,12 +135,94 @@ class SafetyConfig:
 
 @dataclass
 class JobState:
-    last_triggered_at: int | None = None
-    last_completed_at: int | None = None
+    last_triggered_at_ms: int | None = None   # 毫秒时间戳，与 cron_jobs 一致
+    last_completed_at_ms: int | None = None
     last_status: str = "idle"        # idle | running | success | failed
     consecutive_errors: int = 0
     total_runs: int = 0
-    next_trigger_at: int | None = None
+    next_trigger_at_ms: int | None = None
+```
+
+## 与 CronRuntime 的关系说明
+
+ProactiveRuntime 与 CronRuntime 独立运行，理由：
+
+1. CronRuntime 的 CronJob 模型（`SystemEventPayload` / `AgentTurnPayload`）面向简单的"到时间 → 发事件/执行 turn"场景，ProactiveJob 需要条件评估、事件触发、安全约束等额外能力，硬塞进 CronJob 会让其职责膨胀
+2. CronRuntime 的 Phase 2（isolated session）虽然预留了接口，但其设计意图是"cron 触发一个简单的 agent turn"，而非"cron 触发一个有条件评估、多 agent 协作、结果投递的完整 proactive 流程"
+3. 两者共享 `agentos/kernel/scheduler/scheduler.py` 中的 cron 解析和 next-fire 计算函数，避免重复实现调度算法
+
+如果未来 ProactiveRuntime 的时间触发场景与 CronRuntime 高度重合，可以考虑将 CronRuntime 的调度引擎抽取为共享的 `SchedulerEngine`，两个 Runtime 各自使用。
+
+## 条件评估机制
+
+### LLM 条件评估
+
+条件评估使用 proactive-agent 配置的 LLM provider/model（与任务执行使用同一模型）。
+
+**Prompt 模板：**
+```
+你是一个条件评估器。根据以下信息判断条件是否满足。
+条件: {condition}
+当前时间: {now}
+上下文: {context}  # 可选，如最近事件摘要
+
+请只回答 YES 或 NO，不要解释。
+```
+
+**失败处理：**
+- LLM 调用失败（网络错误、超时）→ 视为条件不满足，跳过本次执行，不计入 consecutive_errors
+- LLM 返回非 YES/NO → 视为条件不满足，记录警告日志
+
+**成本控制：**
+- ConditionTrigger 的 `check_interval` 最小值限制为 `5m`（每天最多 288 次评估）
+- 条件评估使用短 prompt（< 200 tokens），单次成本极低
+- 可在 config.yml 中配置 `proactive.condition_model` 使用更便宜的模型（如 gpt-4o-mini）
+
+## SafetyConfig 执行机制
+
+### 工具白名单/黑名单
+
+在 `_spawn_session` 时，将 SafetyConfig 注入到会话的 AgentConfig 中：
+- `allowed_tools` → 覆盖 AgentConfig.tools，只暴露白名单中的工具给 LLM
+- `blocked_tools` → 从 AgentConfig.tools 中移除黑名单工具
+- 两者互斥，优先使用 `allowed_tools`
+
+### 调用限制
+
+在 AgentSessionWorker 中新增计数器，由 ProactiveRuntime 通过会话元数据注入限制值：
+
+```python
+# 会话元数据中注入
+session_meta = {
+    "proactive_job_id": job.id,
+    "max_tool_calls": safety.max_tool_calls,
+    "max_llm_calls": safety.max_llm_calls,
+}
+```
+
+AgentSessionWorker 在每次 LLM 调用和工具调用前检查计数器：
+- `tool_call_count >= max_tool_calls` → 发布 AGENT_STEP_COMPLETED（附带 exceeded_limit 标记）
+- `llm_call_count >= max_llm_calls` → 同上
+
+### 超时控制
+
+ProactiveRuntime 在 `_spawn_session` 后启动 `asyncio.wait_for(timeout=max_duration_ms/1000)`：
+- 超时 → 发布 `USER_TURN_CANCEL_REQUESTED` 事件终止会话
+- AgentSessionWorker 收到取消事件后清理并发布 AGENT_STEP_COMPLETED
+
+## 事件类型
+
+新增以下事件类型到 `agentos/kernel/events/types.py`：
+
+```python
+# Proactive 事件
+PROACTIVE_JOB_TRIGGERED = "proactive.job_triggered"     # job 被触发
+PROACTIVE_JOB_STARTED = "proactive.job_started"          # 会话创建，开始执行
+PROACTIVE_JOB_COMPLETED = "proactive.job_completed"      # 执行完成（成功）
+PROACTIVE_JOB_FAILED = "proactive.job_failed"            # 执行失败
+PROACTIVE_JOB_SKIPPED = "proactive.job_skipped"          # 条件不满足，跳过
+PROACTIVE_CONDITION_EVALUATED = "proactive.condition_evaluated"  # 条件评估完成
+PROACTIVE_RESULT = "proactive.result"                    # 结果投递
 ```
 
 ## 执行流程
@@ -152,7 +235,7 @@ class JobState:
    ├── 检查 enabled=true, state.last_status != "running"
    ├── 有 condition? → LLM 轻量评估（本例无 condition，跳过）
 3. _spawn_session(job)
-   ├── 创建 proactive-agent 隔离会话 session_id=uuid
+   ├── 委托 AgentRuntime.spawn_agent_session() 创建隔离会话
    ├── 构建上下文: proactive-agent system_prompt + task.prompt + safety 约束
    ├── 发布 USER_INPUT 事件到 PublicEventBus
 4. proactive-agent LLM 推理
@@ -193,7 +276,7 @@ class JobState:
 
 ### 结果投递
 
-Web 推送 — 新增事件类型 `proactive.result`：
+Web 推送 — 通过 NotificationService 统一投递，同时发布 `proactive.result` 事件：
 ```python
 EventEnvelope(
     type="proactive.result",
@@ -206,7 +289,7 @@ EventEnvelope(
 )
 ```
 
-飞书推送 — 复用 FeishuChannel 发送能力，格式化为飞书卡片消息。
+飞书推送 — 通过 NotificationService 路由到 FeishuChannel，格式化为飞书卡片消息。
 
 ### 错误处理
 
@@ -271,8 +354,8 @@ CREATE TABLE proactive_jobs (
     delivery_config TEXT NOT NULL,   -- JSON
     safety_config TEXT NOT NULL,     -- JSON
     source TEXT DEFAULT 'config',   -- 'config' | 'conversation'
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    created_at_ms INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL
 );
 
 CREATE TABLE proactive_runs (
@@ -281,8 +364,8 @@ CREATE TABLE proactive_runs (
     session_id TEXT,                 -- 执行会话 ID
     status TEXT NOT NULL,            -- 'running' | 'success' | 'failed' | 'skipped'
     triggered_by TEXT NOT NULL,      -- 'time' | 'event' | 'condition'
-    started_at INTEGER NOT NULL,
-    completed_at INTEGER,
+    started_at_ms INTEGER NOT NULL,
+    completed_at_ms INTEGER,
     result_summary TEXT,
     error_message TEXT,
     FOREIGN KEY (job_id) REFERENCES proactive_jobs(id)
@@ -312,9 +395,9 @@ await heartbeat_runtime.start()
 
 注册到 ToolRegistry，供 proactive-agent 和其他 agent 使用：
 
-- `create_proactive_job`: 创建 proactive 任务
-- `list_proactive_jobs`: 查看所有 proactive 任务
-- `manage_proactive_job`: 启用/禁用/删除任务
+- `create_proactive_job`: 创建 proactive 任务（risk_level: HIGH — 创建持久化自动行为）
+- `list_proactive_jobs`: 查看所有 proactive 任务（risk_level: LOW — 只读）
+- `manage_proactive_job`: 启用/禁用/删除任务（risk_level: MEDIUM — 修改自动行为）
 
 ### REST API
 
@@ -357,6 +440,22 @@ agentos/interfaces/http/
   ├── USER.md
   └── PROACTIVE.yaml     # proactive 任务定义
 ```
+
+## 配置集成
+
+在 `config.yml` 中新增 proactive 配置段：
+
+```yaml
+proactive:
+  enabled: true                      # 全局开关
+  condition_model: gpt_4o_mini       # 条件评估使用的模型（可选，默认使用 agent 配置的模型）
+  max_concurrent_runs: 3             # 最大并发执行数
+  min_condition_interval: "5m"       # ConditionTrigger 最小检查间隔
+```
+
+## EventListener 效率
+
+ProactiveRuntime 订阅 PublicEventBus 时，在消费端按 `event_type` 预过滤：维护一个 `Set[str]` 记录所有 EventTrigger 关注的 event_type，收到事件后先查 set，不匹配则立即丢弃，避免对每个事件做完整的触发器匹配。
 
 ## 业界参考
 
