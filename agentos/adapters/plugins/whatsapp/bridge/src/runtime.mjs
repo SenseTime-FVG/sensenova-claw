@@ -1,5 +1,8 @@
 import { ensureAuthDir, resetAuthDir } from "./auth.mjs";
 
+const DEFAULT_BAILEYS_VERSION = [2, 3000, 1];
+const DEFAULT_BAILEYS_VERSION_FETCH_TIMEOUT_MS = 3000;
+
 function createSilentLogger() {
   const logger = {
     trace() {},
@@ -51,6 +54,24 @@ function isQrRefsTimeout(error) {
 
 function isGroupJid(jid) {
   return typeof jid === "string" && jid.endsWith("@g.us");
+}
+
+async function resolveBaileysVersion(fetchLatestBaileysVersion, emitDebug, timeoutMs) {
+  try {
+    const result = await Promise.race([
+      fetchLatestBaileysVersion(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("fetchLatestBaileysVersion timeout")), timeoutMs);
+      }),
+    ]);
+    if (Array.isArray(result?.version) && result.version.length > 0) {
+      return result.version;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    emitDebug(`fetchLatestBaileysVersion fallback: ${message}`);
+  }
+  return DEFAULT_BAILEYS_VERSION;
 }
 
 async function resolveOutboundTarget(sock, target) {
@@ -176,6 +197,10 @@ function unwrapMessage(message, baileysHelpers) {
   }
   let current = message ?? null;
   while (current && typeof current === "object") {
+    if (current.protocolMessage?.editedMessage?.message) {
+      current = current.protocolMessage.editedMessage.message;
+      continue;
+    }
     if (current.ephemeralMessage?.message) {
       current = current.ephemeralMessage.message;
       continue;
@@ -218,6 +243,7 @@ export class WhatsAppRuntime {
     restartDelayMs = 300,
     reconnectDelayMs = 1000,
     maxReconnectAttempts = 3,
+    versionFetchTimeoutMs = DEFAULT_BAILEYS_VERSION_FETCH_TIMEOUT_MS,
   }) {
     this._emit = emit;
     this._loadBaileys = loadBaileys;
@@ -226,6 +252,7 @@ export class WhatsAppRuntime {
     this._restartDelayMs = restartDelayMs;
     this._reconnectDelayMs = reconnectDelayMs;
     this._maxReconnectAttempts = maxReconnectAttempts;
+    this._versionFetchTimeoutMs = versionFetchTimeoutMs;
     this._sock = null;
     this._authDir = null;
     this._isRecoveringAuth = false;
@@ -272,7 +299,11 @@ export class WhatsAppRuntime {
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     this._emitDebug("auth state loaded");
-    const { version } = await fetchLatestBaileysVersion();
+    const version = await resolveBaileysVersion(
+      fetchLatestBaileysVersion,
+      (message) => this._emitDebug(message),
+      this._versionFetchTimeoutMs,
+    );
     const logger = createSilentLogger();
 
     this._sock = makeWASocket({
@@ -413,8 +444,9 @@ export class WhatsAppRuntime {
 
         const text = extractText(item.message, this._baileysHelpers);
         if (!text) {
+          const protocolType = item?.message?.protocolMessage?.type ?? null;
           this._emitDebug(
-            `messages.upsert ignored: no text content for message_id=${item.key?.id ?? "unknown"} remote_jid=${item.key?.remoteJid ?? "unknown"} ${describeMessageShape(item.message)}`,
+            `messages.upsert ignored: no text content for message_id=${item.key?.id ?? "unknown"} remote_jid=${item.key?.remoteJid ?? "unknown"} protocol_type=${protocolType ?? "-"} ${describeMessageShape(item.message)}`,
           );
           continue;
         }
@@ -630,10 +662,23 @@ export class WhatsAppRuntime {
       return;
     }
     if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+      this._status = {
+        ...this._status,
+        state: "reconnect_exhausted",
+        connected: false,
+        lastError: `WhatsApp reconnect exhausted after ${this._reconnectAttempts} attempts.`,
+        lastEvent: "reconnect_exhausted",
+        lastEventAt: Date.now() / 1000,
+        debugMessage: "connection closed before ready",
+      };
+      this._emit({
+        type: "status",
+        payload: { ...this._status },
+      });
       this._emit({
         type: "error",
         payload: {
-          message: `WhatsApp reconnect exhausted after ${this._reconnectAttempts} attempts.`,
+          message: this._status.lastError,
         },
       });
       return;
