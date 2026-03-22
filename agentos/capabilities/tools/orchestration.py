@@ -43,10 +43,6 @@ class CreateAgentTool(Tool):
                 "type": "string",
                 "description": "系统提示词，定义 Agent 的角色和行为",
             },
-            "provider": {
-                "type": "string",
-                "description": "LLM 提供商，如 'openai'、'anthropic'，留空则继承默认配置",
-            },
             "model": {
                 "type": "string",
                 "description": "模型名称，如 'gpt-4o-mini'、'claude-3-haiku'，留空则继承默认配置",
@@ -91,7 +87,6 @@ class CreateAgentTool(Tool):
 
         # 从 default Agent 继承未指定的配置
         default = registry.get("default")
-        provider = kwargs.get("provider") or (default.provider if default else "openai")
         model = kwargs.get("model") or (default.model if default else "gpt-4o-mini")
         temperature = kwargs.get("temperature")
         if temperature is None:
@@ -101,7 +96,6 @@ class CreateAgentTool(Tool):
             id=agent_id,
             name=name,
             description=str(kwargs.get("description", "")),
-            provider=provider,
             model=model,
             temperature=float(temperature),
             system_prompt=str(kwargs.get("system_prompt", "")),
@@ -118,7 +112,6 @@ class CreateAgentTool(Tool):
             "success": True,
             "agent_id": agent_id,
             "name": name,
-            "provider": provider,
             "model": model,
             "message": f"Agent '{name}' (id={agent_id}) 已创建成功，可通过 send_message 或新会话使用",
         }
