@@ -215,7 +215,10 @@ async def update_llm_default_model(body: DefaultModelUpdateBody, request: Reques
 async def get_llm_status(request: Request):
     """检测当前配置中是否至少有一个 LLM 提供商已配置有效 API key"""
     cfg = request.app.state.config
-    is_configured, providers = check_llm_configured(cfg.data)
+    is_configured, providers = check_llm_configured(
+        cfg.data,
+        secret_store=getattr(cfg, "_secret_store", None),
+    )
     return {"configured": is_configured, "providers": providers}
 
 

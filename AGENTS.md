@@ -739,3 +739,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前环境跑 Playwright 需要同时满足两件事：浏览器具备越权启动权限，且 `http://localhost:3000` 上已有 Next dev 进程；缺任一条件都会失败，但报错表象不同，容易误判到页面逻辑。
+
+### 2026-03-23 LLM 配置状态判定补充
+
+成功经验：
+- `llm-status` 这类“是否已配置”接口不应只按字符串字面值判断；若配置支持 `${secret:...}`，就必须结合 secret store 解析后再判空，否则前端会把已登录用户错误重定向到 `/setup`。
+- 将 secret 解析能力收敛到 `check_llm_configured(..., secret_store=...)` 这一层最稳，Web 接口和 CLI 启动提示共用同一规则，避免状态判断分叉。
+- 对配置判定问题，最小高价值测试是三类：普通 `${ENV}` 占位符、`${secret:...}` 且 secret 为空、`${secret:...}` 且 secret 有值。
+
+失败/风险经验：
+- 当前环境仍无法直接跑 pytest：`.venv` 缺少 `pytest`，`uv run python -m pytest` 又会在 `system-configuration` 依赖层 panic；完成修改后需要至少补做 `python3` 级函数断言和 `py_compile` 校验，并在完整依赖环境复跑正式单测。

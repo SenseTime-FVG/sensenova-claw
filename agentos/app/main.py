@@ -159,7 +159,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         from agentos.platform.config.config import Config, PROJECT_ROOT as _CFG_ROOT
         from agentos.platform.config.llm_presets import check_llm_configured
         _cfg = Config(project_root=_CFG_ROOT)
-        _llm_ok, _ = check_llm_configured(_cfg.data)
+        _llm_ok, _ = check_llm_configured(_cfg.data, secret_store=getattr(_cfg, "_secret_store", None))
     except Exception:
         _llm_ok = True  # 检测失败时不误报警告
 
