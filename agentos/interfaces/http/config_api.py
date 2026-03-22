@@ -1,15 +1,18 @@
 """
-Config API - 按 section 读写 config.yml 中的 llm / agent / plugins
+Config API - 按 section 读写 config.yml，管理 LLM provider/model
 """
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from typing import Any
 
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
 from agentos.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
+from agentos.platform.secrets.migration import migrate_plaintext_secrets
+from agentos.platform.secrets.registry import is_secret_path
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,46 @@ class TestLLMBody(BaseModel):
     api_key: str
     base_url: str = ""
     model_id: str
+
+
+class ProviderUpdateBody(BaseModel):
+    name: str | None = None
+    api_key: str | None = None
+    base_url: str = ""
+    timeout: int = 60
+    max_retries: int = 3
+
+
+class ModelUpdateBody(BaseModel):
+    name: str | None = None
+    provider: str
+    model_id: str
+    timeout: int = 60
+    max_output_tokens: int = 8192
+
+
+@router.get("/secret")
+async def get_secret_value(path: str, request: Request):
+    """按路径读取敏感配置的真实值，仅允许注册过的 secret path。"""
+    if not path:
+        raise HTTPException(400, "缺少 path")
+    if not is_secret_path(path):
+        raise HTTPException(400, f"不允许读取非敏感路径: {path}")
+
+    cfg = request.app.state.config
+    return {"path": path, "value": cfg.get(path, "") or ""}
+
+
+@router.post("/migrate-secrets")
+async def migrate_secrets(request: Request):
+    """将 config.yml 中的明文敏感字段迁移到 secret store。"""
+    secret_store = getattr(request.app.state, "secret_store", None)
+    if secret_store is None:
+        raise HTTPException(500, "secret store 未初始化")
+    try:
+        return migrate_plaintext_secrets(request.app.state.config, secret_store=secret_store)
+    except Exception as exc:
+        raise HTTPException(500, f"迁移 secret 失败: {exc}")
 
 
 @router.get("/sections")
@@ -51,6 +94,106 @@ async def update_config_sections(body: dict[str, Any], request: Request):
         return {"status": "saved", "sections": results}
     except Exception as e:
         raise HTTPException(500, f"写入配置文件失败: {e}")
+
+
+@router.put("/llm/providers/{provider_name}")
+async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, request: Request):
+    """更新单个 LLM provider，支持改名并联动迁移 model 引用"""
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    providers = deepcopy(llm_section.get("providers", {}))
+    models = deepcopy(llm_section.get("models", {}))
+
+    if provider_name not in providers:
+        raise HTTPException(404, f"Provider 不存在: {provider_name}")
+
+    next_name = (body.name or provider_name).strip().lower()
+    if not next_name:
+        raise HTTPException(400, "Provider 名称不能为空")
+    if next_name != provider_name and next_name in providers:
+        raise HTTPException(400, f"Provider 已存在: {next_name}")
+
+    existing = providers.pop(provider_name)
+    provider_payload = {
+        "base_url": body.base_url,
+        "timeout": body.timeout,
+        "max_retries": body.max_retries,
+    }
+    providers[next_name] = provider_payload
+    llm_section["providers"] = providers
+
+    if next_name != provider_name:
+        for model in models.values():
+            if isinstance(model, dict) and model.get("provider") == provider_name:
+                model["provider"] = next_name
+        llm_section["models"] = models
+
+    # 处理 API key
+    if body.api_key is not None:
+        # 先通过 ConfigManager 写入 api_key（含 secret 处理）
+        await config_manager.update("llm", {"providers": {next_name: {"api_key": body.api_key}}})
+        # 重新读取，获取写入 secret ref 后的 raw
+        raw_config = config_manager._load_raw_yaml()
+        raw_providers = raw_config.get("llm", {}).get("providers", {})
+        # 合并 api_key 到 provider_payload
+        raw_provider = raw_providers.get(next_name, {})
+        if "api_key" in raw_provider:
+            provider_payload["api_key"] = raw_provider["api_key"]
+        providers[next_name] = provider_payload
+        llm_section["providers"] = providers
+    else:
+        current_raw = existing if isinstance(existing, dict) else {}
+        if "api_key" in current_raw:
+            provider_payload["api_key"] = current_raw["api_key"]
+            providers[next_name] = provider_payload
+            llm_section["providers"] = providers
+
+    # 整体写回 llm section
+    raw_config = config_manager._load_raw_yaml()
+    raw_config["llm"] = llm_section
+    config_manager._write_raw_yaml(raw_config)
+    config_manager._reload_memory()
+
+    cfg = request.app.state.config
+    return {"status": "saved", "provider": config_manager.get_section("llm").get("providers", {}).get(next_name, {})}
+
+
+@router.put("/llm/models/{model_name}")
+async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Request):
+    """更新单个 LLM model，支持改名并联动 default_model"""
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    models = deepcopy(llm_section.get("models", {}))
+
+    if model_name not in models:
+        raise HTTPException(404, f"Model 不存在: {model_name}")
+
+    next_name = (body.name or model_name).strip()
+    if not next_name:
+        raise HTTPException(400, "Model 名称不能为空")
+    if next_name != model_name and next_name in models:
+        raise HTTPException(400, f"Model 已存在: {next_name}")
+
+    models.pop(model_name)
+    models[next_name] = {
+        "provider": body.provider,
+        "model_id": body.model_id,
+        "timeout": body.timeout,
+        "max_output_tokens": body.max_output_tokens,
+    }
+    llm_section["models"] = models
+    if llm_section.get("default_model") == model_name:
+        llm_section["default_model"] = next_name
+
+    # 整体写回 llm section
+    raw_config = config_manager._load_raw_yaml()
+    raw_config["llm"] = llm_section
+    config_manager._write_raw_yaml(raw_config)
+    config_manager._reload_memory()
+
+    return {"status": "saved", "model": config_manager.get_section("llm").get("models", {}).get(next_name, {})}
 
 
 @router.get("/llm-status")

@@ -452,6 +452,27 @@ llm:
 - 第一版敏感字段默认覆盖 `llm.providers.*.api_key`、`tools.*.api_key`、`tools.email.password`、`plugins.feishu.app_secret`、`plugins.wecom.secret`
 - 如果 keyring backend 不可用，secret 写入会失败，不会自动回退到明文
 
+## 明文迁移到 keyring
+
+如果你已有历史明文配置，可以显式触发迁移：
+
+```bash
+agentos migrate-secrets
+```
+
+也可以通过 HTTP API 触发：
+
+```http
+POST /api/config/migrate-secrets
+```
+
+迁移行为：
+
+- 只迁移已登记的敏感路径
+- 已经是 `${secret:...}` 的值会跳过
+- `${ENV}` 环境变量引用会跳过
+- 迁移成功后，`config.yml` 中的明文会改写成 `${secret:agentos/<dotted_path>}`
+
 ## 下一步
 
 - 返回 [快速开始](quickstart.md) 了解启动步骤

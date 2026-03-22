@@ -465,6 +465,9 @@ class Config:
         if is_secret_ref(value):
             if self._secret_store is None:
                 return ""
+            if hasattr(self._secret_store, "is_available") and not self._secret_store.is_available():
+                logger.warning("secret store 不可用，跳过解析 %s", value)
+                return ""
             ref = parse_secret_ref(value)
             secret = self._secret_store.get(ref)
             return secret or ""

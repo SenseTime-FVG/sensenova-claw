@@ -108,6 +108,14 @@ llm:
 
 配置加载优先级：**环境变量覆盖值 > config.yml 中声明的来源 > 默认值**
 
+如果你之前已经把 API Key 明文写进了 `config.yml`，可以在接入 keyring 后执行：
+
+```bash
+agentos migrate-secrets
+```
+
+它会把已登记的敏感字段迁移到系统 keyring，并把 `config.yml` 改写为 `${secret:...}` 引用。
+
 ---
 
 ## 启动开发服务

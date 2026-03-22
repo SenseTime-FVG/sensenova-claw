@@ -119,6 +119,9 @@ def _write_config(
             },
             "default_model": model_key,
         },
+        "agent": {
+            "model": model_key,
+        },
     }
 
     # 深度合并：existing 为基础，patch 覆盖

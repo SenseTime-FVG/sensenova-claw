@@ -615,11 +615,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 为通用 secret 机制先落 `SecretStore + SecretRef + SecretRegistry` 三层最稳，后续把 `Config` 解析和 `config_store` 持久化都接到同一抽象上，比在各 API 里散落 `if api_key` 判断更可控。
 - `persist_path_updates()` 这类统一写回入口非常适合承接 secret 逻辑；在这里把 `cfg._secret_store` 回填好，能顺手修复“写入后 reload 读不回 secret”的问题。
 - `/api/config/sections` 一旦开始返回脱敏结构，前端设置页必须同步改成“secret 元数据 + draft/touched”双轨状态；否则保存全量 provider 配置时会把原有 secret 误清空。
+- 明文迁移能力最适合做成独立迁移器（扫描 raw config 的叶子路径，再按 `SecretRegistry` 过滤）；这样 HTTP API 和 CLI 命令都能复用同一份迁移逻辑，行为不会分叉。
 
 失败/风险经验：
 - 当前环境下 `python3 -m pytest` 可用，但 `.venv/bin/python -m pytest` 不一定有 `pytest`；回归命令优先直接用系统 `python3 -m pytest` 更稳。
 - `npx tsc --noEmit -p agentos/app/web/tsconfig.json` 在本环境没有及时返回有效结果，前端静态类型回归不能在这次任务里作为通过依据；需要在本地完整 Node/Next 环境继续确认。
 - 虽然已接入 `python-keyring` 抽象并把默认 store 指向 `KeyringSecretStore`，但真实 keyring backend 可用性仍取决于宿主机环境；当前只完成了进程内/注入式测试，未做真实系统 keyring e2e。
+- 全局 `config = Config()` 这类模块级初始化一旦遇到用户本机已有 `${secret:...}` 配置，会在 import 时就触发 secret 解析；默认 store 不可用时必须先走 `is_available()` 兜底，否则测试导入阶段就会直接崩。
 
 ### 2026-03-21 LLM 管理页补充
 
@@ -640,6 +642,44 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 即使前端 payload 看起来合理，secret store 后端的删除语义也可能更严格；像 keyring 删除不存在条目会报错，这类行为必须在仓库内抽象层显式兜底，不能假设底层实现天然幂等。
+
+### 2026-03-21 通用 secret reveal 补充
+
+成功经验：
+- 对“默认掩码、按需展示真实值”的需求，首屏接口不应直接下发真实 secret；新增受保护的通用 `/api/config/secret?path=...` 并限制到 `is_secret_path(path)`，前端点击眼睛后再按需读取，安全边界和复用性都更好。
+- reveal 接口直接返回 `config.get(path)` 的解析结果最省事，能同时兼容 secret ref、环境变量和明文配置，不需要前端关心底层来源。
+- 前端 secret 输入框若需要“默认显示 `******` 但又保留未修改状态”，最稳的是把“展示值”和“真实 draft”分开：未 touch 且未 reveal 时显示 `******`，点击眼睛后再把真实值拉进本地状态，但继续保持 `api_key_touched=false`，这样保存时不会误把原 secret 全量回传。
+
+失败/风险经验：
+- 当前 `test_config_api.py` 在本机直接运行会受全局 `~/.agentos/config.yml` 影响；涉及 `config_api` 的 pytest 回归在本环境应显式用临时 `HOME` 隔离，避免导入阶段误读真实 secret 配置。
+
+### 2026-03-21 LLM 管理页 mock 回传补充
+
+成功经验：
+- 像 `/llms` 这种“只管理用户可见子集”的页面，保存时不应把隐藏保留项（如 `mock` provider/model）一并全量回传；按页面实际可编辑集合组 payload，更符合职责边界，也能避开历史脏配置触发的副作用。
+- 当后端采用 dotted-path merge 写配置时，前端省略未编辑字段通常比回传默认值更安全；缺失字段会保留原配置，而“默认值回传”可能意外触发 secret 删除、覆盖或热重载副作用。
+
+失败/风险经验：
+- 即使后端已经对 secret 删除做了保护，只要前端还在无意义地回传 `mock.api_key=''`，用户历史配置若存在异常状态仍可能触发问题；这类 bug 需要同时检查前后端边界，而不是只修一侧。
+
+### 2026-03-21 Secret 删除幂等补充
+
+成功经验：
+- 清空 secret 字段时，`config_store` 不应把“底层 secret 已缺失”视为致命错误；即使 `delete()` 失败，也应继续把 config 中的该字段置空并完成保存，这样历史脏状态才能被自愈。
+- 对这类问题，最有效的单测是直接构造“raw config 仍是 secret ref，但 secret store.delete() 抛错”的场景；它比只测普通空值或正常 delete 更贴近真实用户故障。
+
+失败/风险经验：
+- 仅依赖前端不回传某些字段不够稳；一旦用户浏览器缓存了旧前端，或历史配置里已存在异常 secret ref，后端仍会再次踩到删除异常。对 secret 清空链路，后端必须保证幂等。
+
+### 2026-03-21 LLM 编辑态补充
+
+成功经验：
+- 对“单项编辑 + 编辑所有配置”这类页面，最稳的前端模型是三层状态：服务端基线 state、单项 draft、全局 draft。这样单项取消不会污染其他项，全局取消也能直接回滚整页。
+- 单项保存和全量保存最好在后端分两条路：局部接口处理 provider/model 改名联动，全量接口继续复用 `/api/config/sections`；否则前端很容易在“看起来局部保存”时误覆盖整份配置。
+- Playwright 对这类交互最有效的断言不是文案，而是“默认 disabled -> 点击编辑后 editable -> 保存命中特定局部接口 -> 编辑所有命中全量接口”。
+
+失败/风险经验：
+- 单项保存后如果页面会重新加载配置，现有折叠态通常会被重置；测试和交互都要考虑“保存后需要重新展开才能继续操作”，否则很容易把页面重载误判成元素消失 bug。
 
 ### 2026-03-21 Setup 动态模型列表补充
 

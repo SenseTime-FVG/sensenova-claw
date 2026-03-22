@@ -37,10 +37,12 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
     };
 
     const putBodies: unknown[] = [];
+    let secretRevealCalls = 0;
 
     Object.assign(window, {
       __llmPutBodies: putBodies,
       __llmSections: state,
+      __secretRevealCalls: secretRevealCalls,
     });
 
     window.confirm = () => true;
@@ -102,6 +104,22 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
         });
       }
 
+      if (url.includes('/api/config/secret') && method === 'GET') {
+        secretRevealCalls += 1;
+        (window as typeof window & { __secretRevealCalls: number }).__secretRevealCalls = secretRevealCalls;
+        const parsed = new URL(url);
+        if (parsed.searchParams.get('path') === 'llm.providers.openai.api_key') {
+          return new Response(JSON.stringify({ path: 'llm.providers.openai.api_key', value: 'sk-real-openai-key' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ detail: 'Not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       return nativeFetch(input, init);
     };
   });
@@ -113,25 +131,35 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
   await expect(page.getByRole('heading', { name: 'LLM 配置' })).toBeVisible();
   await expect(page.getByTestId('provider-card-openai')).toBeVisible();
   await expect(page.getByTestId('provider-card-anthropic')).toBeVisible();
+  await expect(page.getByTestId('provider-body-openai')).not.toBeVisible();
+  await page.getByTestId('provider-toggle-openai').click();
+  await expect(page.getByTestId('provider-body-openai')).toBeVisible();
   await expect(page.getByTestId('llm-card-gpt-4o-mini')).toBeVisible();
+  await page.getByTestId('edit-all-llm-config').click();
+  await expect(page.getByTestId('provider-api-key-input-openai')).toHaveValue('******');
+  await page.getByTestId('provider-api-key-toggle-openai').click();
+  await expect(page.getByTestId('provider-api-key-input-openai')).toHaveValue('sk-real-openai-key');
 
   await page.getByTestId('provider-toggle-openai').click();
   await expect(page.getByTestId('provider-body-openai')).not.toBeVisible();
   await page.getByTestId('provider-toggle-openai').click();
   await expect(page.getByTestId('provider-body-openai')).toBeVisible();
+  await expect.poll(async () => {
+    return page.evaluate(() => (window as typeof window & { __secretRevealCalls?: number }).__secretRevealCalls ?? 0);
+  }).toBe(1);
 
-  await page.getByTestId('provider-name-input-openai').fill('openai-compatible');
-  await page.getByTestId('provider-base-url-input-openai-compatible').fill('https://proxy.example.com/v1');
-  await page.getByTestId('provider-timeout-input-openai-compatible').fill('90');
+  await page.getByTestId('provider-base-url-input-openai').fill('https://proxy.example.com/v1');
+  await page.getByTestId('provider-timeout-input-openai').fill('90');
 
-  await page.getByTestId('add-llm-button-openai-compatible').click();
-  await page.getByTestId('new-llm-name-input-openai-compatible').fill('gpt-4.1');
-  await page.getByTestId('confirm-add-llm-button-openai-compatible').click();
+  await page.getByTestId('add-llm-button-openai').click();
+  await page.getByTestId('new-llm-name-input-openai').fill('gpt-4.1-mini');
+  await page.getByTestId('confirm-add-llm-button-openai').click();
 
-  await page.getByTestId('llm-name-input-gpt-4.1').fill('gpt-4.1-mini');
   await page.getByTestId('llm-model-id-input-gpt-4.1-mini').fill('gpt-4.1-mini');
   await page.getByTestId('llm-max-output-tokens-input-gpt-4.1-mini').fill('16384');
 
+  await page.getByTestId('provider-toggle-anthropic').click();
+  await expect(page.getByTestId('provider-body-anthropic')).toBeVisible();
   await page.getByTestId('delete-llm-button-claude-3-5-haiku').click();
 
   await page.getByTestId('add-provider-button').click();
@@ -145,7 +173,7 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
 
   await page.getByTestId('delete-provider-button-anthropic').click();
 
-  await page.getByTestId('save-llm-config').click();
+  await page.getByTestId('save-all-llm-config').click();
   await expect(page.getByText('已保存')).toBeVisible();
 
   const lastBody = await page.evaluate(() => {
@@ -156,8 +184,7 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
   expect(lastBody).toEqual({
     llm: {
       providers: {
-        mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
-        'openai-compatible': {
+        openai: {
           base_url: 'https://proxy.example.com/v1',
           timeout: 90,
           max_retries: 3,
@@ -170,15 +197,14 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
         },
       },
       models: {
-        mock: { provider: 'mock', model_id: 'mock-agent-v1' },
         'gpt-4o-mini': {
-          provider: 'openai-compatible',
+          provider: 'openai',
           model_id: 'gpt-4o-mini',
           timeout: 60,
           max_output_tokens: 8192,
         },
         'gpt-4.1-mini': {
-          provider: 'openai-compatible',
+          provider: 'openai',
           model_id: 'gpt-4.1-mini',
           timeout: 60,
           max_output_tokens: 16384,
