@@ -153,7 +153,7 @@ agents:
     skills: []
 
   system-admin:
-    name: SystemAdmin
+    name: 系统运维管理员
     description: 系统运维管理员，负责 AgentOS 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作
     temperature: 0.2
     tools: [read_file, write_file, bash_command]

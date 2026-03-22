@@ -137,6 +137,25 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       if (turnId) {
         const existingIndex = prev.findIndex((item) => item.role === 'assistant' && item.turnId === turnId);
         if (existingIndex !== -1) {
+          // 检查该 assistant 消息之后是否已经插入了 tool 消息
+          // 如果有，说明这是新一轮 LLM 调用的结果，应创建新消息而不是覆盖
+          const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
+          if (hasToolAfter) {
+            // 新一轮 LLM 思考，追加新的 assistant 消息
+            return [
+              ...prev,
+              {
+                id: makeId(),
+                role: 'assistant' as const,
+                content,
+                timestamp: Date.now(),
+                turnId: `${turnId}_${Date.now()}`,
+                thinkingContent,
+                thinkingState,
+              },
+            ];
+          }
+          // 同一轮 LLM 调用的流式更新，原地更新
           const next = [...prev];
           next[existingIndex] = {
             ...next[existingIndex],
@@ -375,12 +394,19 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       }
       case 'turn_completed': {
         const final = String(payload.final_response || '');
-        const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
         if (final) {
-          upsertAssistantMessage({
-            turnId,
-            content: final,
-            thinkingState: 'collapsed',
+          // 更新最后一条 assistant 消息的内容（不创建新消息）
+          setMessages((prev) => {
+            // 从后往前找最后一条 assistant 消息
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i].role === 'assistant') {
+                const next = [...prev];
+                next[i] = { ...next[i], content: final, thinkingState: 'collapsed' };
+                return next;
+              }
+            }
+            // 没找到 assistant 消息（理论上不会发生），追加一条
+            return [...prev, { id: makeId(), role: 'assistant', content: final, timestamp: Date.now() }];
           });
         }
         setIsTyping(false);

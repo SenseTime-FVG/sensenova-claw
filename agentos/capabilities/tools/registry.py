@@ -43,14 +43,18 @@ class ToolRegistry:
             WriteFileTool(),
             CreateAgentTool(),
             AskUserTool(),
-            SendEmailTool(),
-            ListEmailsTool(),
-            ReadEmailTool(),
-            DownloadAttachmentTool(),
-            MarkEmailTool(),
-            SearchEmailsTool(),
         ]:
             self.register(tool)
+        if config.get("tools.email.enabled", False):
+            for tool in [
+                SendEmailTool(),
+                ListEmailsTool(),
+                ReadEmailTool(),
+                DownloadAttachmentTool(),
+                MarkEmailTool(),
+                SearchEmailsTool(),
+            ]:
+                self.register(tool)
 
     def register(self, tool: Tool) -> None:
         # 注册工具到内存字典，供 ToolRuntime 查找。

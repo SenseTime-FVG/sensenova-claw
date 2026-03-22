@@ -31,7 +31,7 @@ _LLM_DEBUG = os.environ.get("AGENTOS_DEBUG_LLM", "").strip() not in ("", "0", "f
 def _get_debug_base() -> Path:
     """获取 debug 日志根目录: $AGENTOS_HOME/logs/debug/llm"""
     from agentos.platform.config.workspace import resolve_agentos_home
-    return resolve_agentos_home() / "logs" / "debug" / "llm"
+    return resolve_agentos_home(config) / "logs" / "debug" / "llm"
 
 
 def _save_llm_debug(
@@ -65,7 +65,8 @@ def _save_llm_debug(
     if error:
         record["error"] = error
 
-    filepath = out_dir / f"{llm_call_id}.json"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filepath = out_dir / f"llm_{ts}_{llm_call_id}.json"
     try:
         filepath.write_text(
             json.dumps(record, ensure_ascii=False, indent=2),

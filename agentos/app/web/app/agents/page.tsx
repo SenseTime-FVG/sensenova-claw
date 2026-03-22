@@ -16,7 +16,6 @@ interface Agent {
   name: string;
   status: string;
   description: string;
-  provider: string;
   model: string;
   sessionCount: number;
   toolCount: number;
@@ -287,7 +286,6 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
   const [formId, setFormId] = useState('');
   const [formName, setFormName] = useState('');
   const [formDesc, setFormDesc] = useState('');
-  const [formProvider, setFormProvider] = useState('openai');
   const [formModel, setFormModel] = useState('gpt-4o-mini');
   const [formTemp, setFormTemp] = useState('0.2');
   const [formPrompt, setFormPrompt] = useState('');
@@ -309,7 +307,6 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
           id: formId.trim(),
           name: formName.trim(),
           description: formDesc.trim(),
-          provider: formProvider.trim() || undefined,
           model: formModel.trim() || undefined,
           temperature: parseFloat(formTemp) || 0.2,
           system_prompt: formPrompt,
@@ -355,11 +352,7 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
             <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">描述</label>
             <Input value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="负责搜索和研究的 Agent" />
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Provider</label>
-              <Input value={formProvider} onChange={e => setFormProvider(e.target.value)} />
-            </div>
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Model</label>
               <Input value={formModel} onChange={e => setFormModel(e.target.value)} />

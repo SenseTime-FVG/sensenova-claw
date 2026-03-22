@@ -1,5 +1,5 @@
 """
-Config API - 按 section 读写 config.yml 中的 llm / agent / plugins
+Config API - 按 section 读写 config.yml，管理 LLM provider/model
 """
 from __future__ import annotations
 
@@ -98,6 +98,7 @@ async def update_config_sections(body: dict[str, Any], request: Request):
 
 @router.put("/llm/providers/{provider_name}")
 async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, request: Request):
+    """更新单个 LLM provider，支持改名并联动迁移 model 引用"""
     config_manager = request.app.state.config_manager
     raw_config = config_manager._load_raw_yaml()
     llm_section = deepcopy(raw_config.get("llm", {}))
@@ -146,6 +147,7 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
 
 @router.put("/llm/models/{model_name}")
 async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Request):
+    """更新单个 LLM model，支持改名并联动 default_model"""
     config_manager = request.app.state.config_manager
     raw_config = config_manager._load_raw_yaml()
     llm_section = deepcopy(raw_config.get("llm", {}))
@@ -193,6 +195,41 @@ async def get_llm_status(request: Request):
 async def get_llm_presets():
     """返回所有 LLM 提供商预设分类列表，供前端展示使用"""
     return {"categories": LLM_PROVIDER_CATEGORIES}
+
+
+@router.get("/required-check")
+async def check_required_config(request: Request):
+    """检查必配项状态：搜索工具（至少一个）、邮箱配置"""
+    cfg = request.app.state.config
+
+    # 搜索工具：serper / brave / baidu / tavily 至少配一个
+    search_keys = [
+        "tools.serper_search.api_key",
+        "tools.brave_search.api_key",
+        "tools.baidu_search.api_key",
+        "tools.tavily_search.api_key",
+    ]
+    search_configured = any(
+        bool(cfg.get(k, "")) and not str(cfg.get(k, "")).startswith("${")
+        for k in search_keys
+    )
+
+    # 邮箱：enabled + smtp_host + username 都有值
+    email_enabled = cfg.get("tools.email.enabled", False)
+    email_smtp = cfg.get("tools.email.smtp_host", "")
+    email_user = cfg.get("tools.email.username", "")
+    email_configured = bool(email_enabled and email_smtp and email_user)
+
+    return {
+        "search_tool": {
+            "configured": search_configured,
+            "message": "搜索工具未配置（serper/brave/baidu/tavily 至少需要配置一个）",
+        },
+        "email": {
+            "configured": email_configured,
+            "message": "邮箱未配置（需要配置 SMTP/IMAP 信息）",
+        },
+    }
 
 
 @router.post("/list-models")

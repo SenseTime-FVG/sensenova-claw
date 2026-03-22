@@ -438,6 +438,11 @@ class TestHandleLLMCompleted:
         await worker._handle(event)
 
     async def test_no_tool_calls_triggers_memory_summary(self, private_bus, public_bus, repo, state_store, context_builder, tool_registry, fake_memory_manager, monkeypatch):
+        original = copy.deepcopy(config.data)
+        config.data["llm"]["models"]["claude-sonnet"] = {
+            "provider": "anthropic",
+            "model_id": "claude-sonnet-4-6",
+        }
         runtime = _SimpleAgentRuntime(
             repo,
             state_store,
@@ -445,7 +450,7 @@ class TestHandleLLMCompleted:
             tool_registry,
             memory_manager=fake_memory_manager,
         )
-        agent_cfg = AgentConfig(id="planner", name="planner", provider="openai", model="gpt-4o-mini")
+        agent_cfg = AgentConfig(id="planner", name="planner", model="claude-sonnet")
         worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
 
         await repo.create_session("s1", meta={"agent_id": "planner"})
@@ -480,21 +485,25 @@ class TestHandleLLMCompleted:
         event = EventEnvelope(
             type=LLM_CALL_COMPLETED, session_id="s1", turn_id="t1", payload={},
         )
-        await worker._handle(event)
-        await asyncio.wait_for(done.wait(), timeout=5)
-        task.cancel()
-        await asyncio.gather(*created_tasks)
+        try:
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+            await asyncio.gather(*created_tasks)
 
-        assert any(evt.type == AGENT_STEP_COMPLETED for evt in collected)
-        fake_memory_manager.summarize_turn.assert_awaited_once_with(
-            state.messages,
-            provider="openai",
-            model="gpt-4o-mini",
-            agent_id="planner",
-        )
+            assert any(evt.type == AGENT_STEP_COMPLETED for evt in collected)
+            fake_memory_manager.summarize_turn.assert_awaited_once_with(
+                state.messages,
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                agent_id="planner",
+            )
+        finally:
+            config.data = original
 
     def test_get_provider_prefers_agent_provider_for_direct_model_id(self, private_bus, runtime):
-        agent_cfg = AgentConfig(id="test", name="test", provider="openai", model="gpt-4o-mini")
+        agent_cfg = AgentConfig(id="test", name="test", model="gpt-4o-mini")
+        agent_cfg.provider = "openai"
         worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
         assert worker._get_provider() == "openai"
         assert worker._get_model() == "gpt-4o-mini"

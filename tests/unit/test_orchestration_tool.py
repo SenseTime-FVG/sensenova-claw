@@ -33,7 +33,6 @@ def registry_with_default(agent_registry):
     default = AgentConfig(
         id="default",
         name="Default Agent",
-        provider="openai",
         model="gpt-4o",
         temperature=0.5,
     )
@@ -117,7 +116,7 @@ class TestExecuteSuccess:
         assert registered.name == "New Agent"
 
     async def test_inherit_from_default(self, tool, registry_with_default):
-        """未指定 provider/model/temperature 时从 default Agent 继承"""
+        """未指定 model/temperature 时从 default Agent 继承"""
         result = await tool.execute(
             id="new-agent",
             name="New Agent",
@@ -125,7 +124,6 @@ class TestExecuteSuccess:
         )
 
         assert result["success"] is True
-        assert result["provider"] == "openai"
         assert result["model"] == "gpt-4o"
 
         # 验证 temperature 继承自 default
@@ -133,17 +131,15 @@ class TestExecuteSuccess:
         assert created.temperature == 0.5
 
     async def test_custom_params_override_default(self, tool, registry_with_default):
-        """显式指定 provider/model 时覆盖默认值"""
+        """显式指定 model 时覆盖默认值"""
         result = await tool.execute(
             id="custom",
             name="Custom Agent",
-            provider="anthropic",
             model="claude-3-haiku",
             temperature=0.8,
             _agent_registry=registry_with_default,
         )
 
-        assert result["provider"] == "anthropic"
         assert result["model"] == "claude-3-haiku"
 
         created = registry_with_default.get("custom")
@@ -157,7 +153,6 @@ class TestExecuteSuccess:
             _agent_registry=agent_registry,
         )
 
-        assert result["provider"] == "openai"
         assert result["model"] == "gpt-4o-mini"
 
     async def test_tools_and_delegation(self, tool, agent_registry):

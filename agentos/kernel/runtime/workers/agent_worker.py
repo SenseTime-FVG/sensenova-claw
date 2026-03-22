@@ -63,8 +63,9 @@ class AgentSessionWorker(SessionWorker):
         model_key = self._get_model_key()
         provider, _ = config.resolve_model(model_key)
         # 向后兼容：部分 Agent 仍直接填写 model_id，此时保留显式 provider。
-        if provider == "mock" and self.agent_config and self.agent_config.provider:
-            return self.agent_config.provider
+        explicit_provider = getattr(self.agent_config, "provider", None) if self.agent_config else None
+        if provider == "mock" and explicit_provider:
+            return explicit_provider
         return provider
 
     def _get_model(self) -> str:

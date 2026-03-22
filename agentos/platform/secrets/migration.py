@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import yaml
-
 from agentos.platform.config.config import Config
 from agentos.platform.secrets.refs import build_secret_ref, is_secret_ref
 from agentos.platform.secrets.registry import is_secret_path

@@ -148,6 +148,21 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
       rebuilt.push({ id: makeId(), role: 'user', content: String(payload.content || ''), timestamp: Date.now() });
       continue;
     }
+    if (eventType === 'llm.call_result') {
+      const content = String(payload.content || '');
+      const thinkingContent = String(payload.reasoning_content || '');
+      if (content || thinkingContent) {
+        rebuilt.push({
+          id: makeId(),
+          role: 'assistant',
+          content,
+          timestamp: Date.now(),
+          thinkingContent: thinkingContent || undefined,
+          thinkingState: thinkingContent ? 'collapsed' : undefined,
+        });
+      }
+      continue;
+    }
     if (eventType === 'tool.call_requested') {
       const toolInfo: ToolInfo = {
         name: String(payload.tool_name || ''),
