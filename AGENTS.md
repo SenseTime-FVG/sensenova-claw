@@ -690,3 +690,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - Playwright 浏览器安装路径必须与测试运行时的 `PLAYWRIGHT_BROWSERS_PATH` 保持一致；只执行 `npx playwright install chromium` 而不带同样的环境变量，测试仍会报“Executable doesn't exist”。
+
+### 2026-03-22 dev 合并到 wdh/dev 补充
+
+成功经验：
+- 当用户要求“只在 `wdh/dev` 上操作”时，可以用 detached worktree 基于 `dev` 先做只读验证，再回到当前分支执行合并；这样既不污染 `dev` 分支，也能在合并前确认 `dev` 本身是否已经带着失败用例。
+- 处理冲突时，`config_api` 这类配置写回入口应优先保留 `ConfigManager` 单入口实现；否则容易绕开 secret 路径处理、内存热重载和 `CONFIG_UPDATED` 事件发布。
+- 这次最有效的回归组合是“后端定向 pytest + 进程内 e2e + 前端关键 Playwright”。仅看 merge 是否成功不够，必须同时验证 `test_config_api / test_agent_worker / test_agent_config`、`test_agent_llm_core_flow` 和 `setup-model-list/chat-markdown`。
+
+失败/风险经验：
+- `dev` 上的失败不一定来自当前改动；这次先在 detached worktree 跑测试，就提前暴露了 `tests/unit/test_agent_worker.py` 对本机模型配置的脆弱依赖，以及 `AgentConfig.provider` 已删除但运行时代码仍直接访问的兼容性问题。
+- Playwright 不能并行复用同一个 `webServer.port=3000` 配置直接起两套服务；并发跑多个 spec 容易报 `Address already in use`，这类前端回归在当前仓库更适合串行执行或拆分端口。
