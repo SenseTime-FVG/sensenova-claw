@@ -62,12 +62,17 @@ class AgentSessionWorker(SessionWorker):
         """解析 provider 名称：从 agent_config.model → llm.models → provider"""
         model_key = self._get_model_key()
         provider, _ = config.resolve_model(model_key)
+        # 向后兼容：部分 Agent 仍直接填写 model_id，此时保留显式 provider。
+        if provider == "mock" and self.agent_config and self.agent_config.provider:
+            return self.agent_config.provider
         return provider
 
     def _get_model(self) -> str:
         """解析实际 model_id（传给 LLM API 的模型名）"""
         model_key = self._get_model_key()
-        _, model_id = config.resolve_model(model_key)
+        provider, model_id = config.resolve_model(model_key)
+        if provider == "mock" and self.agent_config and self.agent_config.model:
+            return self.agent_config.model
         return model_id
 
     def _get_model_key(self) -> str:
