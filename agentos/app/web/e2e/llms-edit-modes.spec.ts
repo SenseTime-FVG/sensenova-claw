@@ -36,11 +36,13 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
 
     const providerPuts: unknown[] = [];
     const modelPuts: unknown[] = [];
+    const defaultModelPuts: unknown[] = [];
     const sectionPuts: unknown[] = [];
 
     Object.assign(window, {
       __providerPuts: providerPuts,
       __modelPuts: modelPuts,
+      __defaultModelPuts: defaultModelPuts,
       __sectionPuts: sectionPuts,
     });
 
@@ -89,6 +91,13 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
         state.llm.models['gpt-4o-mini'] = body;
         return new Response(JSON.stringify({ status: 'saved' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
+      if (url.endsWith('/api/config/llm/default-model') && method === 'PUT') {
+        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
+        defaultModelPuts.push(body);
+        (window as typeof window & { __defaultModelPuts: unknown[] }).__defaultModelPuts = defaultModelPuts;
+        state.llm.default_model = body.default_model ?? '';
+        return new Response(JSON.stringify({ status: 'saved' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
       if (url.endsWith('/api/config/sections') && method === 'PUT') {
         const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
         sectionPuts.push(body);
@@ -101,6 +110,21 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
   });
 
   await page.goto('/llms');
+
+  await expect(page.getByTestId('default-model-select')).toBeDisabled();
+  await page.getByTestId('default-model-edit').click();
+  await expect(page.getByTestId('default-model-select')).toBeEnabled();
+  await page.getByTestId('default-model-select').selectOption('');
+  await page.getByTestId('default-model-cancel').click();
+  await expect(page.getByTestId('default-model-select')).toHaveValue('gpt-4o-mini');
+
+  await page.getByTestId('default-model-edit').click();
+  await page.getByTestId('default-model-select').selectOption('');
+  await page.getByTestId('default-model-save').click();
+  await expect.poll(async () => {
+    return page.evaluate(() => ((window as typeof window & { __defaultModelPuts?: unknown[] }).__defaultModelPuts ?? []).length);
+  }).toBe(1);
+  await expect(page.getByTestId('default-model-select')).toHaveValue('');
 
   await page.getByTestId('provider-toggle-openai').click();
   await expect(page.getByTestId('provider-base-url-input-openai')).toBeDisabled();

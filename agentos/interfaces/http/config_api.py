@@ -48,6 +48,10 @@ class ModelUpdateBody(BaseModel):
     max_output_tokens: int = 8192
 
 
+class DefaultModelUpdateBody(BaseModel):
+    default_model: str = ""
+
+
 @router.get("/secret")
 async def get_secret_value(path: str, request: Request):
     """按路径读取敏感配置的真实值，仅允许注册过的 secret path。"""
@@ -181,6 +185,30 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     return {
         "status": "saved",
         "model": updated_llm.get("models", {}).get(next_name, {}),
+    }
+
+
+@router.put("/llm/default-model")
+async def update_llm_default_model(body: DefaultModelUpdateBody, request: Request):
+    """更新默认模型，不修改 provider/model 其他配置。"""
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    models = deepcopy(llm_section.get("models", {}))
+
+    if body.default_model and body.default_model not in models:
+        raise HTTPException(400, f"Model 不存在: {body.default_model}")
+
+    llm_section["default_model"] = body.default_model
+
+    try:
+        updated_llm = await config_manager.replace("llm", llm_section)
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
+
+    return {
+        "status": "saved",
+        "default_model": updated_llm.get("default_model", ""),
     }
 
 @router.get("/llm-status")

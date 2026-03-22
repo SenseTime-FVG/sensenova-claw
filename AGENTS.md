@@ -729,3 +729,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅覆盖“self chat + conversation”这种理想化测试不够；真实 WhatsApp 多设备/自聊场景的消息结构会漂移，自聊链路必须保留协议级样本测试。
+
+### 2026-03-22 LLM 默认模型编辑补充
+
+成功经验：
+- `/llms` 页面采用“单项编辑 + 编辑所有配置”双模式时，`default_model` 也必须进入同一套编辑状态机；否则顶部卡片会变成唯一不能单项编辑的配置项。
+- `default_model` 这类单字段更新，单独提供 `PUT /api/config/llm/default-model` 比复用整份 `llm` section 保存更稳，前后端都更容易保持“只更新当前一项”的语义。
+- Playwright 对顶部配置卡片最有效的断言顺序是“默认禁用 -> 编辑后可改 -> 取消恢复 -> 保存发单独请求”，这样能同时覆盖 UI 状态切换与接口契约。
+
+失败/风险经验：
+- 当前环境跑 Playwright 需要同时满足两件事：浏览器具备越权启动权限，且 `http://localhost:3000` 上已有 Next dev 进程；缺任一条件都会失败，但报错表象不同，容易误判到页面逻辑。
