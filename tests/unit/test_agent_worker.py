@@ -437,7 +437,7 @@ class TestHandleLLMCompleted:
             tool_registry,
             memory_manager=fake_memory_manager,
         )
-        agent_cfg = AgentConfig(id="planner", name="planner", provider="openai", model="gpt-4o-mini")
+        agent_cfg = AgentConfig(id="planner", name="planner", model="claude-sonnet")
         worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
 
         await repo.create_session("s1", meta={"agent_id": "planner"})
@@ -480,8 +480,8 @@ class TestHandleLLMCompleted:
         assert any(evt.type == AGENT_STEP_COMPLETED for evt in collected)
         fake_memory_manager.summarize_turn.assert_awaited_once_with(
             state.messages,
-            provider="openai",
-            model="gpt-4o-mini",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
             agent_id="planner",
         )
 
