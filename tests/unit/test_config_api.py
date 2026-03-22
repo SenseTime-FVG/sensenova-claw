@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 from agentos.interfaces.http import config_api
 from agentos.interfaces.http.config_api import router
 from agentos.platform.config.config import Config
+from agentos.platform.config.config_manager import ConfigManager
 from agentos.platform.secrets.store import InMemorySecretStore
+from agentos.kernel.events.bus import PublicEventBus
 
 
 @pytest.fixture
@@ -33,8 +35,11 @@ def app(tmp_path):
 
     secret_store = InMemorySecretStore()
     cfg = Config(config_path=config_path, secret_store=secret_store)
+    bus = PublicEventBus()
+    config_manager = ConfigManager(config=cfg, event_bus=bus, secret_store=secret_store)
     app.state.config = cfg
     app.state.secret_store = secret_store
+    app.state.config_manager = config_manager
     return app
 
 
@@ -213,3 +218,24 @@ def test_update_single_model_and_rename_default_model(client, app):
     assert "gpt-4o-mini" not in written["llm"]["models"]
     assert written["llm"]["models"]["gpt-4.1-mini"]["model_id"] == "gpt-4.1-mini"
     assert written["llm"]["default_model"] == "gpt-4.1-mini"
+
+
+# ── 必配清单检查 ──
+
+
+def test_required_check_all_missing(client):
+    """未配置搜索工具和邮箱时，两项都返回 configured=false"""
+    resp = client.get("/api/config/required-check")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["search_tool"]["configured"] is False
+    assert data["email"]["configured"] is False
+
+
+def test_required_check_search_configured(client, app):
+    """配置了搜索工具 API key 后，search_tool 返回 configured=true"""
+    app.state.config.data.setdefault("tools", {}).setdefault("serper_search", {})["api_key"] = "sk-test"
+    resp = client.get("/api/config/required-check")
+    data = resp.json()
+    assert data["search_tool"]["configured"] is True
+    assert data["email"]["configured"] is False

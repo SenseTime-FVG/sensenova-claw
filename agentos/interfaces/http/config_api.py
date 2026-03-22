@@ -1,5 +1,5 @@
 """
-Config API - 按 section 读写 config.yml 中的 llm / agent / plugins
+Config API - 按 section 读写 config.yml，管理 LLM provider/model
 """
 from __future__ import annotations
 
@@ -10,23 +10,13 @@ from typing import Any
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
-from agentos.interfaces.http.config_store import load_raw_config, persist_path_updates, persist_section_updates
 from agentos.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
 from agentos.platform.secrets.migration import migrate_plaintext_secrets
-from agentos.platform.secrets.refs import is_secret_ref
 from agentos.platform.secrets.registry import is_secret_path
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/config", tags=["config"])
-
-EDITABLE_SECTIONS = ("llm", "agent", "plugins")
-
-
-class SectionsUpdateBody(BaseModel):
-    llm: dict[str, Any] | None = None
-    agent: dict[str, Any] | None = None
-    plugins: dict[str, Any] | None = None
 
 
 class ListModelsBody(BaseModel):
@@ -85,59 +75,32 @@ async def migrate_secrets(request: Request):
 @router.get("/sections")
 async def get_config_sections(request: Request):
     """返回 llm / agent / plugins 三个 section 的当前值"""
-    cfg = request.app.state.config
-    raw_config = load_raw_config(cfg)
-    result: dict[str, Any] = {}
-    for key in EDITABLE_SECTIONS:
-        result[key] = _sanitize_section(
-            path=key,
-            resolved=deepcopy(cfg.data.get(key, {})),
-            raw=deepcopy(raw_config.get(key, {})),
-        )
-    return result
+    config_manager = request.app.state.config_manager
+    default_sections = ["llm", "agent", "plugins"]
+    return config_manager.get_sections(default_sections)
 
 
 @router.put("/sections")
-async def update_config_sections(body: SectionsUpdateBody, request: Request):
+async def update_config_sections(body: dict[str, Any], request: Request):
     """更新指定 section 并持久化到 config.yml，同时热更新运行时配置"""
-    cfg = request.app.state.config
-
-    updates = body.model_dump(exclude_none=True)
-    if not updates:
+    if not body:
         raise HTTPException(400, "未提供任何更新内容")
-
-    logger.debug("Config sections update request: %s", updates)
-    flattened_updates = _flatten_updates(updates)
-    logger.debug("Config sections flattened updates: %s", flattened_updates)
-
+    config_manager = request.app.state.config_manager
     try:
-        data = persist_path_updates(
-            cfg,
-            flattened_updates,
-            secret_store=getattr(request.app.state, "secret_store", None),
-        )
+        results = {}
+        for section, data in body.items():
+            if isinstance(data, dict):
+                results[section] = await config_manager.update(section, data)
+        return {"status": "saved", "sections": results}
     except Exception as e:
         raise HTTPException(500, f"写入配置文件失败: {e}")
-
-    logger.info("Config sections updated and reloaded: %s", list(updates.keys()))
-
-    # 返回更新后的 sections
-    result: dict[str, Any] = {}
-    raw_config = load_raw_config(cfg)
-    for key in EDITABLE_SECTIONS:
-        result[key] = _sanitize_section(
-            path=key,
-            resolved=deepcopy(data.get(key, {})),
-            raw=deepcopy(raw_config.get(key, {})),
-        )
-    return {"status": "saved", "sections": result}
 
 
 @router.put("/llm/providers/{provider_name}")
 async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, request: Request):
-    cfg = request.app.state.config
-    secret_store = getattr(request.app.state, "secret_store", None)
-    raw_config = load_raw_config(cfg)
+    """更新单个 LLM provider，支持改名并联动迁移 model 引用"""
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
     llm_section = deepcopy(raw_config.get("llm", {}))
     providers = deepcopy(llm_section.get("providers", {}))
     models = deepcopy(llm_section.get("models", {}))
@@ -166,23 +129,18 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
                 model["provider"] = next_name
         llm_section["models"] = models
 
+    # 处理 API key
     if body.api_key is not None:
-        api_key_path = f"llm.providers.{next_name}.api_key"
-        try:
-            persist_path_updates(
-                cfg,
-                {api_key_path: body.api_key},
-                secret_store=secret_store,
-            )
-        except Exception as exc:
-            raise HTTPException(500, f"写入配置文件失败: {exc}")
-        raw_config = load_raw_config(cfg)
-        llm_section = deepcopy(raw_config.get("llm", {}))
-        providers = deepcopy(llm_section.get("providers", {}))
-        providers[next_name] = {
-            **providers.get(next_name, {}),
-            **provider_payload,
-        }
+        # 先通过 ConfigManager 写入 api_key（含 secret 处理）
+        await config_manager.update("llm", {"providers": {next_name: {"api_key": body.api_key}}})
+        # 重新读取，获取写入 secret ref 后的 raw
+        raw_config = config_manager._load_raw_yaml()
+        raw_providers = raw_config.get("llm", {}).get("providers", {})
+        # 合并 api_key 到 provider_payload
+        raw_provider = raw_providers.get(next_name, {})
+        if "api_key" in raw_provider:
+            provider_payload["api_key"] = raw_provider["api_key"]
+        providers[next_name] = provider_payload
         llm_section["providers"] = providers
     else:
         current_raw = existing if isinstance(existing, dict) else {}
@@ -191,22 +149,21 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
             providers[next_name] = provider_payload
             llm_section["providers"] = providers
 
-    try:
-        data = persist_section_updates(cfg, {"llm": llm_section})
-    except Exception as exc:
-        raise HTTPException(500, f"写入配置文件失败: {exc}")
+    # 整体写回 llm section
+    raw_config = config_manager._load_raw_yaml()
+    raw_config["llm"] = llm_section
+    config_manager._write_raw_yaml(raw_config)
+    config_manager._reload_memory()
 
-    return {"status": "saved", "provider": _sanitize_section(
-        path=f"llm.providers.{next_name}",
-        resolved=deepcopy(data.get("llm", {}).get("providers", {}).get(next_name, {})),
-        raw=deepcopy(load_raw_config(cfg).get("llm", {}).get("providers", {}).get(next_name, {})),
-    )}
+    cfg = request.app.state.config
+    return {"status": "saved", "provider": config_manager.get_section("llm").get("providers", {}).get(next_name, {})}
 
 
 @router.put("/llm/models/{model_name}")
 async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Request):
-    cfg = request.app.state.config
-    raw_config = load_raw_config(cfg)
+    """更新单个 LLM model，支持改名并联动 default_model"""
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
     llm_section = deepcopy(raw_config.get("llm", {}))
     models = deepcopy(llm_section.get("models", {}))
 
@@ -230,67 +187,13 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     if llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
 
-    try:
-        data = persist_section_updates(cfg, {"llm": llm_section})
-    except Exception as exc:
-        raise HTTPException(500, f"写入配置文件失败: {exc}")
+    # 整体写回 llm section
+    raw_config = config_manager._load_raw_yaml()
+    raw_config["llm"] = llm_section
+    config_manager._write_raw_yaml(raw_config)
+    config_manager._reload_memory()
 
-    return {"status": "saved", "model": _sanitize_section(
-        path=f"llm.models.{next_name}",
-        resolved=deepcopy(data.get("llm", {}).get("models", {}).get(next_name, {})),
-        raw=deepcopy(load_raw_config(cfg).get("llm", {}).get("models", {}).get(next_name, {})),
-    )}
-
-
-def _flatten_updates(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in data.items():
-        path = f"{prefix}.{key}" if prefix else key
-        if isinstance(value, dict):
-            result.update(_flatten_updates(value, path))
-        else:
-            result[path] = value
-    return result
-
-
-def _sanitize_section(path: str, resolved: Any, raw: Any) -> Any:
-    if is_secret_path(path):
-        return {
-            "configured": bool(resolved),
-            "masked_value": _mask_secret(resolved),
-            "source": _detect_secret_source(raw),
-        }
-    if isinstance(resolved, dict):
-        raw_dict = raw if isinstance(raw, dict) else {}
-        return {
-            key: _sanitize_section(
-                path=f"{path}.{key}",
-                resolved=value,
-                raw=raw_dict.get(key),
-            )
-            for key, value in resolved.items()
-        }
-    if isinstance(resolved, list):
-        return resolved
-    return resolved
-
-
-def _mask_secret(secret: Any) -> str | None:
-    if not isinstance(secret, str) or not secret:
-        return None
-    if len(secret) <= 8:
-        return f"{secret[:2]}...{secret[-2:]}"
-    return f"{secret[:4]}...{secret[-4:]}"
-
-
-def _detect_secret_source(raw_value: Any) -> str:
-    if not raw_value:
-        return "empty"
-    if isinstance(raw_value, str) and is_secret_ref(raw_value):
-        return "secret"
-    if isinstance(raw_value, str) and raw_value.startswith("${") and raw_value.endswith("}"):
-        return "env"
-    return "plain"
+    return {"status": "saved", "model": config_manager.get_section("llm").get("models", {}).get(next_name, {})}
 
 
 @router.get("/llm-status")
@@ -305,6 +208,41 @@ async def get_llm_status(request: Request):
 async def get_llm_presets():
     """返回所有 LLM 提供商预设分类列表，供前端展示使用"""
     return {"categories": LLM_PROVIDER_CATEGORIES}
+
+
+@router.get("/required-check")
+async def check_required_config(request: Request):
+    """检查必配项状态：搜索工具（至少一个）、邮箱配置"""
+    cfg = request.app.state.config
+
+    # 搜索工具：serper / brave / baidu / tavily 至少配一个
+    search_keys = [
+        "tools.serper_search.api_key",
+        "tools.brave_search.api_key",
+        "tools.baidu_search.api_key",
+        "tools.tavily_search.api_key",
+    ]
+    search_configured = any(
+        bool(cfg.get(k, "")) and not str(cfg.get(k, "")).startswith("${")
+        for k in search_keys
+    )
+
+    # 邮箱：enabled + smtp_host + username 都有值
+    email_enabled = cfg.get("tools.email.enabled", False)
+    email_smtp = cfg.get("tools.email.smtp_host", "")
+    email_user = cfg.get("tools.email.username", "")
+    email_configured = bool(email_enabled and email_smtp and email_user)
+
+    return {
+        "search_tool": {
+            "configured": search_configured,
+            "message": "搜索工具未配置（serper/brave/baidu/tavily 至少需要配置一个）",
+        },
+        "email": {
+            "configured": email_configured,
+            "message": "邮箱未配置（需要配置 SMTP/IMAP 信息）",
+        },
+    }
 
 
 @router.post("/list-models")

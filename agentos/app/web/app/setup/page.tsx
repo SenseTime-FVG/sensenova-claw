@@ -257,7 +257,7 @@ export default function SetupPage() {
 
       // 标记已完成配置，避免 ProtectedRoute 再次跳回 setup
       sessionStorage.setItem('llm_just_configured', '1');
-      router.push('/');
+      router.push('/chat?agent=system-admin');
     } catch (e) {
       console.error('保存配置失败:', e);
       setSubmitError('保存配置失败，请稍后重试');

@@ -57,6 +57,10 @@ class SessionStateStore:
             self._session_history[session_id] = []
         self._session_history[session_id].extend(messages)
 
+    def replace_history(self, session_id: str, history: list[dict[str, Any]]) -> None:
+        """替换会话历史（用于上下文压缩后更新）"""
+        self._session_history[session_id] = history
+
     def is_first_turn(self, session_id: str) -> bool:
         """检查是否是会话的第一轮对话"""
         return session_id not in self._session_first_turn
