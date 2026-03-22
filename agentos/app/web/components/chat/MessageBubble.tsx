@@ -9,7 +9,7 @@ import { resolveAssistantDisplayContent } from '@/lib/assistantThink';
 import { MarkdownContent } from './MarkdownContent';
 
 export function MessageBubble({ msg }: { msg: ChatMessage }) {
-  const [showArgs, setShowArgs] = useState(false);
+  const [showArgs, setShowArgs] = useState(true);
   const [showResult, setShowResult] = useState(false);
   const parsedAssistantContent = useMemo(
     () => msg.role === 'assistant'
@@ -17,11 +17,11 @@ export function MessageBubble({ msg }: { msg: ChatMessage }) {
       : { answerContent: '', thinkContent: '' },
     [msg.content, msg.role, msg.thinkingContent],
   );
-  const [showThink, setShowThink] = useState(msg.thinkingState === 'streaming');
+  const [showThink, setShowThink] = useState(true);
 
   useEffect(() => {
     if (msg.role !== 'assistant') return;
-    setShowThink(msg.thinkingState === 'streaming');
+    setShowThink(true);
   }, [msg.id, msg.role, msg.thinkingState]);
 
   if (msg.role === 'system') {
