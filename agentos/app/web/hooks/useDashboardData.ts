@@ -67,6 +67,8 @@ export interface RecentOutput {
   agentName: string;
   timeLabel: string;
   tone: 'blue' | 'emerald' | 'amber' | 'violet' | 'neutral';
+  /** agent 最终输出的 markdown 预览（长度 > 100 时截取前 150 字符） */
+  preview?: string;
 }
 
 export interface ProactiveItem {
@@ -264,8 +266,9 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
   ];
 
   // ── 今日 Task 结果（只展示当天的有标题会话） ──
+  // 只展示 agent 最终输出长度 > 100 的会话
   const todayAllSessions = [...namedSessions]
-    .filter(s => getLastActive(s) >= todayStartMs)
+    .filter(s => getLastActive(s) >= todayStartMs && (s.last_agent_response || '').length > 100)
     .sort((a, b) => getLastActive(b) - getLastActive(a));
 
   const recentOutputs: RecentOutput[] = todayAllSessions.map((s, i) => ({
@@ -274,6 +277,7 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
     agentName: agentNameMap.get(getSessionAgentId(s.meta)) || 'Agent',
     timeLabel: timeLabel(s.last_active),
     tone: OUTPUT_TONES[i % OUTPUT_TONES.length],
+    preview: (s.last_agent_response || '').slice(0, 150),
   }));
 
   // ── Proactive 输出（基于最近完成的 cron 和活跃会话生成建议） ──

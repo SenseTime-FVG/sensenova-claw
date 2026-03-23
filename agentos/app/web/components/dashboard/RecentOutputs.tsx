@@ -33,6 +33,11 @@ function OutputCard({ item, onClick }: { item: RecentOutput; onClick?: () => voi
         <div className="line-clamp-2 text-[12px] font-semibold leading-[1.35] text-neutral-800">
           {item.title}
         </div>
+        {item.preview && (
+          <div className="mt-1.5 line-clamp-3 text-[10px] leading-[1.5] text-neutral-500 whitespace-pre-line">
+            {item.preview}…
+          </div>
+        )}
         <div className="mt-1.5 text-[10px]" style={{ color: '#a1a1aa' }}>{item.timeLabel}</div>
       </div>
     </button>

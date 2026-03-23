@@ -31,7 +31,7 @@ export class OfficeScene extends Phaser.Scene {
     // 背景
     this.load.image('office_bg', `${base}/office_bg_small.webp`);
     // 主角
-    this.load.spritesheet('star_idle', `${base}/star-idle-v5.png`, { frameWidth: 128, frameHeight: 128 });
+    this.load.spritesheet('star_idle', `${base}/icon.png`, { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('star_working', `${base}/star-working-spritesheet-grid.webp`, { frameWidth: 230, frameHeight: 144 });
     // 家具
     this.load.image('sofa_idle', `${base}/sofa-idle-v3.png`);
@@ -59,12 +59,12 @@ export class OfficeScene extends Phaser.Scene {
     // 主角 idle 精灵（沙发上休息）
     this.anims.create({
       key: 'star_idle',
-      frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 29 }),
+      frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 47 }),
       frameRate: 8, repeat: -1,
     });
     // 放在沙发座面上
     this.star = this.physics.add.sprite(780, 250, 'star_idle')
-      .setOrigin(0.5).setScale(0.7).setAlpha(0.9).setDepth(15);
+      .setOrigin(0.5).setScale(0.35).setAlpha(0.9).setDepth(15);
     this.star.play('star_idle');
 
     // 工作动画精灵（桌前，初始隐藏）
@@ -143,18 +143,9 @@ export class OfficeScene extends Phaser.Scene {
     const ct = LAYOUT.furniture.cat;
     this.catSprite = this.add.sprite(ct.x, ct.y, 'cats', Math.floor(Math.random() * 16))
       .setOrigin(ct.origin.x, ct.origin.y).setDepth(ct.depth);
-
-    // Scale.NONE 下用 DOM 点击事件手动换算坐标，避免 Phaser 输入在 CSS 缩放时失准
-    this.game.canvas.addEventListener('pointerdown', (e: PointerEvent) => {
-      const rect = this.game.canvas.getBoundingClientRect();
-      const scaleX = this.game.canvas.width / rect.width;
-      const scaleY = this.game.canvas.height / rect.height;
-      const gameX = (e.clientX - rect.left) * scaleX;
-      const gameY = (e.clientY - rect.top) * scaleY;
-      const bounds = this.catSprite.getBounds();
-      if (bounds.contains(gameX, gameY)) {
-        this.catSprite.setFrame(Math.floor(Math.random() * 16));
-      }
+    this.catSprite.setInteractive({ useHandCursor: true });
+    this.catSprite.on('pointerdown', () => {
+      this.catSprite.setFrame(Math.floor(Math.random() * 16));
     });
 
     // 牌匾
@@ -296,17 +287,10 @@ export function createOfficeGame(parent: HTMLDivElement): Phaser.Game {
     physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
     scene: [OfficeScene],
     scale: {
-      mode: Phaser.Scale.NONE,
+      mode: Phaser.Scale.FIT,
+      autoCenter: Phaser.Scale.CENTER_BOTH,
     },
   });
-
-  // 用 CSS 缩放代替 Phaser ScaleManager，彻底避免亚像素 resize 震荡
-  const canvas = game.canvas;
-  canvas.style.width = '100%';
-  canvas.style.height = '100%';
-  canvas.style.objectFit = 'contain';
-  canvas.style.imageRendering = 'pixelated';
-
   // 调试用
   (window as unknown as Record<string, unknown>).__phaserGame = game;
   return game;

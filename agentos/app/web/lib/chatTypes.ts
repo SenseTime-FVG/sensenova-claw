@@ -31,6 +31,7 @@ export interface SessionItem {
   status: string;
   last_turn_status?: 'started' | 'completed' | 'cancelled' | 'error' | null;
   last_turn_ended_at?: number | null;
+  last_agent_response?: string | null;
 }
 
 export interface TaskGroup {

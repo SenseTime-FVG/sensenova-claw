@@ -113,7 +113,7 @@ export function SmartStack({ agents, onAgentClick }: SmartStackProps) {
             className="overflow-x-auto snap-x thin-scrollbar h-full"
             style={{
               display: 'grid',
-              gridTemplateRows: 'repeat(3, 38px)',
+              gridTemplateRows: 'repeat(3, 46px)',
               gridAutoFlow: 'column',
               gridAutoColumns: 'calc(50% - 4px)',
               gap: '7px',
