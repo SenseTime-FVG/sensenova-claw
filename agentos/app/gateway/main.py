@@ -46,7 +46,7 @@ from agentos.platform.config.workspace import (
     resolve_agentos_home,
 )
 from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api, sessions
-from agentos.interfaces.http import cron_api, notification_api
+from agentos.interfaces.http import cron_api, notification_api, proactive_api
 
 # Token 认证模块（Jupyter-lab 风格）
 from agentos.platform.security.auth import TokenAuthService
@@ -394,6 +394,7 @@ app.include_router(files.router)
 app.include_router(config_api.router)
 app.include_router(cron_api.router)
 app.include_router(notification_api.router)
+app.include_router(proactive_api.router)
 app.include_router(sessions.router)
 from agentos.interfaces.http import custom_pages
 app.include_router(custom_pages.router)
