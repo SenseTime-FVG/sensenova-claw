@@ -85,7 +85,6 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
     sessions,
     currentSessionId,
     switchSession,
-    createSession,
     deleteSession,
     startNewChat,
     refreshTaskGroups,
@@ -103,7 +102,8 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
       const map: Record<string, string> = {};
       if (Array.isArray(data)) {
         for (const a of data) {
-          map[String(a.id)] = String(a.name || a.id);
+          const id = String(a.id);
+          map[id] = String(a.name || a.id);
         }
       }
       setAgentMap(map);
@@ -118,9 +118,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
     .sort((a, b) => b.last_active - a.last_active);
 
   const handleNewChat = () => {
-    const newAgentId = agentFilter || Object.keys(agentMap)[0] || 'default';
     startNewChat();
-    createSession(newAgentId);
   };
 
   const handleRefresh = () => {
@@ -137,6 +135,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
         <div className="flex items-center gap-1">
           <button
             onClick={handleNewChat}
+            data-testid="recent-chats-new-button"
             className="flex items-center gap-0.5 p-1 rounded-lg text-primary hover:bg-primary/10 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -178,6 +177,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
           ))
         )}
       </div>
+
     </div>
   );
 }

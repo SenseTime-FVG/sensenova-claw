@@ -965,3 +965,23 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 同类错误容易同时出现在 `Tabs`、`Separator`、`ScrollArea` 等多个基础组件中；只修单页通常会留下第二处同源问题。
+
+### 2026-03-23 工作台新建会话 Agent 选择补充
+
+成功经验：
+- 工作台底部 selector 切 agent 但继续复用旧 session 的问题，直接在 `ChatSessionContext.sendMessage()` 内比对“当前 session 的 `agent_id`”与“待发送 agent”最稳；不需要新增后端协议，也不会影响已有 `create_session -> session_created -> user_input` 链路。
+- 最近对话 `+` 的需求适合直接放在 `LeftNav` 层完成：复用同一份 agent 列表，弹一个轻量 `Dialog` 让用户确认后再 `createSession()`，普通工作台默认 `default`，带 `agentFilter` 的页面默认当前过滤 agent。
+- Playwright 用假 `fetch` 和假 `WebSocket` 断言 `load_session/create_session/user_input` 的顺序，非常适合这类前端 session 编排回归；本次两个工作台用例都能在隔离环境下快速跑通。
+
+失败/风险经验：
+- 旧前端测试里默认认为 `chat-input`、`send-button` test id 一直存在，但组件实际可能已经漂移；遇到“元素不存在”时先核对测试钩子，不要误判成业务逻辑回归。
+- 当前仓库默认 Playwright 配置会联动 `webServer`，在本机可能被 `uv` 缓存权限或 `system-configuration` panic 拖垮；做前端局部回归时，临时改成“直连已启动 3000 服务”的最小配置更稳。
+
+### 2026-03-23 工作台加号重置空白对话补充
+
+成功经验：
+- 如果产品期望是“像刚进入工作台那样的新对话窗口，但不提前建 session”，最小实现就是让最近对话 `+` 只调用 `startNewChat()`；右侧会自然回到空白输入态，首条消息再沿用现有惰性建 session 链路。
+- 这种行为比“点 `+` 就创建空 session”更稳，也避免用户误触后留下无内容会话；和现有 `sendMessage()` 的惰性创建模型一致。
+
+失败/风险经验：
+- 这类交互需求很容易在中途反复变化；如果先把 `+` 绑定到复杂弹窗或预创建逻辑，再回退会造成无谓代码噪音。应优先围绕“是否真的需要立即创建 session”这个核心约束做最小实现。

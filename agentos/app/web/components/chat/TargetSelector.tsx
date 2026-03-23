@@ -45,6 +45,7 @@ export function TargetSelector({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
+        data-testid="chat-agent-selector-button"
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary/50 border hover:bg-secondary transition-colors text-xs font-medium text-secondary-foreground"
       >
         <Bot size={14} className="text-primary" />
@@ -65,6 +66,8 @@ export function TargetSelector({
             ) : agents.map(a => (
               <button
                 key={a.id}
+                data-testid={`chat-agent-option-${a.id}`}
+                data-selected={selectedAgent === a.id ? 'true' : 'false'}
                 onClick={() => { onSelectAgent(a.id); setOpen(false); }}
                 className={`w-full text-left px-3 py-2.5 rounded-md text-sm hover:bg-muted transition-colors flex items-center gap-3 ${
                   selectedAgent === a.id ? 'bg-muted/80' : ''
