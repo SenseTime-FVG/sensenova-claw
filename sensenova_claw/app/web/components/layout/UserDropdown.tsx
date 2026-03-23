@@ -203,8 +203,8 @@ export function UserDropdown() {
       <DropdownMenuTrigger asChild>
         <button type="button" className="focus:outline-none">
           <Avatar className="h-7 w-7 cursor-pointer ring-2 ring-border/30 hover:ring-primary/30 transition-all">
-            <AvatarImage src="/icon.png" alt="Sensenova-Claw" />
-            <AvatarFallback className="text-[10px] font-semibold bg-muted">AO</AvatarFallback>
+            <AvatarImage src="/claw-icon.png" alt="Sensenova-Claw" />
+            <AvatarFallback className="text-[10px] font-semibold bg-muted">SC</AvatarFallback>
           </Avatar>
         </button>
       </DropdownMenuTrigger>
@@ -214,8 +214,8 @@ export function UserDropdown() {
         <DropdownMenuLabel className="font-normal px-3 py-2.5">
           <div className="flex items-center gap-2.5">
             <Avatar className="h-8 w-8">
-              <AvatarImage src="/icon.png" alt="Sensenova-Claw" />
-              <AvatarFallback className="text-xs font-semibold bg-muted">AO</AvatarFallback>
+              <AvatarImage src="/claw-icon.png" alt="Sensenova-Claw" />
+              <AvatarFallback className="text-xs font-semibold bg-muted">SC</AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold truncate">Sensenova-Claw</p>
