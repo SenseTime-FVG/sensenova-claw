@@ -1,6 +1,7 @@
 'use client';
 
-import { Suspense, useState, useEffect, useCallback, useRef } from 'react';
+import { Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Loader2, Bot, MessageSquare, Plus, Search, RefreshCw, Trash2,
 } from 'lucide-react';
@@ -68,7 +69,9 @@ function AgentContactItem({
       onClick={onClick}
       className={cn(
         'flex items-start gap-3 px-4 py-3.5 cursor-pointer transition-all border-b border-border/60',
-        isSelected ? 'bg-primary/5 shadow-sm' : 'hover:bg-muted/50',
+        isSelected
+          ? 'bg-blue-100 shadow-md border-l-[3px] border-l-blue-500 dark:bg-blue-900/40'
+          : 'hover:bg-muted/50',
       )}
     >
       <div className={cn(
@@ -104,12 +107,13 @@ function AgentContactItem({
 /* ── Session 列表项（中栏） ── */
 
 function SessionListItem({
-  session, isActive, onClick, onDelete,
+  session, isActive, onClick, onDelete, index,
 }: {
   session: SessionItem;
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
+  index: number;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -129,12 +133,14 @@ function SessionListItem({
       onClick={onClick}
       className={cn(
         'flex items-center gap-2.5 px-3 py-2.5 mx-2 rounded-xl cursor-pointer transition-all text-sm group relative',
-        isActive ? 'bg-primary/8 text-foreground shadow-sm border border-primary/15' : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
+        'animate-in fade-in slide-in-from-left-2 duration-200',
+        isActive ? 'bg-blue-100 dark:bg-blue-900/40 text-foreground shadow-md' : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
       )}
+      style={{ animationDelay: `${index * 30}ms`, animationFillMode: 'both' }}
     >
       <MessageSquare className={cn(
         'w-4 h-4 shrink-0',
-        isActive ? 'text-primary' : 'text-muted-foreground',
+        isActive ? 'text-blue-500' : 'text-muted-foreground',
       )} />
       <div className="flex-1 min-w-0">
         <div className="truncate font-medium text-xs">{getTitle(session.meta)}</div>
@@ -177,14 +183,17 @@ function ChatContent() {
   } = useChatSession();
 
   const { openToPath } = useFilePanel();
+  const searchParams = useSearchParams();
+  const agentFromUrl = searchParams.get('agent');
 
   const [agents, setAgents] = useState<AgentBrief[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(true);
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(agentFromUrl);
   const [searchQuery, setSearchQuery] = useState('');
   const [slidePreviewDir, setSlidePreviewDir] = useState<string | null>(null);
   const [previewHeight, setPreviewHeight] = useState(350);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const requiredCheckDone = useRef(false);
 
   const slideSet = useSlideSet(slidePreviewDir);
 
@@ -279,6 +288,14 @@ function ChatContent() {
     }
   }, [agents, selectedAgentId]);
 
+  // 切换 agent 时刷新 session 列表
+  useEffect(() => {
+    if (selectedAgentId) {
+      refreshTaskGroups();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAgentId]);
+
   const selectedSessions = selectedAgentId
     ? (sessionsByAgent[selectedAgentId] || []).sort((a, b) => b.last_active - a.last_active)
     : [];
@@ -291,6 +308,39 @@ function ChatContent() {
         a.description.toLowerCase().includes(searchQuery.toLowerCase()),
       )
     : agents;
+
+  // 必配清单检查：进入 system-admin 新 session 时自动发送缺失配置提醒
+  useEffect(() => {
+    if (requiredCheckDone.current) return;
+    if (selectedAgentId !== 'system-admin') return;
+    if (!agentFromUrl || agentFromUrl !== 'system-admin') return;
+    if (!wsConnected || agents.length === 0) return;
+
+    // 仅在没有现有 session 时触发（首次进入）
+    const existingSessions = sessionsByAgent['system-admin'] || [];
+    if (existingSessions.length > 0) return;
+
+    requiredCheckDone.current = true;
+
+    (async () => {
+      try {
+        const res = await authFetch(`${API_BASE}/api/config/required-check`);
+        const data = await res.json();
+        const missing: string[] = [];
+        for (const [, info] of Object.entries(data)) {
+          const item = info as { configured: boolean; message: string };
+          if (!item.configured) missing.push(item.message);
+        }
+        if (missing.length > 0) {
+          const text = `以下系统配置尚未完成，请帮我配置：\n${missing.map((m, i) => `${i + 1}. ${m}`).join('\n')}`;
+          startNewChat();
+          sendMessage(text, [], 'system-admin');
+        }
+      } catch (e) {
+        console.error('必配清单检查失败:', e);
+      }
+    })();
+  }, [selectedAgentId, agentFromUrl, wsConnected, agents, sessionsByAgent, startNewChat, sendMessage]);
 
   const handleNewChat = () => {
     if (!selectedAgentId) return;
@@ -424,14 +474,15 @@ function ChatContent() {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-0.5">
-                    {selectedSessions.map(session => (
+                  <div key={selectedAgentId} className="space-y-0.5">
+                    {selectedSessions.map((session, idx) => (
                       <SessionListItem
                         key={session.session_id}
                         session={session}
                         isActive={currentSessionId === session.session_id}
                         onClick={() => switchSession(session.session_id)}
                         onDelete={() => deleteSession(session.session_id)}
+                        index={idx}
                       />
                     ))}
                   </div>
@@ -455,6 +506,13 @@ function ChatContent() {
             </div>
           ) : (
             <>
+              {/* Session ID 栏 */}
+              {currentSessionId && (
+                <div className="px-4 py-1.5 border-b border-border/40 flex items-center">
+                  <span className="text-[10px] text-muted-foreground/60">Session: </span>
+                  <span className="text-[10px] text-muted-foreground/60 font-mono select-all">{currentSessionId}</span>
+                </div>
+              )}
               {/* 消息区 */}
               <div className={cn("overflow-y-auto p-4 md:p-8", slideSet ? "min-h-0" : "", "flex-1")}>
                 {messages.length === 0 ? (

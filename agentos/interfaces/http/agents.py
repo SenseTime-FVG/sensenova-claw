@@ -100,7 +100,6 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
         "name": agent_cfg.name,
         "status": "active" if agent_cfg.enabled else "disabled",
         "description": agent_cfg.description,
-        "provider": agent_cfg.provider,
         "model": agent_cfg.model,
         "systemPrompt": agent_cfg.system_prompt,
         "temperature": agent_cfg.temperature,
@@ -129,7 +128,6 @@ class AgentPreferences(BaseModel):
 class AgentConfigUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
-    provider: str | None = None
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
@@ -144,7 +142,6 @@ class AgentCreate(BaseModel):
     id: str
     name: str
     description: str = ""
-    provider: str | None = None
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
@@ -252,7 +249,6 @@ async def create_agent(body: AgentCreate, request: Request):
         id=body.id,
         name=body.name,
         description=body.description,
-        provider=body.provider or (default.provider if default else "openai"),
         model=body.model or (default.model if default else "gpt-4o-mini"),
         temperature=body.temperature if body.temperature is not None else (default.temperature if default else 0.2),
         max_tokens=body.max_tokens,
@@ -286,8 +282,6 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
         updates["name"] = body.name
     if body.description is not None:
         updates["description"] = body.description
-    if body.provider is not None:
-        updates["provider"] = body.provider
     if body.model is not None:
         updates["model"] = body.model
     if body.temperature is not None:

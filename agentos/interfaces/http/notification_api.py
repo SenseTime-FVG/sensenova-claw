@@ -7,7 +7,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from agentos.interfaces.http.config_store import persist_path_updates
 from agentos.kernel.notification.models import Notification
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
@@ -42,12 +41,9 @@ async def update_notification_config(body: NotificationConfigBody, request: Requ
     if not updates:
         raise HTTPException(400, "No notification config updates provided")
 
-    path_updates: dict[str, Any] = {}
-    for key, value in updates.items():
-        path_updates[f"notification.{key}"] = value
-
+    config_manager = request.app.state.config_manager
     try:
-        persist_path_updates(request.app.state.config, path_updates)
+        await config_manager.update("notification", updates)
     except Exception as exc:
         raise HTTPException(500, f"Failed to save notification config: {exc}")
 

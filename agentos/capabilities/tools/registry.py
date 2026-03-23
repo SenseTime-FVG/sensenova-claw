@@ -43,14 +43,18 @@ class ToolRegistry:
             WriteFileTool(),
             CreateAgentTool(),
             AskUserTool(),
-            SendEmailTool(),
-            ListEmailsTool(),
-            ReadEmailTool(),
-            DownloadAttachmentTool(),
-            MarkEmailTool(),
-            SearchEmailsTool(),
         ]:
             self.register(tool)
+        if config.get("tools.email.enabled", False):
+            for tool in [
+                SendEmailTool(),
+                ListEmailsTool(),
+                ReadEmailTool(),
+                DownloadAttachmentTool(),
+                MarkEmailTool(),
+                SearchEmailsTool(),
+            ]:
+                self.register(tool)
 
     def register(self, tool: Tool) -> None:
         # 注册工具到内存字典，供 ToolRuntime 查找。
@@ -61,7 +65,7 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def _is_llm_exposed(self, tool: Tool) -> bool:
-        provider_name, _model_id = config.resolve_model(config.get("agent.model"))
+        provider_name, _model_id = config.resolve_model(config.get("llm.default_model"))
         if provider_name == "mock":
             return True
         if tool.name in {"serper_search", "brave_search", "baidu_search", "tavily_search"}:

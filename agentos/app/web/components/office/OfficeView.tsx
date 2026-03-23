@@ -2,16 +2,24 @@
 
 // 办公室视图：Phaser Canvas + 状态栏
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, memo } from 'react';
 import { useOfficeState } from '@/hooks/useOfficeState';
-import { STATES } from './types';
+import { STATES, type OfficeStateName } from './types';
 
-export function OfficeView() {
+/**
+ * Phaser 画布容器 — 独立 memo 组件，避免父组件重渲染导致画布闪烁。
+ * 只在 officeState 的 state/detail 值真正变化时才向 Phaser 推送事件。
+ */
+const PhaserCanvas = memo(function PhaserCanvas({
+  state,
+  detail,
+}: {
+  state: OfficeStateName;
+  detail: string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<import('phaser').Game | null>(null);
-  const officeState = useOfficeState();
 
-  // 动态 import Phaser（避免 SSR），创建/销毁游戏实例
   useEffect(() => {
     let mounted = true;
 
@@ -33,21 +41,26 @@ export function OfficeView() {
     };
   }, []);
 
-  // 状态变更时推送到 Phaser 场景
   useEffect(() => {
     if (gameRef.current) {
-      gameRef.current.events.emit('setState', officeState.state, officeState.detail);
+      gameRef.current.events.emit('setState', state, detail);
     }
-  }, [officeState]);
+  }, [state, detail]);
 
+  return <div ref={containerRef} className="absolute inset-0" />;
+});
+
+export function OfficeView() {
+  const officeState = useOfficeState();
   const stateInfo = STATES[officeState.state];
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 relative rounded-lg overflow-hidden bg-black">
-        <div ref={containerRef} className="w-full h-full" />
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Phaser 画布：固定宽高比容器，避免 flex 尺寸震荡触发 Scale.FIT 反复重绘 */}
+      <div className="flex-1 min-h-0 relative rounded-lg overflow-hidden bg-black">
+        <PhaserCanvas state={officeState.state} detail={officeState.detail} />
       </div>
-      <div className="mt-2 flex items-center justify-between px-3 py-1.5 text-sm">
+      <div className="flex-shrink-0 h-9 flex items-center justify-between px-3 text-sm">
         <div className="flex items-center gap-2 text-muted-foreground">
           <span className={`inline-block w-2 h-2 rounded-full ${
             officeState.state === 'idle' ? 'bg-green-500' :

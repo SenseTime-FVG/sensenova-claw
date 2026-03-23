@@ -32,6 +32,7 @@ test("start uses openclaw-compatible Baileys auth options", async () => {
 
   const runtime = new WhatsAppRuntime({
     emit: () => {},
+    versionFetchTimeoutMs: 10,
     loadBaileys: async () => ({
       makeWASocket(options) {
         capturedSocketOptions = options;
@@ -65,6 +66,45 @@ test("start uses openclaw-compatible Baileys auth options", async () => {
   });
   assert.deepEqual(capturedSocketOptions.version, [2, 3000, 1]);
   assert.deepEqual(capturedSocketOptions.browser, ["openclaw", "cli", "agentos"]);
+});
+
+test("start falls back when fetchLatestBaileysVersion stalls", async () => {
+  let capturedSocketOptions = null;
+  const fakeSocket = {
+    ev: createFakeEmitter(),
+    ws: { close() {} },
+    user: null,
+  };
+
+  const runtime = new WhatsAppRuntime({
+    emit: () => {},
+    versionFetchTimeoutMs: 10,
+    loadBaileys: async () => ({
+      makeWASocket(options) {
+        capturedSocketOptions = options;
+        return fakeSocket;
+      },
+      useMultiFileAuthState: async () => ({
+        state: {
+          creds: { me: "creds" },
+          keys: { me: "keys" },
+        },
+        saveCreds: async () => {},
+      }),
+      fetchLatestBaileysVersion: async () => new Promise(() => {}),
+      makeCacheableSignalKeyStore(keys) {
+        return { wrappedKeys: keys };
+      },
+    }),
+  });
+
+  await Promise.race([
+    runtime.start("/tmp/agentos-whatsapp-runtime-test"),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("start timeout")), 100)),
+  ]);
+
+  assert.ok(capturedSocketOptions);
+  assert.deepEqual(capturedSocketOptions.version, [2, 3000, 1]);
 });
 
 test("statusCode 515 restarts socket without clearing auth dir", async () => {
@@ -441,6 +481,67 @@ test("messages.upsert accepts self chat messages on lid conversations", async ()
   assert.equal(messageEvent.payload.text, "hello from self lid chat");
 });
 
+test("messages.upsert extracts self chat text from protocolMessage wrapper", async () => {
+  const events = [];
+  const sockets = [];
+
+  const runtime = new WhatsAppRuntime({
+    emit: (event) => {
+      events.push(event);
+    },
+    ensureAuthDir: async () => {},
+    loadBaileys: async () => ({
+      makeWASocket() {
+        const socket = {
+          ev: createFakeEmitter(),
+          ws: { close() {} },
+          user: { id: "85293432086:1@s.whatsapp.net", lid: "121672866726017@lid" },
+        };
+        sockets.push(socket);
+        return socket;
+      },
+      useMultiFileAuthState: async () => ({
+        state: {
+          creds: {},
+          keys: {},
+        },
+        saveCreds: async () => {},
+      }),
+      fetchLatestBaileysVersion: async () => ({ version: [2, 3000, 1] }),
+      makeCacheableSignalKeyStore(keys) {
+        return keys;
+      },
+    }),
+  });
+
+  await runtime.start("/tmp/agentos-whatsapp-runtime-test");
+  sockets[0].ev.emit("messages.upsert", {
+    type: "notify",
+    messages: [
+      {
+        key: {
+          fromMe: true,
+          remoteJid: "121672866726017@lid",
+          id: "wamid-self-protocol-1",
+        },
+        message: {
+          protocolMessage: {
+            editedMessage: {
+              message: {
+                conversation: "hello from self protocol wrapper",
+              },
+            },
+          },
+        },
+      },
+    ],
+  });
+
+  const messageEvent = events.find((event) => event.type === "message");
+  assert.ok(messageEvent);
+  assert.equal(messageEvent.payload.text, "hello from self protocol wrapper");
+});
+
 test("messages.upsert still ignores non-self from_me messages", async () => {
   const events = [];
   const sockets = [];
@@ -609,6 +710,43 @@ test("statusCode 408 reconnects socket without clearing auth dir", async () => {
   assert.equal(makeSocketCalls, 2);
   assert.equal(resetAuthDirCalls, 0);
   assert.equal(events.some((event) => event.type === "status" && event.payload.state === "reconnecting"), true);
+});
+
+test("reconnect exhaustion updates runtime status", async () => {
+  const events = [];
+  const runtime = new WhatsAppRuntime({
+    emit: (event) => {
+      events.push(event);
+    },
+    ensureAuthDir: async () => {},
+    maxReconnectAttempts: 0,
+    loadBaileys: async () => ({
+      makeWASocket() {
+        return {
+          ev: createFakeEmitter(),
+          ws: { close() {} },
+          user: null,
+        };
+      },
+      useMultiFileAuthState: async () => ({
+        state: {
+          creds: {},
+          keys: {},
+        },
+        saveCreds: async () => {},
+      }),
+      fetchLatestBaileysVersion: async () => ({ version: [2, 3000, 1] }),
+      makeCacheableSignalKeyStore(keys) {
+        return keys;
+      },
+    }),
+  });
+
+  await runtime.start("/tmp/agentos-whatsapp-runtime-test");
+  await runtime._reconnectAfterTimeout();
+
+  assert.equal(runtime.getStatus().state, "reconnect_exhausted");
+  assert.equal(events.some((event) => event.type === "status" && event.payload.state === "reconnect_exhausted"), true);
 });
 
 test("qr refs timeout restarts login socket without consuming reconnect budget", async () => {

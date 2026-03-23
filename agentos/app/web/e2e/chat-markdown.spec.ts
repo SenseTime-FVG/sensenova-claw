@@ -9,9 +9,6 @@ type MockWindow = Window & {
 };
 
 function mockAuthAndWebSocket() {
-  localStorage.setItem('access_token', 'e2e-access-token');
-  localStorage.setItem('refresh_token', 'e2e-refresh-token');
-
   class MockWebSocket {
     static readonly CONNECTING = 0;
     static readonly OPEN = 1;
@@ -24,12 +21,17 @@ function mockAuthAndWebSocket() {
     public onerror: ((event: Event) => void) | null = null;
     public onmessage: ((event: MessageEvent) => void) | null = null;
     public sent: string[] = [];
+    private listeners: Record<string, Array<(event: Event | MessageEvent) => void>> = {};
 
-    constructor(_url: string) {
-      (window as unknown as MockWindow).__mockWs = this;
-      (window as unknown as MockWindow).__mockWsSent = this.sent;
+    constructor(url: string) {
+      if (url.includes('/ws')) {
+        (window as unknown as MockWindow).__mockWs = this;
+        (window as unknown as MockWindow).__mockWsSent = this.sent;
+      }
       window.setTimeout(() => {
-        this.onopen?.(new Event('open'));
+        const event = new Event('open');
+        this.onopen?.(event);
+        (this.listeners.open || []).forEach((listener) => listener(event));
       }, 0);
     }
 
@@ -37,13 +39,25 @@ function mockAuthAndWebSocket() {
       this.sent.push(data);
     }
 
+    addEventListener(type: string, listener: (event: Event | MessageEvent) => void) {
+      this.listeners[type] ??= [];
+      this.listeners[type].push(listener);
+    }
+
+    removeEventListener(type: string, listener: (event: Event | MessageEvent) => void) {
+      this.listeners[type] = (this.listeners[type] || []).filter((item) => item !== listener);
+    }
+
     close() {
       this.readyState = MockWebSocket.CLOSED;
       this.onclose?.(new Event('close'));
+      (this.listeners.close || []).forEach((listener) => listener(new Event('close')));
     }
 
     emit(data: unknown) {
-      this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+      const event = { data: JSON.stringify(data) } as MessageEvent;
+      this.onmessage?.(event);
+      (this.listeners.message || []).forEach((listener) => listener(event));
     }
   }
 
@@ -52,6 +66,21 @@ function mockAuthAndWebSocket() {
 
 test.describe('chat markdown rendering（mock websocket）', () => {
   test.beforeEach(async ({ page }) => {
+    await page.context().addCookies([
+      {
+        name: 'agentos_token',
+        value: 'e2e-agentos-token',
+        domain: '127.0.0.1',
+        path: '/',
+      },
+      {
+        name: 'agentos_token',
+        value: 'e2e-agentos-token',
+        domain: 'localhost',
+        path: '/',
+      },
+    ]);
+
     await page.route('**/api/auth/me', async (route) => {
       await route.fulfill({
         status: 200,
@@ -65,6 +94,22 @@ test.describe('chat markdown rendering（mock websocket）', () => {
           created_at: Date.now() / 1000,
           last_login: Date.now() / 1000,
         }),
+      });
+    });
+
+    await page.route('**/api/auth/status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ authenticated: true }),
+      });
+    });
+
+    await page.route('**/api/config/llm-status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ configured: true }),
       });
     });
 
@@ -138,6 +183,7 @@ test.describe('chat markdown rendering（mock websocket）', () => {
 
   test('chat 页面应把 assistant markdown 渲染为语义化节点', async ({ page }) => {
     await page.goto('/chat');
+    await page.waitForFunction(() => Boolean((window as unknown as MockWindow).__mockWs));
 
     await page.evaluate(() => {
       (window as unknown as MockWindow).__mockWs!.emit({
@@ -181,8 +227,87 @@ test.describe('chat markdown rendering（mock websocket）', () => {
     await expect(page.getByTestId('evil-html')).toHaveCount(0);
   });
 
+  test('chat 页面应把非流式 think 内容渲染为默认折叠的思考块', async ({ page }) => {
+    await page.goto('/chat');
+    await page.waitForFunction(() => Boolean((window as unknown as MockWindow).__mockWs));
+
+    await page.evaluate(() => {
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'session_created',
+        session_id: 'sess_md_think_static',
+        payload: { created_at: Date.now() / 1000 },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'turn_completed',
+        session_id: 'sess_md_think_static',
+        payload: {
+          final_response: '<think>先分析用户意图\\n再组织回答</think>你好！有什么我可以帮助你的吗？',
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByTestId('assistant-think-toggle')).toBeVisible();
+    await expect(page.getByText('你好！有什么我可以帮助你的吗？')).toBeVisible();
+    await expect(page.getByTestId('assistant-think-content')).toBeHidden();
+
+    await page.getByTestId('assistant-think-toggle').click();
+    await expect(page.getByTestId('assistant-think-content')).toContainText('先分析用户意图');
+    await expect(page.getByTestId('assistant-think-content')).toContainText('再组织回答');
+  });
+
+  test('chat 页面应在 llm_result 阶段展开 think，turn_completed 后自动折叠', async ({ page }) => {
+    await page.goto('/chat');
+    await page.waitForFunction(() => Boolean((window as unknown as MockWindow).__mockWs));
+
+    await page.evaluate(() => {
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'session_created',
+        session_id: 'sess_md_think_stream',
+        payload: { created_at: Date.now() / 1000 },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'llm_result',
+        session_id: 'sess_md_think_stream',
+        payload: {
+          turn_id: 'turn_stream_1',
+          content: '最终答案',
+          reasoning_details: [
+            { type: 'thinking', thinking: '先判断这是一个问候' },
+            { type: 'thinking', thinking: '再给出友好回复' },
+          ],
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByTestId('assistant-think-content')).toBeVisible();
+    await expect(page.getByTestId('assistant-think-content')).toContainText('先判断这是一个问候');
+    await expect(page.getByText('最终答案')).toBeVisible();
+
+    await page.evaluate(() => {
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'turn_completed',
+        session_id: 'sess_md_think_stream',
+        payload: {
+          turn_id: 'turn_stream_1',
+          final_response: '<think>先判断这是一个问候\\n再给出友好回复</think>最终答案',
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByTestId('assistant-think-content')).toBeHidden();
+    await expect(page.getByText('最终答案')).toBeVisible();
+  });
+
   test('chat 页面 tool 消息应让字符串结果走 markdown、JSON 结果仍走 JSON 查看器', async ({ page }) => {
     await page.goto('/chat');
+    await page.waitForFunction(() => Boolean((window as unknown as MockWindow).__mockWs));
 
     await page.evaluate(() => {
       (window as unknown as MockWindow).__mockWs!.emit({

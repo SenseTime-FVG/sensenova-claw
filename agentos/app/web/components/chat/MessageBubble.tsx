@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { Bot, User, Wrench, ChevronRight, Brain } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Bot, User, Wrench, ChevronRight, ChevronDown, Brain } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
 import { type ChatMessage, type MessageGroupItem, formatArgs, groupMessages } from '@/lib/chatTypes';
+import { resolveAssistantDisplayContent } from '@/lib/assistantThink';
 import { MarkdownContent } from './MarkdownContent';
 
 const MAX_TOOL_CONTENT_HEIGHT = 240;
@@ -135,6 +136,21 @@ export function ToolCallGroup({ tools }: { tools: ChatMessage[] }) {
 }
 
 export function MessageBubble({ msg }: { msg: ChatMessage }) {
+  const [showArgs, setShowArgs] = useState(true);
+  const [showResult, setShowResult] = useState(false);
+  const parsedAssistantContent = useMemo(
+    () => msg.role === 'assistant'
+      ? resolveAssistantDisplayContent(msg.content || '', msg.thinkingContent)
+      : { answerContent: '', thinkContent: '' },
+    [msg.content, msg.role, msg.thinkingContent],
+  );
+  const [showThink, setShowThink] = useState(true);
+
+  useEffect(() => {
+    if (msg.role !== 'assistant') return;
+    setShowThink(true);
+  }, [msg.id, msg.role, msg.thinkingState]);
+
   if (msg.role === 'system') {
     return (
       <div className="flex justify-center my-3">
@@ -167,8 +183,32 @@ export function MessageBubble({ msg }: { msg: ChatMessage }) {
         <Bot size={20} className="text-primary-foreground" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-foreground leading-relaxed">
-          <MarkdownContent content={msg.content || ''} />
+        <div className="space-y-3">
+          {parsedAssistantContent.thinkContent ? (
+            <div className="rounded-2xl border border-amber-500/25 bg-amber-500/8 overflow-hidden">
+              <button
+                type="button"
+                data-testid="assistant-think-toggle"
+                onClick={() => setShowThink((prev) => !prev)}
+                className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-amber-900/80 dark:text-amber-200/90"
+              >
+                <ChevronDown size={16} className={`shrink-0 transition-transform duration-200 ${showThink ? 'rotate-180' : ''}`} />
+                <span>思考过程</span>
+              </button>
+              <div
+                data-testid="assistant-think-content"
+                hidden={!showThink}
+                className="border-t border-amber-500/15 px-4 py-3 text-sm"
+              >
+                <MarkdownContent content={parsedAssistantContent.thinkContent} />
+              </div>
+            </div>
+          ) : null}
+          {parsedAssistantContent.answerContent ? (
+            <div className="text-base md:text-lg text-foreground leading-relaxed">
+              <MarkdownContent content={parsedAssistantContent.answerContent} />
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

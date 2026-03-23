@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentos.platform.config.config import config
 from agentos.kernel.events.bus import PrivateEventBus
@@ -51,7 +51,7 @@ class ToolSessionWorker(SessionWorker):
         elif event.type == USER_QUESTION_ANSWERED:
             self._resolve_question(event)
 
-    def _truncate_result(self, result: any, tool_call_id: str) -> any:
+    def _truncate_result(self, result: Any, tool_call_id: str) -> Any:
         """Token 截断：统一控制传给 LLM 的结果长度"""
         result_str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
 

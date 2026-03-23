@@ -81,7 +81,7 @@ class TestSummarizeTurn:
 
         await manager.summarize_turn(messages)
 
-        memory_path = workspace / "memory.md"
+        memory_path = workspace / "MEMORY.md"
         assert memory_path.exists()
         content = memory_path.read_text(encoding="utf-8")
         assert "需求：实现登录功能" in content
@@ -111,7 +111,7 @@ class TestSummarizeTurn:
         await manager.summarize_turn(messages)
         await manager.summarize_turn(messages)
 
-        content = (workspace / "memory.md").read_text(encoding="utf-8")
+        content = (workspace / "MEMORY.md").read_text(encoding="utf-8")
         assert content.count("---") == 2
 
     @pytest.mark.asyncio
@@ -123,13 +123,13 @@ class TestSummarizeTurn:
 
         await manager_no_llm.summarize_turn(messages)
 
-        assert not (workspace / "memory.md").exists()
+        assert not (workspace / "MEMORY.md").exists()
 
     @pytest.mark.asyncio
     async def test_summarize_turn_skips_empty_conversation(self, manager, workspace):
         await manager.summarize_turn([{"role": "system", "content": "系统提示"}])
 
-        assert not (workspace / "memory.md").exists()
+        assert not (workspace / "MEMORY.md").exists()
 
     @pytest.mark.asyncio
     async def test_summarize_turn_skips_empty_summary(self, manager, workspace, mock_llm_factory):
@@ -142,7 +142,7 @@ class TestSummarizeTurn:
             ]
         )
 
-        assert not (workspace / "memory.md").exists()
+        assert not (workspace / "MEMORY.md").exists()
 
     @pytest.mark.asyncio
     async def test_summarize_turn_passes_provider_and_model(self, manager, mock_llm_factory):

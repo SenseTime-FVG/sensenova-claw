@@ -143,9 +143,18 @@ export class OfficeScene extends Phaser.Scene {
     const ct = LAYOUT.furniture.cat;
     this.catSprite = this.add.sprite(ct.x, ct.y, 'cats', Math.floor(Math.random() * 16))
       .setOrigin(ct.origin.x, ct.origin.y).setDepth(ct.depth);
-    this.catSprite.setInteractive({ useHandCursor: true });
-    this.catSprite.on('pointerdown', () => {
-      this.catSprite.setFrame(Math.floor(Math.random() * 16));
+
+    // Scale.NONE 下用 DOM 点击事件手动换算坐标，避免 Phaser 输入在 CSS 缩放时失准
+    this.game.canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+      const rect = this.game.canvas.getBoundingClientRect();
+      const scaleX = this.game.canvas.width / rect.width;
+      const scaleY = this.game.canvas.height / rect.height;
+      const gameX = (e.clientX - rect.left) * scaleX;
+      const gameY = (e.clientY - rect.top) * scaleY;
+      const bounds = this.catSprite.getBounds();
+      if (bounds.contains(gameX, gameY)) {
+        this.catSprite.setFrame(Math.floor(Math.random() * 16));
+      }
     });
 
     // 牌匾
@@ -287,10 +296,17 @@ export function createOfficeGame(parent: HTMLDivElement): Phaser.Game {
     physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
     scene: [OfficeScene],
     scale: {
-      mode: Phaser.Scale.FIT,
-      autoCenter: Phaser.Scale.CENTER_BOTH,
+      mode: Phaser.Scale.NONE,
     },
   });
+
+  // 用 CSS 缩放代替 Phaser ScaleManager，彻底避免亚像素 resize 震荡
+  const canvas = game.canvas;
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  canvas.style.objectFit = 'contain';
+  canvas.style.imageRendering = 'pixelated';
+
   // 调试用
   (window as unknown as Record<string, unknown>).__phaserGame = game;
   return game;

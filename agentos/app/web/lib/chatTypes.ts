@@ -1,4 +1,5 @@
 // 共享类型定义和工具函数
+import { extractThinkContentFromReasoningDetails } from './assistantThink';
 
 export interface ToolInfo {
   name: string;
@@ -14,6 +15,9 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
   timestamp: number;
+  turnId?: string;
+  thinkingContent?: string;
+  thinkingState?: 'streaming' | 'collapsed';
   /** 工具消息在无 toolInfo 时展示的工具名（如会话历史回放） */
   name?: string;
   toolInfo?: ToolInfo;
@@ -150,9 +154,19 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
     if (eventType === 'llm.call_result') {
       const response = (payload.response || {}) as Record<string, unknown>;
       const content = String(response.content || '');
-      const toolCalls = Array.isArray(response.tool_calls) ? response.tool_calls : [];
-      if (content && toolCalls.length > 0) {
-        rebuilt.push({ id: makeId(), role: 'assistant', content, timestamp: Date.now() });
+      const reasoningDetails = response.reasoning_details;
+      const thinkingContent = extractThinkContentFromReasoningDetails(reasoningDetails);
+      // 历史重建时只为有实际内容或思考内容的 llm_result 创建 assistant 消息
+      // 仅含 tool_calls 的空结果不需要创建（工具调用已由 tool.call_requested 展示）
+      if (content || thinkingContent) {
+        rebuilt.push({
+          id: makeId(),
+          role: 'assistant',
+          content,
+          timestamp: Date.now(),
+          thinkingContent: thinkingContent || undefined,
+          thinkingState: thinkingContent ? 'collapsed' : undefined,
+        });
       }
       continue;
     }
@@ -189,7 +203,19 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
     if (eventType === 'agent.step_completed') {
       const response = String(payload.final_response || '') || String(((payload.result as Record<string, unknown> | undefined)?.content) || '');
       if (response) {
-        rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+        // 查找最后一条 assistant 消息，如果内容相同则跳过（避免与 llm.call_result 重复）
+        let lastAssistantIdx = -1;
+        for (let i = rebuilt.length - 1; i >= 0; i--) {
+          if (rebuilt[i].role === 'assistant') { lastAssistantIdx = i; break; }
+        }
+        if (lastAssistantIdx !== -1 && rebuilt[lastAssistantIdx].content === response) {
+          // 已有相同内容的 assistant 消息，跳过
+        } else if (lastAssistantIdx !== -1 && !rebuilt[lastAssistantIdx].content) {
+          // 最后一条 assistant 消息内容为空（可能是中间轮次），更新它
+          rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], content: response };
+        } else {
+          rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+        }
       }
       continue;
     }

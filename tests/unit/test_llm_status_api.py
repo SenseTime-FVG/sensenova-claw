@@ -8,9 +8,11 @@ from fastapi.testclient import TestClient
 from agentos.interfaces.http.config_api import router
 from agentos.platform.config.config import Config
 from agentos.platform.config.llm_presets import LLM_PROVIDER_CATEGORIES
+from agentos.platform.secrets.refs import build_secret_ref
+from agentos.platform.secrets.store import InMemorySecretStore
 
 
-def make_app(tmp_path, config_data: dict) -> FastAPI:
+def make_app(tmp_path, config_data: dict, secret_store: InMemorySecretStore | None = None) -> FastAPI:
     """构建挂载指定配置的测试应用"""
     app = FastAPI()
     app.include_router(router)
@@ -19,6 +21,8 @@ def make_app(tmp_path, config_data: dict) -> FastAPI:
     config_path.write_text(yaml.dump(config_data), encoding="utf-8")
 
     cfg = Config(config_path=config_path)
+    if secret_store is not None:
+        cfg._secret_store = secret_store
     app.state.config = cfg
     return app
 
@@ -69,6 +73,26 @@ def test_llm_status_not_configured_placeholder(tmp_path):
     data = resp.json()
     assert data["configured"] is False
     assert data["providers"] == []
+
+
+def test_llm_status_secret_ref_counts_as_configured_when_secret_exists(tmp_path):
+    """API key 为 secret 引用且能读到真实值时 configured=True"""
+    secret_store = InMemorySecretStore()
+    ref = "agentos/llm.providers.openai.api_key"
+    secret_store.set(ref, "sk-from-secret-store")
+    app = make_app(tmp_path, {
+        "llm": {
+            "providers": {
+                "openai": {"api_key": build_secret_ref(ref)},
+            },
+        },
+    }, secret_store=secret_store)
+    client = TestClient(app)
+    resp = client.get("/api/config/llm-status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["configured"] is True
+    assert data["providers"] == ["openai"]
 
 
 def test_llm_status_mock_provider_ignored(tmp_path):

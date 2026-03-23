@@ -9,6 +9,9 @@ from typing import Any
 
 import yaml
 
+from agentos.platform.secrets.refs import is_secret_ref, parse_secret_ref
+from agentos.platform.secrets.store import KeyringSecretStore
+
 logger = logging.getLogger(__name__)
 
 # agentos/platform/config/config.py -> 往上 3 层到项目根目录
@@ -67,32 +70,35 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "provider": "openai",
                 "model_id": "gpt-5.4",
                 "timeout": 60,
-                "max_output_tokens": 8192,
+                "max_tokens": 128000,
+                "max_output_tokens": 16384,
             },
             "claude-sonnet": {
                 "provider": "anthropic",
                 "model_id": "claude-sonnet-4-6",
                 "timeout": 60,
-                "max_output_tokens": 8192,
+                "max_tokens": 128000,
+                "max_output_tokens": 16384,
             },
             "claude-opus": {
                 "provider": "anthropic",
                 "model_id": "claude-opus-4-6",
                 "timeout": 60,
-                "max_output_tokens": 8192,
+                "max_tokens": 128000,
+                "max_output_tokens": 16384,
             },
             "gemini-pro": {
                 "provider": "gemini",
                 "model_id": "gemini-2.5-pro",
                 "timeout": 120,
-                "max_output_tokens": 8192,
+                "max_tokens": 128000,
+                "max_output_tokens": 16384,
             },
         },
         "default_model": "mock",  # 引用 llm.models 中的 key
     },
     # agent 段保留作为所有 agent 的后备默认值
     "agent": {
-        "model": "mock",
         "temperature": 0.2,
         "max_turns_per_session": 50,
         "system_prompt": "你是一个有工具能力的AI助手，请在必要时调用工具。",
@@ -134,6 +140,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "skills": {
         "extra_dirs": [],
         "entries": {},
+    },
+    "context_compression": {
+        "max_context_tokens": 128000,
+        "phase1_threshold": 0.8,
+        "phase2_trigger": 0.6,
+        "phase2_chunk_ratio": 0.3,
+        "user_input_max_tokens": 1000,
+        "tool_summary_max_tokens": 3000,
+        "phase2_merge_max_tokens": 2000,
     },
     "session": {
         "maintenance": {
@@ -244,6 +259,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
     },
+        "miniapps": {
+            "default_builder": "builtin",
+            "acp": {
+                "enabled": False,
+                "command": "",
+                "args": [],
+                "env": {},
+                "startup_timeout_seconds": 20,
+                "request_timeout_seconds": 180,
+            },
+        },
     # 安全与认证配置（Jupyter-lab 风格 token）
     "security": {
         "auth_enabled": False,  # 启用后所有 API/WebSocket 需要 token 认证
@@ -288,7 +314,9 @@ class Config:
         *,
         project_root: Path | None = None,
         user_config_dir: Path | None = None,
+        secret_store: Any | None = None,
     ):
+        self._secret_store = secret_store or KeyringSecretStore()
         # 新方式：通过 project_root 自动发现配置
         if project_root is not None:
             self._project_root = Path(project_root).resolve()
@@ -406,12 +434,14 @@ class Config:
             if "provider" in agent:
                 errors.append(
                     "'agent.provider' 已废弃。"
-                    "请使用 'agent.model' 引用 llm.models 中的 key，provider 由系统自动解析。"
+                    "请在 agents.<id>.model 中引用 llm.models 中的 key，provider 由系统自动解析。"
                 )
             if "default_model" in agent:
                 errors.append(
-                    "'agent.default_model' 已废弃，请改为 'agent.model'。"
+                    "'agent.default_model' 已废弃，请改为 'llm.default_model'。"
                 )
+            if "model" in agent:
+                logger.warning("'agent.model' 已废弃，请改为 'llm.default_model'。")
             if "default_temperature" in agent:
                 errors.append(
                     "'agent.default_temperature' 已废弃，请改为 'agent.temperature'。"
@@ -443,11 +473,23 @@ class Config:
         if isinstance(obj, list):
             return [self._resolve_env(v) for v in obj]
         if isinstance(obj, str):
-            pattern = re.compile(r"\$\{([^}]+)\}")
-            for env_name in pattern.findall(obj):
-                obj = obj.replace(f"${{{env_name}}}", os.getenv(env_name, ""))
-            return obj
+            return self._resolve_string_value(obj)
         return obj
+
+    def _resolve_string_value(self, value: str) -> str:
+        if is_secret_ref(value):
+            if self._secret_store is None:
+                return ""
+            if hasattr(self._secret_store, "is_available") and not self._secret_store.is_available():
+                logger.warning("secret store 不可用，跳过解析 %s", value)
+                return ""
+            ref = parse_secret_ref(value)
+            secret = self._secret_store.get(ref)
+            return secret or ""
+        pattern = re.compile(r"\$\{([^}]+)\}")
+        for env_name in pattern.findall(value):
+            value = value.replace(f"${{{env_name}}}", os.getenv(env_name, ""))
+        return value
 
     def get(self, path: str, default: Any = None) -> Any:
         value: Any = self.data
@@ -500,6 +542,25 @@ class Config:
         # 都找不到，返回 mock
         logger.warning("未知的模型 key: %s，使用 mock provider", model_key)
         return "mock", model_key
+
+    def get_model_max_output_tokens(self, model_key: str | None = None) -> int:
+        """获取模型配置中的 max_output_tokens（最大输出 token 数）。
+
+        Args:
+            model_key: llm.models 中的 key，为 None 时使用 llm.default_model。
+        Returns:
+            max_output_tokens，无配置时返回默认值 16384
+        """
+        if not model_key:
+            model_key = self.get("llm.default_model", "mock")
+        models = self.get("llm.models", {})
+        if model_key in models:
+            return int(models[model_key].get("max_output_tokens", 16384))
+        # 向后兼容：反查 model_id
+        for _key, entry in models.items():
+            if isinstance(entry, dict) and entry.get("model_id") == model_key:
+                return int(entry.get("max_output_tokens", 16384))
+        return 16384
 
     def get_model_extra_body(self, model_key: str | None = None) -> dict:
         """获取模型配置中的 extra_body（透传给 LLM API 请求体的额外参数）。

@@ -559,3 +559,339 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `agentos` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
 - 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `AGENTOS_REPO_REF`。
+
+### 2026-03-20 飞书 Wiki token 兼容修复补充
+
+成功经验：
+- `lark-oapi 1.5.3` 的 `Client` 已不再暴露 `_token_manager`；排查这类 SDK 漂移问题时，直接读当前 `.venv` 里的包源码比猜测文档更快，能马上确认真实可用入口是 `TokenManager.get_self_tenant_token(client._config)`。
+- 对兼容性修复，保留“旧路径优先、新路径兜底”最稳：既兼容历史 `_token_manager` 形态，也兼容新版只有 `_config` 的 `Client`。
+- 当前环境即使缺少 `pytest`，也可以先用最小复现脚本验证红灯（复现 `AttributeError`），再用最小脚本验证绿灯，避免在环境问题下盲改。
+
+失败/风险经验：
+- 当前仓库 `.venv` 未安装 `pytest`，而 `uv run --extra dev ...` 在本机会触发 Rust `system-configuration` panic；新增测试文件后不能直接宣称已完成 pytest 回归，需要在完整依赖环境补跑。
+
+### 2026-03-20 飞书 api_tool 接口兼容补充
+
+成功经验：
+- 当某个旧能力决定下线但配置接口要兼容保留时，最稳做法不是删配置，而是统一清理“描述/注释/测试”三处语义，让运行时能力和对外声明一致。
+- 对“保留接口但不生效”的约束，补一条回归测试直接断言 `api_tool.enabled=True` 时也不会注册 `feishu_api`，能防止后续有人误恢复半套旧逻辑。
+
+失败/风险经验：
+- 当前环境仍缺少 `pytest`，这类轻量修复只能先用内联断言脚本和 `py_compile` 做最小验证；正式 pytest 回归仍要在完整依赖环境补跑。
+
+### 2026-03-20 飞书 ask_user 文本闭环补充
+
+成功经验：
+- 对 IM 渠道补 `ask_user`，第一版先做“待回答问题存在时，下一条文本优先解释为回答”最稳；不需要先引入按钮卡片回调，也能把 `USER_QUESTION_ASKED -> USER_QUESTION_ANSWERED` 主链路接通。
+- 渠道侧最小状态就是 `session_id -> question_id`；收到回答后立刻清理状态，后续消息自然回到普通 `USER_INPUT` 流，不容易和日常对话串台。
+- 这类闭环最关键的回归测试是两条：一条断言回答消息被转成 `USER_QUESTION_ANSWERED`，一条断言回答完成后下一条消息重新走 `USER_INPUT`。
+
+失败/风险经验：
+- 当前飞书第一版只支持文本回答，不校验 `options/multi_select` 合法性，也不支持飞书按钮/多选卡片交互；如果后续需要更强约束，必须补事件回调与结构化解析。
+
+### 2026-03-20 多渠道 ask_user 闭环补充
+
+成功经验：
+- `telegram/wecom/whatsapp` 可以直接复用飞书的最小闭环模式：各自 channel 内维护 `pending_questions`，在入站消息路径优先分流成 `USER_QUESTION_ANSWERED`，实现一致且改动面小。
+- 对多渠道并行补同一行为时，测试也要成对补齐：每个 channel 都应同时覆盖“回答优先分流”和“回答后恢复普通 `USER_INPUT`”，否则很容易只在一个渠道上闭环。
+- 渠道层实现保持“无待回答问题时完全不改原路径”，最利于控制回归范围；完整跑 `telegram/wecom/wecom_outbound/whatsapp` 四组单测能快速验证这一点。
+
+失败/风险经验：
+- 文本闭环虽然统一了，但仍然只是“下一条文本即回答”；`options/multi_select` 的结构化校验、取消操作和按钮回调在三个渠道上都还没落。
+
+### 2026-03-20 chat think 展示补充
+
+成功经验：
+- 对“模型把思考内容包在 `<think>...</think>` 里”的前端支持，最稳的做法是“双通道”：非流式/历史消息直接解析正文里的 `<think>` 标签，流式阶段额外消费 `llm_result.reasoning_details`，这样历史回放和实时展示都能覆盖。
+- `/chat` 里如果要避免 `llm_result` 与 `turn_completed` 产生重复 assistant 气泡，消息结构里需要显式保存 `turnId`，并在上下文层做 upsert，而不是每次都 append。
+- Playwright 在 Next dev 下 mock 全局 `WebSocket` 时，替身必须补上 `addEventListener/removeEventListener`，并且只把业务 `/ws` 连接暴露成 `__mockWs`；否则很容易误打到 HMR socket，导致测试看起来“事件没生效”。
+
+失败/风险经验：
+- 当前 `/chat` 页面的 mock e2e 不能再只靠 `localStorage access_token`；实际鉴权链路依赖 `agentos_token` cookie 和 `/api/auth/status`、`/api/config/llm-status`，漏掉任一项都会让页面停在登录/配置检查流程，导致断言偏离真实问题。
+
+### 2026-03-21 Secret Store 接入补充
+
+成功经验：
+- 为通用 secret 机制先落 `SecretStore + SecretRef + SecretRegistry` 三层最稳，后续把 `Config` 解析和 `config_store` 持久化都接到同一抽象上，比在各 API 里散落 `if api_key` 判断更可控。
+- `persist_path_updates()` 这类统一写回入口非常适合承接 secret 逻辑；在这里把 `cfg._secret_store` 回填好，能顺手修复“写入后 reload 读不回 secret”的问题。
+- `/api/config/sections` 一旦开始返回脱敏结构，前端设置页必须同步改成“secret 元数据 + draft/touched”双轨状态；否则保存全量 provider 配置时会把原有 secret 误清空。
+- 明文迁移能力最适合做成独立迁移器（扫描 raw config 的叶子路径，再按 `SecretRegistry` 过滤）；这样 HTTP API 和 CLI 命令都能复用同一份迁移逻辑，行为不会分叉。
+
+失败/风险经验：
+- 当前环境下 `python3 -m pytest` 可用，但 `.venv/bin/python -m pytest` 不一定有 `pytest`；回归命令优先直接用系统 `python3 -m pytest` 更稳。
+- `npx tsc --noEmit -p agentos/app/web/tsconfig.json` 在本环境没有及时返回有效结果，前端静态类型回归不能在这次任务里作为通过依据；需要在本地完整 Node/Next 环境继续确认。
+- 虽然已接入 `python-keyring` 抽象并把默认 store 指向 `KeyringSecretStore`，但真实 keyring backend 可用性仍取决于宿主机环境；当前只完成了进程内/注入式测试，未做真实系统 keyring e2e。
+- 全局 `config = Config()` 这类模块级初始化一旦遇到用户本机已有 `${secret:...}` 配置，会在 import 时就触发 secret 解析；默认 store 不可用时必须先走 `is_available()` 兜底，否则测试导入阶段就会直接崩。
+
+### 2026-03-21 LLM 管理页补充
+
+成功经验：
+- 对“新增独立管理页但不改后端协议”的需求，直接复用 `/api/config/sections` 的 `llm.providers/models/default_model` 最稳；前端只需做一次 `provider -> models[]` 视图映射，就能实现按 provider 管理 llm。
+- 若 Playwright 默认配置会联动根目录 `npm run dev`，而根脚本又依赖 `uv`，优先复用仓库里无 `webServer` 的备用配置（如 `playwright.gateway.config.ts`）配合手动启动前端服务，可避开与当前任务无关的启动链问题。
+- 在当前 macOS 受限环境里，前端浏览器级 e2e 往往需要“两段式验证”：先越权启动 `next dev` 监听端口，再越权运行 `npx playwright test` 启动 Chromium；两者任一不放开，都会被误判成页面功能失败。
+
+失败/风险经验：
+- 对 provider / llm “重命名”这类 key 级编辑，若输入框直接绑定对象 key，测试和实现都容易受重新渲染影响；当前实现虽然可用，但后续若要增强交互稳定性，可考虑引入 draft state 再在 blur/submit 时提交 rename。
+
+### 2026-03-21 LLM 管理页折叠与 secret 删除补充
+
+成功经验：
+- 对 secret-aware 配置写回，`persist_path_updates()` 在处理空字符串时不能无条件 `delete()`；先检查原始配置值是否真的是 secret ref，再决定是否删 secret，才能兼容 `mock.api_key=''` 这类普通空值路径。
+- provider 折叠卡片的头部最好拆成“左侧 toggle 按钮 + 右侧操作按钮”，不要把删除按钮嵌进整卡 toggle 按钮里；否则 HTML 语义和浏览器点击行为都容易出问题。
+- 这类“后端写回 + 前端交互”组合修复，最稳的回归组合是“一条 pytest 单测锁 secret 删除条件 + 一条 Playwright 用例锁 UI 折叠与保存主流程”。
+
+失败/风险经验：
+- 即使前端 payload 看起来合理，secret store 后端的删除语义也可能更严格；像 keyring 删除不存在条目会报错，这类行为必须在仓库内抽象层显式兜底，不能假设底层实现天然幂等。
+
+### 2026-03-21 通用 secret reveal 补充
+
+成功经验：
+- 对“默认掩码、按需展示真实值”的需求，首屏接口不应直接下发真实 secret；新增受保护的通用 `/api/config/secret?path=...` 并限制到 `is_secret_path(path)`，前端点击眼睛后再按需读取，安全边界和复用性都更好。
+- reveal 接口直接返回 `config.get(path)` 的解析结果最省事，能同时兼容 secret ref、环境变量和明文配置，不需要前端关心底层来源。
+- 前端 secret 输入框若需要“默认显示 `******` 但又保留未修改状态”，最稳的是把“展示值”和“真实 draft”分开：未 touch 且未 reveal 时显示 `******`，点击眼睛后再把真实值拉进本地状态，但继续保持 `api_key_touched=false`，这样保存时不会误把原 secret 全量回传。
+
+失败/风险经验：
+- 当前 `test_config_api.py` 在本机直接运行会受全局 `~/.agentos/config.yml` 影响；涉及 `config_api` 的 pytest 回归在本环境应显式用临时 `HOME` 隔离，避免导入阶段误读真实 secret 配置。
+
+### 2026-03-21 LLM 管理页 mock 回传补充
+
+成功经验：
+- 像 `/llms` 这种“只管理用户可见子集”的页面，保存时不应把隐藏保留项（如 `mock` provider/model）一并全量回传；按页面实际可编辑集合组 payload，更符合职责边界，也能避开历史脏配置触发的副作用。
+- 当后端采用 dotted-path merge 写配置时，前端省略未编辑字段通常比回传默认值更安全；缺失字段会保留原配置，而“默认值回传”可能意外触发 secret 删除、覆盖或热重载副作用。
+
+失败/风险经验：
+- 即使后端已经对 secret 删除做了保护，只要前端还在无意义地回传 `mock.api_key=''`，用户历史配置若存在异常状态仍可能触发问题；这类 bug 需要同时检查前后端边界，而不是只修一侧。
+
+### 2026-03-21 Secret 删除幂等补充
+
+成功经验：
+- 清空 secret 字段时，`config_store` 不应把“底层 secret 已缺失”视为致命错误；即使 `delete()` 失败，也应继续把 config 中的该字段置空并完成保存，这样历史脏状态才能被自愈。
+- 对这类问题，最有效的单测是直接构造“raw config 仍是 secret ref，但 secret store.delete() 抛错”的场景；它比只测普通空值或正常 delete 更贴近真实用户故障。
+
+失败/风险经验：
+- 仅依赖前端不回传某些字段不够稳；一旦用户浏览器缓存了旧前端，或历史配置里已存在异常 secret ref，后端仍会再次踩到删除异常。对 secret 清空链路，后端必须保证幂等。
+
+### 2026-03-21 LLM 编辑态补充
+
+成功经验：
+- 对“单项编辑 + 编辑所有配置”这类页面，最稳的前端模型是三层状态：服务端基线 state、单项 draft、全局 draft。这样单项取消不会污染其他项，全局取消也能直接回滚整页。
+- 单项保存和全量保存最好在后端分两条路：局部接口处理 provider/model 改名联动，全量接口继续复用 `/api/config/sections`；否则前端很容易在“看起来局部保存”时误覆盖整份配置。
+- Playwright 对这类交互最有效的断言不是文案，而是“默认 disabled -> 点击编辑后 editable -> 保存命中特定局部接口 -> 编辑所有命中全量接口”。
+
+失败/风险经验：
+- 单项保存后如果页面会重新加载配置，现有折叠态通常会被重置；测试和交互都要考虑“保存后需要重新展开才能继续操作”，否则很容易把页面重载误判成元素消失 bug。
+
+### 2026-03-21 Setup 动态模型列表补充
+
+成功经验：
+- setup 页如果要支持不同 OpenAI 兼容厂商的专用模型发现逻辑，前端请求 `/api/config/list-models` 时必须透传具体 `provider key`（如 `minimax`），不能统一压成 `openai`；否则后端新增的 provider 分支永远不会被命中。
+- 对“动态模型列表取回后仍无法继续”的问题，要同时检查显示逻辑和按钮禁用逻辑；当前 setup 页曾用 `selectedProvider.models.length` 控制 `测试连接/完成配置`，会把“远端已成功返回模型但预设为空”的场景错误判成必须手填模型。
+- 这类 setup 向导问题最适合补一条 Playwright 回归：直接 mock `/llm-presets` 与 `/list-models`，断言请求体里的 `provider` 和最终渲染的模型列表，能同时锁住根因和用户可见行为。
+
+失败/风险经验：
+- Playwright 浏览器安装路径必须与测试运行时的 `PLAYWRIGHT_BROWSERS_PATH` 保持一致；只执行 `npx playwright install chromium` 而不带同样的环境变量，测试仍会报“Executable doesn't exist”。
+
+### 2026-03-22 Mini-App Workspace 补充
+
+成功经验：
+- 复用现有 `custom_pages` 入口比另起一套 `miniapps` 路由更稳：列表/导航无需重做，只要在后端把 page 元数据升级成“工作区 + builder + agent + runs”结构，前端 portal 和 `/features/[slug]` 就能平滑演进。
+- 专属 Agent 的工作目录最好直接落在 `AGENTOS_HOME/workdir/{agent_id}/miniapps/{slug}/app`；这样既能继续复用 `/api/files/workdir/...` 静态服务，又能让 Agent 通过默认 workdir 直接改页面文件，不需要额外路径映射。
+- 对页面内交互回传，最省心的协议是 iframe 里统一使用 `window.AgentOSMiniApp.emit(action, payload)`，外层页面通过 `postMessage -> /api/custom-pages/{slug}/interactions -> gateway.send_user_input` 转给 Agent；这条链路用进程内 mock provider e2e 很容易稳定锁住。
+- ACP 第一版不必一次做全，先实现 `initialize -> session/new -> session/prompt` 的最小 stdio JSON-RPC 客户端，再把通知原样落到 run logs，已经足够给 Claude Code / Codex 预留标准接入点。
+
+失败/风险经验：
+- 当前用户本机配置若在 `agents.default` 下仍保留 `system_prompt`，真实后端启动会在 `AgentRegistry.load_from_config()` 阶段直接报错；这会影响 Playwright 这类需要自动拉起 web server 的回归，不能误判成 mini-app 页面本身失败。
+- 本机 Playwright 仍缺浏览器可执行文件（`chrome-headless-shell` 不存在）；即使 spec 已能被 `--list` 识别，真正浏览器级回归仍需要先执行 `npx playwright install` 并满足系统库依赖。
+- 前端仓库级 `tsc` 目前仍被既有依赖问题阻塞（如 `rehype-highlight`、`@tailwindcss/typography`、`MessageList` 旧 props 错误）；新增页面若要做类型回归，需用 grep 过滤新增文件，不能把全仓历史问题算到本次改动上。
+
+### 2026-03-22 Playwright 认证与浏览器路径补充
+
+成功经验：
+- 当后端 token 每次启动都会刷新时，前端 e2e 不要硬编码旧 token；更稳的做法是让用例先走一次真实 `/login -> verify-token -> router.push` 流程，或在 URL 中带 token 并 mock `verify-token`。
+- Playwright 若在 dev 模式下 mock `WebSocket`，必须只拦截业务 `ws://localhost:8000/ws`，保留 Next HMR 自己的 websocket；否则会因为 `websocket.addEventListener is not a function` 直接触发客户端异常页。
+- `DashboardLayout` 会联动挂载 `GlobalFilePanel`，进入页面时会自动请求 `api/files/roots`；这类全局面板接口若未 mock，`authFetch` 命中真实后端 401 后会把页面重定向回 `/login`，很容易误判成主页面逻辑失败。
+- Playwright 配置里加入本机已安装浏览器的显式路径候选（如 `chrome-headless-shell` 的绝对路径）很有效，能避免浏览器安装在非默认 cache 目录时重复卡在 “Executable doesn't exist”。
+
+失败/风险经验：
+- Playwright strict mode 很容易把“页面可见”误判成失败：像 `Language Coach`、`sess_miniapp` 这类文本如果同时出现在导航、标题和状态徽标中，断言必须收窄到明确 locator，否则会被多匹配阻塞。
+
+### 2026-03-22 Mini-App 专属 Agent 继承补充
+
+成功经验：
+- 当前 `AgentConfig` 已不再保存 `provider` 字段，而是仅保存 `model`，provider 由运行时根据 `llm.models` 动态解析；派生新 agent 时应只继承 `model/temperature/max_tokens/extra_body/tools/skills/workdir` 等真实字段。
+- 对这类“线上 500 + 明确 traceback”的修复，直接复跑 `tests/unit/test_custom_pages_api.py` 最有效，因为它本身就覆盖了“创建 mini-app 并生成专属 agent”的主路径。
+
+失败/风险经验：
+- 旧思维里继续读取 `base_agent.provider` 会在真实创建工作区时直接报 `AttributeError`，哪怕 UI、路由和工作区文件生成逻辑都正确；这类问题属于配置模型漂移，新增 capability 时必须先对齐当前 dataclass 定义。
+
+### 2026-03-22 Mini-App 通用化与 ACP 超时补充
+
+成功经验：
+- 用户举“语言学习”这类例子时，不应顺手把该业务做成平台内置模板；更稳的做法是保持 builtin 生成器输出通用 workspace 壳体，把具体内容和工作流留给未来用户需求与 Agent 决定。
+- 将 ACP timeout 拆成 `startup_timeout_seconds` 和 `request_timeout_seconds` 很关键：初始化/建会话可以短，真正的 `session/prompt` 生成必须显著更长，否则 coding agent 极易在生成中途误超时。
+- 用一个极小的 `ACPClient` 单测直接锁住方法级 timeout 最省心；只需要 monkeypatch `call()`，就能验证 `initialize/new_session/prompt` 各自用了什么超时值。
+
+失败/风险经验：
+- 只改文档或前端文案不够；如果后端仍保留按关键词识别“语言学习”并走专用模板分支，平台语义还是会被悄悄拉向某个垂直场景，必须把实际生成逻辑一起改回通用模式。
+
+### 2026-03-22 Mini-App 动作分流补充
+
+成功经验：
+- mini-app 不应把所有按钮和表单都转给 Agent；在宿主页维护一层 `local/server/agent` 动作路由最稳，页面高频交互可继续像普通应用一样本地执行，只有少数需要判断或改造的动作才进入 Agent。
+- 页面桥接协议最好同时提供 `emit()`、`emitTo()` 和 `configureActionRouting()`：页面可以只声明动作和 payload，把默认路由和按 action 覆盖规则交给宿主页解释，后续复用现有页面时改造成本更低。
+- 后端把 `POST /api/custom-pages/{slug}/actions` 统一做成入口也更清晰：`server` 目标只记日志不建会话，`agent` 目标复用既有 interaction 链路，测试可以稳定断言“server 不创建 session、agent 才创建 session”。
+- Playwright 对这类分流功能的最佳断言是“三段式”：`local` 不发请求，`server` 命中新 actions 接口但不切会话，`agent` 命中新 actions 接口且返回并切到新 session。
+
+失败/风险经验：
+- 浏览器 e2e 里把中文直接塞进内联 iframe HTML payload 容易触发编码噪音，导致断言看到乱码；这类测试数据最好优先用 ASCII，避免把编码问题误判成动作路由失败。
+- Playwright strict mode 下，如果同时存在“动作路由日志”和“动作事件日志”，用宽泛正则断言 action 名会命中多处文本；应收窄到完整事件文案或更具体的 locator。
+
+### 2026-03-23 ACP 设置页补充
+
+成功经验：
+- mini-app ACP 配置最适合直接挂在现有 `config_api / config_manager / /settings` 链路上，不需要再造单独接口；只要把 `miniapps` 加进 `/api/config/sections` 默认返回集合，前端就能和 LLM 配置一起统一保存。
+- ACP 的 `args` 和 `env` 在前端用 “JSON textarea + 保存前校验” 很实用；相比动态 key-value 表单，实现更轻，且能完整覆盖 CLI 参数数组和环境变量对象两类结构。
+- 设置页 e2e 最稳的方式仍是直接 mock `window.fetch`：返回 `/api/config/sections` 初值，捕获 `PUT /api/config/sections` 请求体，最后断言 `miniapps.default_builder` 与 `miniapps.acp.*` 是否按用户输入写回。
+
+失败/风险经验：
+- 设置页这类信息密集页面很容易出现同名文案多处复用；Playwright 若直接 `getByText('Mini-App Builder')`，strict mode 会因为统计卡片和 section 标题重复而失败，断言应优先锁到具体输入控件或唯一容器。
+
+### 2026-03-23 ACP 导航入口补充
+
+成功经验：
+- 仅实现 `/settings` 页面不够，如果不把它挂进 `DashboardNav.adminNavItems`，用户在“管理”分组里根本发现不了；这类后台配置页必须和 `Tools`、`Skills` 一样进入统一的管理子导航。
+- `DashboardLayout` 里的 `ADMIN_PATHS` 也要同步补上新路由，否则虽然能打开页面，但还会带着右侧文件面板，和其他管理页的布局不一致。
+
+### 2026-03-23 ACP 路由迁移与 Codex Bridge 补充
+
+成功经验：
+- 把 ACP 正式入口迁到 `/acp` 时，最省心的做法是“新增 `/acp` 页面 + Next redirect 把 `/settings` 指过去”，这样新旧链接都能兼容，且不需要大规模搬运页面代码。
+- 当前本机 `codex` CLI 暴露的是 `exec` / `mcp-server` / `app-server`，不是 AgentOS builder 直接使用的 ACP 子集；要“自动用 Codex”，最务实的方案是加一个很薄的 `codex_acp_bridge`，把 `initialize/session/new/session/prompt` 转成一次 `codex exec`。
+- 对这类 bridge，优先把协议层和命令构造抽成纯函数最有效；单测只 mock runner，不依赖真实 Codex 登录态，也能稳定锁住 session 生命周期和最终返回格式。
+
+失败/风险经验：
+- 不能简单把 `miniapps.acp.command=codex` 当成可用配置写给用户；在当前安装版本下这会直接协议不匹配，必须明确区分 MCP/app-server 与 AgentOS 当前 ACP builder 的差异。
+
+### 2026-03-23 官方 codex-acp 适配器补充
+
+成功经验：
+- 用户给出 `zed-industries/codex-acp` 后，应优先切回官方适配器推荐，而不是继续把自定义 bridge 当主路径；AgentOS 当前 ACP client 本身已经能直接对接这个适配器。
+- 当前 Linux x64 环境下，`npx @zed-industries/codex-acp` 单独执行会因为 optional binary 包缺失失败，但 `npx -y -p @zed-industries/codex-acp -p @zed-industries/codex-acp-linux-x64 codex-acp --help` 可以正常启动，适合作为无需预安装的通用配置。
+- 当 `~/.agentos/config.yml` 尚无 `miniapps` 段时，直接补入 `default_builder: acp` 和 `codex-acp` 启动参数风险较低，且能让新 workspace 默认走 Codex。
+- 用真实后端创建一条 `builder_type=acp` 的 mini-app 很有必要；只有这样才能确认官方 `codex-acp` 不只是能启动，而是真的会把页面文件写到 `~/.agentos/workdir/.../app/` 并让 run 状态最终变成 `completed`。
+- 真实 ACP 生成是长任务，排查时不要只看首轮 API 返回的 `queued/running`；应同时检查 `custom_pages_runs/<slug>.json` 的日志流和工作区文件是否持续变化，避免把“仍在生成中”误判成“协议卡死”。
+
+失败/风险经验：
+- npm 主包版本与平台二进制包版本可能暂时不同步；仅凭 `npx 包名` 失败，不能立刻判断官方适配器不可用，先检查 optionalDependencies 和平台包安装方式。
+
+### 2026-03-23 Mini-App 构建消息流补充
+
+成功经验：
+- 对 workspace 右侧 Agent 面板这类 UI，若要展示 ACP/builder 生成过程，优先把 build run 日志转成“只读聊天转录”更稳，不要硬把构建日志塞进真实聊天 session；这样不会污染后续用户会话，也不依赖 Gateway 事件桥再造一遍。
+- `ACP agent_message_chunk` / `ACP agent_thought_chunk` 适合在前端按连续 chunk 聚合成 assistant 消息与思考块；只要在遇到普通系统日志时 flush，一页里就能同时看到“构建状态 + builder 输出 + 思考过程”。
+- 这类前端功能的 e2e 最稳方式是把“构建中 -> 刷新 -> 已就绪 -> 页面动作分流”串成同一条 Playwright 场景；复用同一套登录和全局 mock，比拆成第二条独立用例更不容易被鉴权状态机和全局布局请求干扰。
+
+失败/风险经验：
+- 单独为“构建消息流”再开一条浏览器用例时，若它和主用例走的认证初始化路径稍有不同，就很容易被 `ProtectedRoute` 重定向回 `/login`；这类页面测试应优先复用已经验证稳定的认证入口，而不是在第二条用例里重新发明一套登录前置。
+
+### 2026-03-23 Mini-App ACP 工具事件卡片补充
+
+成功经验：
+- 若前端需要把 ACP `tool_call` 渲染成结构化卡片，后端 run log 最好直接保留 `sessionUpdate + status + title` 三要素；像 `ACP tool_call [completed]: Edit app.js` 这种格式，前端无需额外上下文就能稳定解析出标题和状态。
+- 构建消息流里 assistant chunk 和 tool_call 是两种不同语义，前端聚合时要在遇到 tool/system 日志前先 flush assistant draft；否则工具卡片会被错误并入上一条 assistant 消息。
+- 给工具卡片补 `data-testid` 后，Playwright 可以直接断言“标题 + 状态”是否出现，明显比匹配整段日志文本更稳。
+
+失败/风险经验：
+- 前端把普通消息数组重构成 union item（chat/tool）后，像 `messages.length` 这种旧变量名很容易残留并只在运行期暴露；这类重构完成后要优先跑一次真实浏览器回归，而不只看 TypeScript 静态检查。
+
+### 2026-03-23 Mini-App 悬浮工作区布局补充
+
+成功经验：
+- 对“主舞台优先”的 workspace 页面，最稳的实现不是在现有右栏上加收起逻辑，而是明确拆成两种布局态：未 pin 时只有中间主舞台，聊天窗作为绝对定位浮窗；pin 后再切回 `ResizablePanelGroup` 的固定右栏。
+- 浮动 tabs 和信息卡片若覆盖在预览上层，容器必须先 `pointer-events-none`，再让真实卡片恢复 `pointer-events-auto`；否则即使视觉上透明，也会把 iframe 内点击全部挡住。
+- `workspace` 页签下的浮动信息卡片更适合放在舞台底部，顶部只保留轻量 tabs；否则用户最容易点击到的首屏按钮区域会被状态卡片压住。
+- Playwright 覆盖这类交互时，建议把“默认悬浮按钮 -> 展开浮窗 -> pin 成右栏 -> 继续操作 preview”串成同一条场景，这样最容易发现布局切换后的真实遮挡问题。
+
+### 2026-03-23 Mini-App 浮动按钮显隐补充
+
+成功经验：
+- 这类悬浮页签不应强行维持“始终有一个选中项”；把状态从 `WorkspaceTab` 放宽到 `WorkspaceTab | null`，再用统一 `toggleOverlayTab()` 处理“点击当前按钮即收起”，实现最直接也最不容易漏分支。
+- Playwright 对显隐切换最好直接断言 `toBeHidden()`，这样能发现“视觉上像收起了，但其实仍在页面上拦截事件”的问题。
+### 2026-03-22 dev 合并到 wdh/dev 补充
+
+成功经验：
+- 当用户要求“只在 `wdh/dev` 上操作”时，可以用 detached worktree 基于 `dev` 先做只读验证，再回到当前分支执行合并；这样既不污染 `dev` 分支，也能在合并前确认 `dev` 本身是否已经带着失败用例。
+- 处理冲突时，`config_api` 这类配置写回入口应优先保留 `ConfigManager` 单入口实现；否则容易绕开 secret 路径处理、内存热重载和 `CONFIG_UPDATED` 事件发布。
+- 这次最有效的回归组合是“后端定向 pytest + 进程内 e2e + 前端关键 Playwright”。仅看 merge 是否成功不够，必须同时验证 `test_config_api / test_agent_worker / test_agent_config`、`test_agent_llm_core_flow` 和 `setup-model-list/chat-markdown`。
+
+失败/风险经验：
+- `dev` 上的失败不一定来自当前改动；这次先在 detached worktree 跑测试，就提前暴露了 `tests/unit/test_agent_worker.py` 对本机模型配置的脆弱依赖，以及 `AgentConfig.provider` 已删除但运行时代码仍直接访问的兼容性问题。
+- Playwright 不能并行复用同一个 `webServer.port=3000` 配置直接起两套服务；并发跑多个 spec 容易报 `Address already in use`，这类前端回归在当前仓库更适合串行执行或拆分端口。
+
+### 2026-03-22 WhatsApp 启动超时补充
+
+成功经验：
+- 对可选 channel，启动失败不应直接拖垮 FastAPI lifespan；像 WhatsApp sidecar 这类外部子进程超时，更稳的策略是 channel 自己记录 `state=error/last_error`，让主服务继续启动，状态页再暴露失败原因。
+- 这类问题最有效的 TDD 用例不是去模拟完整 sidecar，而是让 fake bridge 的 `start()` 直接抛 `TimeoutError`，断言 `WhatsAppChannel.start()` 不再向上抛异常且会写入运行时错误状态。
+
+失败/风险经验：
+- 当前 sidecar 的 `start` 命令响应时机仍依赖 Node runtime 完成一段真实初始化；在网络慢、Baileys 初始化卡住或登录态异常时，`start` 仍可能超时。当前修复解决的是“主服务被带崩”，不是“WhatsApp 一定能成功连上”。
+
+### 2026-03-22 WhatsApp 版本探测卡顿补充
+
+成功经验：
+- 真实日志如果稳定停在 `auth state loaded` 之后、`socket created` 之前，优先怀疑 `fetchLatestBaileysVersion()` 这类启动期远端探测，而不是扫码或 Python sidecar 协议本身。
+- 给 sidecar runtime 增加“版本探测超时回退到内置版本”的兜底后，`start` 可以继续完成 socket 创建；这类修复最适合用 `node:test` 直接把 `fetchLatestBaileysVersion` mock 成永不返回，再断言 `runtime.start()` 仍会在短时间内返回并使用 fallback version。
+
+失败/风险经验：
+- 当前沙箱环境直接跑 `python3 -m agentos.app.main run --no-frontend` 仍可能被 `watchfiles` 权限拦住（`[Errno 1] Operation not permitted`）；这种失败不能用来判断 WhatsApp 启动逻辑是否仍有 bug，需优先看单测和用户本机真实启动日志。
+
+### 2026-03-22 WhatsApp 自聊 protocolMessage 补充
+
+成功经验：
+- “给自己发 WhatsApp 纯文本”在真实设备上不一定走 `conversation`/`extendedTextMessage`；这次样本最外层是 `protocolMessage`，如果 sidecar 只解常规 wrapper，就会持续出现 `messages.upsert received` 但 `ignored: no text content`。
+- 对这类协议兼容问题，最稳的流程是先在 `runtime.test.mjs` 补失败样本，再在 `unwrapMessage()` 中按最小范围扩展 wrapper；这次补 `protocolMessage.editedMessage.message` 后，自聊文本即可进入现有提取链。
+- 在 `no text content` 的 debug 日志中带上 `protocol_type`，后续能更快区分“真空消息”还是“漏解某种 protocol wrapper”。
+
+失败/风险经验：
+- 仅覆盖“self chat + conversation”这种理想化测试不够；真实 WhatsApp 多设备/自聊场景的消息结构会漂移，自聊链路必须保留协议级样本测试。
+
+### 2026-03-22 LLM 默认模型编辑补充
+
+成功经验：
+- `/llms` 页面采用“单项编辑 + 编辑所有配置”双模式时，`default_model` 也必须进入同一套编辑状态机；否则顶部卡片会变成唯一不能单项编辑的配置项。
+- `default_model` 这类单字段更新，单独提供 `PUT /api/config/llm/default-model` 比复用整份 `llm` section 保存更稳，前后端都更容易保持“只更新当前一项”的语义。
+- Playwright 对顶部配置卡片最有效的断言顺序是“默认禁用 -> 编辑后可改 -> 取消恢复 -> 保存发单独请求”，这样能同时覆盖 UI 状态切换与接口契约。
+
+失败/风险经验：
+- 当前环境跑 Playwright 需要同时满足两件事：浏览器具备越权启动权限，且 `http://localhost:3000` 上已有 Next dev 进程；缺任一条件都会失败，但报错表象不同，容易误判到页面逻辑。
+
+### 2026-03-23 LLM 配置状态判定补充
+
+成功经验：
+- `llm-status` 这类“是否已配置”接口不应只按字符串字面值判断；若配置支持 `${secret:...}`，就必须结合 secret store 解析后再判空，否则前端会把已登录用户错误重定向到 `/setup`。
+- 将 secret 解析能力收敛到 `check_llm_configured(..., secret_store=...)` 这一层最稳，Web 接口和 CLI 启动提示共用同一规则，避免状态判断分叉。
+- 对配置判定问题，最小高价值测试是三类：普通 `${ENV}` 占位符、`${secret:...}` 且 secret 为空、`${secret:...}` 且 secret 有值。
+
+失败/风险经验：
+- 当前环境仍无法直接跑 pytest：`.venv` 缺少 `pytest`，`uv run python -m pytest` 又会在 `system-configuration` 依赖层 panic；完成修改后需要至少补做 `python3` 级函数断言和 `py_compile` 校验，并在完整依赖环境复跑正式单测。
+
+### 2026-03-23 Tools API Key 指引补充
+
+成功经验：
+- Tools 页的 API key 获取说明是由后端 `TOOL_API_KEY_SPECS` 直接驱动的；要让前端展示更具体的“如何拿 token”，优先补充 `setup_guide/docs_url/example_format`，比在前端硬编码文案更稳。
+- 对这类“内容增强但仍需用户可见回归”的改动，后端单测断言关键关键词，前端 Playwright 只断言一个代表性流程即可，维护成本最低。
+- 当前环境若已安装独立 `chrome-headless-shell`，可在 `playwright.config.ts` 中加入固定候选路径回退，避免每次测试都依赖 Playwright 自带浏览器缓存。
+
+失败/风险经验：
+- 第三方控制台的入口名称会变化，例如 `Dashboard`、`Subscriptions`、`API Keys` 等；文案应写到“足够具体但不强依赖像素级页面布局”，否则后续很容易因供应商改版过时。
+
+### 2026-03-23 Tabs orientation 布局补充
+
+成功经验：
+- Radix 这类组件如果运行时依赖 `data-orientation="horizontal"`，Tailwind 选择器必须写成 `data-[orientation=horizontal]:...` 或 `group-data-[orientation=horizontal]/...`；写成 `data-horizontal:` 只会匹配布尔属性，实际不会命中。
+- 当页面表现成“tab 栏在左、内容在右”时，先检查根组件是否仍是 `display:flex` 且没有被切成 `flex-col`；这种问题通常是状态类名没生效，不是业务页本身的布局问题。
+- 对布局修复，Playwright 最稳的断言不是截图，而是直接比较 `boundingBox`：验证 tablist 的 `y` 在内容上方、`x` 基本对齐即可。
+
+失败/风险经验：
+- 同类错误容易同时出现在 `Tabs`、`Separator`、`ScrollArea` 等多个基础组件中；只修单页通常会留下第二处同源问题。

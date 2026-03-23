@@ -8,7 +8,7 @@ definition = PluginDefinition(
     id="feishu",
     name="飞书",
     version="0.9.0",
-    description="飞书/Lark 消息 Channel 插件（含 Markdown 卡片、主动出站、API 调用）",
+    description="飞书/Lark 消息 Channel 插件（含 Markdown 卡片与主动出站）",
 )
 
 

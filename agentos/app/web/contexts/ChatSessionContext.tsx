@@ -14,11 +14,13 @@ import {
   type TaskProgressItem,
   type ContextFileRef,
   makeId,
+  formatArgs,
   truncateResult,
   rebuildMessagesFromEvents,
   rebuildStepsFromEvents,
   groupSessionsToTasks,
 } from '@/lib/chatTypes';
+import { extractThinkContentFromReasoningDetails } from '@/lib/assistantThink';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 const WS_RECONNECT_INTERVAL_MS = 1000;
@@ -122,6 +124,61 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
   function addMsg(role: ChatMessage['role'], content: string) {
     setMessages(prev => [...prev, { id: makeId(), role, content, timestamp: Date.now() }]);
+  }
+
+  function upsertAssistantMessage(message: {
+    turnId?: string;
+    content: string;
+    thinkingContent?: string;
+    thinkingState?: 'streaming' | 'collapsed';
+  }) {
+    const { turnId, content, thinkingContent, thinkingState } = message;
+    setMessages((prev) => {
+      if (turnId) {
+        const existingIndex = prev.findIndex((item) => item.role === 'assistant' && item.turnId === turnId);
+        if (existingIndex !== -1) {
+          // 检查该 assistant 消息之后是否已经插入了 tool 消息
+          // 如果有，说明这是新一轮 LLM 调用的结果，应创建新消息而不是覆盖
+          const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
+          if (hasToolAfter) {
+            // 新一轮 LLM 思考，追加新的 assistant 消息
+            return [
+              ...prev,
+              {
+                id: makeId(),
+                role: 'assistant' as const,
+                content,
+                timestamp: Date.now(),
+                turnId: `${turnId}_${Date.now()}`,
+                thinkingContent,
+                thinkingState,
+              },
+            ];
+          }
+          // 同一轮 LLM 调用的流式更新，原地更新
+          const next = [...prev];
+          next[existingIndex] = {
+            ...next[existingIndex],
+            content,
+            thinkingContent,
+            thinkingState,
+          };
+          return next;
+        }
+      }
+      return [
+        ...prev,
+        {
+          id: makeId(),
+          role: 'assistant',
+          content,
+          timestamp: Date.now(),
+          turnId,
+          thinkingContent,
+          thinkingState,
+        },
+      ];
+    });
   }
 
   const bindSessionToCurrentSocket = useCallback((sid: string | null) => {
@@ -275,7 +332,19 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         break;
       case 'llm_result': {
         const content = String(payload.content || '');
-        if (content) addMsg('assistant', content);
+        const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
+        const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
+        const hasToolCalls = Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0;
+        // 有内容、有思考过程、或有工具调用时，都创建 assistant 消息
+        // 确保工具调用前的思考过程不会丢失
+        if (content || thinkingContent || hasToolCalls) {
+          upsertAssistantMessage({
+            turnId,
+            content,
+            thinkingContent,
+            thinkingState: thinkingContent ? 'streaming' : undefined,
+          });
+        }
         break;
       }
       case 'tool_execution': {
@@ -302,6 +371,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const mid = toolCallMapRef.current.get(toolCallId);
         if (mid) {
           setMessages(prev => prev.map(m => m.id === mid ? { ...m, content: `Tool Finished: ${toolName}`, toolInfo: { name: toolName, arguments: m.toolInfo?.arguments || {}, result, success, error, status: 'completed' } } : m));
+        } else {
+          const fallbackContent = typeof result === 'string'
+            ? result
+            : formatArgs(result);
+          setMessages(prev => [...prev, {
+            id: makeId(),
+            role: 'tool',
+            name: toolName,
+            content: fallbackContent,
+            timestamp: Date.now(),
+          }]);
         }
         const stepIdx = toolStepMapRef.current.get(toolCallId);
         if (stepIdx !== undefined) {
@@ -317,7 +397,21 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       }
       case 'turn_completed': {
         const final = String(payload.final_response || '');
-        if (final) addMsg('assistant', final);
+        if (final) {
+          // 更新最后一条 assistant 消息的内容（不创建新消息）
+          setMessages((prev) => {
+            // 从后往前找最后一条 assistant 消息
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i].role === 'assistant') {
+                const next = [...prev];
+                next[i] = { ...next[i], content: final, thinkingState: 'collapsed' };
+                return next;
+              }
+            }
+            // 没找到 assistant 消息（理论上不会发生），追加一条
+            return [...prev, { id: makeId(), role: 'assistant', content: final, timestamp: Date.now() }];
+          });
+        }
         setIsTyping(false);
         clearInteractions();
         // 推送任务完成通知卡片
@@ -346,6 +440,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           if (s.session_id !== sid) return s;
           try { const m = JSON.parse(s.meta); m.title = title; return { ...s, meta: JSON.stringify(m) }; } catch { return s; }
         }));
+        break;
+      }
+      case 'session_list_changed': {
+        // 后端通知有新 session（如 send_message 创建），刷新列表
+        loadSessionList();
         break;
       }
       case 'session_deleted': {

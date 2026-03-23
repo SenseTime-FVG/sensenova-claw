@@ -13,7 +13,14 @@ from agentos.adapters.plugins.whatsapp.models import WhatsAppInboundMessage
 from agentos.interfaces.ws.gateway import Gateway
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED, USER_INPUT, USER_QUESTION_ASKED
+from agentos.kernel.events.types import (
+    AGENT_STEP_COMPLETED,
+    ERROR_RAISED,
+    TOOL_CALL_STARTED,
+    USER_INPUT,
+    USER_QUESTION_ANSWERED,
+    USER_QUESTION_ASKED,
+)
 from agentos.kernel.runtime.publisher import EventPublisher
 
 
@@ -44,6 +51,12 @@ class _FakeWhatsAppBridge:
     async def send_text(self, target: str, text: str) -> dict:
         self.sent_messages.append({"target": target, "text": text})
         return {"success": True, "message_id": f"msg:{target}"}
+
+
+class _TimeoutOnStartBridge(_FakeWhatsAppBridge):
+    async def start(self) -> None:
+        self.started = True
+        raise TimeoutError("WhatsApp sidecar command timed out: start")
 
 
 def _make_channel(
@@ -92,6 +105,25 @@ class TestLifecycle:
         assert bridge.started is True
         assert bridge.stopped is True
         assert bridge.handler is not None
+
+    @pytest.mark.asyncio
+    async def test_start_timeout_does_not_crash_channel_startup(self):
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus=bus)
+        gateway = Gateway(publisher=publisher)
+        bridge = _TimeoutOnStartBridge()
+        channel = WhatsAppChannel(
+            config=WhatsAppConfig(enabled=True, auth_dir="/tmp/agentos-whatsapp-auth"),
+            plugin_api=_SimplePluginApi(gateway=gateway),
+            bridge=bridge,
+        )
+
+        await channel.start()
+
+        assert bridge.started is True
+        assert channel._runtime_state.connected is False
+        assert channel._runtime_state.state == "error"
+        assert channel._runtime_state.last_error == "WhatsApp sidecar command timed out: start"
 
 
 class TestShouldRespond:
@@ -214,6 +246,110 @@ class TestInbound:
 
         assert collected == []
         assert gateway._session_bindings == {}
+
+    @pytest.mark.asyncio
+    async def test_answers_pending_question_before_user_input(self):
+        channel, _, bus, bridge = _make_channel()
+        session_id = "whatsapp_ask_001"
+        channel._chat_sessions["dm:+15550000001"] = session_id
+        channel._session_meta[session_id] = channel._session_meta_model(
+            chat_jid="15550000001@s.whatsapp.net",
+            chat_type="p2p",
+            sender_jid="15550000001@s.whatsapp.net",
+            last_message_id="wamid-0",
+        )
+
+        await channel.send_event(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=session_id,
+                source="tool",
+                payload={"question_id": "q_wa_1", "question": "请选择环境"},
+            )
+        )
+        assert bridge.sent_messages[-1]["text"] == "请选择环境"
+
+        async def collect():
+            async for event in bus.subscribe():
+                if event.type == USER_QUESTION_ANSWERED:
+                    return event
+
+        task = asyncio.create_task(collect())
+        await asyncio.sleep(0.05)
+
+        await channel.handle_incoming_message(
+            WhatsAppInboundMessage(
+                text="生产环境",
+                chat_jid="15550000001@s.whatsapp.net",
+                chat_type="p2p",
+                sender_jid="15550000001@s.whatsapp.net",
+                message_id="wamid-1",
+            )
+        )
+
+        event = await asyncio.wait_for(task, timeout=2)
+        assert event.type == USER_QUESTION_ANSWERED
+        assert event.payload["question_id"] == "q_wa_1"
+        assert event.payload["answer"] == "生产环境"
+
+    @pytest.mark.asyncio
+    async def test_restores_user_input_after_answering_pending_question(self):
+        channel, _, bus, _ = _make_channel()
+        session_id = "whatsapp_ask_002"
+        channel._chat_sessions["dm:+15550000002"] = session_id
+        channel._session_meta[session_id] = channel._session_meta_model(
+            chat_jid="15550000002@s.whatsapp.net",
+            chat_type="p2p",
+            sender_jid="15550000002@s.whatsapp.net",
+            last_message_id="wamid-0",
+        )
+        await channel.send_event(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=session_id,
+                source="tool",
+                payload={"question_id": "q_wa_2", "question": "补充说明"},
+            )
+        )
+
+        async def collect_answer():
+            async for event in bus.subscribe():
+                if event.type == USER_QUESTION_ANSWERED:
+                    return event
+
+        answer_task = asyncio.create_task(collect_answer())
+        await asyncio.sleep(0.05)
+        await channel.handle_incoming_message(
+            WhatsAppInboundMessage(
+                text="第一次回答",
+                chat_jid="15550000002@s.whatsapp.net",
+                chat_type="p2p",
+                sender_jid="15550000002@s.whatsapp.net",
+                message_id="wamid-a",
+            )
+        )
+        first_event = await asyncio.wait_for(answer_task, timeout=2)
+        assert first_event.type == USER_QUESTION_ANSWERED
+
+        async def collect_input():
+            async for event in bus.subscribe():
+                if event.type == USER_INPUT:
+                    return event
+
+        input_task = asyncio.create_task(collect_input())
+        await asyncio.sleep(0.05)
+        await channel.handle_incoming_message(
+            WhatsAppInboundMessage(
+                text="新的普通消息",
+                chat_jid="15550000002@s.whatsapp.net",
+                chat_type="p2p",
+                sender_jid="15550000002@s.whatsapp.net",
+                message_id="wamid-b",
+            )
+        )
+        second_event = await asyncio.wait_for(input_task, timeout=2)
+        assert second_event.type == USER_INPUT
+        assert second_event.payload["content"] == "新的普通消息"
 
 
 class TestOutbound:

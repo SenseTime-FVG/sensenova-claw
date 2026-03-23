@@ -14,9 +14,13 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentos.capabilities.agents.config import AgentConfig
+
+if TYPE_CHECKING:
+    from agentos.kernel.events.bus import PublicEventBus
+    from agentos.platform.config.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +122,7 @@ class AgentRegistry:
             id=agent_id,
             name=agent_dict.get("name", agent_id.replace("-", " ").title() if agent_id != "default" else "Default Agent"),
             description=agent_dict.get("description", "默认 AI Agent" if agent_id == "default" else ""),
-            provider="",  # provider 现在由 model key 通过 resolve_model 动态解析
-            model=agent_dict.get("model", fallback.get("model", "mock")),
+            model=agent_dict.get("model", ""),
             temperature=agent_dict.get("temperature", fallback.get("temperature", 0.2)),
             max_tokens=agent_dict.get("max_tokens"),
             system_prompt=system_prompt,
@@ -153,6 +156,15 @@ class AgentRegistry:
         return ""
 
     # ── 运行时更新 ──────────────────────────────────
+
+    async def start_config_listener(self, bus: PublicEventBus, config: Config) -> None:
+        """订阅 config.updated 事件，agents section 变更时重载"""
+        from agentos.kernel.events.types import CONFIG_UPDATED
+        async for event in bus.subscribe():
+            if event.type == CONFIG_UPDATED and event.payload.get("section") == "agents":
+                self._agents.clear()
+                self.load_from_config(config.data)
+                logger.info("AgentRegistry: agents reloaded due to config change")
 
     def update(self, agent_id: str, updates: dict[str, Any]) -> AgentConfig | None:
         """部分更新 Agent 配置（仅内存，不持久化）"""
