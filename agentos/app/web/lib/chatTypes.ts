@@ -201,7 +201,15 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
     if (eventType === 'agent.step_completed') {
       const response = String(payload.final_response || '') || String(((payload.result as Record<string, unknown> | undefined)?.content) || '');
       if (response) {
-        rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+        // 检查最后一条 assistant 消息是否已有相同内容（由 llm.call_result 创建）
+        const lastAssistant = [...rebuilt].reverse().find(m => m.role === 'assistant');
+        if (lastAssistant && lastAssistant.content === response) {
+          // 内容相同，只折叠思考状态
+          const idx = rebuilt.indexOf(lastAssistant);
+          rebuilt[idx] = { ...rebuilt[idx], thinkingState: rebuilt[idx].thinkingContent ? 'collapsed' : undefined };
+        } else {
+          rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+        }
       }
       continue;
     }
