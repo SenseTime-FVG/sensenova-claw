@@ -147,7 +147,7 @@ llm:
       max_tokens: 256000
       max_output_tokens: 16384
 
-  default_model: gemini-pro
+  default_model: null
 
 # ════════════════════════════════════════════════════
 # Agents 配置
@@ -212,12 +212,6 @@ agents:
     tools: [bash_command, read_file, write_file, send_message, send_email, list_emails, read_email, download_attachment, mark_email, search_emails, ask_user]
     skills: []
 
-  philosopher:
-    name: 哲学家
-    description: 哲学思辨与深度思考，擅长多角度分析问题、引用中西方哲学经典
-    temperature: 0.7
-    tools: [serper_search, fetch_url, ask_user]
-    skills: []
 
 # ════════════════════════════════════════════════════
 # 工具配置
