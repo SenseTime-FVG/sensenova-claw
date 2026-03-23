@@ -226,7 +226,8 @@ class SendMessageTool(Tool):
                     f"发送失败：当前已达到最大消息传递深度 {max_send_depth}，"
                     "无法继续创建新的子会话。"
                 )
-            if target_id in current_send_chain:
+            # 允许自我委派（同一 agent 的新 session），拦截真正的循环（A→B→A）
+            if target_id in current_send_chain and target_id != current_agent_id:
                 chain_str = " -> ".join(current_send_chain + [target_id])
                 return f"发送失败：检测到循环链路 {chain_str}。"
 
