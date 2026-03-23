@@ -226,7 +226,7 @@ async def lifespan(app: FastAPI):
         agent_runtime=agent_runtime,
         retry_backoff_seconds=list(config.get("delegation.retry.backoff_seconds", [0, 1, 3])),
     )
-    title_runtime = TitleRuntime(bus=bus, repo=repo)
+    title_runtime = TitleRuntime(bus=bus, repo=repo, agent_registry=agent_registry)
 
     gateway = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
     custom_page_service.gateway = gateway

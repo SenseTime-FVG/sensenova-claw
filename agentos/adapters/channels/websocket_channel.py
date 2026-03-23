@@ -403,12 +403,16 @@ class WebSocketChannel(Channel):
                 "timestamp": event.ts,
             }
         if event.type == ERROR_RAISED:
+            user_message = event.payload.get("user_message") or event.payload.get("error_message")
             return {
                 "type": "error",
                 "session_id": event.session_id,
                 "payload": {
                     "error_type": event.payload.get("error_type"),
-                    "message": event.payload.get("error_message"),
+                    "error_code": event.payload.get("error_code"),
+                    "message": user_message,
+                    "user_message": user_message,
+                    "raw_message": event.payload.get("error_message"),
                     "details": event.payload.get("context", {}),
                 },
                 "timestamp": event.ts,

@@ -876,6 +876,75 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境仍无法直接跑 pytest：`.venv` 缺少 `pytest`，`uv run python -m pytest` 又会在 `system-configuration` 依赖层 panic；完成修改后需要至少补做 `python3` 级函数断言和 `py_compile` 校验，并在完整依赖环境复跑正式单测。
 
+### 2026-03-23 /agents 创建模型下拉补充
+
+成功经验：
+- `/agents` 创建弹窗与 `/agents/[id]` 编辑页若都需要模型列表，最省事的做法是统一复用 `/api/config/sections` 中的 `llm.models/default_model`，前端直接按 key 生成下拉，无需新增专门接口。
+- 这类“把输入框改成选择框”的前端改动，最高价值的 Playwright 断言是“默认值来自 `default_model` + 提交请求体带上用户选中的 model”，比只看界面上出现选项更能锁住真实行为。
+- 当前仓库跑前端 e2e 时，若 `playwright.config.ts` 的 `webServer.command` 会触发根目录 `npm run dev`，可以先保证 3000 端口已有服务，再用 `reuseExistingServer` 跳过那条启动链，避免把 `uv` 环境问题误判成页面失败。
+
+失败/风险经验：
+- 在当前环境下直接跑根目录联动启动仍可能触发 `uv` 的缓存权限或 `system-configuration` panic；前端回归若报在 `webServer` 启动阶段，先区分是页面断言失败还是基础启动链失败。
+
+### 2026-03-23 Agent 持久化修复补充
+
+成功经验：
+- Agent 重启丢失时，先核对启动期真实加载来源最关键；当前生效来源只有 `config.yml` 的 `agents` 段和 `AGENTOS_HOME/agents/<id>/SYSTEM_PROMPT.md`，没有任何 `config.json` 覆盖层读取逻辑，因此修复应直接写回这两处。
+- 对 Agent CRUD，最稳的持久化方式是复用 `ConfigManager.replace("agents", ...)` 做整段写回，同时只修改目标 agent 的记录；这样既能保留其他未知 key，又能触发既有的配置内存刷新与 `CONFIG_UPDATED` 事件。
+- Python 3.14 下旧式 `asyncio.get_event_loop().run_until_complete(...)` 很容易在测试 fixture 中直接报错；测试夹具应改成 `asyncio.run(...)` 才能稳定把失败推进到业务断言。
+
+失败/风险经验：
+- `tests/e2e/test_agents_preset_api_flow.py` 中“preset-agent 不允许删除”和“写 `config.json` 覆盖层”的假设已经过时；排查 Agent 持久化问题时，不能把旧测试名义上的预期当成当前产品事实。
+
+### 2026-03-23 Qwen 静默回退 Mock 修复补充
+
+成功经验：
+- 当日志里已经出现 `llm.call_requested provider=qwen`，但最终回复仍是 `mock` 文案时，优先检查 provider 工厂是否在“显式请求某 provider”时做了静默回退；这类问题不能只看事件 payload，必须沿 `LLMFactory.get_provider()` 实际取到的实例继续追踪。
+- 对多 Agent 场景，标题生成链路不能只读全局 `llm.default_model`；应先看 `session -> agent_id -> agent.model`，否则会出现“主回复走 agent 模型、标题却走全局 mock”的错位现象。
+- 针对这类配置/编排问题，最小有效回归测试是两条：一条锁住“显式 provider 不可用时返回结构化错误而不是 mock 回复”，另一条锁住“TitleRuntime 按 session agent 模型选 provider/model”。
+
+失败/风险经验：
+- `LLMFactory` 改为抛错后，若 `LLMSessionWorker` 在 `try` 外先取 provider，异常会直接炸出 worker，前端收不到统一错误事件；provider 获取也必须纳入同一错误处理分支。
+
+### 2026-03-23 LLM 参数错误友好提示补充
+
+成功经验：
+- 对外部 LLM 网关返回的 provider 特定错误（如 DashScope 的 `Range of max_tokens should be [1, 65536]`），最稳的落点是 `LLMSessionWorker` 的统一异常出口：同时生成 `error_code`、`user_message` 和结构化 `context`，再复用现有 `error.raised` / `llm.call_result` / `agent.step_completed` 链路，无需单独开新事件。
+- WebSocket 下行如果只传 `message` 不够，最好同时保留 `error_code`、`user_message`、`raw_message`；这样前端能优先显示友好文案，同时保留排查原始错误的能力。
+- 前端收到结构化错误后，应优先展示 `user_message`，不要直接把 provider 原始异常前缀成 `Error:`；否则用户看到的仍是低可读性的网关报错字符串。
+
+失败/风险经验：
+- 直接在运行时对 `max_tokens` 做硬编码自动截断虽然能临时避错，但会掩盖真实配置问题；若用户更需要可见性而不是静默修复，应改成错误提炼而不是偷偷改请求参数。
+
+### 2026-03-23 max_tokens 越界自动重试补充
+
+成功经验：
+- 对 `max_tokens_out_of_range` 这类可机械修复的错误，最稳的是“提示 + 单次重试”组合：先向当前 session 发一条会话内通知，再用解析出的 `limit` 仅重试一次，成功则用户直接拿到正常回复，失败再退回结构化错误链路。
+- 这类提示最好复用现有 `notification.session`，而不是新增一套前端事件；WebSocket 已能把它稳定映射成追加到对话框的系统消息，改动最小。
+- provider 上限不应硬编码在正常请求路径；更稳的做法是从实际错误文案里提取上限数字（如 `65536`、`196608`），仅对当前请求做临时修复。
+
+失败/风险经验：
+- 自动重试必须严格限制为一次；如果不加边界，很容易在 provider 持续报参数错误时形成重复通知或隐藏真实故障。
+
+### 2026-03-23 Chat Agent 切换补充
+
+成功经验：
+- 工作台聊天页里，“选中的 agent”和“当前打开的 session”是两套独立状态；排查“明明选了 minimax，实际却走 default”时，先看前端是否真的切换了 `currentSessionId`，不要先怀疑后端 provider 回退。
+- 多 agent 会话页在切换左侧 agent 后，需要同步右侧会话上下文：有历史会话时切到该 agent 最近会话，没有历史会话时补建一个新的空会话，否则后续 `user_input` 仍会落到旧 session。
+- 这类回归最适合用前端 Playwright 的假 WebSocket 用例固化，直接断言发出的 `create_session.agent_id` 和 `user_input.session_id`，比只看页面上显示的模型名称更可靠。
+
+失败/风险经验：
+- 当前环境跑 Playwright 时，仓库默认 `webServer` 会走 `uv run python3 -m agentos.app.main run`；如果 `uv` 命中缓存权限或 `system-configuration` panic，浏览器级 e2e 会在服务启动前失败，不能误判为页面交互逻辑有问题。
+
+### 2026-03-23 LLM 回退链路补充
+
+成功经验：
+- LLM 失败回退规则应集中放在 `LLMSessionWorker`，不要分散在 `LLMFactory` 和调用层各自兜底；否则“provider 不可用”“参数错误”“业务 400”会出现互相覆盖的行为差异。
+- `max_tokens` 越界这类错误可以保留“同 provider 截断重试”作为第一层自恢复，但只允许一次；若重试仍失败，再继续走 `当前模型 -> default model -> mock` 的分层回退更清晰。
+- 回退提示最好统一写成 `provider:model`，并明确“哪个模型出错、将回退到哪个模型”；这样用户在对话框里就能直接分辨是 agent 选错、provider 故障还是自动降级。
+
+失败/风险经验：
+- 单元测试若不显式固定 `config.data["llm"]["default_model"]`，会被开发机本地真实配置污染，导致回退目标漂移；这类测试必须在用例内保存并恢复配置。
 ### 2026-03-23 Tools API Key 指引补充
 
 成功经验：
