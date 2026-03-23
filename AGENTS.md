@@ -749,3 +749,23 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前环境仍无法直接跑 pytest：`.venv` 缺少 `pytest`，`uv run python -m pytest` 又会在 `system-configuration` 依赖层 panic；完成修改后需要至少补做 `python3` 级函数断言和 `py_compile` 校验，并在完整依赖环境复跑正式单测。
+
+### 2026-03-23 Tools API Key 指引补充
+
+成功经验：
+- Tools 页的 API key 获取说明是由后端 `TOOL_API_KEY_SPECS` 直接驱动的；要让前端展示更具体的“如何拿 token”，优先补充 `setup_guide/docs_url/example_format`，比在前端硬编码文案更稳。
+- 对这类“内容增强但仍需用户可见回归”的改动，后端单测断言关键关键词，前端 Playwright 只断言一个代表性流程即可，维护成本最低。
+- 当前环境若已安装独立 `chrome-headless-shell`，可在 `playwright.config.ts` 中加入固定候选路径回退，避免每次测试都依赖 Playwright 自带浏览器缓存。
+
+失败/风险经验：
+- 第三方控制台的入口名称会变化，例如 `Dashboard`、`Subscriptions`、`API Keys` 等；文案应写到“足够具体但不强依赖像素级页面布局”，否则后续很容易因供应商改版过时。
+
+### 2026-03-23 Tabs orientation 布局补充
+
+成功经验：
+- Radix 这类组件如果运行时依赖 `data-orientation="horizontal"`，Tailwind 选择器必须写成 `data-[orientation=horizontal]:...` 或 `group-data-[orientation=horizontal]/...`；写成 `data-horizontal:` 只会匹配布尔属性，实际不会命中。
+- 当页面表现成“tab 栏在左、内容在右”时，先检查根组件是否仍是 `display:flex` 且没有被切成 `flex-col`；这种问题通常是状态类名没生效，不是业务页本身的布局问题。
+- 对布局修复，Playwright 最稳的断言不是截图，而是直接比较 `boundingBox`：验证 tablist 的 `y` 在内容上方、`x` 基本对齐即可。
+
+失败/风险经验：
+- 同类错误容易同时出现在 `Tabs`、`Separator`、`ScrollArea` 等多个基础组件中；只修单页通常会留下第二处同源问题。
