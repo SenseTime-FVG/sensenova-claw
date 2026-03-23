@@ -95,42 +95,12 @@ function ToolCallItem({ msg }: { msg: ChatMessage }) {
 }
 
 export function ToolCallGroup({ tools }: { tools: ChatMessage[] }) {
-  const [expanded, setExpanded] = useState(false);
-
-  const completed = tools.filter(t => t.toolInfo?.status === 'completed').length;
-  const running = tools.filter(t => t.toolInfo?.status === 'running').length;
-  const total = tools.length;
-  const allDone = running === 0 && total > 0;
-
   return (
-    <div className="my-2 ml-14">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/50 border border-border/40 text-xs hover:bg-muted/80 transition-colors cursor-pointer select-none"
-      >
-        <ChevronRight size={14} className={`shrink-0 text-muted-foreground transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`} />
-        <Brain size={14} className={allDone ? 'text-primary/60' : 'text-amber-500 animate-pulse'} />
-        <span className="font-medium text-foreground">Thinking</span>
-        <span className="text-muted-foreground">
-          {running > 0 ? `${completed}/${total}` : `${total} 次工具调用`}
-        </span>
-        {running > 0 && (
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 leading-none">
-            {running} 执行中...
-          </span>
-        )}
-        {allDone && (
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-600 dark:text-green-400 leading-none">
-            完成
-          </span>
-        )}
-      </button>
-
-      {expanded && (
-        <div className="ml-3 mt-1 border-l-2 border-border/30 pl-2">
-          {tools.map(tool => <ToolCallItem key={tool.id} msg={tool} />)}
-        </div>
-      )}
+    <div className="flex gap-4 max-w-4xl mx-auto my-2">
+      <div className="w-10 shrink-0" />
+      <div className="flex-1 min-w-0 space-y-1">
+        {tools.map(tool => <ToolCallItem key={tool.id} msg={tool} />)}
+      </div>
     </div>
   );
 }
@@ -192,8 +162,9 @@ export function MessageBubble({ msg }: { msg: ChatMessage }) {
                 onClick={() => setShowThink((prev) => !prev)}
                 className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-amber-900/80 dark:text-amber-200/90"
               >
-                <ChevronDown size={16} className={`shrink-0 transition-transform duration-200 ${showThink ? 'rotate-180' : ''}`} />
+                <Brain size={14} className="shrink-0 text-amber-600 dark:text-amber-400" />
                 <span>思考过程</span>
+                <ChevronDown size={14} className={`shrink-0 transition-transform duration-200 ${showThink ? 'rotate-180' : ''}`} />
               </button>
               <div
                 data-testid="assistant-think-content"
