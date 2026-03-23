@@ -5,9 +5,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.interfaces.http.tools import router
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.platform.config.config import Config
+from sensenova_claw.interfaces.http.tools import router
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.platform.config.config import Config
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def app(tmp_path):
 
     app.state.tool_registry = tool_registry
     app.state.config = cfg
-    app.state.agentos_home = str(workspace_dir)
+    app.state.sensenova_claw_home = str(workspace_dir)
     return app
 
 

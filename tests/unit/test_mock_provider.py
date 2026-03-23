@@ -1,8 +1,8 @@
 """MockProvider 单元测试"""
 from __future__ import annotations
 
-from agentos.adapters.llm.providers.mock_provider import MockProvider
-from agentos.adapters.llm.base import LLMProvider
+from sensenova_claw.adapters.llm.providers.mock_provider import MockProvider
+from sensenova_claw.adapters.llm.base import LLMProvider
 
 
 async def test_mock_provider_is_llm_provider() -> None:

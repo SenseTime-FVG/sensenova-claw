@@ -1,7 +1,7 @@
 """B06: Config 加载 + 环境变量替换"""
 import os
 from pathlib import Path
-from agentos.platform.config.config import Config, DEFAULT_CONFIG
+from sensenova_claw.platform.config.config import Config, DEFAULT_CONFIG
 
 
 class TestConfig:
@@ -23,26 +23,26 @@ class TestConfig:
     def test_env_substitution(self, tmp_path):
         yml = tmp_path / "config.yml"
         yml.write_text(
-            "OPENAI_API_KEY: ${TEST_AGENTOS_KEY}\n"
+            "OPENAI_API_KEY: ${TEST_SENSENOVA_CLAW_KEY}\n"
             "agent:\n  model: gpt-5.4\n",
             encoding="utf-8",
         )
-        os.environ["TEST_AGENTOS_KEY"] = "sk-test-123"
+        os.environ["TEST_SENSENOVA_CLAW_KEY"] = "sk-test-123"
         try:
             cfg = Config(config_path=yml)
             assert cfg.get("OPENAI_API_KEY") == "sk-test-123"
         finally:
-            os.environ.pop("TEST_AGENTOS_KEY", None)
+            os.environ.pop("TEST_SENSENOVA_CLAW_KEY", None)
 
     def test_env_substitution_still_works_with_secret_store(self, tmp_path):
         yml = tmp_path / "config.yml"
-        yml.write_text("OPENAI_API_KEY: ${TEST_AGENTOS_KEY}\n", encoding="utf-8")
-        os.environ["TEST_AGENTOS_KEY"] = "sk-test-env-secret"
+        yml.write_text("OPENAI_API_KEY: ${TEST_SENSENOVA_CLAW_KEY}\n", encoding="utf-8")
+        os.environ["TEST_SENSENOVA_CLAW_KEY"] = "sk-test-env-secret"
         try:
             cfg = Config(config_path=yml, secret_store=object())
             assert cfg.get("OPENAI_API_KEY") == "sk-test-env-secret"
         finally:
-            os.environ.pop("TEST_AGENTOS_KEY", None)
+            os.environ.pop("TEST_SENSENOVA_CLAW_KEY", None)
 
     def test_deep_merge(self, tmp_path):
         yml = tmp_path / "config.yml"

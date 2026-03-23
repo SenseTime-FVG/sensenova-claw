@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.platform.config.config import Config
-from agentos.platform.secrets.store import InMemorySecretStore, SecretStoreError
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.secrets.store import InMemorySecretStore, SecretStoreError
 
 
 def test_config_resolves_secret_reference(tmp_path):
@@ -14,11 +14,11 @@ def test_config_resolves_secret_reference(tmp_path):
         "llm:\n"
         "  providers:\n"
         "    openai:\n"
-        "      api_key: ${secret:agentos/llm.providers.openai.api_key}\n",
+        "      api_key: ${secret:sensenova_claw/llm.providers.openai.api_key}\n",
         encoding="utf-8",
     )
     store = InMemorySecretStore()
-    store.set("agentos/llm.providers.openai.api_key", "sk-from-secret-store")
+    store.set("sensenova_claw/llm.providers.openai.api_key", "sk-from-secret-store")
 
     cfg = Config(config_path=config_path, secret_store=store)
 
@@ -37,7 +37,7 @@ def test_config_raises_when_secret_lookup_fails(tmp_path):
     config_path.write_text(
         "tools:\n"
         "  serper_search:\n"
-        "    api_key: ${secret:agentos/tools.serper_search.api_key}\n",
+        "    api_key: ${secret:sensenova_claw/tools.serper_search.api_key}\n",
         encoding="utf-8",
     )
 
@@ -59,7 +59,7 @@ def test_config_logs_and_falls_back_to_empty_when_secret_lookup_fails(tmp_path, 
         "llm:\n"
         "  providers:\n"
         "    qwen:\n"
-        "      api_key: ${secret:agentos/llm.providers.qwen.api_key}\n",
+        "      api_key: ${secret:sensenova_claw/llm.providers.qwen.api_key}\n",
         encoding="utf-8",
     )
 

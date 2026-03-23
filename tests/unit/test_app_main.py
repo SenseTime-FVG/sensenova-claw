@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from agentos.app.main import _spawn_managed_process, _terminate_managed_process
+from sensenova_claw.app.main import _spawn_managed_process, _terminate_managed_process
 
 
 @pytest.mark.skipif(os.name == "nt", reason="该测试仅覆盖类 Unix 进程组行为")

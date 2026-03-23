@@ -1,8 +1,8 @@
 """T04: ToolRegistry 注册/发现"""
 from unittest.mock import patch
 
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.capabilities.tools.base import Tool, ToolRiskLevel
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
 
 
 class MockTool(Tool):
@@ -34,7 +34,7 @@ class TestToolRegistry:
 
     def test_email_tools_registered_when_enabled(self):
         """tools.email.enabled=True 时 email 工具应注册"""
-        from agentos.platform.config.config import config
+        from sensenova_claw.platform.config.config import config
         original = config.data["tools"]["email"]["enabled"]
         try:
             config.data["tools"]["email"]["enabled"] = True

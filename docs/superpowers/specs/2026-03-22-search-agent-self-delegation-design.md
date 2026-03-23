@@ -19,7 +19,7 @@
 
 ### 1. 允许自我委派的授权检查
 
-**文件**: `agentos/capabilities/agents/registry.py`
+**文件**: `sensenova_claw/capabilities/agents/registry.py`
 
 当前 `get_sendable` 在 `can_send_message_to` 为空时，返回所有**其他**已启用 agent（排除自身）：
 
@@ -40,7 +40,7 @@ if not source.can_send_message_to:
 
 ### 2. 放宽循环检测
 
-**文件**: `agentos/capabilities/tools/send_message_tool.py`
+**文件**: `sensenova_claw/capabilities/tools/send_message_tool.py`
 
 当前逻辑（第 229 行）：
 
@@ -71,7 +71,7 @@ if target_id in current_send_chain and target_id != current_agent_id:
 
 ### 3. search-agent 配置调整
 
-**文件**: `.agentos/agents/search-agent/config.yml`
+**文件**: `.sensenova-claw/agents/search-agent/config.yml`
 
 将 `max_send_depth` 从 1 调整为 2：
 
@@ -85,7 +85,7 @@ depth 控制逻辑：
 
 ### 4. search-agent System Prompt 增强
 
-**文件**: `.agentos/agents/search-agent/SYSTEM_PROMPT.md`
+**文件**: `.sensenova-claw/agents/search-agent/SYSTEM_PROMPT.md`
 
 在现有 system prompt 末尾追加：
 
@@ -155,10 +155,10 @@ depth 控制逻辑：
 
 | # | 文件 | 类型 | 改动内容 |
 |---|---|---|---|
-| 1 | `agentos/capabilities/agents/registry.py` | 代码 | `get_sendable` 不再排除自身，允许自我委派通过授权检查 |
-| 2 | `agentos/capabilities/tools/send_message_tool.py` | 代码 | 循环检测条件加 `and target_id != current_agent_id` |
-| 3 | `.agentos/agents/search-agent/config.yml` | 配置 | `max_send_depth: 1` → `2` |
-| 4 | `.agentos/agents/search-agent/SYSTEM_PROMPT.md` | 配置 | 追加任务拆分与并行执行指引 |
+| 1 | `sensenova_claw/capabilities/agents/registry.py` | 代码 | `get_sendable` 不再排除自身，允许自我委派通过授权检查 |
+| 2 | `sensenova_claw/capabilities/tools/send_message_tool.py` | 代码 | 循环检测条件加 `and target_id != current_agent_id` |
+| 3 | `.sensenova-claw/agents/search-agent/config.yml` | 配置 | `max_send_depth: 1` → `2` |
+| 4 | `.sensenova-claw/agents/search-agent/SYSTEM_PROMPT.md` | 配置 | 追加任务拆分与并行执行指引 |
 
 ## 测试策略
 

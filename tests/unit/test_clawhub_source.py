@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 
-from agentos.adapters.skill_sources.clawhub import ClawHubAdapter, MAX_RETRIES
+from sensenova_claw.adapters.skill_sources.clawhub import ClawHubAdapter, MAX_RETRIES
 
 
 def _make_response(status_code=200, json_data=None, content=b"", headers=None):
@@ -267,8 +267,8 @@ class TestClawHubRetry:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("agentos.adapters.skill_sources.clawhub.httpx.AsyncClient", return_value=mock_client):
-            with patch("agentos.adapters.skill_sources.clawhub.asyncio.sleep", new_callable=AsyncMock):
+        with patch("sensenova_claw.adapters.skill_sources.clawhub.httpx.AsyncClient", return_value=mock_client):
+            with patch("sensenova_claw.adapters.skill_sources.clawhub.asyncio.sleep", new_callable=AsyncMock):
                 result = await adapter._request("GET", "https://example.com/test")
         assert result.status_code == 200
 
@@ -287,7 +287,7 @@ class TestClawHubRetry:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("agentos.adapters.skill_sources.clawhub.httpx.AsyncClient", return_value=mock_client):
-            with patch("agentos.adapters.skill_sources.clawhub.asyncio.sleep", new_callable=AsyncMock):
+        with patch("sensenova_claw.adapters.skill_sources.clawhub.httpx.AsyncClient", return_value=mock_client):
+            with patch("sensenova_claw.adapters.skill_sources.clawhub.asyncio.sleep", new_callable=AsyncMock):
                 with pytest.raises(httpx.HTTPStatusError):
                     await adapter._request("GET", "https://example.com/test")

@@ -3,7 +3,7 @@
 import json
 import pytest
 
-from agentos.kernel.scheduler.models import (
+from sensenova_claw.kernel.scheduler.models import (
     AtSchedule,
     CronDelivery,
     CronJob,

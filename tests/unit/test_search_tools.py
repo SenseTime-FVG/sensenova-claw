@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from agentos.capabilities.tools.builtin import (
+from sensenova_claw.capabilities.tools.builtin import (
     BaiduSearchTool,
     BraveSearchTool,
     SerperSearchTool,
     TavilySearchTool,
 )
-from agentos.platform.config.config import config
+from sensenova_claw.platform.config.config import config
 
 
 @pytest.fixture(autouse=True)
@@ -43,10 +43,10 @@ async def test_serper_search_without_api_key_returns_empty_result() -> None:
     config.data["tools"]["serper_search"]["api_key"] = ""
 
     tool = SerperSearchTool()
-    result = await tool.execute(q="AgentOS")
+    result = await tool.execute(q="Sensenova-Claw")
 
     assert result["provider"] == "serper"
-    assert result["query"] == "AgentOS"
+    assert result["query"] == "Sensenova-Claw"
     assert result["items"] == []
     assert "SERPER_API_KEY" in result["note"]
 
@@ -57,12 +57,12 @@ async def test_brave_search_maps_response() -> None:
     config.data["tools"]["brave_search"]["max_results"] = 3
 
     response = _make_http_response({
-        "query": {"original": "AgentOS", "more_results_available": True},
+        "query": {"original": "Sensenova-Claw", "more_results_available": True},
         "web": {
             "results": [
                 {
-                    "title": "AgentOS",
-                    "url": "https://example.com/agentos",
+                    "title": "Sensenova-Claw",
+                    "url": "https://example.com/sensenova_claw",
                     "description": "Main snippet",
                     "extra_snippets": ["Extra snippet 1", "Extra snippet 2"],
                     "language": "en",
@@ -73,8 +73,8 @@ async def test_brave_search_maps_response() -> None:
     manager, client = _make_async_client("get", response)
 
     tool = BraveSearchTool()
-    with patch("agentos.capabilities.tools.builtin.httpx.AsyncClient", return_value=manager):
-        result = await tool.execute(q="AgentOS", page=2, freshness="pw", extra_snippets=True)
+    with patch("sensenova_claw.capabilities.tools.builtin.httpx.AsyncClient", return_value=manager):
+        result = await tool.execute(q="Sensenova-Claw", page=2, freshness="pw", extra_snippets=True)
 
     client.get.assert_awaited_once_with(
         "https://api.search.brave.com/res/v1/web/search",
@@ -83,7 +83,7 @@ async def test_brave_search_maps_response() -> None:
             "Accept": "application/json",
         },
         params={
-            "q": "AgentOS",
+            "q": "Sensenova-Claw",
             "count": 3,
             "offset": 1,
             "country": "US",
@@ -94,10 +94,10 @@ async def test_brave_search_maps_response() -> None:
         },
     )
     assert result["provider"] == "brave"
-    assert result["query"] == "AgentOS"
+    assert result["query"] == "Sensenova-Claw"
     assert result["more_results_available"] is True
-    assert result["items"][0]["title"] == "AgentOS"
-    assert result["items"][0]["link"] == "https://example.com/agentos"
+    assert result["items"][0]["title"] == "Sensenova-Claw"
+    assert result["items"][0]["link"] == "https://example.com/sensenova_claw"
     assert "Main snippet" in result["items"][0]["snippet"]
     assert "Extra snippet 1" in result["items"][0]["snippet"]
 
@@ -130,7 +130,7 @@ async def test_baidu_search_maps_response() -> None:
     manager, client = _make_async_client("post", response)
 
     tool = BaiduSearchTool()
-    with patch("agentos.capabilities.tools.builtin.httpx.AsyncClient", return_value=manager):
+    with patch("sensenova_claw.capabilities.tools.builtin.httpx.AsyncClient", return_value=manager):
         result = await tool.execute(q="百度千帆", max_results=5, search_recency_filter="month")
 
     client.post.assert_awaited_once_with(
@@ -159,13 +159,13 @@ async def test_tavily_search_maps_response() -> None:
     config.data["tools"]["tavily_search"]["project_id"] = "project-123"
 
     response = _make_http_response({
-        "query": "AgentOS",
-        "answer": "AgentOS is an event-driven AI agent platform.",
+        "query": "Sensenova-Claw",
+        "answer": "Sensenova-Claw is an event-driven AI agent platform.",
         "results": [
             {
-                "title": "AgentOS Docs",
+                "title": "Sensenova-Claw Docs",
                 "url": "https://example.com/docs",
-                "content": "AgentOS documentation",
+                "content": "Sensenova-Claw documentation",
                 "score": 0.97,
                 "favicon": "https://example.com/favicon.ico",
             }
@@ -176,8 +176,8 @@ async def test_tavily_search_maps_response() -> None:
     manager, client = _make_async_client("post", response)
 
     tool = TavilySearchTool()
-    with patch("agentos.capabilities.tools.builtin.httpx.AsyncClient", return_value=manager):
-        result = await tool.execute(q="AgentOS", topic="news", time_range="week", max_results=4)
+    with patch("sensenova_claw.capabilities.tools.builtin.httpx.AsyncClient", return_value=manager):
+        result = await tool.execute(q="Sensenova-Claw", topic="news", time_range="week", max_results=4)
 
     client.post.assert_awaited_once_with(
         "https://api.tavily.com/search",
@@ -187,7 +187,7 @@ async def test_tavily_search_maps_response() -> None:
             "X-Project-ID": "project-123",
         },
         json={
-            "query": "AgentOS",
+            "query": "Sensenova-Claw",
             "search_depth": "basic",
             "topic": "news",
             "max_results": 4,
@@ -195,6 +195,6 @@ async def test_tavily_search_maps_response() -> None:
         },
     )
     assert result["provider"] == "tavily"
-    assert result["answer"] == "AgentOS is an event-driven AI agent platform."
+    assert result["answer"] == "Sensenova-Claw is an event-driven AI agent platform."
     assert result["request_id"] == "req-tavily"
-    assert result["items"][0]["title"] == "AgentOS Docs"
+    assert result["items"][0]["title"] == "Sensenova-Claw Docs"

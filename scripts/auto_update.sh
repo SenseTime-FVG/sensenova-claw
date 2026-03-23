@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AgentOS 自动更新脚本
+# Sensenova-Claw 自动更新脚本
 # 定期检查 dev 分支是否有新 commit，有则 pull 并重启服务
 #
 # 用法:
@@ -66,9 +66,9 @@ start_services() {
   # 启动后端
   log "启动后端 (port=$BACKEND_PORT)..."
   if command -v uv >/dev/null 2>&1; then
-    uv run uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
+    uv run uvicorn sensenova_claw.app.gateway.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
   else
-    python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
+    python3 -m uvicorn sensenova_claw.app.gateway.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
   fi
   BACKEND_PID=$!
   sleep 2
@@ -79,7 +79,7 @@ start_services() {
   fi
 
   # 启动前端
-  local web_dir="$ROOT_DIR/agentos/app/web"
+  local web_dir="$ROOT_DIR/sensenova_claw/app/web"
   if [ -d "$web_dir/node_modules" ]; then
     log "启动前端 (port=$FRONTEND_PORT)..."
     cd "$web_dir"
@@ -173,7 +173,7 @@ main() {
     git checkout "$BRANCH" || { log "错误: 无法切换到 $BRANCH"; exit 1; }
   fi
 
-  log "AgentOS 自动更新服务启动"
+  log "Sensenova-Claw 自动更新服务启动"
   log "  分支: $BRANCH"
   log "  检查间隔: ${CHECK_INTERVAL}s"
 

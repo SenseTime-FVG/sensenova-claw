@@ -1,6 +1,6 @@
 """Skill 市场数据模型单测"""
 import pytest
-from agentos.capabilities.skills.models import (
+from sensenova_claw.capabilities.skills.models import (
     SkillSearchItem, SearchResult, SkillDetail,
     UpdateInfo, ErrorResponse, InstallRequest, SkillInvokeRequest,
 )

@@ -1,6 +1,6 @@
 """config.updated 事件常量和订阅者测试"""
 import pytest
-from agentos.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
+from sensenova_claw.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
 
 
 def test_config_updated_constant():
@@ -12,9 +12,9 @@ def test_system_session_id_constant():
 
 
 import asyncio
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.router import BusRouter
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.router import BusRouter
 
 
 @pytest.mark.asyncio
@@ -63,8 +63,8 @@ async def test_bus_router_skips_config_events():
 
 # ── Task 5: Module subscriber tests ──────────────────────────────────────────
 
-from agentos.adapters.llm.factory import LLMFactory
-from agentos.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.adapters.llm.factory import LLMFactory
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
 
 
 @pytest.mark.asyncio
@@ -105,10 +105,10 @@ async def test_llm_factory_ignores_non_llm_events():
 @pytest.mark.asyncio
 async def test_agent_registry_reloads_on_config_event(tmp_path):
     import yaml
-    from agentos.platform.config.config import Config
+    from sensenova_claw.platform.config.config import Config
 
     bus = PublicEventBus()
-    registry = AgentRegistry(agentos_home=tmp_path)
+    registry = AgentRegistry(sensenova_claw_home=tmp_path)
     config_path = tmp_path / "config.yml"
     config_path.write_text(yaml.dump({
         "agent": {"temperature": 0.2},
@@ -143,8 +143,8 @@ async def test_agent_registry_reloads_on_config_event(tmp_path):
 
 @pytest.mark.asyncio
 async def test_memory_manager_reloads_on_config_event(tmp_path):
-    from agentos.capabilities.memory.config import MemoryConfig
-    from agentos.capabilities.memory.manager import MemoryManager
+    from sensenova_claw.capabilities.memory.config import MemoryConfig
+    from sensenova_claw.capabilities.memory.manager import MemoryManager
 
     bus = PublicEventBus()
     mem_config = MemoryConfig.from_dict({"memory": {"enabled": False}})
@@ -177,7 +177,7 @@ async def test_memory_manager_reloads_on_config_event(tmp_path):
 @pytest.mark.asyncio
 async def test_gateway_broadcasts_config_events():
     from unittest.mock import AsyncMock, MagicMock
-    from agentos.interfaces.ws.gateway import Gateway
+    from sensenova_claw.interfaces.ws.gateway import Gateway
 
     bus = PublicEventBus()
     publisher = MagicMock()

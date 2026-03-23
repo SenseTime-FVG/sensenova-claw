@@ -4,7 +4,7 @@ import time
 import pytest
 import pytest_asyncio
 
-from agentos.adapters.storage.repository import Repository
+from sensenova_claw.adapters.storage.repository import Repository
 
 
 @pytest_asyncio.fixture

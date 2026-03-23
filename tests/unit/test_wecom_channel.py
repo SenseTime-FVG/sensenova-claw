@@ -7,13 +7,13 @@ from dataclasses import dataclass
 
 import pytest
 
-from agentos.adapters.plugins.wecom.channel import WecomChannel
-from agentos.adapters.plugins.wecom.config import WecomConfig
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import USER_INPUT, USER_QUESTION_ANSWERED, USER_QUESTION_ASKED
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.plugins.wecom.channel import WecomChannel
+from sensenova_claw.adapters.plugins.wecom.config import WecomConfig
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import USER_INPUT, USER_QUESTION_ANSWERED, USER_QUESTION_ASKED
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 class _SimplePluginApi:
@@ -193,7 +193,7 @@ class TestInbound:
         channel, _, bus, client = _make_channel()
         session_id = "wecom_ask_001"
         channel._chat_sessions["dm:user-1"] = session_id
-        from agentos.adapters.plugins.wecom.channel import WecomSessionMeta
+        from sensenova_claw.adapters.plugins.wecom.channel import WecomSessionMeta
         channel._session_meta[session_id] = WecomSessionMeta(
             chat_id="chat-1",
             chat_type="p2p",
@@ -232,7 +232,7 @@ class TestInbound:
     @pytest.mark.asyncio
     async def test_restores_user_input_after_answering_pending_question(self):
         channel, _, bus, _ = _make_channel()
-        from agentos.adapters.plugins.wecom.channel import WecomSessionMeta
+        from sensenova_claw.adapters.plugins.wecom.channel import WecomSessionMeta
 
         session_id = "wecom_ask_002"
         channel._chat_sessions["dm:user-2"] = session_id

@@ -228,7 +228,7 @@ office-main
 **架构**：
 
 ```python
-# agentos/adapters/doc_sources/base.py
+# sensenova_claw/adapters/doc_sources/base.py
 class DocSourceAdapter:
     @staticmethod
     def can_handle(url: str) -> bool:
@@ -293,7 +293,7 @@ def generate_ppt(content: dict) -> str:
 
 | 工具名 | 功能 | 优先级 | 文件路径 |
 |--------|------|--------|----------|
-| `doc_source_tool` | 统一文档来源访问 | 高 | `agentos/capabilities/tools/doc_source.py` |
+| `doc_source_tool` | 统一文档来源访问 | 高 | `sensenova_claw/capabilities/tools/doc_source.py` |
 
 ### 6.2 需要新增的 Skills
 
@@ -309,12 +309,12 @@ def generate_ppt(content: dict) -> str:
 
 | 适配器 | 功能 | 优先级 | 文件路径 |
 |--------|------|--------|----------|
-| `DocSourceAdapter` | 基类 | 高 | `agentos/adapters/doc_sources/base.py` |
-| `DocSourceRegistry` | 注册表 | 高 | `agentos/adapters/doc_sources/registry.py` |
-| `LocalFileAdapter` | 本地文件 | 高 | `agentos/adapters/doc_sources/local.py` |
-| `FeishuDocAdapter` | 飞书文档 | 高 | `agentos/adapters/doc_sources/feishu.py` |
-| `NotionAdapter` | Notion | 中 | `agentos/adapters/doc_sources/notion.py` |
-| `DingTalkAdapter` | 钉钉文档 | 低 | `agentos/adapters/doc_sources/dingtalk.py` |
+| `DocSourceAdapter` | 基类 | 高 | `sensenova_claw/adapters/doc_sources/base.py` |
+| `DocSourceRegistry` | 注册表 | 高 | `sensenova_claw/adapters/doc_sources/registry.py` |
+| `LocalFileAdapter` | 本地文件 | 高 | `sensenova_claw/adapters/doc_sources/local.py` |
+| `FeishuDocAdapter` | 飞书文档 | 高 | `sensenova_claw/adapters/doc_sources/feishu.py` |
+| `NotionAdapter` | Notion | 中 | `sensenova_claw/adapters/doc_sources/notion.py` |
+| `DingTalkAdapter` | 钉钉文档 | 低 | `sensenova_claw/adapters/doc_sources/dingtalk.py` |
 
 ### 6.4 需要新增的配置
 
@@ -380,7 +380,7 @@ ppt:
 ```bash
 # Web 界面：选择 office-main agent
 # CLI：指定 agent_id
-python3 -m agentos.app.cli.cli_client --agent office-main
+python3 -m sensenova-claw.app.cli.cli_client --agent office-main
 ```
 
 ### 9.2 使用示例

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from agentos.platform.config.config import config
-from agentos.kernel.events.types import (
+from sensenova_claw.platform.config.config import config
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     LLM_CALL_REQUESTED,
     TOOL_CALL_REQUESTED,

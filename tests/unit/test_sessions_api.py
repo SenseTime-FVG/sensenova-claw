@@ -9,12 +9,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.adapters.storage.repository import Repository
-from agentos.adapters.storage.session_jsonl import SessionJsonlWriter
-from agentos.interfaces.http.sessions import router
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.adapters.storage.session_jsonl import SessionJsonlWriter
+from sensenova_claw.interfaces.http.sessions import router
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 def _run(coro):
@@ -26,8 +26,8 @@ def app(tmp_path):
     app = FastAPI()
     app.include_router(router)
 
-    agentos_home = tmp_path / ".agentos"
-    agentos_home.mkdir()
+    sensenova_claw_home = tmp_path / ".sensenova-claw"
+    sensenova_claw_home.mkdir()
 
     repo = Repository(db_path=str(tmp_path / "test.db"))
     _run(repo.init())
@@ -42,7 +42,7 @@ def app(tmp_path):
         gateway: Gateway
 
     app.state.services = Services(repo=repo, gateway=gateway)
-    app.state.agentos_home = str(agentos_home)
+    app.state.sensenova_claw_home = str(sensenova_claw_home)
     return app
 
 
@@ -56,7 +56,7 @@ def test_delete_session_removes_db_rows_and_jsonl_file(client, app):
     _run(app.state.services.repo.create_turn("turn_delete_1", "sess_delete_1", "hello"))
     _run(app.state.services.repo.save_message("sess_delete_1", "turn_delete_1", "user", content="hello"))
 
-    writer = SessionJsonlWriter(base_dir=app.state.agentos_home + "/agents")
+    writer = SessionJsonlWriter(base_dir=app.state.sensenova_claw_home + "/agents")
     writer.append("helper", "sess_delete_1", "turn_delete_1", {"role": "user", "content": "hello"})
 
     resp = client.delete("/api/sessions/sess_delete_1")
@@ -70,7 +70,7 @@ def test_delete_session_removes_db_rows_and_jsonl_file(client, app):
 def test_delete_session_defaults_to_default_agent_dir_when_meta_missing(client, app):
     _run(app.state.services.repo.create_session("sess_delete_default"))
 
-    writer = SessionJsonlWriter(base_dir=app.state.agentos_home + "/agents")
+    writer = SessionJsonlWriter(base_dir=app.state.sensenova_claw_home + "/agents")
     writer.append("default", "sess_delete_default", "turn_1", {"role": "user", "content": "hello"})
 
     resp = client.delete("/api/sessions/sess_delete_default")
@@ -89,7 +89,7 @@ def test_bulk_delete_sessions_by_ids(client, app):
     _run(app.state.services.repo.create_session("sess_batch_1", meta={"agent_id": "helper"}))
     _run(app.state.services.repo.create_session("sess_batch_2"))
 
-    writer = SessionJsonlWriter(base_dir=app.state.agentos_home + "/agents")
+    writer = SessionJsonlWriter(base_dir=app.state.sensenova_claw_home + "/agents")
     writer.append("helper", "sess_batch_1", "turn_1", {"role": "user", "content": "1"})
     writer.append("default", "sess_batch_2", "turn_1", {"role": "user", "content": "2"})
 
@@ -115,7 +115,7 @@ def test_bulk_delete_sessions_by_filter(client, app):
     conn.commit()
     conn.close()
 
-    writer = SessionJsonlWriter(base_dir=app.state.agentos_home + "/agents")
+    writer = SessionJsonlWriter(base_dir=app.state.sensenova_claw_home + "/agents")
     writer.append("helper", "sess_filter_1", "turn_1", {"role": "user", "content": "1"})
     writer.append("default", "sess_filter_2", "turn_1", {"role": "user", "content": "2"})
     writer.append("default", "sess_filter_3", "turn_1", {"role": "user", "content": "3"})

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from agentos.adapters.plugins.wecom.config import WecomConfig
+from sensenova_claw.adapters.plugins.wecom.config import WecomConfig
 
 
 class TestWecomConfigDefaults:

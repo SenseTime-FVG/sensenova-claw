@@ -9,7 +9,7 @@ import pytest
 import os
 from pathlib import Path
 
-from agentos.capabilities.tools.email import (
+from sensenova_claw.capabilities.tools.email import (
     SendEmailTool,
     ListEmailsTool,
     ReadEmailTool,
@@ -17,7 +17,7 @@ from agentos.capabilities.tools.email import (
     MarkEmailTool,
     SearchEmailsTool,
 )
-from agentos.platform.config.config import config
+from sensenova_claw.platform.config.config import config
 
 
 # 检查是否配置了真实邮箱
@@ -38,7 +38,7 @@ async def test_send_email_e2e():
 
     result = await tool.execute(
         to=os.getenv("EMAIL_USERNAME"),  # 发给自己
-        subject="AgentOS 测试邮件",
+        subject="Sensenova-Claw 测试邮件",
         body="这是一封自动化测试邮件，请忽略。"
     )
 
@@ -64,7 +64,7 @@ async def test_search_emails_e2e():
     tool = SearchEmailsTool()
 
     result = await tool.execute(
-        query="AgentOS",
+        query="Sensenova-Claw",
         limit=10
     )
 

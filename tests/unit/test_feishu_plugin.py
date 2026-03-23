@@ -12,12 +12,12 @@ from unittest.mock import patch
 
 import pytest
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.adapters.plugins import PluginRegistry, _iter_builtin_plugin_modules
-from agentos.adapters.plugins.base import PluginApi
-from agentos.adapters.plugins.feishu.plugin import definition, register
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.adapters.plugins import PluginRegistry, _iter_builtin_plugin_modules
+from sensenova_claw.adapters.plugins.base import PluginApi
+from sensenova_claw.adapters.plugins.feishu.plugin import definition, register
 
 
 # ---- 辅助：构造真实 PluginApi ----
@@ -28,7 +28,7 @@ def _make_plugin_api(config_overrides: dict | None = None) -> PluginApi:
 
     通过直接设置 config 中的 plugins.feishu 字段来控制测试配置。
     """
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     # 备份原始 feishu 配置
     defaults = {
@@ -159,15 +159,15 @@ class TestRegister:
     async def test_missing_dependency_reports_failed_state(self):
         api = _make_plugin_api({"enabled": True})
         registry = api._registry
-        original_channel_module = sys.modules.pop("agentos.adapters.plugins.feishu.channel", None)
+        original_channel_module = sys.modules.pop("sensenova_claw.adapters.plugins.feishu.channel", None)
         try:
-            with patch.dict(sys.modules, {"agentos.adapters.plugins.feishu.channel": None}):
+            with patch.dict(sys.modules, {"sensenova_claw.adapters.plugins.feishu.channel": None}):
                 await register(api)
         finally:
             if original_channel_module is not None:
-                sys.modules["agentos.adapters.plugins.feishu.channel"] = original_channel_module
+                sys.modules["sensenova_claw.adapters.plugins.feishu.channel"] = original_channel_module
             else:
-                sys.modules.pop("agentos.adapters.plugins.feishu.channel", None)
+                sys.modules.pop("sensenova_claw.adapters.plugins.feishu.channel", None)
         assert registry._pending_channels == []
         assert registry._plugin_states["feishu"]["status"] == "failed"
         assert "依赖" in registry._plugin_states["feishu"]["error"]
@@ -175,4 +175,4 @@ class TestRegister:
 
 def test_builtin_plugin_module_points_to_plugins_package():
     modules = dict(_iter_builtin_plugin_modules())
-    assert modules["feishu"] == "agentos.adapters.plugins.feishu.plugin"
+    assert modules["feishu"] == "sensenova_claw.adapters.plugins.feishu.plugin"

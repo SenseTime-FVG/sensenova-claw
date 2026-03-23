@@ -4,8 +4,8 @@ E2E 测试：验证 Skills 系统集成
 import tempfile
 from pathlib import Path
 
-from agentos.capabilities.skills.registry import SkillRegistry
-from agentos.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.capabilities.skills.registry import SkillRegistry
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
 
 
 def test_skills_integration():
@@ -52,7 +52,7 @@ if __name__ == "__main__":
 def test_research_union_builtin_skills_in_prompt():
     """验证内置 research-union / union-search-plus 能被注入 prompt。"""
     project_root = Path(__file__).resolve().parents[2]
-    builtin_dir = project_root / ".agentos" / "skills"
+    builtin_dir = project_root / ".sensenova-claw" / "skills"
 
     with tempfile.TemporaryDirectory() as tmpdir:
         registry = SkillRegistry(
@@ -72,7 +72,7 @@ def test_research_union_builtin_skills_in_prompt():
 def test_mineru_choice_builtin_skill_in_prompt():
     """验证内置 mineru 渠道选择 skill 能被注入 prompt。"""
     project_root = Path(__file__).resolve().parents[2]
-    builtin_dir = project_root / ".agentos" / "skills"
+    builtin_dir = project_root / ".sensenova-claw" / "skills"
 
     with tempfile.TemporaryDirectory() as tmpdir:
         registry = SkillRegistry(

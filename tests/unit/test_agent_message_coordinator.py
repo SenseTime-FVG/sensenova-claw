@@ -5,15 +5,15 @@ import asyncio
 
 import pytest
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     AGENT_MESSAGE_REQUESTED,
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
     USER_TURN_CANCEL_REQUESTED,
 )
-from agentos.kernel.runtime.agent_message_coordinator import AgentMessageCoordinator
+from sensenova_claw.kernel.runtime.agent_message_coordinator import AgentMessageCoordinator
 
 pytestmark = pytest.mark.asyncio
 

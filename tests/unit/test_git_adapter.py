@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from pathlib import Path
 
-from agentos.adapters.skill_sources.git_adapter import GitAdapter
+from sensenova_claw.adapters.skill_sources.git_adapter import GitAdapter
 
 
 def _setup_repo(base: Path, files: dict[str, str], repo_subdir: str = "repo") -> Path:
@@ -51,7 +51,7 @@ description: A cool skill
             })
 
         with patch.object(adapter, "_clone", side_effect=mock_clone):
-            with patch("agentos.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(tmp_path)):
+            with patch("sensenova_claw.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(tmp_path)):
                 detail = await adapter.get_detail("https://github.com/user/repo.git")
 
         assert detail.name == "My Skill"
@@ -67,7 +67,7 @@ description: A cool skill
             _setup_repo(dest, {"readme.md": "hello"})
 
         with patch.object(adapter, "_clone", side_effect=mock_clone):
-            with patch("agentos.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(tmp_path)):
+            with patch("sensenova_claw.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(tmp_path)):
                 with pytest.raises(FileNotFoundError, match="SKILL.md"):
                     await adapter.get_detail("https://github.com/user/repo.git")
 
@@ -79,7 +79,7 @@ description: A cool skill
             _setup_repo(dest, {"some-skill/SKILL.md": "# Just content"})
 
         with patch.object(adapter, "_clone", side_effect=mock_clone):
-            with patch("agentos.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(tmp_path)):
+            with patch("sensenova_claw.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(tmp_path)):
                 detail = await adapter.get_detail("https://github.com/user/repo.git")
 
         assert detail.name == "some-skill"
@@ -104,7 +104,7 @@ class TestGitAdapterDownload:
             })
 
         with patch.object(adapter, "_clone", side_effect=mock_clone):
-            with patch("agentos.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(clone_dir)):
+            with patch("sensenova_claw.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(clone_dir)):
                 result = await adapter.download("https://github.com/user/repo.git", target_dir)
 
         assert result == target_dir / "my-skill"
@@ -126,7 +126,7 @@ class TestGitAdapterDownload:
             _setup_repo(dest, {"my-skill/SKILL.md": "# Skill"})
 
         with patch.object(adapter, "_clone", side_effect=mock_clone):
-            with patch("agentos.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(tmp_path / "clonetmp")):
+            with patch("sensenova_claw.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(tmp_path / "clonetmp")):
                 (tmp_path / "clonetmp").mkdir()
                 with pytest.raises(FileExistsError, match="已存在"):
                     await adapter.download("https://github.com/user/repo.git", target_dir)
@@ -143,7 +143,7 @@ class TestGitAdapterDownload:
             _setup_repo(dest, {"readme.md": "hello"})
 
         with patch.object(adapter, "_clone", side_effect=mock_clone):
-            with patch("agentos.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(clone_dir)):
+            with patch("sensenova_claw.adapters.skill_sources.git_adapter.tempfile.mkdtemp", return_value=str(clone_dir)):
                 with pytest.raises(FileNotFoundError, match="SKILL.md"):
                     await adapter.download("https://github.com/user/repo.git", target_dir)
 
@@ -172,7 +172,7 @@ class TestGitAdapterClone:
         mock_proc.returncode = 0
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
 
-        with patch("agentos.adapters.skill_sources.git_adapter.asyncio.create_subprocess_exec",
+        with patch("sensenova_claw.adapters.skill_sources.git_adapter.asyncio.create_subprocess_exec",
                     new_callable=AsyncMock, return_value=mock_proc):
             await adapter._clone("https://github.com/user/repo.git", Path("/tmp/test"))
 
@@ -183,7 +183,7 @@ class TestGitAdapterClone:
         mock_proc.returncode = 0
         mock_proc.communicate = AsyncMock(return_value=(b"", b""))
 
-        with patch("agentos.adapters.skill_sources.git_adapter.asyncio.create_subprocess_exec",
+        with patch("sensenova_claw.adapters.skill_sources.git_adapter.asyncio.create_subprocess_exec",
                     new_callable=AsyncMock, return_value=mock_proc):
             await adapter._clone("git@github.com:user/repo.git", Path("/tmp/test"))
 
@@ -193,7 +193,7 @@ class TestGitAdapterClone:
         mock_proc.returncode = 128
         mock_proc.communicate = AsyncMock(return_value=(b"", b"fatal: not found"))
 
-        with patch("agentos.adapters.skill_sources.git_adapter.asyncio.create_subprocess_exec",
+        with patch("sensenova_claw.adapters.skill_sources.git_adapter.asyncio.create_subprocess_exec",
                     new_callable=AsyncMock, return_value=mock_proc):
             with pytest.raises(RuntimeError, match="git clone 失败"):
                 await adapter._clone("https://github.com/user/repo.git", Path("/tmp/test"))

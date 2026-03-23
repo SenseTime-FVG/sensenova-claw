@@ -6,14 +6,14 @@ import asyncio
 
 import pytest
 
-from agentos.adapters.plugins.whatsapp.bridge_client import SidecarBridgeClient
-from agentos.adapters.plugins.whatsapp.channel import WhatsAppChannel
-from agentos.adapters.plugins.whatsapp.config import WhatsAppConfig
-from agentos.adapters.plugins.whatsapp.models import WhatsAppInboundMessage
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.adapters.plugins.whatsapp.bridge_client import SidecarBridgeClient
+from sensenova_claw.adapters.plugins.whatsapp.channel import WhatsAppChannel
+from sensenova_claw.adapters.plugins.whatsapp.config import WhatsAppConfig
+from sensenova_claw.adapters.plugins.whatsapp.models import WhatsAppInboundMessage
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
     TOOL_CALL_STARTED,
@@ -21,7 +21,7 @@ from agentos.kernel.events.types import (
     USER_QUESTION_ANSWERED,
     USER_QUESTION_ASKED,
 )
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 class _SimplePluginApi:
@@ -72,7 +72,7 @@ def _make_channel(
     bridge = _FakeWhatsAppBridge()
     config = WhatsAppConfig(
         enabled=True,
-        auth_dir="/tmp/agentos-whatsapp-auth",
+        auth_dir="/tmp/sensenova_claw-whatsapp-auth",
         dm_policy=dm_policy,
         group_policy=group_policy,
         allowlist=allowlist or [],
@@ -92,7 +92,7 @@ class TestLifecycle:
         publisher = EventPublisher(bus=bus)
         gateway = Gateway(publisher=publisher)
         channel = WhatsAppChannel(
-            config=WhatsAppConfig(enabled=True, auth_dir="/tmp/agentos-whatsapp-auth"),
+            config=WhatsAppConfig(enabled=True, auth_dir="/tmp/sensenova_claw-whatsapp-auth"),
             plugin_api=_SimplePluginApi(gateway=gateway),
         )
         assert isinstance(channel._bridge, SidecarBridgeClient)
@@ -113,7 +113,7 @@ class TestLifecycle:
         gateway = Gateway(publisher=publisher)
         bridge = _TimeoutOnStartBridge()
         channel = WhatsAppChannel(
-            config=WhatsAppConfig(enabled=True, auth_dir="/tmp/agentos-whatsapp-auth"),
+            config=WhatsAppConfig(enabled=True, auth_dir="/tmp/sensenova_claw-whatsapp-auth"),
             plugin_api=_SimplePluginApi(gateway=gateway),
             bridge=bridge,
         )

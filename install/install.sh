@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# AgentOS 一键安装脚本（Linux/macOS）
+# Sensenova-Claw 一键安装脚本（Linux/macOS）
 #
 # 用法:
-#   curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash
 #
 # 或本地执行:
 #   bash install/install.sh
@@ -14,10 +14,10 @@ set -euo pipefail
 
 # ── 配置 ──
 
-AGENTOS_HOME="${AGENTOS_HOME:-$HOME/.agentos}"
-APP_DIR="$AGENTOS_HOME/app"
-REPO_URL="${AGENTOS_REPO_URL:-https://github.com/SenseTime-FVG/agentos.git}"
-REPO_REF="${AGENTOS_REPO_REF:-${AGENTOS_REPO_BRANCH:-dev}}"
+SENSENOVA_CLAW_HOME="${SENSENOVA_CLAW_HOME:-$HOME/.sensenova-claw}"
+APP_DIR="$SENSENOVA_CLAW_HOME/app"
+REPO_URL="${SENSENOVA_CLAW_REPO_URL:-https://github.com/SenseTime-FVG/sensenova-claw.git}"
+REPO_REF="${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-dev}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
 DEV_MODE=false
@@ -276,7 +276,7 @@ install_node() {
 
 setup_repo() {
   if [ -d "$APP_DIR/.git" ]; then
-    info "更新 AgentOS ($REPO_REF)..."
+    info "更新 Sensenova-Claw ($REPO_REF)..."
     cd "$APP_DIR"
     git fetch origin "$REPO_REF" --quiet || {
       warn "git fetch $REPO_REF 失败，跳过更新"
@@ -296,12 +296,12 @@ setup_repo() {
       }
     fi
     cd - >/dev/null
-    log "AgentOS 已更新"
+    log "Sensenova-Claw 已更新"
   else
-    info "克隆 AgentOS 仓库 ($REPO_REF)..."
+    info "克隆 Sensenova-Claw 仓库 ($REPO_REF)..."
     mkdir -p "$(dirname "$APP_DIR")"
     git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$APP_DIR"
-    log "AgentOS 克隆完成"
+    log "Sensenova-Claw 克隆完成"
   fi
 }
 
@@ -326,30 +326,30 @@ install_deps() {
 
   # 3) 前端依赖
   info "安装前端依赖..."
-  cd "$APP_DIR/agentos/app/web"
+  cd "$APP_DIR/sensenova_claw/app/web"
   npm install 2>&1 | tail -5
   cd "$APP_DIR"
   log "前端依赖安装完成"
 }
 
-# ── 步骤 5b: 构建 AGENTOS_HOME 目录结构 ──
+# ── 步骤 5b: 构建 SENSENOVA_CLAW_HOME 目录结构 ──
 
 setup_home_dir() {
-  info "初始化 AGENTOS_HOME 目录结构..."
+  info "初始化 SENSENOVA_CLAW_HOME 目录结构..."
 
   # 创建核心子目录
   for subdir in agents/default data skills workdir/default db; do
-    mkdir -p "$AGENTOS_HOME/$subdir"
+    mkdir -p "$SENSENOVA_CLAW_HOME/$subdir"
   done
 
-  local builtin_dir="$APP_DIR/.agentos"
+  local builtin_dir="$APP_DIR/.sensenova-claw"
 
   # 复制预置 agents（不覆盖已有文件）
   if [ -d "$builtin_dir/agents" ]; then
     find "$builtin_dir/agents" -mindepth 1 -maxdepth 1 -type d | while read -r agent_dir; do
       local agent_name
       agent_name=$(basename "$agent_dir")
-      local target_dir="$AGENTOS_HOME/agents/$agent_name"
+      local target_dir="$SENSENOVA_CLAW_HOME/agents/$agent_name"
       mkdir -p "$target_dir"
       find "$agent_dir" -maxdepth 1 -type f | while read -r f; do
         local target_file="$target_dir/$(basename "$f")"
@@ -366,7 +366,7 @@ setup_home_dir() {
     find "$builtin_dir/skills" -mindepth 1 -maxdepth 1 -type d | while read -r skill_dir; do
       local skill_name
       skill_name=$(basename "$skill_dir")
-      local target_dir="$AGENTOS_HOME/skills/$skill_name"
+      local target_dir="$SENSENOVA_CLAW_HOME/skills/$skill_name"
       if [ ! -d "$target_dir" ]; then
         cp -r "$skill_dir" "$target_dir"
       fi
@@ -374,14 +374,14 @@ setup_home_dir() {
     log "预置 Skills 已复制"
   fi
 
-  log "AGENTOS_HOME 初始化完成: $AGENTOS_HOME"
+  log "SENSENOVA_CLAW_HOME 初始化完成: $SENSENOVA_CLAW_HOME"
 }
 
 # ── 步骤 6: 初始化配置文件 ──
 
 setup_config() {
-  # 配置文件放在 AGENTOS_HOME 根目录，与代码 DEFAULT_CONFIG_PATH 一致
-  local config_file="$AGENTOS_HOME/config.yml"
+  # 配置文件放在 SENSENOVA_CLAW_HOME 根目录，与代码 DEFAULT_CONFIG_PATH 一致
+  local config_file="$SENSENOVA_CLAW_HOME/config.yml"
   local example_file="$APP_DIR/config_example.yml"
 
   if [ -f "$config_file" ]; then
@@ -402,15 +402,15 @@ setup_config() {
 # ── 步骤 7: 注册全局命令 ──
 
 register_command() {
-  info "注册 agentos 命令..."
+  info "注册 sensenova-claw 命令..."
   cd "$APP_DIR"
 
   # 使用 editable 安装，避免 uv tool 环境里残留一份过期代码副本。
-  uv tool install --editable --from . --force agentos 2>/dev/null || {
+  uv tool install --editable --from . --force sensenova-claw 2>/dev/null || {
     # 降级：用 pip install -e
     warn "uv tool install 失败，尝试 pip install..."
     uv pip install -e . 2>/dev/null || pip install -e . 2>/dev/null || {
-      warn "全局命令注册失败，你可以手动运行: cd $APP_DIR && python3 -m agentos.app.main run"
+      warn "全局命令注册失败，你可以手动运行: cd $APP_DIR && python3 -m sensenova_claw.app.main run"
       return
     }
   }
@@ -421,10 +421,10 @@ register_command() {
     export PATH="$uv_bin:$PATH"
   fi
 
-  if command_exists agentos; then
-    log "agentos 命令已注册"
+  if command_exists sensenova-claw; then
+    log "sensenova-claw 命令已注册"
   else
-    warn "agentos 命令未在 PATH 中找到，你可能需要重新打开终端"
+    warn "sensenova-claw 命令未在 PATH 中找到，你可能需要重新打开终端"
     info "或手动添加到 PATH: export PATH=\"$uv_bin:\$PATH\""
   fi
 }
@@ -434,7 +434,7 @@ register_command() {
 print_success() {
   echo ""
   echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
-  echo -e "${GREEN}  AgentOS 安装完成!${NC}"
+  echo -e "${GREEN}  Sensenova-Claw 安装完成!${NC}"
   echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
   echo ""
   if [ "$DEV_MODE" = "true" ]; then
@@ -444,7 +444,7 @@ print_success() {
     echo "  安装目录: $APP_DIR"
     echo "  安装来源: $REPO_URL@$REPO_REF"
   fi
-  echo "  数据目录: $AGENTOS_HOME"
+  echo "  数据目录: $SENSENOVA_CLAW_HOME"
   echo ""
   if [ "$IS_CN" = "true" ]; then
     echo "  已配置国内镜像: npm($CN_NPM_REGISTRY) pip($CN_UV_INDEX)"
@@ -453,15 +453,15 @@ print_success() {
   echo -e "  ${YELLOW}下一步:${NC}"
   echo ""
   echo "    1. 启动服务:"
-  echo "       agentos run"
+  echo "       sensenova-claw run"
   echo ""
   echo "    2. 打开 Web 界面进行 LLM 等配置:"
   echo "       http://localhost:3000"
   echo ""
   echo "    或使用 CLI 客户端（需先启动服务）:"
-  echo "       agentos cli"
+  echo "       sensenova-claw cli"
   echo ""
-  echo "  文档: https://github.com/SenseTime-FVG/agentos"
+  echo "  文档: https://github.com/SenseTime-FVG/sensenova-claw"
   echo ""
 }
 
@@ -477,7 +477,7 @@ main() {
 
   echo ""
   echo -e "${BLUE}╔══════════════════════════════════════════════╗${NC}"
-  echo -e "${BLUE}║         AgentOS 一键安装脚本                ║${NC}"
+  echo -e "${BLUE}║         Sensenova-Claw 一键安装脚本                ║${NC}"
   echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}"
   echo ""
 
@@ -488,9 +488,9 @@ main() {
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     APP_DIR="$(cd "$script_dir/.." && pwd)"
 
-    # 校验是否是 agentos 项目
-    if [ ! -f "$APP_DIR/agentos/app/gateway/main.py" ]; then
-      fail "当前仓库不是 AgentOS 项目，无法使用 --dev 模式"
+    # 校验是否是 sensenova-claw 项目
+    if [ ! -f "$APP_DIR/sensenova_claw/app/gateway/main.py" ]; then
+      fail "当前仓库不是 Sensenova-Claw 项目，无法使用 --dev 模式"
     fi
 
     log "开发模式: 使用本地代码 $APP_DIR"
@@ -510,10 +510,10 @@ main() {
     print_success
   else
     # 正常安装模式
-    local default_dir="$AGENTOS_HOME"
-    AGENTOS_HOME=$(prompt_input "安装路径" "$default_dir")
-    APP_DIR="$AGENTOS_HOME/app"
-    log "安装到: $AGENTOS_HOME"
+    local default_dir="$SENSENOVA_CLAW_HOME"
+    SENSENOVA_CLAW_HOME=$(prompt_input "安装路径" "$default_dir")
+    APP_DIR="$SENSENOVA_CLAW_HOME/app"
+    log "安装到: $SENSENOVA_CLAW_HOME"
     echo ""
 
     detect_region

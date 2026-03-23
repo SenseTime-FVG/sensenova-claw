@@ -5,8 +5,8 @@ import yaml
 from pathlib import Path
 from unittest.mock import patch
 
-from agentos.app.cli.llm_setup import _write_config, run_llm_setup_sync
-from agentos.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.app.cli.llm_setup import _write_config, run_llm_setup_sync
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
 
 
 def test_write_config_creates_file(tmp_path):
@@ -26,8 +26,8 @@ def test_write_config_creates_file(tmp_path):
     assert config_path.exists()
     data = yaml.safe_load(config_path.read_text())
     # OpenAI 兼容提供商统一用 "openai" 作为存储键
-    assert data["llm"]["providers"]["openai"]["api_key"] == "${secret:agentos/llm.providers.openai.api_key}"
-    assert secret_store.get("agentos/llm.providers.openai.api_key") == "sk-test"
+    assert data["llm"]["providers"]["openai"]["api_key"] == "${secret:sensenova_claw/llm.providers.openai.api_key}"
+    assert secret_store.get("sensenova_claw/llm.providers.openai.api_key") == "sk-test"
     assert data["llm"]["default_model"] == "qwen-plus"
     assert data["agent"]["model"] == "qwen-plus"
 
@@ -51,8 +51,8 @@ def test_write_config_preserves_existing(tmp_path):
     # 已有配置被保留
     assert data["tools"]["bash_command"]["enabled"] is True
     # 新配置被写入（anthropic 分类用 "anthropic" 作为存储键）
-    assert data["llm"]["providers"]["anthropic"]["api_key"] == "${secret:agentos/llm.providers.anthropic.api_key}"
-    assert secret_store.get("agentos/llm.providers.anthropic.api_key") == "sk-ant"
+    assert data["llm"]["providers"]["anthropic"]["api_key"] == "${secret:sensenova_claw/llm.providers.anthropic.api_key}"
+    assert secret_store.get("sensenova_claw/llm.providers.anthropic.api_key") == "sk-ant"
     assert data["llm"]["default_model"] == "claude-sonnet"
     assert data["agent"]["model"] == "claude-sonnet"
 
@@ -119,7 +119,7 @@ def test_run_llm_setup_skip(tmp_path):
     """测试用户选择跳过时返回 False，不创建配置文件"""
     config_path = tmp_path / "config.yml"
     # LLM_PROVIDER_CATEGORIES 有 3 个分类，第 4 个选项是"跳过配置"
-    with patch("agentos.app.cli.llm_setup.input", side_effect=["4"]):
+    with patch("sensenova_claw.app.cli.llm_setup.input", side_effect=["4"]):
         result = run_llm_setup_sync(config_path)
     assert result is False
 
@@ -128,7 +128,7 @@ def test_run_llm_setup_empty_api_key(tmp_path):
     """测试 API Key 为空时返回 False，不写配置"""
     config_path = tmp_path / "config.yml"
     # 选 OpenAI 兼容(1) -> 选 OpenAI(1) -> Base URL 默认 -> 空 API Key
-    with patch("agentos.app.cli.llm_setup.input", side_effect=["1", "1", "", ""]):
+    with patch("sensenova_claw.app.cli.llm_setup.input", side_effect=["1", "1", "", ""]):
         result = run_llm_setup_sync(config_path)
     assert result is False
     assert not config_path.exists()
@@ -138,7 +138,7 @@ def test_run_llm_setup_complete_flow(tmp_path):
     """测试完整流程：选择 OpenAI 兼容 -> qwen -> 默认 URL -> API Key -> 手动输入模型"""
     config_path = tmp_path / "config.yml"
     # 选 OpenAI 兼容(1) -> 通义千问(2) -> 默认 Base URL(空) -> API Key -> 手动输入 qwen-max
-    with patch("agentos.app.cli.llm_setup.input", side_effect=["1", "2", "", "sk-qwen-test", "qwen-max"]):
+    with patch("sensenova_claw.app.cli.llm_setup.input", side_effect=["1", "2", "", "sk-qwen-test", "qwen-max"]):
         result = run_llm_setup_sync(config_path)
     assert result is True
     assert config_path.exists()

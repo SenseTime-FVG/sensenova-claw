@@ -175,7 +175,7 @@ class Message:
 
 建议新增公共组件，例如：
 
-- 路径：`agentos/app/web/components/chat/MarkdownRenderer.tsx`
+- 路径：`sensenova_claw/app/web/components/chat/MarkdownRenderer.tsx`
 
 职责：
 

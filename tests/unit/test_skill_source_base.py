@@ -2,8 +2,8 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from agentos.adapters.skill_sources.base import MarketAdapter
-from agentos.capabilities.skills.models import SearchResult, SkillDetail, UpdateInfo
+from sensenova_claw.adapters.skill_sources.base import MarketAdapter
+from sensenova_claw.capabilities.skills.models import SearchResult, SkillDetail, UpdateInfo
 from pathlib import Path
 
 

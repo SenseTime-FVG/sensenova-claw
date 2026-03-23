@@ -7,9 +7,9 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.interfaces.http.config_api import router
-from agentos.platform.config.config import Config
-from agentos.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.interfaces.http.config_api import router
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
 
 
 def test_migrate_secrets_endpoint_migrates_plaintext_values(tmp_path):
@@ -35,5 +35,5 @@ def test_migrate_secrets_endpoint_migrates_plaintext_values(tmp_path):
     assert body["migrated"] == 1
     written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert written["plugins"]["feishu"]["app_secret"] == (
-        "${secret:agentos/plugins.feishu.app_secret}"
+        "${secret:sensenova_claw/plugins.feishu.app_secret}"
     )

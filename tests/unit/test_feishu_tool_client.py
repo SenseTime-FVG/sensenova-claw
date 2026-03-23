@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.adapters.plugins.feishu.tool_client import FeishuToolClient
+from sensenova_claw.adapters.plugins.feishu.tool_client import FeishuToolClient
 
 
 class _FakeChannel:
@@ -32,7 +32,7 @@ async def test_get_token_uses_sdk_config_when_client_has_no_token_manager(monkey
         return "tenant_token_from_config"
 
     monkeypatch.setattr(
-        "agentos.adapters.plugins.feishu.tool_client.TokenManager.get_self_tenant_token",
+        "sensenova_claw.adapters.plugins.feishu.tool_client.TokenManager.get_self_tenant_token",
         _fake_get_self_tenant_token,
     )
 

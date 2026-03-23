@@ -3,7 +3,7 @@
 import time
 import pytest
 
-from agentos.kernel.scheduler.models import (
+from sensenova_claw.kernel.scheduler.models import (
     AtSchedule,
     CronJob,
     CronJobState,
@@ -11,7 +11,7 @@ from agentos.kernel.scheduler.models import (
     EverySchedule,
     SystemEventPayload,
 )
-from agentos.kernel.scheduler.scheduler import (
+from sensenova_claw.kernel.scheduler.scheduler import (
     compute_initial_next_run_ms,
     compute_next_run_at_ms,
     is_job_runnable,

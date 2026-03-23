@@ -1,6 +1,6 @@
-from agentos.adapters.channels.websocket_channel import WebSocketChannel
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import ERROR_RAISED, LLM_CALL_RESULT
+from sensenova_claw.adapters.channels.websocket_channel import WebSocketChannel
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import ERROR_RAISED, LLM_CALL_RESULT
 
 
 def test_map_llm_call_result_exposes_thinking_payload():

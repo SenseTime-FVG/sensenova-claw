@@ -79,14 +79,14 @@
 
 1. 已在项目根目录的 `config.yml` 中启用飞书插件
 2. 已正确填写 `plugins.feishu.app_id` 与 `plugins.feishu.app_secret`
-3. AgentOS Gateway 已启动
+3. Sensenova-Claw Gateway 已启动
 
 在 **事件订阅** 页面：
 
 1. 选择 **使用长连接接收事件**（WebSocket 模式）
 2. 添加事件：`im.message.receive_v1`（接收消息）
 
-对应的 AgentOS 配置示例：
+对应的 Sensenova-Claw 配置示例：
 
 ```yaml
 plugins:

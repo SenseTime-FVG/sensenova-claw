@@ -1,7 +1,7 @@
 """T05: 工具确认流程 (HIGH risk)"""
 import pytest
-from agentos.capabilities.tools.base import ToolRiskLevel
-from agentos.capabilities.tools.builtin import BashCommandTool, ReadFileTool, WriteFileTool
+from sensenova_claw.capabilities.tools.base import ToolRiskLevel
+from sensenova_claw.capabilities.tools.builtin import BashCommandTool, ReadFileTool, WriteFileTool
 
 
 class TestToolConfirmation:

@@ -4,12 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentos.capabilities.agents.config import AgentConfig
-from agentos.capabilities.agents.registry import AgentRegistry
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.runtime.title_runtime import TitleRuntime
-from agentos.platform.config.config import config
+from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.runtime.title_runtime import TitleRuntime
+from sensenova_claw.platform.config.config import config
 
 
 class _RepoStub:

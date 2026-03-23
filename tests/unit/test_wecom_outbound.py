@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.adapters.plugins.wecom.channel import WecomChannel, WecomSessionMeta
-from agentos.adapters.plugins.wecom.config import WecomConfig
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED, USER_QUESTION_ASKED
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.plugins.wecom.channel import WecomChannel, WecomSessionMeta
+from sensenova_claw.adapters.plugins.wecom.config import WecomConfig
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED, USER_QUESTION_ASKED
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 class _SimplePluginApi:

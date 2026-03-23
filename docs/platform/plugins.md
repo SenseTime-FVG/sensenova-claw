@@ -1,8 +1,8 @@
 # 插件系统
 
-> 路径：`agentos/adapters/plugins/`
+> 路径：`sensenova_claw/adapters/plugins/`
 
-插件系统允许在不修改核心代码的情况下扩展 AgentOS 的功能。
+插件系统允许在不修改核心代码的情况下扩展 Sensenova-Claw 的功能。
 
 ---
 
@@ -69,7 +69,7 @@ Discord Bot 接入插件，提供以下功能：
 ### 1. 实现 Plugin 接口
 
 ```python
-from agentos.adapters.plugins import Plugin
+from sensenova_claw.adapters.plugins import Plugin
 
 class MyPlugin(Plugin):
     name = "my_plugin"
@@ -105,10 +105,10 @@ class MyPlugin(Plugin):
 
 ### 2. 放置插件文件
 
-将插件代码放置在 `agentos/adapters/plugins/` 目录下：
+将插件代码放置在 `sensenova_claw/adapters/plugins/` 目录下：
 
 ```
-agentos/adapters/plugins/
+sensenova_claw/adapters/plugins/
   __init__.py
   feishu/              # 飞书插件
     __init__.py

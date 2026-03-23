@@ -1,6 +1,6 @@
 import json
 import pytest
-from agentos.kernel.proactive.models import (
+from sensenova_claw.kernel.proactive.models import (
     ProactiveJob, TimeTrigger, EventTrigger, ConditionTrigger,
     ProactiveTask, DeliveryConfig, SafetyConfig, JobState,
     trigger_to_json, trigger_from_json, job_to_db_row, job_from_db_row,
@@ -76,7 +76,7 @@ def test_parse_duration_ms():
 # ---------- DB 操作测试 ----------
 
 import asyncio
-from agentos.adapters.storage.repository import Repository
+from sensenova_claw.adapters.storage.repository import Repository
 
 
 @pytest.fixture

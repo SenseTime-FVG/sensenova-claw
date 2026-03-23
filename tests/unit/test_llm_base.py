@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.adapters.llm.base import LLMProvider
+from sensenova_claw.adapters.llm.base import LLMProvider
 
 
 async def test_call_raises_not_implemented() -> None:

@@ -14,10 +14,10 @@
 
 | Action | File | Responsibility |
 |--------|------|----------------|
-| Modify | `agentos/capabilities/agents/registry.py:60-63` | `get_sendable` 不再排除自身 |
-| Modify | `agentos/capabilities/tools/send_message_tool.py:229` | 循环检测允许自我委派 |
-| Modify | `.agentos/agents/search-agent/config.yml:30` | `max_send_depth: 1` → `2` |
-| Modify | `.agentos/agents/search-agent/SYSTEM_PROMPT.md` | 追加任务拆分与并行执行指引 |
+| Modify | `sensenova_claw/capabilities/agents/registry.py:60-63` | `get_sendable` 不再排除自身 |
+| Modify | `sensenova_claw/capabilities/tools/send_message_tool.py:229` | 循环检测允许自我委派 |
+| Modify | `.sensenova-claw/agents/search-agent/config.yml:30` | `max_send_depth: 1` → `2` |
+| Modify | `.sensenova-claw/agents/search-agent/SYSTEM_PROMPT.md` | 追加任务拆分与并行执行指引 |
 | Modify | `tests/unit/test_agent_registry.py` | 新增 `get_sendable` 包含自身的测试 |
 | Modify | `tests/integration/test_send_message_tool.py` | 新增自我委派和循环检测测试 |
 
@@ -39,7 +39,7 @@
 改为：
 
 ```python
-    registry = AgentRegistry(agentos_home=tmp_path / "agents")
+    registry = AgentRegistry(sensenova_claw_home=tmp_path / "agents")
 ```
 
 - [ ] **Step 2: 运行现有集成测试确认可导入**
@@ -113,11 +113,11 @@ git commit -m "test: add get_sendable self-inclusion tests"
 ### Task 2: get_sendable 允许自身 — 实现
 
 **Files:**
-- Modify: `agentos/capabilities/agents/registry.py:60-63`
+- Modify: `sensenova_claw/capabilities/agents/registry.py:60-63`
 
 - [ ] **Step 1: 修改 get_sendable**
 
-在 `agentos/capabilities/agents/registry.py` 第 60-63 行，将：
+在 `sensenova_claw/capabilities/agents/registry.py` 第 60-63 行，将：
 
 ```python
 if not source.can_send_message_to:
@@ -144,7 +144,7 @@ Expected: ALL PASS
 - [ ] **Step 3: Commit**
 
 ```bash
-git add agentos/capabilities/agents/registry.py
+git add sensenova_claw/capabilities/agents/registry.py
 git commit -m "feat: allow self in get_sendable for self-delegation"
 ```
 
@@ -338,11 +338,11 @@ git commit -m "test: add self-delegation and cycle detection tests"
 ### Task 4: 循环检测放宽 — 实现
 
 **Files:**
-- Modify: `agentos/capabilities/tools/send_message_tool.py:229-231`
+- Modify: `sensenova_claw/capabilities/tools/send_message_tool.py:229-231`
 
 - [ ] **Step 1: 修改循环检测条件**
 
-在 `agentos/capabilities/tools/send_message_tool.py` 第 229-231 行，将：
+在 `sensenova_claw/capabilities/tools/send_message_tool.py` 第 229-231 行，将：
 
 ```python
             if target_id in current_send_chain:
@@ -372,7 +372,7 @@ Expected: ALL PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agentos/capabilities/tools/send_message_tool.py
+git add sensenova_claw/capabilities/tools/send_message_tool.py
 git commit -m "feat: allow self-delegation in cycle detection"
 ```
 
@@ -381,11 +381,11 @@ git commit -m "feat: allow self-delegation in cycle detection"
 ### Task 5: search-agent 配置调整
 
 **Files:**
-- Modify: `.agentos/agents/search-agent/config.yml`
+- Modify: `.sensenova-claw/agents/search-agent/config.yml`
 
 - [ ] **Step 1: 修改 max_send_depth**
 
-在 `.agentos/agents/search-agent/config.yml` 中，将：
+在 `.sensenova-claw/agents/search-agent/config.yml` 中，将：
 
 ```yaml
 max_send_depth: 1
@@ -400,7 +400,7 @@ max_send_depth: 2
 - [ ] **Step 2: Commit**
 
 ```bash
-git add .agentos/agents/search-agent/config.yml
+git add .sensenova-claw/agents/search-agent/config.yml
 git commit -m "config: increase search-agent max_send_depth to 2"
 ```
 
@@ -409,11 +409,11 @@ git commit -m "config: increase search-agent max_send_depth to 2"
 ### Task 6: search-agent System Prompt 增强
 
 **Files:**
-- Modify: `.agentos/agents/search-agent/SYSTEM_PROMPT.md`
+- Modify: `.sensenova-claw/agents/search-agent/SYSTEM_PROMPT.md`
 
 - [ ] **Step 1: 追加任务拆分指引**
 
-在 `.agentos/agents/search-agent/SYSTEM_PROMPT.md` 末尾追加：
+在 `.sensenova-claw/agents/search-agent/SYSTEM_PROMPT.md` 末尾追加：
 
 ```markdown
 
@@ -454,7 +454,7 @@ git commit -m "config: increase search-agent max_send_depth to 2"
 - [ ] **Step 2: Commit**
 
 ```bash
-git add .agentos/agents/search-agent/SYSTEM_PROMPT.md
+git add .sensenova-claw/agents/search-agent/SYSTEM_PROMPT.md
 git commit -m "config: add self-delegation parallel search guidance to search-agent prompt"
 ```
 
@@ -471,10 +471,10 @@ Expected: ALL PASS，无回归
 
 Run: `git diff --stat HEAD~7`
 Expected: 只有以下 6 个文件被修改：
-- `agentos/capabilities/agents/registry.py`
-- `agentos/capabilities/tools/send_message_tool.py`
-- `.agentos/agents/search-agent/config.yml`
-- `.agentos/agents/search-agent/SYSTEM_PROMPT.md`
+- `sensenova_claw/capabilities/agents/registry.py`
+- `sensenova_claw/capabilities/tools/send_message_tool.py`
+- `.sensenova-claw/agents/search-agent/config.yml`
+- `.sensenova-claw/agents/search-agent/SYSTEM_PROMPT.md`
 - `tests/unit/test_agent_registry.py`
 - `tests/integration/test_send_message_tool.py`
 

@@ -9,15 +9,15 @@ import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.adapters.channels.base import Channel
-from agentos.adapters.storage.repository import Repository
-from agentos.interfaces.http.cron_api import router
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.notification.service import NotificationService
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.kernel.scheduler.models import CronJob, EverySchedule, SystemEventPayload, cron_job_to_db_row
-from agentos.kernel.scheduler.runtime import CronRuntime
-from agentos.interfaces.ws.gateway import Gateway
+from sensenova_claw.adapters.channels.base import Channel
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.interfaces.http.cron_api import router
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.notification.service import NotificationService
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.kernel.scheduler.models import CronJob, EverySchedule, SystemEventPayload, cron_job_to_db_row
+from sensenova_claw.kernel.scheduler.runtime import CronRuntime
+from sensenova_claw.interfaces.ws.gateway import Gateway
 
 
 class DummyChannel(Channel):
