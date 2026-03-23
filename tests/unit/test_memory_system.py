@@ -291,46 +291,33 @@ class TestMemoryManager:
         )
 
     @pytest.mark.asyncio
-    async def test_load_memory_md_missing_file(self, manager):
-        result = await manager.load_memory_md()
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_load_memory_md_empty_file(self, manager, workspace):
-        (workspace / "MEMORY.md").write_text("", encoding="utf-8")
-        result = await manager.load_memory_md()
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_load_memory_md_normal(self, manager, workspace):
-        (workspace / "MEMORY.md").write_text("用户偏好: Python 3.12", encoding="utf-8")
+    async def test_load_memory_md_returns_prompt_with_paths(self, manager):
+        """load_memory_md 应返回指引 prompt（包含文件路径），不读取文件内容"""
         result = await manager.load_memory_md()
         assert result is not None
-        assert "用户偏好: Python 3.12" in result
-        assert "记忆读取" in result  # 包含指引文本
+        assert "MEMORY.md" in result
+        assert "记忆文件" in result
+        assert "read_file" in result
+        assert "agents/default" in result
 
     @pytest.mark.asyncio
-    async def test_load_memory_md_includes_agent_memory(self, manager, workspace):
-        (workspace / "MEMORY.md").write_text("全局偏好: 喜欢 Python", encoding="utf-8")
-        memory_dir = workspace / "memory"
-        memory_dir.mkdir()
-        (memory_dir / "planner.md").write_text("上次已经完成接口设计", encoding="utf-8")
-
+    async def test_load_memory_md_with_agent_id(self, manager):
+        """指定 agent_id 时，路径应包含该 agent_id"""
         result = await manager.load_memory_md(agent_id="planner")
-
         assert result is not None
-        assert "全局偏好: 喜欢 Python" in result
-        assert "planner 的历史记忆" in result
-        assert "上次已经完成接口设计" in result
+        assert "agents/planner/MEMORY.md" in result
+        assert "agents/planner/memory/" in result
 
     @pytest.mark.asyncio
-    async def test_load_memory_md_truncation(self, manager, workspace):
-        # bootstrap_max_chars=200，写入超过 200 字符的内容
-        long_content = "A" * 300
-        (workspace / "MEMORY.md").write_text(long_content, encoding="utf-8")
+    async def test_load_memory_md_includes_today_yesterday(self, manager):
+        """prompt 应包含今天和昨天的日期路径"""
+        from datetime import datetime, timedelta
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
         result = await manager.load_memory_md()
-        assert result is not None
-        assert "内容已截断" in result
+        assert today_str in result
+        assert yesterday_str in result
 
     @pytest.mark.asyncio
     async def test_sync_index_no_files(self, manager):
@@ -347,12 +334,25 @@ class TestMemoryManager:
 
     @pytest.mark.asyncio
     async def test_sync_index_with_daily_logs(self, manager, workspace):
+        """兼容旧路径：workspace/memory/*.md 仍可被索引"""
         memory_dir = workspace / "memory"
         memory_dir.mkdir()
         (memory_dir / "2026-03-10.md").write_text("今天完成了 API 设计", encoding="utf-8")
         await manager.sync_index()
         mtimes = manager.index.get_indexed_mtimes()
         assert "memory/2026-03-10.md" in mtimes
+
+    @pytest.mark.asyncio
+    async def test_sync_index_with_agent_memory(self, manager, workspace):
+        """新路径：agents/{id}/memory/*.md 和 agents/{id}/MEMORY.md"""
+        agent_dir = workspace / "agents" / "planner"
+        (agent_dir / "memory").mkdir(parents=True)
+        (agent_dir / "MEMORY.md").write_text("长期记忆", encoding="utf-8")
+        (agent_dir / "memory" / "2026-03-20.md").write_text("日记内容", encoding="utf-8")
+        await manager.sync_index()
+        mtimes = manager.index.get_indexed_mtimes()
+        assert "agents/planner/MEMORY.md" in mtimes
+        assert "agents/planner/memory/2026-03-20.md" in mtimes
 
     @pytest.mark.asyncio
     async def test_sync_index_auto_embeds_new_chunks(self, manager, workspace, monkeypatch):
@@ -442,7 +442,9 @@ class TestMemoryManager:
         assert isinstance(results, list)
 
     @pytest.mark.asyncio
-    async def test_summarize_turn_appends_to_uppercase_memory_md(self, workspace, tmp_path):
+    async def test_summarize_turn_writes_to_daily_file(self, workspace, tmp_path):
+        """summarize_turn 应写入 agents/{agent_id}/memory/YYYY-MM-DD.md"""
+        from datetime import datetime
         from agentos.capabilities.memory.manager import MemoryManager
 
         class _FakeProvider:
@@ -464,14 +466,47 @@ class TestMemoryManager:
             messages=[
                 {"role": "user", "content": "请记住我偏好 Python"},
                 {"role": "assistant", "content": "好的，我会记住。"},
+            ],
+            agent_id="planner",
+        )
+
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        daily_path = workspace / "agents" / "planner" / "memory" / f"{today_str}.md"
+        assert daily_path.exists()
+        content = daily_path.read_text(encoding="utf-8")
+        assert "用户偏好 Python" in content
+
+    @pytest.mark.asyncio
+    async def test_summarize_turn_default_agent_id(self, workspace, tmp_path):
+        """未指定 agent_id 时应使用 default"""
+        from datetime import datetime
+        from agentos.capabilities.memory.manager import MemoryManager
+
+        class _FakeProvider:
+            async def call(self, **kwargs):
+                return {"content": "总结内容"}
+
+        class _FakeFactory:
+            def get_provider(self, provider_name=None):
+                return _FakeProvider()
+
+        manager = MemoryManager(
+            workspace_dir=str(workspace),
+            config=MemoryConfig(enabled=True),
+            db_path=tmp_path / "test_memory_summary2.db",
+            llm_factory=_FakeFactory(),
+        )
+
+        await manager.summarize_turn(
+            messages=[
+                {"role": "user", "content": "你好"},
+                {"role": "assistant", "content": "你好！"},
             ]
         )
 
-        assert (workspace / "MEMORY.md").exists()
-        assert not (workspace / "memory.md").exists()
-
-        content = (workspace / "MEMORY.md").read_text(encoding="utf-8")
-        assert "用户偏好 Python" in content
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        daily_path = workspace / "agents" / "default" / "memory" / f"{today_str}.md"
+        assert daily_path.exists()
 
 
 # ===== MemorySearchTool 测试 =====

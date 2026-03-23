@@ -1,11 +1,16 @@
-"""记忆管理器：统一管理记忆文件读取、向量索引和对话总结"""
+"""记忆管理器：统一管理记忆文件读取、向量索引和对话总结
+
+存储结构（v1.3）：
+  ~/.agentos/agents/{agent_id}/MEMORY.md            — 长期累积记忆
+  ~/.agentos/agents/{agent_id}/memory/YYYY-MM-DD.md  — 按日记忆
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -62,46 +67,13 @@ class MemoryManager:
                 logger.info("MemoryManager: config reloaded due to config change")
 
     async def load_memory_md(self, agent_id: str | None = None) -> str | None:
-        """读取 MEMORY.md 和 agent 专属记忆，格式化为 system prompt 片段
+        """生成记忆指引 prompt，告诉 Agent 应该读取哪些记忆文件。
 
-        1. 读取 {workspace}/MEMORY.md
-        2. 如有 agent_id，额外读取 {workspace}/memory/{agent_id}.md
-        3. 文件都不存在时返回 None
-        4. 超过 bootstrap_max_chars 截断
-        5. 包装为 Memory 指令段落
+        不再把文件内容注入 system prompt，而是列出文件路径，
+        由 Agent 在需要时通过 read_file 工具主动读取。
         """
-        parts: list[str] = []
-
-        for memory_path in self._global_memory_candidates():
-            if not memory_path.exists():
-                continue
-            try:
-                content = await asyncio.to_thread(memory_path.read_text, "utf-8")
-                if content.strip():
-                    parts.append(content.strip())
-                    break
-            except Exception:
-                logger.warning("读取 MEMORY.md 失败", exc_info=True)
-
-        if agent_id:
-            agent_memory_path = Path(self.workspace_dir) / "memory" / f"{agent_id}.md"
-            if agent_memory_path.exists():
-                try:
-                    agent_content = await asyncio.to_thread(agent_memory_path.read_text, "utf-8")
-                    if agent_content.strip():
-                        parts.append(f"### {agent_id} 的历史记忆\n{agent_content.strip()}")
-                except Exception:
-                    logger.warning("读取 agent 记忆失败: %s", agent_id, exc_info=True)
-
-        if not parts:
-            return None
-
-        content = "\n\n".join(parts)
-        max_chars = self.config.bootstrap_max_chars
-        if len(content) > max_chars:
-            content = content[:max_chars] + "\n...(内容已截断，使用 memory_search 检索完整内容)"
-
-        return self._format_memory_prompt(content)
+        effective_id = agent_id or "default"
+        return self._format_memory_prompt(effective_id)
 
     async def search(self, query: str, max_results: int = 5) -> list[MemorySearchResult]:
         """搜索记忆文件
@@ -147,21 +119,38 @@ class MemoryManager:
         """阻塞式索引同步（在线程池中执行）"""
         workspace = Path(self.workspace_dir)
 
-        # 扫描 memory 文件
+        # 扫描所有 agent 的记忆文件
         memory_files: dict[str, Path] = {}
 
-        # MEMORY.md
-        for memory_md in self._global_memory_candidates():
-            if memory_md.exists():
-                memory_files["MEMORY.md"] = memory_md
+        # 新路径：agents/*/MEMORY.md + agents/*/memory/*.md
+        agents_dir = workspace / "agents"
+        if agents_dir.exists():
+            for agent_dir in agents_dir.iterdir():
+                if not agent_dir.is_dir():
+                    continue
+                agent_mem_md = agent_dir / "MEMORY.md"
+                if agent_mem_md.exists():
+                    rel = str(agent_mem_md.relative_to(workspace)).replace("\\", "/")
+                    memory_files[rel] = agent_mem_md
+                mem_sub = agent_dir / "memory"
+                if mem_sub.exists():
+                    for md_file in mem_sub.glob("*.md"):
+                        rel = str(md_file.relative_to(workspace)).replace("\\", "/")
+                        memory_files[rel] = md_file
+
+        # 兼容旧路径：workspace/MEMORY.md
+        for legacy in self._global_memory_candidates():
+            if legacy.exists():
+                rel = str(legacy.relative_to(workspace)).replace("\\", "/")
+                memory_files[rel] = legacy
                 break
 
-        # memory/*.md
-        memory_dir = workspace / "memory"
-        if memory_dir.exists():
-            for md_file in memory_dir.glob("**/*.md"):
-                rel_path = str(md_file.relative_to(workspace)).replace("\\", "/")
-                memory_files[rel_path] = md_file
+        # 兼容旧路径：workspace/memory/*.md
+        old_memory_dir = workspace / "memory"
+        if old_memory_dir.exists():
+            for md_file in old_memory_dir.glob("**/*.md"):
+                rel = str(md_file.relative_to(workspace)).replace("\\", "/")
+                memory_files[rel] = md_file
 
         # 获取已索引的 mtime
         indexed_mtimes = self.index.get_indexed_mtimes()
@@ -333,20 +322,17 @@ class MemoryManager:
         return str(response.get("content", "") or "")
 
     async def _append_to_memory_md(self, summary: str, agent_id: str | None = None) -> None:
-        """将总结内容追加到对应 agent 的记忆文件。"""
-        if agent_id:
-            memory_path = Path(self.workspace_dir) / "memory" / f"{agent_id}.md"
-        else:
-            memory_path = Path(self.workspace_dir) / "MEMORY.md"
+        """将总结内容追加到当日记忆文件 agents/{agent_id}/memory/YYYY-MM-DD.md"""
+        effective_id = agent_id or "default"
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        daily_path = self._daily_memory_path(effective_id, today_str)
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         entry = f"\n\n---\n[{timestamp}]\n{summary}\n"
 
         try:
-            if not agent_id:
-                await asyncio.to_thread(self._migrate_legacy_memory_file, memory_path)
-            await asyncio.to_thread(self._append_file_blocking, memory_path, entry)
-            logger.info("对话总结已追加到 %s", memory_path)
+            await asyncio.to_thread(self._append_file_blocking, daily_path, entry)
+            logger.info("对话总结已追加到 %s", daily_path)
         except Exception:
             logger.warning("写入记忆文件失败", exc_info=True)
 
@@ -357,31 +343,85 @@ class MemoryManager:
         with open(path, "a", encoding="utf-8") as file:
             file.write(content)
 
+    def _agent_memory_dir(self, agent_id: str) -> Path:
+        """返回 agents/{agent_id}/memory/ 目录路径"""
+        return Path(self.workspace_dir) / "agents" / agent_id / "memory"
+
+    def _agent_memory_md(self, agent_id: str) -> Path:
+        """返回 agents/{agent_id}/MEMORY.md 路径"""
+        return Path(self.workspace_dir) / "agents" / agent_id / "MEMORY.md"
+
+    def _daily_memory_path(self, agent_id: str, date_str: str) -> Path:
+        """返回 agents/{agent_id}/memory/YYYY-MM-DD.md 路径"""
+        return self._agent_memory_dir(agent_id) / f"{date_str}.md"
+
     def _global_memory_candidates(self) -> list[Path]:
+        """兼容旧路径：workspace/MEMORY.md, workspace/memory.md"""
         workspace = Path(self.workspace_dir)
         return [workspace / "MEMORY.md", workspace / "memory.md"]
 
-    @staticmethod
-    def _migrate_legacy_memory_file(target: Path) -> None:
-        legacy = target.parent / "memory.md"
-        if legacy.exists() and not target.exists():
-            legacy.rename(target)
+    def _collect_memory_paths(self, agent_id: str) -> dict[str, Path]:
+        """收集该 agent 的所有记忆文件（用于索引扫描）。
 
-    def _format_memory_prompt(self, content: str) -> str:
-        """将 MEMORY.md 内容包装为 system prompt 片段
-
-        注意：prompt_builder._build_memory 会自动添加 '## Memory' 标题，
-        这里只输出正文内容。
+        包含：agents/{agent_id}/MEMORY.md + agents/{agent_id}/memory/*.md
+        兼容旧路径：workspace/MEMORY.md, workspace/memory/{agent_id}.md
         """
+        files: dict[str, Path] = {}
+        workspace = Path(self.workspace_dir)
+
+        # 新路径
+        agent_mem_md = self._agent_memory_md(agent_id)
+        if agent_mem_md.exists():
+            rel = str(agent_mem_md.relative_to(workspace)).replace("\\", "/")
+            files[rel] = agent_mem_md
+
+        mem_dir = self._agent_memory_dir(agent_id)
+        if mem_dir.exists():
+            for md_file in mem_dir.glob("*.md"):
+                rel = str(md_file.relative_to(workspace)).replace("\\", "/")
+                files[rel] = md_file
+
+        # 兼容旧路径
+        for legacy in self._global_memory_candidates():
+            if legacy.exists():
+                rel = str(legacy.relative_to(workspace)).replace("\\", "/")
+                files[rel] = legacy
+                break
+
+        old_agent_mem = workspace / "memory" / f"{agent_id}.md"
+        if old_agent_mem.exists():
+            rel = str(old_agent_mem.relative_to(workspace)).replace("\\", "/")
+            files[rel] = old_agent_mem
+
+        return files
+
+    def _format_memory_prompt(self, agent_id: str) -> str:
+        """生成记忆指引 prompt（不含文件内容，由 Agent 按需 read_file）。
+
+        prompt_builder._build_memory 会自动添加 '## Memory' 标题。
+        """
+        today = datetime.now()
+        yesterday = today - timedelta(days=1)
+        today_str = today.strftime("%Y-%m-%d")
+        yesterday_str = yesterday.strftime("%Y-%m-%d")
+
+        # 基础路径（使用 ~ 简写）
+        base = f"~/.agentos/agents/{agent_id}"
+        memory_md = f"{base}/MEMORY.md"
+        today_file = f"{base}/memory/{today_str}.md"
+        yesterday_file = f"{base}/memory/{yesterday_str}.md"
+
         return (
-            "你拥有长期记忆能力。\n\n"
-            "### 记忆读取\n"
-            "- 回答涉及过往工作、决策、日期、人物、偏好的问题前，先调用 memory_search 搜索记忆\n"
-            "- 搜索后可用 read_file 获取完整上下文\n\n"
-            "### 记忆写入\n"
-            "- 用户提到偏好、个人信息、重要决策时，用 write_file 写入 MEMORY.md\n"
-            "- 日常笔记和运行上下文追加到 memory/{今天日期}.md\n"
-            "- 已有文件时追加内容，不要覆盖\n\n"
-            "### 当前 MEMORY.md 内容\n"
-            f"{content}"
+            "你拥有长期记忆能力。以下是你的记忆文件，请在需要时用 read_file 读取。\n\n"
+            "### 记忆文件\n"
+            f"- **长期记忆**: `{memory_md}` — 用户偏好、重要决策、长期有效的信息\n"
+            f"- **今日记忆**: `{today_file}` — 今天的对话摘要和上下文\n"
+            f"- **昨日记忆**: `{yesterday_file}` — 昨天的对话摘要\n\n"
+            "### 记忆读取规则\n"
+            "- 每次会话开始时，先用 read_file 读取上述三个文件（不存在则跳过）\n"
+            "- 回答涉及过往工作、决策、日期、人物、偏好的问题前，先读记忆文件或调用 memory_search\n\n"
+            "### 记忆写入规则\n"
+            f"- 用户提到偏好、个人信息、重要决策时，用 write_file 追加到 `{memory_md}`\n"
+            f"- 日常笔记和运行上下文追加到 `{today_file}`\n"
+            "- 已有文件时追加内容，不要覆盖\n"
         )
