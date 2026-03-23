@@ -28,6 +28,7 @@ export const adminNavItems = [
   { path: '/gateway', label: 'Gateway' },
   { path: '/tools', label: 'Tools' },
   { path: '/skills', label: 'Skills' },
+  { path: '/acp', label: 'ACP' },
 ];
 
 export function useFeatureNavItems() {
