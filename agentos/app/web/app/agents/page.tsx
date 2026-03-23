@@ -286,11 +286,44 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
   const [formId, setFormId] = useState('');
   const [formName, setFormName] = useState('');
   const [formDesc, setFormDesc] = useState('');
-  const [formModel, setFormModel] = useState('gpt-4o-mini');
+  const [formModel, setFormModel] = useState('');
   const [formTemp, setFormTemp] = useState('0.2');
   const [formPrompt, setFormPrompt] = useState('');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    authFetch(`${API_BASE}/api/config/sections`)
+      .then(res => res.json())
+      .then(data => {
+        if (cancelled) return;
+        const llm = data?.llm;
+        const models = llm?.models && typeof llm.models === 'object'
+          ? Object.keys(llm.models).filter(key => key !== 'mock')
+          : [];
+        const defaultModel = typeof llm?.default_model === 'string' ? llm.default_model : '';
+
+        setAvailableModels(models);
+        setFormModel(currentValue => {
+          if (currentValue && models.includes(currentValue)) return currentValue;
+          if (defaultModel && models.includes(defaultModel)) return defaultModel;
+          return models[0] || '';
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAvailableModels([]);
+          setFormModel('');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleCreate = async () => {
     if (!formId.trim() || !formName.trim()) {
@@ -355,7 +388,20 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Model</label>
-              <Input value={formModel} onChange={e => setFormModel(e.target.value)} />
+              <select
+                value={formModel}
+                onChange={e => setFormModel(e.target.value)}
+                data-testid="agent-model-select"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <option value="">跟随系统默认模型</option>
+                {availableModels.map(model => (
+                  <option key={model} value={model}>{model}</option>
+                ))}
+              </select>
+              {availableModels.length === 0 && (
+                <p className="text-xs text-muted-foreground">当前未发现已配置模型，创建时将跟随系统默认模型。</p>
+              )}
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Temperature</label>

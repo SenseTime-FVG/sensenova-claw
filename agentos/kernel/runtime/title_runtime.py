@@ -3,12 +3,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from typing import TYPE_CHECKING
 
 from agentos.adapters.storage.repository import Repository
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.types import USER_INPUT
 from agentos.adapters.llm.factory import LLMFactory
+
+if TYPE_CHECKING:
+    from agentos.capabilities.agents.registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +27,15 @@ class TitleRuntime:
     标题生成是一次性操作，不需要 per-session Worker。
     """
 
-    def __init__(self, bus: PublicEventBus, repo: Repository):
+    def __init__(
+        self,
+        bus: PublicEventBus,
+        repo: Repository,
+        agent_registry: AgentRegistry | None = None,
+    ):
         self.bus = bus
         self.repo = repo
+        self.agent_registry = agent_registry
         self.llm_factory = LLMFactory()
         self._task: asyncio.Task | None = None
         self._processed_sessions: set[str] = set()
@@ -65,7 +75,8 @@ class TitleRuntime:
 
     async def _generate_title(self, session_id: str, user_input: str) -> None:
         try:
-            provider = self.llm_factory.get_provider()
+            provider_name, model = await self._resolve_session_model(session_id)
+            provider = self.llm_factory.get_provider(provider_name)
             messages = [
                 {
                     "role": "system",
@@ -74,8 +85,6 @@ class TitleRuntime:
                 {"role": "user", "content": f"用户问题：{user_input}\n\n请生成会话标题："},
             ]
 
-            from agentos.platform.config.config import config
-            _, model = config.resolve_model()
             response = await provider.call(model=model, messages=messages, tools=None, temperature=0.7)
             title = response.get("content", "").strip()
 
@@ -104,3 +113,22 @@ class TitleRuntime:
                     payload={"title": "", "success": False, "error": str(exc)},
                 )
             )
+
+    async def _resolve_session_model(self, session_id: str) -> tuple[str, str]:
+        """优先使用 session 绑定的 agent 模型，缺失时回退到全局默认模型。"""
+        from agentos.platform.config.config import config
+
+        model_key: str | None = None
+        if self.agent_registry:
+            session_meta = await self.repo.get_session_meta(session_id)
+            agent_id = (session_meta or {}).get("agent_id")
+            agent_config = self.agent_registry.get(agent_id) if agent_id else None
+            if agent_config and agent_config.model:
+                model_key = agent_config.model
+
+        provider_name, model_id = config.resolve_model(model_key)
+
+        # 兼容仍直接填写 model_id 的 agent 配置。
+        if provider_name == "mock" and model_key:
+            return "mock", model_key
+        return provider_name, model_id

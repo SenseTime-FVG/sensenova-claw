@@ -458,7 +458,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         break;
       }
       case 'error':
-        addMsg('system', `Error: ${payload.message || payload.error_type || 'Unknown Error'}`);
+        addMsg('system', String(payload.user_message || payload.message || payload.error_type || 'Unknown Error'));
         setIsTyping(false);
         clearInteractions();
         break;
