@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentos.capabilities.skills.registry import SkillRegistry
+from sensenova_claw.capabilities.skills.registry import SkillRegistry
 
 
 def _load_builtin_skills(tmp_path: Path) -> SkillRegistry:
     project_root = Path(__file__).resolve().parents[2]
-    builtin_dir = project_root / ".agentos" / "skills"
+    builtin_dir = project_root / ".sensenova-claw" / "skills"
 
     registry = SkillRegistry(
         workspace_dir=tmp_path / "skills",

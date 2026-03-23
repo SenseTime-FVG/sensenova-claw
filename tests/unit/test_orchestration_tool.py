@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from agentos.capabilities.tools.orchestration import CreateAgentTool
-from agentos.capabilities.tools.base import ToolRiskLevel
-from agentos.capabilities.agents.config import AgentConfig
-from agentos.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.capabilities.tools.orchestration import CreateAgentTool
+from sensenova_claw.capabilities.tools.base import ToolRiskLevel
+from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
 
 
 @pytest.fixture

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from agentos.adapters.llm.providers.openai_provider import OpenAIProvider
+from sensenova_claw.adapters.llm.providers.openai_provider import OpenAIProvider
 
 
 def test_normalize_messages_adds_function_type_and_tool_call_id() -> None:

@@ -51,7 +51,7 @@
 1. **`contexts/UserPreferencesContext.tsx`**
    - `UserPreferences` 接口：`{ accentColor, fontSize, panelRadius }`
    - 默认值：`{ accentColor: 'teal', fontSize: 'standard', panelRadius: 'rounded' }`
-   - 从 `localStorage` key `agentos-user-prefs` 读取/写入
+   - 从 `localStorage` key `sensenova-claw-user-prefs` 读取/写入
    - 提供 `useUserPreferences()` hook
    - `useEffect` 中监听偏好变化，动态修改 `document.documentElement.style` 上的 CSS 变量
 
@@ -95,7 +95,7 @@ interface UserPreferences {
 }
 ```
 
-存储到 `localStorage` key `agentos-user-prefs`，JSON 序列化。
+存储到 `localStorage` key `sensenova-claw-user-prefs`，JSON 序列化。
 
 ## 不在范围内
 

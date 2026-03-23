@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.capabilities.miniapps.codex_acp_bridge import (
+from sensenova_claw.capabilities.miniapps.codex_acp_bridge import (
     CodexACPBridge,
     build_codex_exec_command,
     _extract_prompt_text,
@@ -25,7 +25,7 @@ def test_build_codex_exec_command_includes_defaults_and_overrides() -> None:
         prompt="请生成页面",
         output_file="/tmp/out.txt",
         model="gpt-5-codex",
-        profile="agentos",
+        profile="sensenova_claw",
         extra_args=["--dangerously-bypass-approvals-and-sandbox"],
     )
 

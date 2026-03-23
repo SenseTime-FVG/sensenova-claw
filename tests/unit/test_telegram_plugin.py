@@ -8,16 +8,16 @@ import pytest
 
 telegram = pytest.importorskip("telegram", reason="python-telegram-bot not installed")
 
-from agentos.adapters.plugins.telegram.plugin import definition, register
-from agentos.adapters.plugins import PluginRegistry
-from agentos.adapters.plugins.base import PluginApi
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.plugins.telegram.plugin import definition, register
+from sensenova_claw.adapters.plugins import PluginRegistry
+from sensenova_claw.adapters.plugins.base import PluginApi
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 def _make_plugin_api(config_overrides: dict | None = None) -> PluginApi:
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     defaults = {
         "enabled": False,
@@ -92,7 +92,7 @@ class TestRegister:
             "builtins.__import__",
             side_effect=lambda name, *args, **kwargs: (
                 (_ for _ in ()).throw(ModuleNotFoundError(name="telegram"))
-                if name == "agentos.adapters.plugins.telegram.channel"
+                if name == "sensenova_claw.adapters.plugins.telegram.channel"
                 else original_import(name, *args, **kwargs)
             ),
         ):

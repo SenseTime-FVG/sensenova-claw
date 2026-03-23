@@ -1,6 +1,6 @@
 # 快速开始
 
-本指南帮助你在本地环境快速搭建和运行 AgentOS。
+本指南帮助你在本地环境快速搭建和运行 Sensenova-Claw。
 
 ## 环境要求
 
@@ -19,7 +19,7 @@
 
 ```bash
 git clone <项目地址>
-cd agentos
+cd sensenova-claw
 ```
 
 ### 2. 安装后端依赖
@@ -152,7 +152,7 @@ npm run dev:server
 或者直接使用 uvicorn：
 
 ```bash
-python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8000
+python3 -m uvicorn sensenova_claw.app.gateway.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 单独启动前端
@@ -166,7 +166,7 @@ npm run dev:web
 TUI 客户端提供终端交互界面，需要后端已运行：
 
 ```bash
-python3 -m agentos.app.cli.cli_client --port 8000
+python3 -m sensenova-claw.app.cli.cli_client --port 8000
 ```
 
 ## 访问服务
@@ -187,7 +187,7 @@ python3 -m agentos.app.cli.cli_client --port 8000
 
 ### 2. 验证前端
 
-打开浏览器访问 http://localhost:3000 ，页面应显示 AgentOS 的对话界面。
+打开浏览器访问 http://localhost:3000 ，页面应显示 Sensenova-Claw 的对话界面。
 
 ### 3. 发送测试消息
 

@@ -2,7 +2,7 @@
 
 ## 概述
 
-为 AgentOS 内置一个 Proactive Agent，支持定时执行任务和结合 Memory 为用户做信息整理推送。Proactive Agent 作为独立 agent 存在，通过 ProactiveRuntime 管理触发、执行和投递。
+为 Sensenova-Claw 内置一个 Proactive Agent，支持定时执行任务和结合 Memory 为用户做信息整理推送。Proactive Agent 作为独立 agent 存在，通过 ProactiveRuntime 管理触发、执行和投递。
 
 ## 核心场景
 
@@ -149,7 +149,7 @@ ProactiveRuntime 与 CronRuntime 独立运行，理由：
 
 1. CronRuntime 的 CronJob 模型（`SystemEventPayload` / `AgentTurnPayload`）面向简单的"到时间 → 发事件/执行 turn"场景，ProactiveJob 需要条件评估、事件触发、安全约束等额外能力，硬塞进 CronJob 会让其职责膨胀
 2. CronRuntime 的 Phase 2（isolated session）虽然预留了接口，但其设计意图是"cron 触发一个简单的 agent turn"，而非"cron 触发一个有条件评估、多 agent 协作、结果投递的完整 proactive 流程"
-3. 两者共享 `agentos/kernel/scheduler/scheduler.py` 中的 cron 解析和 next-fire 计算函数，避免重复实现调度算法
+3. 两者共享 `sensenova_claw/kernel/scheduler/scheduler.py` 中的 cron 解析和 next-fire 计算函数，避免重复实现调度算法
 
 如果未来 ProactiveRuntime 的时间触发场景与 CronRuntime 高度重合，可以考虑将 CronRuntime 的调度引擎抽取为共享的 `SchedulerEngine`，两个 Runtime 各自使用。
 
@@ -212,7 +212,7 @@ ProactiveRuntime 在 `_spawn_session` 后启动 `asyncio.wait_for(timeout=max_du
 
 ## 事件类型
 
-新增以下事件类型到 `agentos/kernel/events/types.py`：
+新增以下事件类型到 `sensenova_claw/kernel/events/types.py`：
 
 ```python
 # Proactive 事件
@@ -304,7 +304,7 @@ EventEnvelope(
 在 proactive-agent 目录下定义 `PROACTIVE.yaml`：
 
 ```yaml
-# .agentos/agents/proactive-agent/PROACTIVE.yaml
+# .sensenova-claw/agents/proactive-agent/PROACTIVE.yaml
 jobs:
   - name: "每日邮件摘要"
     trigger:
@@ -330,7 +330,7 @@ jobs:
       channels: ["feishu"]
 ```
 
-启动时 ProactiveRuntime 从 `.agentos/agents/proactive-agent/PROACTIVE.yaml` 加载 job 定义。
+启动时 ProactiveRuntime 从 `.sensenova-claw/agents/proactive-agent/PROACTIVE.yaml` 加载 job 定义。
 
 ### 方式 2：对话式创建
 
@@ -421,20 +421,20 @@ Web dashboard 新增 "Proactive" 页面：
 ## 文件结构
 
 ```
-agentos/kernel/proactive/
+sensenova_claw/kernel/proactive/
   ├── __init__.py
   ├── models.py          # ProactiveJob, Trigger, Task, Safety 等数据模型
   ├── runtime.py         # ProactiveRuntime 主逻辑
   ├── triggers.py        # 触发器评估逻辑（时间/事件/条件）
   └── delivery.py        # 结果投递逻辑
 
-agentos/capabilities/tools/
+sensenova_claw/capabilities/tools/
   └── proactive_tools.py # create/list/manage proactive job 工具
 
-agentos/interfaces/http/
+sensenova_claw/interfaces/http/
   └── proactive_api.py   # REST API 端点
 
-.agentos/agents/proactive-agent/
+.sensenova-claw/agents/proactive-agent/
   ├── AGENTS.md
   ├── SYSTEM_PROMPT.md
   ├── USER.md

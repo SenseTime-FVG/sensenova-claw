@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>AgentOS</h1>
+  <h1>Sensenova-Claw</h1>
   <p><strong>基于事件驱动架构的 AI Agent 平台</strong></p>
   <p>
     <img src="https://img.shields.io/badge/python-≥3.12-blue" alt="Python">
@@ -64,34 +64,34 @@ ui.user_input → agent.step_started → llm.call_requested → llm.call_complet
 
 ### Option A: 一键安装脚本（推荐）
 
-脚本自动安装 Python、Node.js 等依赖，克隆仓库并注册全局 `agentos` 命令。
+脚本自动安装 Python、Node.js 等依赖，克隆仓库并注册全局 `sensenova-claw` 命令。
 
 **Linux / macOS:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
 ```
 
-安装完成后，运行 `agentos run` 启动服务，然后打开 http://localhost:3000 进行 LLM 等配置。
+安装完成后，运行 `sensenova-claw run` 启动服务，然后打开 http://localhost:3000 进行 LLM 等配置。
 
 > 详细说明见 [install/README.md](install/README.md)
 >
-> 如需验证某个发布分支或 tag，可在安装前指定 `AGENTOS_REPO_REF`，例如:
-> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.sh | AGENTOS_REPO_REF=v0.5.0 bash`
+> 如需验证某个发布分支或 tag，可在安装前指定 `SENSENOVA_CLAW_REPO_REF`，例如:
+> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_REPO_REF=v0.5.0 bash`
 
 ### Option B: 手动安装
 
 **环境要求**: Python 3.12+ · Node.js 18+ · Git
 
 ```bash
-git clone https://github.com/SenseTime-FVG/agentos.git
-cd agentos
+git clone https://github.com/SenseTime-FVG/sensenova-claw.git
+cd sensenova-claw
 
 # 安装依赖（会同时安装前端依赖、后端默认 Python 依赖和 WhatsApp bridge 依赖）
 npm install
@@ -107,7 +107,7 @@ cp config_example.yml config.yml
 
 ```bash
 # 一键安装方式
-agentos run
+sensenova-claw run
 
 # 手动安装方式
 npm run dev
@@ -126,8 +126,8 @@ npm run dev:server
 npm run dev:web
 
 # 启动 CLI 客户端（需后端已运行）
-agentos cli
-# 或: python3 -m agentos.app.cli.cli_client --port 8000
+sensenova-claw cli
+# 或: python3 -m sensenova-claw.app.cli.cli_client --port 8000
 ```
 
 **3. 发送第一条消息**
@@ -176,7 +176,7 @@ tools:
     max_results: 5
 ```
 
-**配置加载优先级**: 环境变量 > `.agentos/config.yaml` > `config.yml` > 默认值
+**配置加载优先级**: 环境变量 > `.sensenova-claw/config.yaml` > `config.yml` > 默认值
 
 ## 💬 Chat Channels
 
@@ -185,7 +185,7 @@ tools:
 | 渠道 | 说明 | 配置 |
 |------|------|------|
 | **Web** | Next.js 14 前端，WebSocket 实时通信 | 默认启用 |
-| **CLI** | 命令行交互客户端 | `python3 -m agentos.app.cli.cli_client` |
+| **CLI** | 命令行交互客户端 | `python3 -m sensenova-claw.app.cli.cli_client` |
 | **飞书** | 企业 IM 集成，支持私聊/群聊 | `config.yml` plugins.feishu |
 | **Telegram** | Telegram Bot Channel，支持私聊/群组消息接入 | `config.yml` plugins.telegram |
 | **企微** | 企业微信消息 Channel，支持私聊/群聊接入 | `config.yml` plugins.wecom |
@@ -264,7 +264,7 @@ plugins:
 plugins:
   whatsapp:
     enabled: true
-    auth_dir: "~/.agentos/data/plugins/whatsapp/auth"
+    auth_dir: "~/.sensenova-claw/data/plugins/whatsapp/auth"
     typing_indicator: "none"   # composing / none
     dm_policy: "open"          # 私聊策略: open / allowlist / disabled
     group_policy: "open"       # 群聊策略: open / allowlist / disabled
@@ -273,7 +273,7 @@ plugins:
     show_tool_progress: false
     bridge:
       command: "node"
-      entry: "agentos/adapters/plugins/whatsapp/bridge/src/index.mjs"
+      entry: "sensenova_claw/adapters/plugins/whatsapp/bridge/src/index.mjs"
       startup_timeout_seconds: 30
       send_timeout_seconds: 15
 ```
@@ -281,7 +281,7 @@ plugins:
 安装 sidecar 依赖（必需）：
 
 ```bash
-npm install --prefix agentos/adapters/plugins/whatsapp/bridge
+npm install --prefix sensenova_claw/adapters/plugins/whatsapp/bridge
 ```
 
 启动后通过web端(管理-Gateway-whatsapp)，点击`授权`进行扫码授权  
@@ -314,9 +314,9 @@ agent:
 <details>
 <summary><b>添加新 Provider（开发者指南）</b></summary>
 
-1. 在 `agentos/adapters/llm/providers/` 下创建 `xxx_provider.py`
+1. 在 `sensenova_claw/adapters/llm/providers/` 下创建 `xxx_provider.py`
 2. 继承 `LLMProvider` 基类，实现 `async def call()` 方法
-3. 在 `agentos/adapters/llm/factory.py` 的 `LLMFactory` 中注册
+3. 在 `sensenova_claw/adapters/llm/factory.py` 的 `LLMFactory` 中注册
 4. 在 `config.yml` 的 `llm_providers` 中添加配置
 
 </details>
@@ -407,7 +407,7 @@ arguments:
 **CLI 客户端**:
 
 ```bash
-python3 -m agentos.app.cli.cli_client [OPTIONS]
+python3 -m sensenova-claw.app.cli.cli_client [OPTIONS]
 
 Options:
   --host TEXT       服务地址（默认: localhost）
@@ -423,7 +423,7 @@ Options:
 ## 📁 Project Structure
 
 ```
-agentos/
+sensenova_claw/
 ├── kernel/              # 🧠 内核层
 │   ├── events/          #    事件总线（PublicEventBus, PrivateEventBus）
 │   ├── runtime/         #    运行时编排（Agent/LLM/Tool Worker）
@@ -476,7 +476,7 @@ python3 -m pytest tests/ -q -m "not slow"
 ./.venv/bin/python tests/e2e/run_ask_user_real_api.py --provider gemini --timeout 120
 
 # ask_user 前端回归脚本（需先安装 Playwright 浏览器与系统依赖）
-cd agentos/app/web && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright test e2e/ask-user.spec.ts --reporter=line
+cd sensenova_claw/app/web && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright test e2e/ask-user.spec.ts --reporter=line
 ```
 
 **测试体系**:
@@ -508,5 +508,5 @@ cd agentos/app/web && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright t
 ---
 
 <p align="center">
-  <sub>AgentOS is for educational, research, and technical exchange purposes.</sub>
+  <sub>Sensenova-Claw is for educational, research, and technical exchange purposes.</sub>
 </p>

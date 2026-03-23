@@ -7,8 +7,8 @@ import types
 
 import pytest
 
-from agentos.adapters.plugins.discord.config import DiscordConfig
-from agentos.adapters.plugins.discord.runtime import DiscordRuntime, build_discord_intents, format_discord_runtime_error
+from sensenova_claw.adapters.plugins.discord.config import DiscordConfig
+from sensenova_claw.adapters.plugins.discord.runtime import DiscordRuntime, build_discord_intents, format_discord_runtime_error
 
 
 class _FakeIntents:
@@ -49,7 +49,7 @@ def test_format_discord_runtime_error_falls_back_to_exception_text():
 
 def test_runtime_initial_status_is_idle():
     runtime = DiscordRuntime(DiscordConfig(enabled=True, bot_token="token"))
-    assert runtime._agentos_status["status"] == "idle"
+    assert runtime._sensenova_claw_status["status"] == "idle"
 
 
 @pytest.mark.asyncio
@@ -79,13 +79,13 @@ async def test_runtime_start_returns_after_launching_connect_task(monkeypatch):
         Thread = type("Thread", (), {})
         DMChannel = type("DMChannel", (), {})
 
-    monkeypatch.setattr("agentos.adapters.plugins.discord.runtime.importlib.import_module", lambda _: _FakeDiscordModule)
+    monkeypatch.setattr("sensenova_claw.adapters.plugins.discord.runtime.importlib.import_module", lambda _: _FakeDiscordModule)
 
     runtime = DiscordRuntime(DiscordConfig(enabled=True, bot_token="token"))
     await runtime.start()
 
     assert events == ["login:token"]
-    assert runtime._agentos_status["status"] == "connecting"
+    assert runtime._sensenova_claw_status["status"] == "connecting"
     assert runtime._connect_task is not None
     assert runtime._connect_task.done() is False
 

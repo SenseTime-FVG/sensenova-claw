@@ -1,6 +1,6 @@
 # 开发环境搭建
 
-本文档介绍如何搭建 AgentOS 的本地开发环境。
+本文档介绍如何搭建 Sensenova-Claw 的本地开发环境。
 
 ---
 
@@ -23,7 +23,7 @@
 
 ```bash
 git clone <repo-url>
-cd agentos
+cd sensenova-claw
 ```
 
 ### 2. 安装 Python 依赖
@@ -44,7 +44,7 @@ uv sync --extra dev
 ### 3. 安装前端依赖
 
 ```bash
-cd agentos/app/web
+cd sensenova_claw/app/web
 npm install
 cd -
 ```
@@ -103,7 +103,7 @@ tools:
 llm:
   providers:
     openai:
-      api_key: ${secret:agentos/llm.providers.openai.api_key}
+      api_key: ${secret:sensenova_claw/llm.providers.openai.api_key}
 ```
 
 配置加载优先级：**环境变量覆盖值 > config.yml 中声明的来源 > 默认值**
@@ -111,7 +111,7 @@ llm:
 如果你之前已经把 API Key 明文写进了 `config.yml`，可以在接入 keyring 后执行：
 
 ```bash
-agentos migrate-secrets
+sensenova-claw migrate-secrets
 ```
 
 它会把已登记的敏感字段迁移到系统 keyring，并把 `config.yml` 改写为 `${secret:...}` 引用。
@@ -137,7 +137,7 @@ npm run dev:server
 或直接使用 uvicorn：
 
 ```bash
-python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8000
+python3 -m uvicorn sensenova_claw.app.gateway.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 后端启动后：
@@ -159,7 +159,7 @@ npm run dev:web
 TUI 客户端需要后端已运行：
 
 ```bash
-python3 -m agentos.app.cli.cli_client --port 8000
+python3 -m sensenova-claw.app.cli.cli_client --port 8000
 ```
 
 ---
@@ -167,7 +167,7 @@ python3 -m agentos.app.cli.cli_client --port 8000
 ## 项目结构
 
 ```
-agentos/
+sensenova_claw/
   kernel/                        # 内核层
     events/                      #   事件系统
       bus.py                     #     PublicEventBus
@@ -269,7 +269,7 @@ npx playwright install --with-deps
 如果 8000 端口被占用，可以指定其他端口：
 
 ```bash
-python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8001
+python3 -m uvicorn sensenova_claw.app.gateway.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 ### Mock 模式

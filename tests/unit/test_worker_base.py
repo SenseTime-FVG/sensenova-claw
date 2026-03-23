@@ -6,9 +6,9 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from agentos.kernel.events.bus import PublicEventBus, PrivateEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.runtime.workers.base import SessionWorker
+from sensenova_claw.kernel.events.bus import PublicEventBus, PrivateEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.runtime.workers.base import SessionWorker
 
 
 class DummyWorker(SessionWorker):

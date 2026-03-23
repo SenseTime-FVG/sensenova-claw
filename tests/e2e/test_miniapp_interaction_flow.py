@@ -7,30 +7,30 @@ from pathlib import Path
 
 import pytest
 
-from agentos.adapters.llm.factory import LLMFactory
-from agentos.adapters.storage.repository import Repository
-from agentos.capabilities.agents.registry import AgentRegistry
-from agentos.capabilities.miniapps.service import MiniAppService
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.persister import EventPersister
-from agentos.kernel.events.router import BusRouter
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED
-from agentos.kernel.runtime.agent_runtime import AgentRuntime
-from agentos.kernel.runtime.context_builder import ContextBuilder
-from agentos.kernel.runtime.llm_runtime import LLMRuntime
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.kernel.runtime.state import SessionStateStore
-from agentos.kernel.runtime.tool_runtime import ToolRuntime
-from agentos.platform.config.config import config
+from sensenova_claw.adapters.llm.factory import LLMFactory
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.capabilities.miniapps.service import MiniAppService
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.persister import EventPersister
+from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED
+from sensenova_claw.kernel.runtime.agent_runtime import AgentRuntime
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.kernel.runtime.llm_runtime import LLMRuntime
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.kernel.runtime.state import SessionStateStore
+from sensenova_claw.kernel.runtime.tool_runtime import ToolRuntime
+from sensenova_claw.platform.config.config import config
 
 
 @pytest.mark.asyncio
 async def test_miniapp_interaction_end_to_end(tmp_path: Path) -> None:
-    agentos_home = tmp_path / "agentos_home"
-    db_path = tmp_path / "agentos.db"
+    sensenova_claw_home = tmp_path / "sensenova_claw_home"
+    db_path = tmp_path / "sensenova-claw.db"
 
     original_config = copy.deepcopy(config.data)
     config.data["llm"]["default_model"] = "mock"
@@ -38,7 +38,7 @@ async def test_miniapp_interaction_end_to_end(tmp_path: Path) -> None:
     for agent_cfg in config.data.get("agents", {}).values():
         if isinstance(agent_cfg, dict):
             agent_cfg.pop("system_prompt", None)
-    config.data["system"]["agentos_home"] = str(agentos_home)
+    config.data["system"]["sensenova_claw_home"] = str(sensenova_claw_home)
     config.data["system"]["database_path"] = str(db_path)
     config.data["system"]["log_level"] = "DEBUG"
 
@@ -52,9 +52,9 @@ async def test_miniapp_interaction_end_to_end(tmp_path: Path) -> None:
 
     tool_registry = ToolRegistry()
     state_store = SessionStateStore()
-    agent_registry = AgentRegistry(agentos_home=agentos_home)
+    agent_registry = AgentRegistry(sensenova_claw_home=sensenova_claw_home)
     agent_registry.load_from_config(config.data)
-    context_builder = ContextBuilder(tool_registry=tool_registry, agentos_home=str(agentos_home))
+    context_builder = ContextBuilder(tool_registry=tool_registry, sensenova_claw_home=str(sensenova_claw_home))
     context_builder.agent_registry = agent_registry
 
     agent_runtime = AgentRuntime(
@@ -70,7 +70,7 @@ async def test_miniapp_interaction_end_to_end(tmp_path: Path) -> None:
 
     gateway = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
     miniapp_service = MiniAppService(
-        agentos_home=agentos_home,
+        sensenova_claw_home=sensenova_claw_home,
         config=config,
         agent_registry=agent_registry,
         gateway=gateway,

@@ -20,9 +20,9 @@ from typing import Any
 
 import pytest
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     CRON_DELIVERY_REQUESTED,
     ERROR_RAISED,
@@ -30,10 +30,10 @@ from agentos.kernel.events.types import (
     USER_QUESTION_ANSWERED,
     USER_QUESTION_ASKED,
 )
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.adapters.plugins.feishu.config import FeishuConfig
-from agentos.adapters.plugins.feishu.channel import FeishuChannel, FeishuSessionMeta
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.adapters.plugins.feishu.config import FeishuConfig
+from sensenova_claw.adapters.plugins.feishu.channel import FeishuChannel, FeishuSessionMeta
 
 
 # ---- 辅助：轻量 PluginApi 替代品（不使用 mock） ----

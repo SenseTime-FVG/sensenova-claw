@@ -1,8 +1,8 @@
 """B02/B03: PublicEventBus 发布/订阅 + PrivateEventBus 会话隔离"""
 import asyncio
 import pytest
-from agentos.kernel.events.bus import PublicEventBus, PrivateEventBus
-from agentos.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.bus import PublicEventBus, PrivateEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
 
 pytestmark = pytest.mark.asyncio
 

@@ -1,9 +1,9 @@
 """B08: ContextBuilder"""
-from agentos.kernel.runtime.context_builder import ContextBuilder
-from agentos.capabilities.agents.config import AgentConfig
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.capabilities.skills.registry import SkillRegistry, Skill
-from agentos.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.capabilities.skills.registry import SkillRegistry, Skill
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
 from pathlib import Path
 
 

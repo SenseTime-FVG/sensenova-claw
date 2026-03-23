@@ -1,6 +1,6 @@
 # WebSocket 协议
 
-AgentOS 通过 WebSocket 实现前端与后端的实时双向通信。所有对话交互、事件推送均通过 WebSocket 完成。
+Sensenova-Claw 通过 WebSocket 实现前端与后端的实时双向通信。所有对话交互、事件推送均通过 WebSocket 完成。
 
 ---
 

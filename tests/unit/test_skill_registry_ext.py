@@ -2,7 +2,7 @@
 import json
 import pytest
 from pathlib import Path
-from agentos.capabilities.skills.registry import Skill, SkillRegistry
+from sensenova_claw.capabilities.skills.registry import Skill, SkillRegistry
 
 
 @pytest.fixture

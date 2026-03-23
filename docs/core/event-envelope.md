@@ -2,7 +2,7 @@
 
 ## 概述
 
-`EventEnvelope` 是 AgentOS 中最核心的数据结构。系统中所有的通信都通过 EventEnvelope 进行，它封装了事件的完整元信息和业务数据。
+`EventEnvelope` 是 Sensenova-Claw 中最核心的数据结构。系统中所有的通信都通过 EventEnvelope 进行，它封装了事件的完整元信息和业务数据。
 
 ---
 

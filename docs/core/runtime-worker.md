@@ -2,7 +2,7 @@
 
 ## 概述
 
-AgentOS 采用 **Runtime-Worker 二层设计**：Runtime 是全局单例，负责管理配置和资源；Worker 是每 session 一个实例，负责实际的事件处理逻辑。
+Sensenova-Claw 采用 **Runtime-Worker 二层设计**：Runtime 是全局单例，负责管理配置和资源；Worker 是每 session 一个实例，负责实际的事件处理逻辑。
 
 ```
 Runtime（全局单例）

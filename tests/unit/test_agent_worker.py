@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 
-from agentos.adapters.storage.repository import Repository
-from agentos.capabilities.agents.config import AgentConfig
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.kernel.events.bus import PublicEventBus, PrivateEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.kernel.events.bus import PublicEventBus, PrivateEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     AGENT_MESSAGE_COMPLETED,
     AGENT_MESSAGE_FAILED,
     AGENT_STEP_COMPLETED,
@@ -28,10 +28,10 @@ from agentos.kernel.events.types import (
     USER_INPUT,
     USER_TURN_CANCEL_REQUESTED,
 )
-from agentos.kernel.runtime.context_builder import ContextBuilder
-from agentos.kernel.runtime.state import SessionStateStore, TurnState
-from agentos.kernel.runtime.workers.agent_worker import AgentSessionWorker
-from agentos.platform.config.config import config
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.kernel.runtime.state import SessionStateStore, TurnState
+from sensenova_claw.kernel.runtime.workers.agent_worker import AgentSessionWorker
+from sensenova_claw.platform.config.config import config
 
 
 # ── 真实 AgentRuntime 替身 ────────────────────────────────
@@ -127,7 +127,7 @@ class TestConfigHelpers:
     """配置读取辅助方法测试"""
 
     def test_get_provider_from_agent_config(self, private_bus, runtime):
-        # 显式固定 config，避免受本机 ~/.agentos/config.yml 覆盖影响。
+        # 显式固定 config，避免受本机 ~/.sensenova-claw/config.yml 覆盖影响。
         original = copy.deepcopy(config.data)
         try:
             config.data["llm"]["models"]["claude-sonnet"] = {
@@ -476,7 +476,7 @@ class TestHandleLLMCompleted:
             return task
 
         monkeypatch.setattr(
-            "agentos.kernel.runtime.workers.agent_worker.asyncio.create_task",
+            "sensenova_claw.kernel.runtime.workers.agent_worker.asyncio.create_task",
             capture_task,
         )
 

@@ -8,13 +8,13 @@ import pytest
 
 telegram = pytest.importorskip("telegram", reason="python-telegram-bot not installed")
 
-from agentos.adapters.plugins.telegram.channel import TelegramChannel
-from agentos.adapters.plugins.telegram.config import TelegramConfig
-from agentos.adapters.plugins.telegram.models import TelegramInboundMessage
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.adapters.plugins.telegram.channel import TelegramChannel
+from sensenova_claw.adapters.plugins.telegram.config import TelegramConfig
+from sensenova_claw.adapters.plugins.telegram.models import TelegramInboundMessage
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
     TOOL_CALL_STARTED,
@@ -22,7 +22,7 @@ from agentos.kernel.events.types import (
     USER_QUESTION_ANSWERED,
     USER_QUESTION_ASKED,
 )
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 class _SimplePluginApi:
@@ -38,7 +38,7 @@ class _FakeTelegramRuntime:
         self.started = False
         self.stopped = False
         self.handler = None
-        self.bot_username = "agentos_bot"
+        self.bot_username = "sensenova_claw_bot"
         self.sent_messages: list[dict] = []
 
     def set_message_handler(self, handler) -> None:
@@ -148,7 +148,7 @@ class TestShouldRespond:
         )
         assert channel._should_respond(
             TelegramInboundMessage(
-                text="@agentos_bot hello",
+                text="@sensenova_claw_bot hello",
                 chat_id="-100123",
                 chat_type="group",
                 sender_id="1001",
@@ -274,7 +274,7 @@ class TestInbound:
 
         await channel.handle_incoming_message(
             TelegramInboundMessage(
-                text="@agentos_bot hello",
+                text="@sensenova_claw_bot hello",
                 chat_id="-100123",
                 chat_type="group",
                 sender_id="1001",

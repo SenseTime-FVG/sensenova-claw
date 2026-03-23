@@ -18,11 +18,11 @@
 
 ### 2. Setup 后跳转
 
-**文件**: `agentos/app/web/app/setup/page.tsx`
+**文件**: `sensenova_claw/app/web/app/setup/page.tsx`
 
 将 `router.push('/')` 改为 `router.push('/chat?agent=system-admin')`（两处：完成配置按钮和跳过按钮）。
 
-**文件**: `agentos/app/web/app/chat/page.tsx`
+**文件**: `sensenova_claw/app/web/app/chat/page.tsx`
 
 当前 chat 页面不读取 `?agent=` query param。需要添加：
 - 读取 `searchParams.get('agent')`
@@ -34,7 +34,7 @@
 
 **新增端点**: `GET /api/config/required-check`
 
-**文件**: `agentos/interfaces/http/config_api.py`
+**文件**: `sensenova_claw/interfaces/http/config_api.py`
 
 返回各必配项状态：
 
@@ -57,7 +57,7 @@
 
 #### 3.2 前端自动消息
 
-**文件**: `agentos/app/web/app/chat/page.tsx`
+**文件**: `sensenova_claw/app/web/app/chat/page.tsx`
 
 当 `selectedAgentId === 'system-admin'` 且创建新 session 时：
 1. 调用 `GET /api/config/required-check`
@@ -79,6 +79,6 @@
 | 操作 | 文件 |
 |------|------|
 | 修改 | `config_example.yml` — system-admin name |
-| 修改 | `agentos/app/web/app/setup/page.tsx` — 跳转目标 |
-| 修改 | `agentos/app/web/app/chat/page.tsx` — 读取 agent query param + 必配清单检查 |
-| 修改 | `agentos/interfaces/http/config_api.py` — 新增 required-check 端点 |
+| 修改 | `sensenova_claw/app/web/app/setup/page.tsx` — 跳转目标 |
+| 修改 | `sensenova_claw/app/web/app/chat/page.tsx` — 读取 agent query param + 必配清单检查 |
+| 修改 | `sensenova_claw/interfaces/http/config_api.py` — 新增 required-check 端点 |

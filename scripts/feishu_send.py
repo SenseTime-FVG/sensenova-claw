@@ -72,7 +72,7 @@ def list_chats(token: str):
     print(f"\n{'='*60}")
     print("使用以下命令发送测试消息:")
     if items:
-        print(f'  python {sys.argv[0]} send {items[0]["chat_id"]} "Hello from AgentOS!"')
+        print(f'  python {sys.argv[0]} send {items[0]["chat_id"]} "Hello from Sensenova-Claw!"')
 
 
 def send_message(token: str, chat_id: str, text: str):

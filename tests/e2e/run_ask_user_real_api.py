@@ -13,9 +13,9 @@ import time
 import uuid
 from pathlib import Path
 
-from agentos.platform.config.config import config
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.platform.config.config import config
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
     USER_INPUT,

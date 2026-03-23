@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.interfaces.http.files import router
+from sensenova_claw.interfaces.http.files import router
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def app(temp_dir):
     test_app = FastAPI()
     test_app.include_router(router)
     test_app.state.config = {}
-    test_app.state.agentos_home = temp_dir
+    test_app.state.sensenova_claw_home = temp_dir
     return test_app
 
 

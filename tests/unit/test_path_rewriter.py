@@ -3,7 +3,7 @@
 import platform
 import tempfile
 from pathlib import Path
-from agentos.kernel.runtime.path_rewriter import rewrite_relative_paths, _looks_like_relative_file_path
+from sensenova_claw.kernel.runtime.path_rewriter import rewrite_relative_paths, _looks_like_relative_file_path
 
 
 class TestLooksLikeRelativeFilePath:
@@ -23,7 +23,7 @@ class TestLooksLikeRelativeFilePath:
         assert _looks_like_relative_file_path("C:/Users/test/file.txt") is False
 
     def test_tilde_path(self):
-        assert _looks_like_relative_file_path("~/.agentos/config.yml") is False
+        assert _looks_like_relative_file_path("~/.sensenova-claw/config.yml") is False
 
     def test_url(self):
         assert _looks_like_relative_file_path("https://example.com/file.txt") is False
@@ -49,7 +49,7 @@ class TestRewriteRelativePaths:
 
     @staticmethod
     def _workdir() -> str:
-        return str(Path(tempfile.gettempdir()).resolve() / "agentos_test_workdir")
+        return str(Path(tempfile.gettempdir()).resolve() / "sensenova_claw_test_workdir")
 
     def test_rewrites_simple_file(self):
         wd = self._workdir()
@@ -78,9 +78,9 @@ class TestRewriteRelativePaths:
 
     def test_preserves_tilde_path(self):
         wd = self._workdir()
-        text = "配置在 `~/.agentos/config.yml`"
+        text = "配置在 `~/.sensenova-claw/config.yml`"
         result = rewrite_relative_paths(text, wd)
-        assert "`~/.agentos/config.yml`" in result
+        assert "`~/.sensenova-claw/config.yml`" in result
 
     def test_preserves_url(self):
         wd = self._workdir()

@@ -9,12 +9,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.types import NOTIFICATION_PUSH, NOTIFICATION_SESSION
-from agentos.kernel.notification.models import Notification
-from agentos.kernel.notification.providers.native import NativeNotificationProvider
-from agentos.kernel.notification.service import NotificationService
-from agentos.platform.config.config import config
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.types import NOTIFICATION_PUSH, NOTIFICATION_SESSION
+from sensenova_claw.kernel.notification.models import Notification
+from sensenova_claw.kernel.notification.providers.native import NativeNotificationProvider
+from sensenova_claw.kernel.notification.service import NotificationService
+from sensenova_claw.platform.config.config import config
 
 
 async def _wait_for_event(bus: PublicEventBus):
@@ -133,7 +133,7 @@ def test_native_notification_provider_selects_platform_command(
         calls.append(list(args))
         return SimpleNamespace(returncode=0)
 
-    from agentos.kernel.notification.providers import native as native_module
+    from sensenova_claw.kernel.notification.providers import native as native_module
 
     monkeypatch.setattr(native_module.sys, "platform", platform_name)
     monkeypatch.setattr(native_module.shutil, "which", fake_which)
@@ -160,7 +160,7 @@ def test_native_notification_provider_windows_script_registers_shortcut(monkeypa
         calls.append(list(args))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    from agentos.kernel.notification.providers import native as native_module
+    from sensenova_claw.kernel.notification.providers import native as native_module
 
     monkeypatch.setattr(native_module.sys, "platform", "win32")
     monkeypatch.setattr(native_module.shutil, "which", fake_which)
@@ -179,7 +179,7 @@ def test_native_notification_provider_windows_script_registers_shortcut(monkeypa
 
     assert native_module._WINDOWS_TOAST_APP_ID in script
     assert native_module._WINDOWS_TOAST_SHORTCUT_NAME in script
-    assert "AgentOSShortcutInstaller" in script
+    assert "Sensenova-ClawShortcutInstaller" in script
     assert "CreateToastNotifier($appId).Show($toast)" in script
     assert "<text>Cron &amp; $done</text>" in script
     assert "<text>body with &lt;xml&gt; and 'quote'</text>" in script
@@ -192,7 +192,7 @@ def test_native_notification_provider_returns_false_when_command_fails(monkeypat
     def fake_run(args, **kwargs):
         return SimpleNamespace(returncode=1, stdout="", stderr="boom")
 
-    from agentos.kernel.notification.providers import native as native_module
+    from sensenova_claw.kernel.notification.providers import native as native_module
 
     monkeypatch.setattr(native_module.sys, "platform", "win32")
     monkeypatch.setattr(native_module.shutil, "which", fake_which)

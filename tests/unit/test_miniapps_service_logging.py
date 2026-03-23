@@ -1,4 +1,4 @@
-from agentos.capabilities.miniapps.service import _extract_acp_update_text, _format_acp_update_log_message
+from sensenova_claw.capabilities.miniapps.service import _extract_acp_update_text, _format_acp_update_log_message
 
 
 def test_extract_acp_update_text_prefers_title_for_tool_call() -> None:

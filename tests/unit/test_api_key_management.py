@@ -8,12 +8,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.interfaces.http.tools import router, VALIDATORS
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.platform.config.config import Config
-from agentos.platform.config.config_manager import ConfigManager
-from agentos.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.interfaces.http.tools import router, VALIDATORS
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.config.config_manager import ConfigManager
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def app(tmp_path):
     config_manager = ConfigManager(config=cfg, event_bus=bus, secret_store=secret_store)
     app.state.config = cfg
     app.state.tool_registry = ToolRegistry()
-    app.state.agentos_home = str(tmp_path)
+    app.state.sensenova_claw_home = str(tmp_path)
     app.state.secret_store = secret_store
     app.state.config_manager = config_manager
     return app
@@ -80,10 +80,10 @@ def test_put_api_keys_persists_to_config(client, app):
     assert response.status_code == 200
 
     written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
-    assert written["tools"]["brave_search"]["api_key"] == "${secret:agentos/tools.brave_search.api_key}"
-    assert written["tools"]["tavily_search"]["api_key"] == "${secret:agentos/tools.tavily_search.api_key}"
-    assert app.state.secret_store.get("agentos/tools.brave_search.api_key") == "BSA-new-key-1234"
-    assert app.state.secret_store.get("agentos/tools.tavily_search.api_key") == "tvly-new-key-9999"
+    assert written["tools"]["brave_search"]["api_key"] == "${secret:sensenova_claw/tools.brave_search.api_key}"
+    assert written["tools"]["tavily_search"]["api_key"] == "${secret:sensenova_claw/tools.tavily_search.api_key}"
+    assert app.state.secret_store.get("sensenova_claw/tools.brave_search.api_key") == "BSA-new-key-1234"
+    assert app.state.secret_store.get("sensenova_claw/tools.tavily_search.api_key") == "tvly-new-key-9999"
 
     data = response.json()["api_keys"]
     assert data["brave_search"]["configured"] is True

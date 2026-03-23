@@ -16,7 +16,7 @@ def config_file(tmp_path):
 
 @pytest.mark.asyncio
 async def test_watcher_detects_external_change(config_file):
-    from agentos.platform.config.config_file_watcher import ConfigFileWatcher
+    from sensenova_claw.platform.config.config_file_watcher import ConfigFileWatcher
     callback = AsyncMock()
     loop = asyncio.get_running_loop()
     watcher = ConfigFileWatcher(
@@ -36,7 +36,7 @@ async def test_watcher_detects_external_change(config_file):
 
 @pytest.mark.asyncio
 async def test_watcher_skips_self_write(config_file):
-    from agentos.platform.config.config_file_watcher import ConfigFileWatcher
+    from sensenova_claw.platform.config.config_file_watcher import ConfigFileWatcher
     content = yaml.dump({"llm": {"default_model": "gpt-4o"}})
     content_hash = hashlib.md5(content.encode()).hexdigest()
     callback = AsyncMock()
@@ -57,7 +57,7 @@ async def test_watcher_skips_self_write(config_file):
 
 @pytest.mark.asyncio
 async def test_watcher_handles_invalid_yaml(config_file):
-    from agentos.platform.config.config_file_watcher import ConfigFileWatcher
+    from sensenova_claw.platform.config.config_file_watcher import ConfigFileWatcher
     callback = AsyncMock()
     loop = asyncio.get_running_loop()
     watcher = ConfigFileWatcher(

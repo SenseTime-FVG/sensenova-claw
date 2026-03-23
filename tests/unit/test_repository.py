@@ -1,7 +1,7 @@
 """B05: Repository CRUD"""
 import pytest
 
-from agentos.kernel.runtime.message_record import MessageRecord
+from sensenova_claw.kernel.runtime.message_record import MessageRecord
 
 pytestmark = pytest.mark.asyncio
 

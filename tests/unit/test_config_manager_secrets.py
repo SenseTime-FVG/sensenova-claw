@@ -2,10 +2,10 @@
 import pytest
 import yaml
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.platform.config.config import Config
-from agentos.platform.config.config_manager import ConfigManager
-from agentos.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.config.config_manager import ConfigManager
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
 
 
 @pytest.mark.asyncio
@@ -21,9 +21,9 @@ async def test_update_writes_secret_ref_for_sensitive_path(tmp_path):
 
     written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert written["tools"]["serper_search"]["api_key"] == (
-        "${secret:agentos/tools.serper_search.api_key}"
+        "${secret:sensenova_claw/tools.serper_search.api_key}"
     )
-    assert store.get("agentos/tools.serper_search.api_key") == "sk-secret-123"
+    assert store.get("sensenova_claw/tools.serper_search.api_key") == "sk-secret-123"
 
 
 @pytest.mark.asyncio
@@ -45,11 +45,11 @@ async def test_update_writes_plain_value_for_non_secret_path(tmp_path):
 async def test_update_deletes_secret_when_value_is_empty(tmp_path):
     config_path = tmp_path / "config.yml"
     config_path.write_text(
-        "tools:\n  serper_search:\n    api_key: ${secret:agentos/tools.serper_search.api_key}\n",
+        "tools:\n  serper_search:\n    api_key: ${secret:sensenova_claw/tools.serper_search.api_key}\n",
         encoding="utf-8",
     )
     store = InMemorySecretStore()
-    store.set("agentos/tools.serper_search.api_key", "sk-old")
+    store.set("sensenova_claw/tools.serper_search.api_key", "sk-old")
     cfg = Config(config_path=config_path, secret_store=store)
     bus = PublicEventBus()
     manager = ConfigManager(config=cfg, event_bus=bus, secret_store=store)
@@ -58,4 +58,4 @@ async def test_update_deletes_secret_when_value_is_empty(tmp_path):
 
     written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert written["tools"]["serper_search"]["api_key"] == ""
-    assert store.get("agentos/tools.serper_search.api_key") is None
+    assert store.get("sensenova_claw/tools.serper_search.api_key") is None
