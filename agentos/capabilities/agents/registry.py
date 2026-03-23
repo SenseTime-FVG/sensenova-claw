@@ -58,9 +58,8 @@ class AgentRegistry:
         if not source:
             return []
         if not source.can_send_message_to:
-            # 空列表 = 可以向所有其他已启用 Agent 发送消息
-            return [a for a in self._agents.values()
-                    if a.id != from_agent_id and a.enabled]
+            # 空列表 = 可以向所有已启用 Agent 发送消息（含自身，支持自我委派）
+            return [a for a in self._agents.values() if a.enabled]
         return [self._agents[aid] for aid in source.can_send_message_to
                 if aid in self._agents and self._agents[aid].enabled]
 
