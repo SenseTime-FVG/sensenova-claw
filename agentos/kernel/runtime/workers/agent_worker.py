@@ -81,6 +81,13 @@ class AgentSessionWorker(SessionWorker):
             return self.agent_config.temperature
         return config.get("agent.temperature", 0.2)
 
+    def _get_max_tokens(self) -> int:
+        """获取 max_output_tokens：agent 级别覆盖 model 级别"""
+        if self.agent_config and self.agent_config.max_tokens:
+            return self.agent_config.max_tokens
+        model_key = self._get_model_key()
+        return config.get_model_max_output_tokens(model_key)
+
     def _get_extra_body(self) -> dict:
         """获取 extra_body：agent 级别覆盖 model 级别"""
         model_key = self._get_model_key()
@@ -296,6 +303,7 @@ class AgentSessionWorker(SessionWorker):
                     "messages": messages,
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
+                    "max_tokens": self._get_max_tokens(),
                     "extra_body": self._get_extra_body(),
                 },
             )
@@ -493,6 +501,7 @@ class AgentSessionWorker(SessionWorker):
                     "messages": state.messages,
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
+                    "max_tokens": self._get_max_tokens(),
                     "extra_body": self._get_extra_body(),
                 },
             )

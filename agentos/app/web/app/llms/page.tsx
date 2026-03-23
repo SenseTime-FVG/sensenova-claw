@@ -25,6 +25,7 @@ interface ModelConfig {
   provider: string;
   model_id: string;
   timeout: number;
+  max_tokens: number;
   max_output_tokens: number;
 }
 
@@ -118,6 +119,7 @@ export default function LlmsPage() {
         provider: draft.provider,
         model_id: draft.model_id,
         timeout: draft.timeout,
+        max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
       },
     ]));
@@ -362,7 +364,8 @@ export default function LlmsPage() {
         provider: providerName,
         model_id: '',
         timeout: 60,
-        max_output_tokens: 8192,
+        max_tokens: 128000,
+        max_output_tokens: 16384,
         name: nextName,
       };
     if (editingAll && globalDraft) {
@@ -593,6 +596,7 @@ export default function LlmsPage() {
         provider: draft.provider,
         model_id: draft.model_id,
         timeout: draft.timeout,
+        max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
       }),
     });
@@ -951,12 +955,20 @@ export default function LlmsPage() {
                                 onChange={(value) => updateModelField(modelName, 'timeout', parseInt(value, 10) || 60)}
                               />
                               <FieldInput
+                                label="Max Tokens"
+                                type="number"
+                                value={String(getModelDraft(modelName).max_tokens || 128000)}
+                                dataTestId={`llm-max-tokens-input-${modelName}`}
+                                disabled={!isModelEditable(modelName)}
+                                onChange={(value) => updateModelField(modelName, 'max_tokens', parseInt(value, 10) || 128000)}
+                              />
+                              <FieldInput
                                 label="Max Output Tokens"
                                 type="number"
-                                value={String(getModelDraft(modelName).max_output_tokens || 8192)}
+                                value={String(getModelDraft(modelName).max_output_tokens || 16384)}
                                 dataTestId={`llm-max-output-tokens-input-${modelName}`}
                                 disabled={!isModelEditable(modelName)}
-                                onChange={(value) => updateModelField(modelName, 'max_output_tokens', parseInt(value, 10) || 8192)}
+                                onChange={(value) => updateModelField(modelName, 'max_output_tokens', parseInt(value, 10) || 16384)}
                               />
                             </div>
                             <div className="flex items-start justify-end md:justify-center">
@@ -1140,7 +1152,8 @@ function normalizeModels(input: Record<string, unknown>): Record<string, ModelCo
           provider: String(model.provider || ''),
           model_id: String(model.model_id || ''),
           timeout: Number(model.timeout || 60),
-          max_output_tokens: Number(model.max_output_tokens || 8192),
+          max_tokens: Number(model.max_tokens || 128000),
+          max_output_tokens: Number(model.max_output_tokens || 16384),
         },
       ];
     }),
@@ -1191,6 +1204,7 @@ function buildModelPayloadsFromDrafts(models: Record<string, ModelDraft>): Recor
         provider: draft.provider,
         model_id: draft.model_id,
         timeout: draft.timeout,
+        max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
       },
     ]),
