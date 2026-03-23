@@ -803,3 +803,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 前端把普通消息数组重构成 union item（chat/tool）后，像 `messages.length` 这种旧变量名很容易残留并只在运行期暴露；这类重构完成后要优先跑一次真实浏览器回归，而不只看 TypeScript 静态检查。
+
+### 2026-03-23 Mini-App 悬浮工作区布局补充
+
+成功经验：
+- 对“主舞台优先”的 workspace 页面，最稳的实现不是在现有右栏上加收起逻辑，而是明确拆成两种布局态：未 pin 时只有中间主舞台，聊天窗作为绝对定位浮窗；pin 后再切回 `ResizablePanelGroup` 的固定右栏。
+- 浮动 tabs 和信息卡片若覆盖在预览上层，容器必须先 `pointer-events-none`，再让真实卡片恢复 `pointer-events-auto`；否则即使视觉上透明，也会把 iframe 内点击全部挡住。
+- `workspace` 页签下的浮动信息卡片更适合放在舞台底部，顶部只保留轻量 tabs；否则用户最容易点击到的首屏按钮区域会被状态卡片压住。
+- Playwright 覆盖这类交互时，建议把“默认悬浮按钮 -> 展开浮窗 -> pin 成右栏 -> 继续操作 preview”串成同一条场景，这样最容易发现布局切换后的真实遮挡问题。
+
+### 2026-03-23 Mini-App 浮动按钮显隐补充
+
+成功经验：
+- 这类悬浮页签不应强行维持“始终有一个选中项”；把状态从 `WorkspaceTab` 放宽到 `WorkspaceTab | null`，再用统一 `toggleOverlayTab()` 处理“点击当前按钮即收起”，实现最直接也最不容易漏分支。
+- Playwright 对显隐切换最好直接断言 `toBeHidden()`，这样能发现“视觉上像收起了，但其实仍在页面上拦截事件”的问题。

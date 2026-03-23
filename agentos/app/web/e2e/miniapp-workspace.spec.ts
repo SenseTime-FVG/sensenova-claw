@@ -419,6 +419,33 @@ test('mini-app 工作区应在构建期转发 builder 消息并按 local/server/
   await page.getByRole('button', { name: '验证 Token' }).click();
   await page.goto('/features/research-hub');
 
+  await expect(page.getByTestId('workspace-floating-tabs')).toBeVisible();
+  await expect(page.getByTestId('workspace-overview-panel')).toBeVisible();
+  await expect(page.getByTestId('workspace-chat-fab')).toBeVisible();
+  await page.getByTestId('workspace-tab-workspace').click();
+  await expect(page.getByTestId('workspace-overview-panel')).toBeHidden();
+  await page.getByTestId('workspace-tab-workspace').click();
+  await expect(page.getByTestId('workspace-overview-panel')).toBeVisible();
+
+  await page.getByTestId('workspace-tab-runs').click();
+  await expect(page.getByTestId('workspace-runs-panel')).toBeVisible();
+  await page.getByTestId('workspace-tab-runs').click();
+  await expect(page.getByTestId('workspace-runs-panel')).toBeHidden();
+  await page.getByTestId('workspace-tab-runs').click();
+  await expect(page.getByTestId('workspace-runs-panel')).toBeVisible();
+
+  await page.getByTestId('workspace-tab-details').click();
+  await expect(page.getByTestId('workspace-details-panel')).toBeVisible();
+  await page.getByTestId('workspace-tab-details').click();
+  await expect(page.getByTestId('workspace-details-panel')).toBeHidden();
+  await page.getByTestId('workspace-tab-details').click();
+  await expect(page.getByTestId('workspace-details-panel')).toBeVisible();
+
+  await page.getByTestId('workspace-tab-workspace').click();
+  await expect(page.getByTestId('workspace-overview-panel')).toBeVisible();
+
+  await page.getByTestId('workspace-chat-fab').click();
+  await expect(page.getByTestId('workspace-chat-floating-panel')).toBeVisible();
   await expect(page.getByText('正在转发当前构建任务的 builder 消息...')).toBeVisible();
   await expect(page.getByText('Research Hub 构建消息流')).toBeVisible();
   await expect(page.getByText('Build a research workspace')).toBeVisible();
@@ -428,6 +455,8 @@ test('mini-app 工作区应在构建期转发 builder 消息并按 local/server/
 
   await page.getByTestId('assistant-think-toggle').first().click();
   await expect(page.getByTestId('assistant-think-content').first()).toContainText(/Inspect\s*files/);
+  await page.getByLabel('固定聊天窗口').click();
+  await expect(page.getByTestId('workspace-chat-pinned')).toBeVisible();
 
   workspacePhase = 'ready';
   await page.getByRole('button', { name: '刷新' }).click();
