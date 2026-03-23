@@ -15,6 +15,7 @@ import {
   type ContextFileRef,
   makeId,
   formatArgs,
+  getAgentId,
   truncateResult,
   rebuildMessagesFromEvents,
   rebuildStepsFromEvents,
@@ -640,6 +641,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const switchedSessionRef = useRef(false);
+  const getCurrentSessionAgentId = useCallback(() => {
+    const activeSessionId = sessionIdRef.current;
+    if (!activeSessionId) return null;
+    const activeSession = sessions.find((item) => item.session_id === activeSessionId);
+    if (!activeSession) return null;
+    return getAgentId(activeSession.meta);
+  }, [sessions]);
 
   const switchSession = useCallback(async (sid: string) => {
     switchedSessionRef.current = true;
@@ -696,6 +704,12 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
     if (!content.trim() || !wsConnected) return;
 
+    const targetAgentId = agentId || 'default';
+    const currentSessionAgentId = getCurrentSessionAgentId();
+    if (sessionIdRef.current && currentSessionAgentId && currentSessionAgentId !== targetAgentId) {
+      startNewChat();
+    }
+
     emptySessionIdRef.current = null;
     addMsg('user', content);
 
@@ -706,7 +720,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       const meta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
       wsSend({
         type: 'create_session',
-        payload: { agent_id: agentId || 'default', meta },
+        payload: { agent_id: targetAgentId, meta },
         timestamp: Date.now() / 1000,
       });
     } else {
@@ -718,7 +732,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       });
     }
     setIsTyping(true);
-  }, [wsConnected, wsSend]);
+  }, [getCurrentSessionAgentId, startNewChat, wsConnected, wsSend]);
 
   const sendQuestionAnswerFn = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     const interaction = activeInteractionRef.current;
