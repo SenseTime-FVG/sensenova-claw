@@ -144,6 +144,7 @@ export default function AutomationPage() {
           defaultAgentId="default"
           lockAgent
           emptyState={<AutomationEmptyState />}
+          returnToMainLabel="返回自动化"
         />
       </WorkbenchShell>
     </DashboardLayout>

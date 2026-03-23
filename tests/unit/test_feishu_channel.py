@@ -27,6 +27,7 @@ from agentos.kernel.events.types import (
     CRON_DELIVERY_REQUESTED,
     ERROR_RAISED,
     TOOL_CALL_STARTED,
+    USER_QUESTION_ANSWERED,
     USER_QUESTION_ASKED,
 )
 from agentos.kernel.runtime.publisher import EventPublisher
@@ -354,6 +355,105 @@ class TestOnMessageAsync:
         sid1 = collected[0].session_id
         sid2 = collected[1].session_id
         assert sid1 == sid2  # 同一群聊复用 session
+
+    async def test_answers_pending_question_instead_of_publishing_user_input(self):
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus=bus)
+        gateway = Gateway(publisher=publisher)
+        plugin_api = _SimplePluginApi(gateway=gateway)
+        config = FeishuConfig(enabled=True, app_id="test", app_secret="test")
+        ch = FeishuChannel(config=config, plugin_api=plugin_api)
+
+        session_id = "feishu_pending_001"
+        ch._chat_sessions["dm:sender_001"] = session_id
+
+        question_event = EventEnvelope(
+            type=USER_QUESTION_ASKED,
+            session_id=session_id,
+            payload={"question_id": "q_001", "question": "请选择环境"},
+        )
+
+        async def noop_send_reply(session_id: str, text: str) -> None:
+            del session_id, text
+
+        ch._send_reply = noop_send_reply
+        await ch.send_event(question_event)
+
+        collected: list[EventEnvelope] = []
+
+        async def collector():
+            async for event in bus.subscribe():
+                collected.append(event)
+                if event.type == USER_QUESTION_ANSWERED:
+                    break
+
+        task = asyncio.create_task(collector())
+        await asyncio.sleep(0.05)
+
+        await ch._on_message_async("生产环境", "chat_001", "p2p", "msg_001", "sender_001")
+
+        await asyncio.wait_for(task, timeout=2)
+
+        assert len(collected) == 1
+        assert collected[0].type == USER_QUESTION_ANSWERED
+        assert collected[0].session_id == session_id
+        assert collected[0].payload["question_id"] == "q_001"
+        assert collected[0].payload["answer"] == "生产环境"
+        assert collected[0].payload["cancelled"] is False
+
+    async def test_clears_pending_question_after_answer_and_restores_user_input_flow(self):
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus=bus)
+        gateway = Gateway(publisher=publisher)
+        plugin_api = _SimplePluginApi(gateway=gateway)
+        config = FeishuConfig(enabled=True, app_id="test", app_secret="test")
+        ch = FeishuChannel(config=config, plugin_api=plugin_api)
+
+        session_id = "feishu_pending_002"
+        ch._chat_sessions["dm:sender_002"] = session_id
+
+        async def noop_send_reply(session_id: str, text: str) -> None:
+            del session_id, text
+
+        ch._send_reply = noop_send_reply
+        await ch.send_event(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=session_id,
+                payload={"question_id": "q_002", "question": "补充说明"},
+            )
+        )
+
+        first_batch: list[EventEnvelope] = []
+
+        async def answer_collector():
+            async for event in bus.subscribe():
+                first_batch.append(event)
+                if event.type == USER_QUESTION_ANSWERED:
+                    break
+
+        first_task = asyncio.create_task(answer_collector())
+        await asyncio.sleep(0.05)
+        await ch._on_message_async("第一次回答", "chat_002", "p2p", "msg_a", "sender_002")
+        await asyncio.wait_for(first_task, timeout=2)
+
+        assert first_batch[-1].type == USER_QUESTION_ANSWERED
+
+        second_batch: list[EventEnvelope] = []
+
+        async def input_collector():
+            async for event in bus.subscribe():
+                second_batch.append(event)
+                if event.type == "user.input":
+                    break
+
+        second_task = asyncio.create_task(input_collector())
+        await asyncio.sleep(0.05)
+        await ch._on_message_async("新的普通消息", "chat_002", "p2p", "msg_b", "sender_002")
+        await asyncio.wait_for(second_task, timeout=2)
+
+        assert second_batch[-1].type == "user.input"
+        assert second_batch[-1].payload["content"] == "新的普通消息"
 
 
 class TestHandleMessageEvent:

@@ -1,15 +1,16 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Inter } from "next/font/google";
+import { DM_Sans } from "next/font/google";
 import { NotificationProvider } from '@/components/notification/NotificationProvider';
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ChatSessionProvider } from '@/contexts/ChatSessionContext';
 import { FilePanelProvider } from '@/contexts/FilePanelContext';
+import { UserPreferencesProvider } from '@/contexts/UserPreferencesContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { cn } from "@/lib/utils";
 
-const inter = Inter({subsets:['latin'],variable:'--font-sans'});
+const dmSans = DM_Sans({subsets:['latin'],variable:'--font-sans', weight:['400','500','600','700']});
 
 export const metadata: Metadata = {
   title: 'AgentOS',
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN" className={cn("font-sans", inter.variable)} suppressHydrationWarning>
+    <html lang="zh-CN" className={cn("font-sans antialiased", dmSans.variable)} suppressHydrationWarning>
       <body>
         <ThemeProvider
             attribute="class"
@@ -30,9 +31,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <AuthProvider>
               <ChatSessionProvider>
                 <FilePanelProvider>
-                  <ProtectedRoute>
-                    {children}
-                  </ProtectedRoute>
+                  <UserPreferencesProvider>
+                    <ProtectedRoute>
+                      {children}
+                    </ProtectedRoute>
+                  </UserPreferencesProvider>
                 </FilePanelProvider>
               </ChatSessionProvider>
             </AuthProvider>

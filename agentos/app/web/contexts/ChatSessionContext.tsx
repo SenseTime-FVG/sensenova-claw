@@ -14,11 +14,14 @@ import {
   type TaskProgressItem,
   type ContextFileRef,
   makeId,
+  formatArgs,
+  getAgentId,
   truncateResult,
   rebuildMessagesFromEvents,
   rebuildStepsFromEvents,
   groupSessionsToTasks,
 } from '@/lib/chatTypes';
+import { extractThinkContentFromReasoningDetails } from '@/lib/assistantThink';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 const WS_RECONNECT_INTERVAL_MS = 1000;
@@ -77,7 +80,7 @@ const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
 // ── Provider ──
 
 export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
-  const { pushNotification } = useNotification();
+  const { pushNotification, pushCard } = useNotification();
   const { isAuthenticated, isLoading } = useAuth();
   const pathname = usePathname();
 
@@ -122,6 +125,61 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
   function addMsg(role: ChatMessage['role'], content: string) {
     setMessages(prev => [...prev, { id: makeId(), role, content, timestamp: Date.now() }]);
+  }
+
+  function upsertAssistantMessage(message: {
+    turnId?: string;
+    content: string;
+    thinkingContent?: string;
+    thinkingState?: 'streaming' | 'collapsed';
+  }) {
+    const { turnId, content, thinkingContent, thinkingState } = message;
+    setMessages((prev) => {
+      if (turnId) {
+        const existingIndex = prev.findIndex((item) => item.role === 'assistant' && item.turnId === turnId);
+        if (existingIndex !== -1) {
+          // 检查该 assistant 消息之后是否已经插入了 tool 消息
+          // 如果有，说明这是新一轮 LLM 调用的结果，应创建新消息而不是覆盖
+          const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
+          if (hasToolAfter) {
+            // 新一轮 LLM 思考，追加新的 assistant 消息
+            return [
+              ...prev,
+              {
+                id: makeId(),
+                role: 'assistant' as const,
+                content,
+                timestamp: Date.now(),
+                turnId: `${turnId}_${Date.now()}`,
+                thinkingContent,
+                thinkingState,
+              },
+            ];
+          }
+          // 同一轮 LLM 调用的流式更新，原地更新
+          const next = [...prev];
+          next[existingIndex] = {
+            ...next[existingIndex],
+            content,
+            thinkingContent,
+            thinkingState,
+          };
+          return next;
+        }
+      }
+      return [
+        ...prev,
+        {
+          id: makeId(),
+          role: 'assistant',
+          content,
+          timestamp: Date.now(),
+          turnId,
+          thinkingContent,
+          thinkingState,
+        },
+      ];
+    });
   }
 
   const bindSessionToCurrentSocket = useCallback((sid: string | null) => {
@@ -275,7 +333,19 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         break;
       case 'llm_result': {
         const content = String(payload.content || '');
-        if (content) addMsg('assistant', content);
+        const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
+        const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
+        const hasToolCalls = Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0;
+        // 有内容、有思考过程、或有工具调用时，都创建 assistant 消息
+        // 确保工具调用前的思考过程不会丢失
+        if (content || thinkingContent || hasToolCalls) {
+          upsertAssistantMessage({
+            turnId,
+            content,
+            thinkingContent,
+            thinkingState: thinkingContent ? 'streaming' : undefined,
+          });
+        }
         break;
       }
       case 'tool_execution': {
@@ -302,6 +372,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const mid = toolCallMapRef.current.get(toolCallId);
         if (mid) {
           setMessages(prev => prev.map(m => m.id === mid ? { ...m, content: `Tool Finished: ${toolName}`, toolInfo: { name: toolName, arguments: m.toolInfo?.arguments || {}, result, success, error, status: 'completed' } } : m));
+        } else {
+          const fallbackContent = typeof result === 'string'
+            ? result
+            : formatArgs(result);
+          setMessages(prev => [...prev, {
+            id: makeId(),
+            role: 'tool',
+            name: toolName,
+            content: fallbackContent,
+            timestamp: Date.now(),
+          }]);
         }
         const stepIdx = toolStepMapRef.current.get(toolCallId);
         if (stepIdx !== undefined) {
@@ -317,9 +398,44 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       }
       case 'turn_completed': {
         const final = String(payload.final_response || '');
-        if (final) addMsg('assistant', final);
+        setMessages((prev) => {
+          // 从后往前找最后一条 assistant 消息
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === 'assistant') {
+              const existing = prev[i];
+              // 如果 llm_result 已经设置了相同内容，只折叠思考状态
+              if (existing.content === final || !final) {
+                const next = [...prev];
+                next[i] = { ...next[i], thinkingState: 'collapsed' };
+                return next;
+              }
+              // 内容不同时才更新（不创建新消息）
+              const next = [...prev];
+              next[i] = { ...next[i], content: final, thinkingState: 'collapsed' };
+              return next;
+            }
+          }
+          // 没找到 assistant 消息且有内容，追加一条
+          if (final) {
+            return [...prev, { id: makeId(), role: 'assistant', content: final, timestamp: Date.now() }];
+          }
+          return prev;
+        });
         setIsTyping(false);
         clearInteractions();
+        // 推送任务完成通知卡片
+        const completedSessionId = incomingSessionId || '';
+        if (completedSessionId) {
+          pushCard({
+            kind: 'task_completed',
+            title: '任务完成',
+            body: final ? (final.length > 100 ? final.slice(0, 100) + '...' : final) : '一个任务已完成',
+            level: 'success',
+            source: 'agent',
+            sessionId: completedSessionId,
+            actions: [{ label: '查看会话 →', value: 'view_session' }],
+          });
+        }
         break;
       }
       case 'turn_cancelled':
@@ -351,7 +467,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         break;
       }
       case 'error':
-        addMsg('system', `Error: ${payload.message || payload.error_type || 'Unknown Error'}`);
+        addMsg('system', String(payload.user_message || payload.message || payload.error_type || 'Unknown Error'));
         setIsTyping(false);
         clearInteractions();
         break;
@@ -370,6 +486,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
             toast: metadata.show_toast !== false,
             browser: metadata.show_browser === true,
           });
+          // 同时推送到通知中心卡片
+          const notifSessionId = typeof data.session_id === 'string' ? data.session_id : undefined;
+          pushCard({
+            kind: 'general',
+            title,
+            body,
+            level: String(payload.level || 'info') as 'info' | 'warning' | 'error' | 'success',
+            source: String(payload.source || 'system'),
+            sessionId: notifSessionId,
+            actions: notifSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined,
+          });
         }
         const targetSessionId = typeof data.session_id === 'string' ? data.session_id : null;
         if (body && Boolean(metadata.append_to_chat) && (!targetSessionId || targetSessionId === sessionIdRef.current)) {
@@ -381,17 +508,23 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const toolCallId = String(payload.tool_call_id || '');
         const sourceSessionId = incomingSessionId || '';
         if (!toolCallId || !sourceSessionId) break;
-        enqueueInteraction({
-          kind: 'confirmation',
-          interactionId: toolCallId,
-          sourceSessionId,
-          timeout: Number(payload.timeout || 300),
-          createdAt: Date.now(),
-          toolName: String(payload.tool_name || ''),
-          riskLevel: String(payload.risk_level || 'high'),
-          arguments: (payload.arguments || {}) as Record<string, unknown>,
-        });
+        // 不再弹出 InteractionDialog，改为通知卡片处理
         setIsTyping(true);
+        console.log('[NotificationCard] pushing tool_confirmation card:', toolCallId, payload.tool_name);
+        pushCard({
+          id: `confirm_${toolCallId}`,
+          kind: 'tool_confirmation',
+          title: '需要授权',
+          body: `工具 "${payload.tool_name}" 需要你的确认才能执行`,
+          level: 'warning',
+          source: 'tool',
+          sessionId: sourceSessionId,
+          interactionId: toolCallId,
+          actions: [
+            { label: '批准', value: 'approve' },
+            { label: '拒绝', value: 'deny' },
+          ],
+        });
         break;
       }
       case 'user_question_asked': {
@@ -400,19 +533,22 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         if (!questionId || !sourceSessionId) break;
         const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
         const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
-        enqueueInteraction({
-          kind: 'question',
-          interactionId: questionId,
-          sourceSessionId,
-          sourceAgentId,
-          sourceAgentName,
-          question: String(payload.question || ''),
-          options: Array.isArray(payload.options) ? payload.options.map(String) : null,
-          multiSelect: Boolean(payload.multi_select),
-          timeout: Number(payload.timeout || 300),
-          createdAt: Date.now(),
-        });
+        // 不再弹出 InteractionDialog，改为通知卡片处理
         setIsTyping(true);
+        const questionOptions = Array.isArray(payload.options)
+          ? payload.options.map((o: unknown) => ({ label: String(o), value: String(o) }))
+          : undefined;
+        pushCard({
+          id: `question_${questionId}`,
+          kind: 'user_question',
+          title: `${sourceAgentName} 需要你的回复`,
+          body: String(payload.question || '请做出选择'),
+          level: 'info',
+          source: sourceAgentName,
+          sessionId: sourceSessionId,
+          interactionId: questionId,
+          actions: questionOptions,
+        });
         break;
       }
       case 'user_question_answered_event': {
@@ -512,7 +648,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     }
   }, []);
 
+  const switchedSessionRef = useRef(false);
+  const getCurrentSessionAgentId = useCallback(() => {
+    const activeSessionId = sessionIdRef.current;
+    if (!activeSessionId) return null;
+    const activeSession = sessions.find((item) => item.session_id === activeSessionId);
+    if (!activeSession) return null;
+    return getAgentId(activeSession.meta);
+  }, [sessions]);
+
   const switchSession = useCallback(async (sid: string) => {
+    switchedSessionRef.current = true;
     doCleanupEmptySession(sid);
     await reloadSessionHistory(sid);
   }, [reloadSessionHistory, doCleanupEmptySession]);
@@ -555,11 +701,22 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   }, [startNewChat]);
 
   const resetIfNeeded = useCallback(() => {
+    // 如果是通过 switchSession 跳转过来的，保留会话不重置
+    if (switchedSessionRef.current) {
+      switchedSessionRef.current = false;
+      return;
+    }
     startNewChat();
   }, [startNewChat]);
 
   const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
     if (!content.trim() || !wsConnected) return;
+
+    const targetAgentId = agentId || 'default';
+    const currentSessionAgentId = getCurrentSessionAgentId();
+    if (sessionIdRef.current && currentSessionAgentId && currentSessionAgentId !== targetAgentId) {
+      startNewChat();
+    }
 
     emptySessionIdRef.current = null;
     addMsg('user', content);
@@ -571,7 +728,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       const meta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
       wsSend({
         type: 'create_session',
-        payload: { agent_id: agentId || 'default', meta },
+        payload: { agent_id: targetAgentId, meta },
         timestamp: Date.now() / 1000,
       });
     } else {
@@ -583,7 +740,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       });
     }
     setIsTyping(true);
-  }, [wsConnected, wsSend]);
+  }, [getCurrentSessionAgentId, startNewChat, wsConnected, wsSend]);
 
   const sendQuestionAnswerFn = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     const interaction = activeInteractionRef.current;

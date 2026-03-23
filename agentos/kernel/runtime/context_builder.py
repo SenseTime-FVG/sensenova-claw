@@ -170,11 +170,7 @@ class ContextBuilder:
         model_key = (
             agent_config.model
             if agent_config and agent_config.model
-            else (
-                config.get("agent.model")
-                or config.get("agent.default_model")
-                or config.get("llm.default_model", "mock")
-            )
+            else config.get("llm.default_model", "mock")
         )
         _, model = config.resolve_model(model_key)
         return RuntimeInfo(

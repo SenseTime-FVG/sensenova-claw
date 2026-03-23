@@ -21,7 +21,7 @@ class TestAgentConfig:
 
     def test_defaults(self):
         a = AgentConfig(id="m", name="M")
-        assert a.provider == "openai"
+        assert a.model == "gpt-4o-mini"
         assert a.enabled is True
         assert a.temperature == 0.2
         assert a.max_delegation_depth == 3
@@ -30,13 +30,13 @@ class TestAgentConfig:
     def test_from_dict_defaults(self):
         a = AgentConfig.from_dict({"id": "x"})
         assert a.name == "x"
-        assert a.provider == "openai"
+        assert a.model == "gpt-4o-mini"
 
     def test_to_dict_keys(self):
         a = AgentConfig(id="k", name="K")
         d = a.to_dict()
         expected_keys = {
-            "id", "name", "description", "provider", "model",
+            "id", "name", "description", "model",
             "temperature", "max_tokens", "extra_body", "system_prompt", "tools",
             "skills", "workdir", "can_delegate_to", "max_delegation_depth",
             "max_pingpong_turns",

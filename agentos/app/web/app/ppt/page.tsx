@@ -91,11 +91,12 @@ function PPTWorkspace() {
   const [{ isOver, canDrop }, dropRef] = useDrop(
     () => ({
       accept: 'FILE',
-      drop: (item: DroppedFile) => {
+      drop: (item: DroppedFile, monitor) => {
+        if (monitor.didDrop()) return;
         handleDrop(item);
       },
       collect: (monitor) => ({
-        isOver: monitor.isOver(),
+        isOver: monitor.isOver({ shallow: true }),
         canDrop: monitor.canDrop(),
       }),
     }),
@@ -177,6 +178,7 @@ function PPTWorkspace() {
         defaultAgentId="ppt-agent"
         lockAgent
         emptyState={emptyState}
+        returnToMainLabel="返回 PPT"
       />
     </div>
   );

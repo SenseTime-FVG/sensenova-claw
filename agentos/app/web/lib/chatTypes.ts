@@ -1,4 +1,5 @@
 // 共享类型定义和工具函数
+import { extractThinkContentFromReasoningDetails } from './assistantThink';
 
 export interface ToolInfo {
   name: string;
@@ -14,6 +15,9 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
   timestamp: number;
+  turnId?: string;
+  thinkingContent?: string;
+  thinkingState?: 'streaming' | 'collapsed';
   /** 工具消息在无 toolInfo 时展示的工具名（如会话历史回放） */
   name?: string;
   toolInfo?: ToolInfo;
@@ -25,6 +29,9 @@ export interface SessionItem {
   last_active: number;
   meta: string;
   status: string;
+  last_turn_status?: 'started' | 'completed' | 'cancelled' | 'error' | null;
+  last_turn_ended_at?: number | null;
+  last_agent_response?: string | null;
 }
 
 export interface TaskGroup {
@@ -145,6 +152,25 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
       rebuilt.push({ id: makeId(), role: 'user', content: String(payload.content || ''), timestamp: Date.now() });
       continue;
     }
+    if (eventType === 'llm.call_result') {
+      const response = (payload.response || {}) as Record<string, unknown>;
+      const content = String(response.content || '');
+      const reasoningDetails = response.reasoning_details;
+      const thinkingContent = extractThinkContentFromReasoningDetails(reasoningDetails);
+      // 历史重建时只为有实际内容或思考内容的 llm_result 创建 assistant 消息
+      // 仅含 tool_calls 的空结果不需要创建（工具调用已由 tool.call_requested 展示）
+      if (content || thinkingContent) {
+        rebuilt.push({
+          id: makeId(),
+          role: 'assistant',
+          content,
+          timestamp: Date.now(),
+          thinkingContent: thinkingContent || undefined,
+          thinkingState: thinkingContent ? 'collapsed' : undefined,
+        });
+      }
+      continue;
+    }
     if (eventType === 'tool.call_requested') {
       const toolInfo: ToolInfo = {
         name: String(payload.tool_name || ''),
@@ -178,7 +204,20 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
     if (eventType === 'agent.step_completed') {
       const response = String(payload.final_response || '') || String(((payload.result as Record<string, unknown> | undefined)?.content) || '');
       if (response) {
-        rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+        // 查找最后一条 assistant 消息，避免与 llm.call_result 重复
+        let lastAssistantIdx = -1;
+        for (let i = rebuilt.length - 1; i >= 0; i--) {
+          if (rebuilt[i].role === 'assistant') { lastAssistantIdx = i; break; }
+        }
+        if (lastAssistantIdx !== -1 && rebuilt[lastAssistantIdx].content === response) {
+          // 内容相同，只折叠思考状态
+          rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], thinkingState: rebuilt[lastAssistantIdx].thinkingContent ? 'collapsed' : undefined };
+        } else if (lastAssistantIdx !== -1 && !rebuilt[lastAssistantIdx].content) {
+          // 最后一条 assistant 消息内容为空（可能是中间轮次），更新它
+          rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], content: response };
+        } else {
+          rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+        }
       }
       continue;
     }
@@ -191,6 +230,35 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
     }
   }
   return rebuilt;
+}
+
+// --- 消息分组（将连续工具调用收拢到一个折叠组） ---
+
+export type MessageGroupItem =
+  | { type: 'message'; id: string; msg: ChatMessage }
+  | { type: 'tool_group'; id: string; messages: ChatMessage[] };
+
+export function groupMessages(messages: ChatMessage[]): MessageGroupItem[] {
+  const groups: MessageGroupItem[] = [];
+  let toolBuf: ChatMessage[] = [];
+
+  const flush = () => {
+    if (toolBuf.length > 0) {
+      groups.push({ type: 'tool_group', id: `tg_${toolBuf[0].id}`, messages: [...toolBuf] });
+      toolBuf = [];
+    }
+  };
+
+  for (const msg of messages) {
+    if (msg.role === 'tool') {
+      toolBuf.push(msg);
+    } else {
+      flush();
+      groups.push({ type: 'message', id: msg.id, msg });
+    }
+  }
+  flush();
+  return groups;
 }
 
 /** 从 session 事件中重建右侧面板的步骤和任务进度 */

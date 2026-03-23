@@ -45,7 +45,7 @@ function RecentChatItem({
       className={cn(
         'flex items-start gap-2.5 px-3 py-3 rounded-xl cursor-pointer transition-all group',
         isActive
-          ? 'bg-primary/8 text-foreground border border-primary/20 shadow-sm'
+          ? 'bg-blue-100 text-foreground border border-blue-200 shadow-sm dark:bg-blue-900/40 dark:border-blue-800'
           : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
       )}
     >
@@ -85,7 +85,6 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
     sessions,
     currentSessionId,
     switchSession,
-    createSession,
     deleteSession,
     startNewChat,
     refreshTaskGroups,
@@ -103,7 +102,8 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
       const map: Record<string, string> = {};
       if (Array.isArray(data)) {
         for (const a of data) {
-          map[String(a.id)] = String(a.name || a.id);
+          const id = String(a.id);
+          map[id] = String(a.name || a.id);
         }
       }
       setAgentMap(map);
@@ -118,9 +118,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
     .sort((a, b) => b.last_active - a.last_active);
 
   const handleNewChat = () => {
-    const newAgentId = agentFilter || Object.keys(agentMap)[0] || 'default';
     startNewChat();
-    createSession(newAgentId);
   };
 
   const handleRefresh = () => {
@@ -130,13 +128,17 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
-        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.15em]">
-          最近对话
-        </span>
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
+          <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-[0.15em]">
+            最近对话
+          </span>
+        </div>
+        <div className="flex items-center gap-0.5">
           <button
             onClick={handleNewChat}
+            data-testid="recent-chats-new-button"
             className="flex items-center gap-0.5 p-1 rounded-lg text-primary hover:bg-primary/10 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -144,7 +146,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
           <button
             onClick={handleRefresh}
             disabled={loadingAgents || loadingSessions}
-            className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-all disabled:opacity-50"
           >
             <RefreshCw className={cn('w-3 h-3', (loadingAgents || loadingSessions) && 'animate-spin')} />
           </button>
@@ -178,6 +180,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
           ))
         )}
       </div>
+
     </div>
   );
 }

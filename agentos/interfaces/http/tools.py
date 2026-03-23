@@ -13,7 +13,7 @@ import httpx
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
-from agentos.interfaces.http.config_store import persist_path_updates
+from agentos.platform.secrets.refs import is_secret_ref
 
 logger = logging.getLogger(__name__)
 
@@ -22,45 +22,49 @@ router = APIRouter(prefix="/api/tools", tags=["tools"])
 TOOL_API_KEY_SPECS: dict[str, dict[str, Any]] = {
     "serper_search": {
         "config_path": "tools.serper_search.api_key",
-        "docs_url": "https://serper.dev/api-key",
+        "docs_url": "https://serper.dev/",
         "description": "Google search via Serper API",
         "setup_guide": [
-            "Open https://serper.dev and sign in.",
-            "Go to Dashboard and locate the API Key section.",
-            "Copy the key and save it here.",
+            "1. 打开 https://serper.dev/ ，点击 Sign up / Get started，使用邮箱或 Google 账号完成注册并登录。",
+            "2. 登录后进入 Dashboard，在页面中找到 API Key 区域；Serper 会在控制台里直接展示可复制的 key。",
+            "3. 点击复制按钮获取 API Key。Serper 官方提供免费试用额度，通常可以先不绑信用卡就完成测试。",
+            "4. 把复制出的 API Key 粘贴到这里，点击 Validate 验证；验证通过后，再保存到当前工具配置中。",
         ],
-        "example_format": "sk-...",
+        "example_format": "<serper-api-key>",
     },
     "brave_search": {
         "config_path": "tools.brave_search.api_key",
-        "docs_url": "https://brave.com/search/api/",
+        "docs_url": "https://api-dashboard.search.brave.com/app/documentation/web-search/get-started",
         "description": "Web search via Brave Search API",
         "setup_guide": [
-            "Open https://brave.com/search/api/ and create an account.",
-            "Create or open an API application.",
-            "Copy the subscription token and save it here.",
+            "1. 打开 Brave Search API 文档页 https://api-dashboard.search.brave.com/app/documentation/web-search/get-started ，点击 Log in 注册或登录控制台。",
+            "2. 登录后进入 dashboard，在 Subscriptions 中选择并订阅一个 Web Search plan；没有订阅时不会生成可用 token。",
+            "3. 打开订阅后的应用或凭据页面，复制请求头里要用的 X-Subscription-Token。",
+            "4. 把这个 token 粘贴到这里，点击 Validate 验证；验证通过后保存即可。",
         ],
-        "example_format": "BSA-...",
+        "example_format": "<brave-x-subscription-token>",
     },
     "baidu_search": {
         "config_path": "tools.baidu_search.api_key",
-        "docs_url": "https://cloud.baidu.com/product/AppBuilder",
+        "docs_url": "https://cloud.baidu.com/doc/qianfan-docs/s/qm8qxemze",
         "description": "Web search via Baidu AppBuilder AI Search",
         "setup_guide": [
-            "Open Baidu AppBuilder and create an application.",
-            "Enable AI Search capabilities for the app.",
-            "Copy the API Key and save it here.",
+            "1. 登录百度智能云后，打开千帆开发者中心文档中的“快速开始”页，进入控制台-安全认证-API Key。",
+            "2. 点击“创建 API Key”，并在“添加权限”里勾选你要调用的千帆 / AppBuilder / AI 搜索相关能力。",
+            "3. 创建完成后复制该 API Key；百度接口调用时需要按 Bearer 方式使用，所以这里保存的就是 Bearer 后面的那段 key。",
+            "4. 把复制出的 key 粘贴到这里，点击 Validate 验证；若后续还要调用应用对话接口，再在百度控制台中额外准备 app_id。",
         ],
-        "example_format": "appbuilder-...",
+        "example_format": "bce-v3/ALTAK-.../...",
     },
     "tavily_search": {
         "config_path": "tools.tavily_search.api_key",
-        "docs_url": "https://tavily.com",
+        "docs_url": "https://docs.tavily.com/documentation/quickstart",
         "description": "Web search via Tavily Search API",
         "setup_guide": [
-            "Open https://tavily.com and sign in.",
-            "Open the dashboard and copy the API key.",
-            "Save the key here and validate it.",
+            "1. 打开 https://tavily.com/ 并完成登录，首次使用会进入 Tavily dashboard。",
+            "2. 在 Dashboard 或 API Keys 区域找到系统分配给你的 key，并点击复制。",
+            "3. Tavily 请求使用 Authorization: Bearer <api_key>，所以这里需要填写的就是 Bearer 后面的实际 key。",
+            "4. 把 key 粘贴到这里后点击 Validate 验证，验证通过后保存。",
         ],
         "example_format": "tvly-...",
     },
@@ -93,19 +97,44 @@ def _mask_secret(secret: str | None) -> str | None:
     return f"{secret[:4]}...{secret[-4:]}"
 
 
-def _api_key_status(cfg) -> dict[str, dict[str, Any]]:
+def _api_key_status(request) -> dict[str, dict[str, Any]]:
+    """获取工具 API key 状态"""
+    cfg = request.app.state.config
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
     result: dict[str, dict[str, Any]] = {}
     for tool_name, spec in TOOL_API_KEY_SPECS.items():
         value = cfg.get(spec["config_path"], "")
+        raw_value = _read_raw_value(raw_config, spec["config_path"])
         result[tool_name] = {
             "configured": bool(value),
             "masked_key": _mask_secret(value),
+            "source": _detect_secret_source(raw_value),
             "docs_url": spec["docs_url"],
             "description": spec["description"],
             "setup_guide": spec["setup_guide"],
             "example_format": spec["example_format"],
         }
     return result
+
+
+def _read_raw_value(raw_config: dict[str, Any], dotted_path: str) -> Any:
+    current: Any = raw_config
+    for key in dotted_path.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _detect_secret_source(raw_value: Any) -> str:
+    if not raw_value:
+        return "empty"
+    if isinstance(raw_value, str) and is_secret_ref(raw_value):
+        return "secret"
+    if isinstance(raw_value, str) and raw_value.startswith("${") and raw_value.endswith("}"):
+        return "env"
+    return "plain"
 
 
 async def _validate_serper(api_key: str) -> tuple[bool, str]:
@@ -226,7 +255,7 @@ async def toggle_tool(tool_name: str, body: EnablePayload, request: Request):
 @router.get("/api-keys")
 async def get_tool_api_keys(request: Request):
     """返回工具 API key 状态与配置指南。"""
-    return _api_key_status(request.app.state.config)
+    return _api_key_status(request)
 
 
 @router.put("/api-keys")
@@ -242,13 +271,24 @@ async def update_tool_api_keys(body: dict[str, str | None], request: Request):
             raise HTTPException(404, f"Tool API key config not found: {tool_name}")
         path_updates[spec["config_path"]] = api_key or ""
 
+    # Convert flat path_updates to nested dict for ConfigManager
+    tools_nested: dict[str, Any] = {}
+    for path, value in path_updates.items():
+        keys = path.split(".")
+        sub_path = keys[1:]  # Remove "tools." prefix
+        current = tools_nested
+        for k in sub_path[:-1]:
+            current = current.setdefault(k, {})
+        current[sub_path[-1]] = value
+
+    config_manager = request.app.state.config_manager
     try:
-        persist_path_updates(request.app.state.config, path_updates)
+        await config_manager.update("tools", tools_nested)
     except Exception as exc:
         raise HTTPException(500, f"Failed to save API keys: {exc}")
 
     logger.info("Updated tool API keys: %s", list(body.keys()))
-    return {"status": "saved", "api_keys": _api_key_status(request.app.state.config)}
+    return {"status": "saved", "api_keys": _api_key_status(request)}
 
 
 @router.post("/api-keys/{tool_name}/validate")

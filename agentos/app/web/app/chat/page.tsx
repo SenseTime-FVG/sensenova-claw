@@ -1,19 +1,38 @@
 'use client';
 
-import { Suspense, useState, useEffect, useCallback, useRef } from 'react';
+import { Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Loader2, Bot, MessageSquare, Plus, Search, RefreshCw, Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useFilePanel } from '@/contexts/FilePanelContext';
 import { type SessionItem, type ContextFileRef, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
-import { MessageBubble } from '@/components/chat/MessageBubble';
+import { MessageList } from '@/components/chat/MessageBubble';
 import { TypingIndicator } from '@/components/chat/TypingIndicator';
 import { ChatInput } from '@/components/chat/ChatInput';
-import { InteractionDialog } from '@/components/chat/QuestionDialog';
+import { SlideViewer, useSlideSet } from '@/components/ppt/PPTViewer';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+
+/* ── workdir 根目录缓存 ── */
+let _workdirRootCache: string | null | undefined;
+async function fetchWorkdirRoot(): Promise<string | null> {
+  if (_workdirRootCache !== undefined) return _workdirRootCache as string | null;
+  let result: string | null = null;
+  try {
+    const res = await authFetch(`${API_BASE}/api/files/roots`);
+    if (res.ok) {
+      const data = await res.json();
+      const entry = (data.roots || []).find((r: { name: string }) => r.name === 'Agent 工作区');
+      result = entry?.path ?? null;
+    }
+  } catch { /* ignore */ }
+  _workdirRootCache = result;
+  return result;
+}
 
 interface AgentBrief {
   id: string;
@@ -50,7 +69,9 @@ function AgentContactItem({
       onClick={onClick}
       className={cn(
         'flex items-start gap-3 px-4 py-3.5 cursor-pointer transition-all border-b border-border/60',
-        isSelected ? 'bg-primary/5 shadow-sm' : 'hover:bg-muted/50',
+        isSelected
+          ? 'bg-blue-100 shadow-md border-l-[3px] border-l-blue-500 dark:bg-blue-900/40'
+          : 'hover:bg-muted/50',
       )}
     >
       <div className={cn(
@@ -86,12 +107,13 @@ function AgentContactItem({
 /* ── Session 列表项（中栏） ── */
 
 function SessionListItem({
-  session, isActive, onClick, onDelete,
+  session, isActive, onClick, onDelete, index,
 }: {
   session: SessionItem;
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
+  index: number;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -111,12 +133,14 @@ function SessionListItem({
       onClick={onClick}
       className={cn(
         'flex items-center gap-2.5 px-3 py-2.5 mx-2 rounded-xl cursor-pointer transition-all text-sm group relative',
-        isActive ? 'bg-primary/8 text-foreground shadow-sm border border-primary/15' : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
+        'animate-in fade-in slide-in-from-left-2 duration-200',
+        isActive ? 'bg-blue-100 dark:bg-blue-900/40 text-foreground shadow-md' : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
       )}
+      style={{ animationDelay: `${index * 30}ms`, animationFillMode: 'both' }}
     >
       <MessageSquare className={cn(
         'w-4 h-4 shrink-0',
-        isActive ? 'text-primary' : 'text-muted-foreground',
+        isActive ? 'text-blue-500' : 'text-muted-foreground',
       )} />
       <div className="flex-1 min-w-0">
         <div className="truncate font-medium text-xs">{getTitle(session.meta)}</div>
@@ -152,23 +176,43 @@ function ChatContent() {
     createSession,
     deleteSession,
     startNewChat,
-    resetIfNeeded,
     refreshTaskGroups,
     loadingSessions,
-    activeInteraction,
-    interactionSubmitting,
-    sendQuestionAnswer,
-    sendConfirmationResponse,
-    handleInteractionTimeout,
     handleSkillInvoke,
     cleanupEmptySession,
   } = useChatSession();
 
+  const { openToPath } = useFilePanel();
+  const searchParams = useSearchParams();
+  const agentFromUrl = searchParams.get('agent');
+
   const [agents, setAgents] = useState<AgentBrief[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(true);
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(agentFromUrl);
   const [searchQuery, setSearchQuery] = useState('');
+  const [slidePreviewDir, setSlidePreviewDir] = useState<string | null>(null);
+  const [previewHeight, setPreviewHeight] = useState(350);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const requiredCheckDone = useRef(false);
+  const creatingSessionForAgent = useRef<string | null>(null);
+
+  const slideSet = useSlideSet(slidePreviewDir);
+
+  const onPreviewResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = previewHeight;
+    const onMove = (ev: MouseEvent) => {
+      const delta = startY - ev.clientY;
+      setPreviewHeight(Math.max(180, Math.min(window.innerHeight * 0.8, startH + delta)));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [previewHeight]);
 
   const loadAgents = useCallback(async () => {
     setLoadingAgents(true);
@@ -192,13 +236,44 @@ function ChatContent() {
   useEffect(() => { loadAgents(); }, [loadAgents]);
 
   useEffect(() => {
-    resetIfNeeded();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
+
+  // 监听 PPT 幻灯片预览事件
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { dir: string; isAbsolute: boolean };
+      let resolvedDir: string;
+
+      if (detail.isAbsolute) {
+        resolvedDir = detail.dir;
+      } else {
+        const curSession = sessions.find(s => s.session_id === currentSessionId);
+        const agentId = (curSession ? getAgentId(curSession.meta) : null) || selectedAgentId || 'default';
+        const firstSegment = detail.dir.split('/')[0];
+        resolvedDir = firstSegment === agentId ? detail.dir : `${agentId}/${detail.dir}`;
+
+        fetchWorkdirRoot().then(root => {
+          if (root) {
+            const sep = root.includes('\\') ? '\\' : '/';
+            const fullPath = [root, resolvedDir.replace(/\//g, sep)].join(sep);
+            openToPath(fullPath);
+          }
+        });
+      }
+
+      setSlidePreviewDir(resolvedDir);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    };
+
+    window.addEventListener('agentos:open-slide-preview', handler);
+    return () => window.removeEventListener('agentos:open-slide-preview', handler);
+  }, [selectedAgentId, currentSessionId, sessions, openToPath]);
+
+  // 切换会话时关闭预览
+  useEffect(() => {
+    setSlidePreviewDir(null);
+  }, [currentSessionId]);
 
   // 按 agent 分组 sessions
   const sessionsByAgent = sessions.reduce<Record<string, SessionItem[]>>((acc, s) => {
@@ -227,6 +302,36 @@ function ChatContent() {
     : [];
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
+  const currentSessionAgentId = useMemo(() => {
+    if (!currentSessionId) return null;
+    const currentSession = sessions.find((session) => session.session_id === currentSessionId);
+    return currentSession ? getAgentId(currentSession.meta) : null;
+  }, [currentSessionId, sessions]);
+
+  useEffect(() => {
+    if (!selectedAgentId || !currentSessionId) return;
+    if (currentSessionAgentId === selectedAgentId) return;
+    // 防止异步竞态导致重复创建 session
+    if (creatingSessionForAgent.current === selectedAgentId) return;
+
+    if (selectedSessions.length > 0) {
+      creatingSessionForAgent.current = null;
+      void switchSession(selectedSessions[0].session_id);
+      return;
+    }
+
+    creatingSessionForAgent.current = selectedAgentId;
+    startNewChat();
+    createSession(selectedAgentId);
+  }, [
+    createSession,
+    currentSessionAgentId,
+    currentSessionId,
+    selectedAgentId,
+    selectedSessions,
+    startNewChat,
+    switchSession,
+  ]);
 
   const filteredAgents = searchQuery.trim()
     ? agents.filter(a =>
@@ -235,8 +340,42 @@ function ChatContent() {
       )
     : agents;
 
+  // 必配清单检查：进入 system-admin 新 session 时自动发送缺失配置提醒
+  useEffect(() => {
+    if (requiredCheckDone.current) return;
+    if (selectedAgentId !== 'system-admin') return;
+    if (!agentFromUrl || agentFromUrl !== 'system-admin') return;
+    if (!wsConnected || agents.length === 0) return;
+
+    // 仅在没有现有 session 时触发（首次进入）
+    const existingSessions = sessionsByAgent['system-admin'] || [];
+    if (existingSessions.length > 0) return;
+
+    requiredCheckDone.current = true;
+
+    (async () => {
+      try {
+        const res = await authFetch(`${API_BASE}/api/config/required-check`);
+        const data = await res.json();
+        const missing: string[] = [];
+        for (const [, info] of Object.entries(data)) {
+          const item = info as { configured: boolean; message: string };
+          if (!item.configured) missing.push(item.message);
+        }
+        if (missing.length > 0) {
+          const text = `以下系统配置尚未完成，请帮我配置：\n${missing.map((m, i) => `${i + 1}. ${m}`).join('\n')}`;
+          startNewChat();
+          sendMessage(text, [], 'system-admin');
+        }
+      } catch (e) {
+        console.error('必配清单检查失败:', e);
+      }
+    })();
+  }, [selectedAgentId, agentFromUrl, wsConnected, agents, sessionsByAgent, startNewChat, sendMessage]);
+
   const handleNewChat = () => {
     if (!selectedAgentId) return;
+    creatingSessionForAgent.current = null;
     startNewChat();
     createSession(selectedAgentId);
   };
@@ -297,6 +436,7 @@ function ChatContent() {
                     hasUnread={false}
                     onClick={() => {
                       cleanupEmptySession();
+                      creatingSessionForAgent.current = null;
                       setSelectedAgentId(agent.id);
                     }}
                   />
@@ -367,14 +507,15 @@ function ChatContent() {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-0.5">
-                    {selectedSessions.map(session => (
+                  <div key={selectedAgentId} className="space-y-0.5">
+                    {selectedSessions.map((session, idx) => (
                       <SessionListItem
                         key={session.session_id}
                         session={session}
                         isActive={currentSessionId === session.session_id}
                         onClick={() => switchSession(session.session_id)}
                         onDelete={() => deleteSession(session.session_id)}
+                        index={idx}
                       />
                     ))}
                   </div>
@@ -398,8 +539,15 @@ function ChatContent() {
             </div>
           ) : (
             <>
+              {/* Session ID 栏 */}
+              {currentSessionId && (
+                <div className="px-4 py-1.5 border-b border-border/40 flex items-center">
+                  <span className="text-[10px] text-muted-foreground/60">Session: </span>
+                  <span className="text-[10px] text-muted-foreground/60 font-mono select-all">{currentSessionId}</span>
+                </div>
+              )}
               {/* 消息区 */}
-              <div className="flex-1 overflow-y-auto p-4 md:p-8">
+              <div className={cn("overflow-y-auto p-4 md:p-8", slideSet ? "min-h-0" : "", "flex-1")}>
                 {messages.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
                     <Bot size={32} className="text-primary/30" />
@@ -407,12 +555,25 @@ function ChatContent() {
                   </div>
                 ) : (
                   <>
-                    {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+                    <MessageList messages={messages} />
                     {isTyping && <TypingIndicator />}
                     <div ref={chatEndRef} />
                   </>
                 )}
               </div>
+
+              {/* PPT 幻灯片内联预览（可拖拽调整高度） */}
+              {slideSet && (
+                <div className="shrink-0 flex flex-col" style={{ height: previewHeight }}>
+                  <div
+                    className="flex items-center justify-center h-2 cursor-ns-resize hover:bg-primary/20 transition-colors group border-t border-border/60"
+                    onMouseDown={onPreviewResize}
+                  >
+                    <div className="w-8 h-0.5 rounded-full bg-border group-hover:bg-primary/50 transition-colors" />
+                  </div>
+                  <SlideViewer slideSet={slideSet} onClose={() => setSlidePreviewDir(null)} />
+                </div>
+              )}
 
               {/* 输入区 */}
               <ChatInput
@@ -421,22 +582,10 @@ function ChatContent() {
                 onSelectAgent={() => {}}
                 onSend={handleSend}
                 onSlashSubmit={handleSlashSubmit}
-                disabled={isTyping || !!activeInteraction || interactionSubmitting}
+                disabled={isTyping}
                 wsConnected={wsConnected}
                 handleSkillInvoke={handleSkillInvoke}
                 hideAgentSelector
-              />
-
-              {/* 交互对话框 */}
-              <InteractionDialog
-                open={!!activeInteraction}
-                interaction={activeInteraction}
-                submitting={interactionSubmitting}
-                wsConnected={wsConnected}
-                onQuestionSubmit={(answer) => sendQuestionAnswer(answer, false)}
-                onQuestionCancel={() => sendQuestionAnswer(null, true)}
-                onConfirmationSubmit={sendConfirmationResponse}
-                onTimeout={handleInteractionTimeout}
               />
             </>
           )}

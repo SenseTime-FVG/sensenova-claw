@@ -17,6 +17,10 @@ import sys
 import time
 from pathlib import Path
 
+from agentos.platform.config.config import Config, DEFAULT_CONFIG_PATH
+from agentos.platform.secrets.migration import migrate_plaintext_secrets
+from agentos.platform.secrets.store import KeyringSecretStore
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # 前端目录解析：根据 project_root 定位
@@ -155,7 +159,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         from agentos.platform.config.config import Config, PROJECT_ROOT as _CFG_ROOT
         from agentos.platform.config.llm_presets import check_llm_configured
         _cfg = Config(project_root=_CFG_ROOT)
-        _llm_ok, _ = check_llm_configured(_cfg.data)
+        _llm_ok, _ = check_llm_configured(_cfg.data, secret_store=getattr(_cfg, "_secret_store", None))
     except Exception:
         _llm_ok = True  # 检测失败时不误报警告
 
@@ -224,6 +228,24 @@ def cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_migrate_secrets(args: argparse.Namespace) -> int:
+    """迁移当前 config.yml 中的明文敏感字段到 keyring。"""
+    config_path = Path(args.config).resolve() if getattr(args, "config", None) else _default_config_path()
+    cfg = Config(config_path=config_path, secret_store=KeyringSecretStore())
+    report = migrate_plaintext_secrets(cfg, secret_store=cfg._secret_store)
+    print(f"migrated={report['migrated']}")
+    for path in report["migrated_paths"]:
+        print(path)
+    return 0
+
+
+def _default_config_path() -> Path:
+    local = Path.cwd() / "config.yml"
+    if local.exists():
+        return local
+    return DEFAULT_CONFIG_PATH
+
+
 # ── 主入口 ───────────────────────────────────────────
 
 def main() -> int:
@@ -251,6 +273,8 @@ def main() -> int:
 
     # agentos version
     subparsers.add_parser("version", help="显示版本号")
+    migrate_parser = subparsers.add_parser("migrate-secrets", help="迁移 config.yml 中的明文 secret 到 keyring")
+    migrate_parser.add_argument("--config", default=None, help="指定 config.yml 路径")
 
     args = parser.parse_args()
 
@@ -260,6 +284,8 @@ def main() -> int:
         return cmd_cli(args)
     elif args.command == "version":
         return cmd_version(args)
+    elif args.command == "migrate-secrets":
+        return cmd_migrate_secrets(args)
     else:
         parser.print_help()
         return 0

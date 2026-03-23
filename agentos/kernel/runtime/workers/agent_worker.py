@@ -50,11 +50,16 @@ class AgentSessionWorker(SessionWorker):
         private_bus: PrivateEventBus,
         runtime: AgentRuntime,
         agent_config: AgentConfig | None = None,
+        session_meta: dict | None = None,
     ):
         super().__init__(session_id, private_bus)
         self.rt = runtime
         self.agent_config = agent_config
         self._consecutive_errors = 0
+        # 安全限制（仅对 proactive 会话生效）
+        self._session_meta: dict | None = session_meta
+        self._llm_call_count = 0
+        self._tool_call_count = 0
 
     # ── 配置读取辅助 ──────────────────────────────────
 
@@ -62,28 +67,37 @@ class AgentSessionWorker(SessionWorker):
         """解析 provider 名称：从 agent_config.model → llm.models → provider"""
         model_key = self._get_model_key()
         provider, _ = config.resolve_model(model_key)
+        # 向后兼容：部分 Agent 仍直接填写 model_id，此时保留显式 provider。
+        explicit_provider = getattr(self.agent_config, "provider", None) if self.agent_config else None
+        if provider == "mock" and explicit_provider:
+            return explicit_provider
         return provider
 
     def _get_model(self) -> str:
         """解析实际 model_id（传给 LLM API 的模型名）"""
         model_key = self._get_model_key()
-        _, model_id = config.resolve_model(model_key)
+        provider, model_id = config.resolve_model(model_key)
+        if provider == "mock" and self.agent_config and self.agent_config.model:
+            return self.agent_config.model
         return model_id
 
     def _get_model_key(self) -> str:
         """获取 model key（llm.models 中的 key）"""
         if self.agent_config and self.agent_config.model:
             return self.agent_config.model
-        return (
-            config.get("agent.model")
-            or config.get("agent.default_model")
-            or config.get("llm.default_model", "mock")
-        )
+        return config.get("llm.default_model", "mock")
 
     def _get_temperature(self) -> float:
         if self.agent_config:
             return self.agent_config.temperature
         return config.get("agent.temperature", 0.2)
+
+    def _get_max_tokens(self) -> int:
+        """获取 max_output_tokens：agent 级别覆盖 model 级别"""
+        if self.agent_config and self.agent_config.max_tokens:
+            return self.agent_config.max_tokens
+        model_key = self._get_model_key()
+        return config.get_model_max_output_tokens(model_key)
 
     def _get_extra_body(self) -> dict:
         """获取 extra_body：agent 级别覆盖 model 级别"""
@@ -97,11 +111,60 @@ class AgentSessionWorker(SessionWorker):
         """根据 Agent 配置过滤可用工具"""
         all_tools = self.rt.tool_registry.as_llm_tools()
         if not self.agent_config or not self.agent_config.tools:
-            return all_tools  # 空列表 = 全部工具
-        allowed = set(self.agent_config.tools)
-        # 始终保留 send_message 工具
-        always_keep = {"send_message"}
-        return [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
+            tools = all_tools  # 空列表 = 全部工具
+        else:
+            allowed = set(self.agent_config.tools)
+            # 始终保留 send_message 工具
+            always_keep = {"send_message"}
+            tools = [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
+
+        # 仅对 proactive 会话应用安全限制
+        if self._session_meta and self._session_meta.get("proactive_job_id"):
+            allowed_tools = self._session_meta.get("allowed_tools")
+            blocked_tools = self._session_meta.get("blocked_tools")
+            if allowed_tools:
+                tools = [t for t in tools if t["name"] in allowed_tools or t["name"] == "send_message"]
+            elif blocked_tools:
+                tools = [t for t in tools if t["name"] not in blocked_tools]
+
+        return tools
+
+    def _is_proactive_session(self) -> bool:
+        """判断当前会话是否为 proactive 会话"""
+        return bool(self._session_meta and self._session_meta.get("proactive_job_id"))
+
+    async def _force_complete_on_limit(
+        self,
+        session_id: str,
+        turn_id: str | None,
+        limit_type: str,
+    ) -> None:
+        """超出安全限制时强制结束当前轮次"""
+        msg = f"已达到安全限制：{limit_type}"
+        logger.warning(
+            "Safety limit reached session=%s turn=%s limit=%s",
+            session_id, turn_id, limit_type,
+        )
+        if turn_id:
+            await self.rt.repo.update_turn_status(turn_id, status="completed", agent_response=msg)
+            state = self.rt.state_store.get_turn(session_id, turn_id)
+            if state:
+                new_messages = state.messages[state.history_offset:]
+                self.rt.state_store.append_to_history(session_id, new_messages)
+        await self.bus.publish(
+            EventEnvelope(
+                type=AGENT_STEP_COMPLETED,
+                session_id=session_id,
+                turn_id=turn_id,
+                source="agent",
+                payload={
+                    "step_type": "final",
+                    "result": {"content": msg},
+                    "next_action": "end",
+                    "exceeded_limit": limit_type,
+                },
+            )
+        )
 
     # ── 持久化辅助 ─────────────────────────────────────
 
@@ -242,6 +305,17 @@ class AgentSessionWorker(SessionWorker):
             self.session_id, self.rt.repo,
         )
 
+        # 上下文压缩：LLM 调用前兜底
+        if self.rt.context_compressor:
+            try:
+                _agent_id = self.agent_config.id if self.agent_config else "default"
+                history = await self.rt.context_compressor.compress_if_needed(
+                    self.session_id, history, agent_id=_agent_id,
+                )
+                self.rt.state_store.replace_history(self.session_id, history)
+            except Exception:
+                logger.warning("上下文压缩失败，使用原始历史 session=%s", self.session_id, exc_info=True)
+
         # v0.6: 加载 MEMORY.md 注入 system prompt
         memory_context = None
         if self.rt.memory_manager:
@@ -275,6 +349,13 @@ class AgentSessionWorker(SessionWorker):
         )
 
         llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
+        # 计数并检查 LLM 调用限制（仅 proactive 会话）
+        self._llm_call_count += 1
+        if self._is_proactive_session():
+            max_llm = self._session_meta.get("max_llm_calls")  # type: ignore[union-attr]
+            if max_llm and self._llm_call_count > max_llm:
+                await self._force_complete_on_limit(self.session_id, turn_id, "max_llm_calls")
+                return
         await self.bus.publish(
             EventEnvelope(
                 type=LLM_CALL_REQUESTED,
@@ -289,6 +370,7 @@ class AgentSessionWorker(SessionWorker):
                     "messages": messages,
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
+                    "max_tokens": self._get_max_tokens(),
                     "extra_body": self._get_extra_body(),
                 },
             )
@@ -398,6 +480,10 @@ class AgentSessionWorker(SessionWorker):
         # 注意：消息已在 _handle_user_input / _handle_llm_result / _handle_tool_result
         # 中增量持久化到 SQLite，此处无需再批量保存
 
+        # 上下文压缩：轮末异步压缩
+        if self.rt.context_compressor:
+            asyncio.create_task(self._compress_history_safe(event.session_id))
+
         await self.bus.publish(
             EventEnvelope(
                 type=AGENT_STEP_COMPLETED,
@@ -417,6 +503,20 @@ class AgentSessionWorker(SessionWorker):
             asyncio.create_task(
                 self._summarize_turn_safe(state.messages, agent_id=agent_id)
             )
+
+    async def _compress_history_safe(self, session_id: str) -> None:
+        """异步执行上下文压缩，不影响主流程。"""
+        try:
+            history = self.rt.state_store.get_session_history(session_id)
+            if not history:
+                return
+            _agent_id = self.agent_config.id if self.agent_config else "default"
+            compressed = await self.rt.context_compressor.compress_async(
+                session_id, history, agent_id=_agent_id,
+            )
+            self.rt.state_store.replace_history(session_id, compressed)
+        except Exception:
+            logger.warning("轮末上下文压缩失败 session=%s", session_id, exc_info=True)
 
     async def _handle_tool_result(self, event: EventEnvelope) -> None:
         """处理工具返回结果，收集结果并在所有工具完成后触发下一轮 LLM 调用"""
@@ -453,7 +553,27 @@ class AgentSessionWorker(SessionWorker):
         if state.pending_tool_calls:
             return
 
+        # 计数并检查工具调用限制（仅 proactive 会话，每批工具完成后累计）
+        if self._is_proactive_session():
+            # 统计本批次完成的工具调用数（从 tool_results 推断）
+            self._tool_call_count = len(state.tool_results)
+            max_tools = self._session_meta.get("max_tool_calls")  # type: ignore[union-attr]
+            if max_tools and self._tool_call_count >= max_tools:
+                await self._force_complete_on_limit(
+                    event.session_id, event.turn_id, "max_tool_calls"
+                )
+                return
+
         llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
+        # 计数并检查 LLM 调用限制（仅 proactive 会话）
+        self._llm_call_count += 1
+        if self._is_proactive_session():
+            max_llm = self._session_meta.get("max_llm_calls")  # type: ignore[union-attr]
+            if max_llm and self._llm_call_count > max_llm:
+                await self._force_complete_on_limit(
+                    event.session_id, event.turn_id, "max_llm_calls"
+                )
+                return
         await self.bus.publish(
             EventEnvelope(
                 type=LLM_CALL_REQUESTED,
@@ -468,6 +588,7 @@ class AgentSessionWorker(SessionWorker):
                     "messages": state.messages,
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
+                    "max_tokens": self._get_max_tokens(),
                     "extra_body": self._get_extra_body(),
                 },
             )

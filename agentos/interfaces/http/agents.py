@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import logging
 import time
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,7 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
 from agentos.capabilities.agents.config import AgentConfig
+from agentos.capabilities.agents.registry import SYSTEM_PROMPT_FILENAME
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,10 @@ def _get_agent_registry(request: Request):
     return request.app.state.agent_registry
 
 
+def _get_config_manager(request: Request):
+    return getattr(request.app.state, "config_manager", None)
+
+
 def _prefs_path(request: Request) -> Path:
     cfg = request.app.state.config
     home = Path(getattr(request.app.state, "agentos_home", "") or str(Path.home() / ".agentos"))
@@ -51,6 +58,64 @@ def _save_prefs(request: Request, prefs: dict) -> None:
     p = _prefs_path(request)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(prefs, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _agentos_home_path(request: Request) -> Path:
+    return Path(getattr(request.app.state, "agentos_home", "") or str(Path.home() / ".agentos"))
+
+
+def _agent_prompt_path(request: Request, agent_id: str) -> Path:
+    return _agentos_home_path(request) / "agents" / agent_id / SYSTEM_PROMPT_FILENAME
+
+
+def _serialize_agent_for_config(agent: AgentConfig) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "name": agent.name,
+        "description": agent.description,
+        "model": agent.model,
+        "temperature": agent.temperature,
+        "tools": list(agent.tools),
+        "skills": list(agent.skills),
+        "workdir": agent.workdir,
+        "can_delegate_to": list(agent.can_delegate_to),
+        "max_delegation_depth": agent.max_delegation_depth,
+        "max_pingpong_turns": agent.max_pingpong_turns,
+        "enabled": agent.enabled,
+    }
+    if agent.max_tokens is not None:
+        data["max_tokens"] = agent.max_tokens
+    return data
+
+
+async def _persist_agent_record(
+    request: Request,
+    agent_id: str,
+    agent: AgentConfig | None,
+) -> None:
+    config_manager = _get_config_manager(request)
+    if config_manager is None:
+        return
+
+    raw_config = config_manager._load_raw_yaml()
+    agents_section = deepcopy(raw_config.get("agents", {}))
+    if not isinstance(agents_section, dict):
+        agents_section = {}
+
+    if agent is None:
+        agents_section.pop(agent_id, None)
+    else:
+        agents_section[agent_id] = _serialize_agent_for_config(agent)
+
+    await config_manager.replace("agents", agents_section)
+
+
+def _persist_agent_prompt(request: Request, agent_id: str, system_prompt: str) -> None:
+    prompt_path = _agent_prompt_path(request, agent_id)
+    if system_prompt.strip():
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(system_prompt, encoding="utf-8")
+    elif prompt_path.exists():
+        prompt_path.unlink()
 
 
 def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, Any]:
@@ -100,7 +165,6 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
         "name": agent_cfg.name,
         "status": "active" if agent_cfg.enabled else "disabled",
         "description": agent_cfg.description,
-        "provider": agent_cfg.provider,
         "model": agent_cfg.model,
         "systemPrompt": agent_cfg.system_prompt,
         "temperature": agent_cfg.temperature,
@@ -129,7 +193,6 @@ class AgentPreferences(BaseModel):
 class AgentConfigUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
-    provider: str | None = None
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
@@ -144,7 +207,6 @@ class AgentCreate(BaseModel):
     id: str
     name: str
     description: str = ""
-    provider: str | None = None
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
@@ -252,7 +314,6 @@ async def create_agent(body: AgentCreate, request: Request):
         id=body.id,
         name=body.name,
         description=body.description,
-        provider=body.provider or (default.provider if default else "openai"),
         model=body.model or (default.model if default else "gpt-4o-mini"),
         temperature=body.temperature if body.temperature is not None else (default.temperature if default else 0.2),
         max_tokens=body.max_tokens,
@@ -262,12 +323,12 @@ async def create_agent(body: AgentCreate, request: Request):
         can_delegate_to=body.can_delegate_to,
         max_delegation_depth=body.max_delegation_depth,
     )
-    registry.register(agent)
-
     # 初始化 per-agent workspace 目录（AGENTS.md / USER.md + workdir）
     from agentos.platform.config.workspace import ensure_agent_workspace
-    agentos_home = getattr(request.app.state, "agentos_home", "") or str(Path.home() / ".agentos")
-    await ensure_agent_workspace(agentos_home, agent.id)
+    await ensure_agent_workspace(str(_agentos_home_path(request)), agent.id)
+    _persist_agent_prompt(request, agent.id, agent.system_prompt)
+    await _persist_agent_record(request, agent.id, agent)
+    registry.register(agent)
 
     logger.info("Created agent: %s", agent.id)
     return _build_agent_detail(agent, request)
@@ -286,8 +347,6 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
         updates["name"] = body.name
     if body.description is not None:
         updates["description"] = body.description
-    if body.provider is not None:
-        updates["provider"] = body.provider
     if body.model is not None:
         updates["model"] = body.model
     if body.temperature is not None:
@@ -305,7 +364,10 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
     if body.max_delegation_depth is not None:
         updates["max_delegation_depth"] = body.max_delegation_depth
 
-    updated = registry.update(agent_id, updates)
+    updated = replace(agent_cfg, **updates, updated_at=time.time())
+    _persist_agent_prompt(request, agent_id, updated.system_prompt)
+    await _persist_agent_record(request, agent_id, updated)
+    registry.register(updated)
     logger.info("Agent config updated: %s -> %s", agent_id, list(updates.keys()))
     return _build_agent_detail(updated, request)
 
@@ -317,8 +379,12 @@ async def delete_agent(agent_id: str, request: Request):
         raise HTTPException(status_code=400, detail="Cannot delete the default agent")
 
     registry = _get_agent_registry(request)
-    if not registry.delete(agent_id):
+    if not registry.get(agent_id):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    await _persist_agent_record(request, agent_id, None)
+    _persist_agent_prompt(request, agent_id, "")
+    registry.delete(agent_id)
 
     logger.info("Deleted agent: %s", agent_id)
     return {"status": "deleted", "agent_id": agent_id}
