@@ -23,6 +23,39 @@
 
 ---
 
+### Task 0: 修复集成测试文件语法错误
+
+**Files:**
+- Modify: `tests/integration/test_send_message_tool.py:36`
+
+- [ ] **Step 1: 修复语法错误**
+
+在 `tests/integration/test_send_message_tool.py` 第 36 行，将：
+
+```python
+    registry = AgentRegistry() / "agents")
+```
+
+改为：
+
+```python
+    registry = AgentRegistry(agentos_home=tmp_path / "agents")
+```
+
+- [ ] **Step 2: 运行现有集成测试确认可导入**
+
+Run: `python3 -m pytest tests/integration/test_send_message_tool.py --collect-only`
+Expected: 成功收集测试用例，无 SyntaxError
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/integration/test_send_message_tool.py
+git commit -m "fix: syntax error in send_message integration test"
+```
+
+---
+
 ### Task 1: get_sendable 允许自身 — 测试
 
 **Files:**
@@ -395,6 +428,7 @@ git commit -m "config: increase search-agent max_send_depth to 2"
 
 拆分方法：使用 send_message 的多目标模式向自己发送子任务：
 
+\`\`\`json
 {
   "targets": [
     {"target_agent": "search-agent", "message": "[子任务模式] 子任务描述1..."},
@@ -403,6 +437,7 @@ git commit -m "config: increase search-agent max_send_depth to 2"
   "mode": "sync",
   "timeout_seconds": 600
 }
+\`\`\`
 
 注意事项：
 - 每个子任务的 message 必须以 [子任务模式] 开头
@@ -434,7 +469,7 @@ Expected: ALL PASS，无回归
 
 - [ ] **Step 2: 检查改动文件清单**
 
-Run: `git diff --stat HEAD~6`
+Run: `git diff --stat HEAD~7`
 Expected: 只有以下 6 个文件被修改：
 - `agentos/capabilities/agents/registry.py`
 - `agentos/capabilities/tools/send_message_tool.py`
@@ -442,3 +477,5 @@ Expected: 只有以下 6 个文件被修改：
 - `.agentos/agents/search-agent/SYSTEM_PROMPT.md`
 - `tests/unit/test_agent_registry.py`
 - `tests/integration/test_send_message_tool.py`
+
+**注意：** 端到端集成测试（search-agent 收到复杂任务 → LLM 自主拆分 → 并行子 session → 汇总）需要真实 LLM API key，不在本计划范围内。可在手动测试或 e2e 测试中验证。
