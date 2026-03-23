@@ -3,7 +3,7 @@
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { WorkbenchShell } from '@/components/workbench/WorkbenchShell';
 import { ChatPanel } from '@/components/chat/ChatPanel';
-import { TaskTemplates } from '@/components/workbench/TaskTemplates';
+import { Dashboard } from '@/components/dashboard';
 
 export default function Page() {
   return (
@@ -11,7 +11,8 @@ export default function Page() {
       <WorkbenchShell>
         <ChatPanel
           defaultAgentId="office-main"
-          emptyState={<TaskTemplates />}
+          emptyState={({ selectAgent }) => <Dashboard onSelectAgent={selectAgent} />}
+          returnToMainLabel="返回工作台"
         />
       </WorkbenchShell>
     </DashboardLayout>

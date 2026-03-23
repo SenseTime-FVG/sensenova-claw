@@ -74,4 +74,38 @@ export async function authPost<T = any>(
   return response.json();
 }
 
+/**
+ * PUT 请求
+ */
+export async function authPut<T = any>(
+  url: string,
+  body?: any,
+  options?: RequestInit
+): Promise<T> {
+  const response = await authFetch(url, {
+    ...options,
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return response.json();
+}
+
+/**
+ * DELETE 请求
+ */
+export async function authDelete<T = any>(
+  url: string,
+  options?: RequestInit
+): Promise<T> {
+  const response = await authFetch(url, {
+    ...options,
+    method: 'DELETE',
+  });
+  return response.json();
+}
+
 export { API_BASE };

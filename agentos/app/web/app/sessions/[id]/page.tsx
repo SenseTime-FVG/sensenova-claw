@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send } from 'lucide-react';
+import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send, ChevronRight, Brain } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -12,12 +12,23 @@ import { MarkdownContent } from '@/components/chat/MarkdownContent';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
+interface ToolInfo {
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: unknown;
+  success?: boolean;
+  error?: string;
+  status: 'running' | 'completed';
+}
+
 interface Message {
+  id?: string;
   role: string;
   content?: string;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  toolInfo?: ToolInfo;
 }
 
 interface ToolCall {
@@ -65,6 +76,141 @@ function formatArgs(args: unknown): string {
   return String(args);
 }
 
+const MAX_TOOL_CONTENT_HEIGHT = 240;
+
+function InlineToolContent({ value }: { value: unknown }) {
+  if (!value) return <span className="text-muted-foreground italic">empty</span>;
+  const str = typeof value === 'string' ? value : '';
+  if (str || isJsonLike(value)) {
+    return (
+      <pre className="whitespace-pre-wrap break-words text-xs font-mono leading-relaxed">
+        <code>{formatArgs(value)}</code>
+      </pre>
+    );
+  }
+  return <MarkdownRenderer className="chat-markdown chat-markdown--detail text-xs" content={stringifyContent(value)} />;
+}
+
+function SingleToolItem({ msg }: { msg: Message }) {
+  const [expanded, setExpanded] = useState(false);
+  const ti = msg.toolInfo;
+
+  const toolName = ti?.name || msg.name || 'tool';
+  const statusIcon = ti
+    ? (ti.status === 'completed' ? (ti.success !== false ? 'text-green-500' : 'text-red-500') : 'text-amber-500')
+    : 'text-green-500';
+  const statusLabel = ti
+    ? (ti.status === 'running' ? '执行中...' : ti.success !== false ? '成功' : '失败')
+    : '成功';
+  const statusCls = ti
+    ? (ti.status === 'running' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : ti.success !== false ? 'bg-green-500/10 text-green-600 dark:text-green-400' : 'bg-red-500/10 text-red-600 dark:text-red-400')
+    : 'bg-green-500/10 text-green-600 dark:text-green-400';
+
+  return (
+    <div className="py-0.5">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs hover:bg-muted/80 transition-colors cursor-pointer select-none"
+      >
+        <ChevronRight size={12} className={`shrink-0 text-muted-foreground transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`} />
+        <Wrench size={11} className={`shrink-0 ${statusIcon}`} />
+        <span className="font-mono text-foreground/80">{toolName}</span>
+        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium leading-none ${statusCls}`}>{statusLabel}</span>
+      </button>
+      {expanded && (
+        <div className="ml-5 mt-1 border-l-2 border-border/30 pl-3 space-y-2 pb-1">
+          {ti ? (
+            <>
+              <div>
+                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Input</div>
+                <div className="overflow-y-auto rounded-md border border-border/50 bg-muted/30 px-3 py-2" style={{ maxHeight: MAX_TOOL_CONTENT_HEIGHT }}>
+                  <InlineToolContent value={ti.arguments} />
+                </div>
+              </div>
+              {ti.status === 'completed' && (
+                <div>
+                  <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Output</div>
+                  <div className={`overflow-y-auto rounded-md border px-3 py-2 ${ti.error ? 'border-red-500/20 bg-red-500/5' : 'border-border/50 bg-muted/30'}`} style={{ maxHeight: MAX_TOOL_CONTENT_HEIGHT }}>
+                    {ti.error ? <span className="text-xs text-red-600 dark:text-red-400">{ti.error}</span> : <InlineToolContent value={ti.result} />}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="overflow-y-auto rounded-md border border-border/50 bg-muted/30 px-3 py-2" style={{ maxHeight: MAX_TOOL_CONTENT_HEIGHT }}>
+              <InlineToolContent value={msg.content || ''} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InlineToolCallGroup({ tools }: { tools: Message[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const completed = tools.filter(t => t.toolInfo?.status === 'completed').length;
+  const running = tools.filter(t => t.toolInfo?.status === 'running').length;
+  const total = tools.length;
+  const allDone = running === 0 && total > 0;
+
+  return (
+    <div className="my-2 ml-14">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/50 border border-border/40 text-xs hover:bg-muted/80 transition-colors cursor-pointer select-none"
+      >
+        <ChevronRight size={14} className={`shrink-0 text-muted-foreground transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`} />
+        <Brain size={14} className={allDone ? 'text-primary/60' : 'text-amber-500 animate-pulse'} />
+        <span className="font-medium text-foreground">Thinking</span>
+        <span className="text-muted-foreground">
+          {running > 0 ? `${completed}/${total}` : `${total} 次工具调用`}
+        </span>
+        {running > 0 && (
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 leading-none">
+            {running} 执行中...
+          </span>
+        )}
+        {allDone && (
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-600 dark:text-green-400 leading-none">
+            完成
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="ml-3 mt-1 border-l-2 border-border/30 pl-2">
+          {tools.map((tool, idx) => <SingleToolItem key={tool.id || idx} msg={tool} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type MsgGroup =
+  | { type: 'message'; key: string; msg: Message }
+  | { type: 'tool_group'; key: string; messages: Message[] };
+
+function groupSessionMessages(messages: Message[]): MsgGroup[] {
+  const groups: MsgGroup[] = [];
+  let toolBuf: Message[] = [];
+  const flush = () => {
+    if (toolBuf.length > 0) {
+      groups.push({ type: 'tool_group', key: `tg_${toolBuf[0].id || groups.length}`, messages: [...toolBuf] });
+      toolBuf = [];
+    }
+  };
+  for (const msg of messages) {
+    if (msg.role === 'tool') {
+      toolBuf.push(msg);
+    } else {
+      flush();
+      groups.push({ type: 'message', key: msg.id || `m_${groups.length}`, msg });
+    }
+  }
+  flush();
+  return groups;
+}
+
 function MessageBubble({ msg }: { msg: Message }) {
   if (msg.role === 'system') {
     return (
@@ -83,7 +229,7 @@ function MessageBubble({ msg }: { msg: Message }) {
           <User size={20} className="text-secondary-foreground" />
         </div>
         <div className="flex-1 flex flex-col items-end">
-          <div className="bg-primary text-primary-foreground text-base p-4 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] leading-relaxed">
+          <div className="bg-primary text-primary-foreground text-sm p-4 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] leading-relaxed">
             <MarkdownRenderer className="chat-markdown chat-markdown--user" content={msg.content || ''} />
           </div>
         </div>
@@ -92,71 +238,15 @@ function MessageBubble({ msg }: { msg: Message }) {
   }
 
   if (msg.role === 'assistant') {
-    const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
+    if (!msg.content) return null;
     return (
       <div className="flex gap-4 max-w-5xl mx-auto my-6 overflow-hidden">
         <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shrink-0 border border-primary/20 shadow-md">
           <Bot size={22} className="text-primary-foreground" />
         </div>
-        <div className="flex-1 min-w-0 space-y-4">
-          {msg.content && (
-            <div className="text-base text-foreground bg-card border border-border p-5 rounded-2xl rounded-tl-none shadow-sm leading-relaxed">
-              <MarkdownContent content={msg.content} />
-            </div>
-          )}
-          {hasToolCalls && (
-            <div className="space-y-3">
-              {msg.tool_calls!.map((tc) => {
-                const tcName = tc.function?.name || tc.name || 'unknown';
-                const tcArgs = tc.function?.arguments || tc.arguments || '';
-                return (
-                  <div key={tc.id} className="bg-muted/50 border border-border rounded-xl overflow-hidden shadow-sm">
-                    <div className="bg-muted px-4 py-2 flex items-center gap-2 text-sm font-medium border-b border-border">
-                      <Wrench size={14} className="text-yellow-500" />
-                      <span className="text-foreground font-mono">{tcName}</span>
-                    </div>
-                    {isJsonLike(tcArgs) ? (
-                      <pre className="json-viewer">
-                        <code>{formatArgs(tcArgs)}</code>
-                      </pre>
-                    ) : (
-                      <div className="p-4">
-                        <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={stringifyContent(tcArgs)} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (msg.role === 'tool') {
-    let displayContent = msg.content || '';
-    if (displayContent.length > 1000) {
-      displayContent = displayContent.slice(0, 1000) + '\n... (truncated)';
-    }
-    return (
-      <div className="flex gap-4 max-w-5xl mx-auto my-4 pl-14 overflow-hidden">
         <div className="flex-1 min-w-0">
-          <div className="bg-muted/30 border border-border rounded-xl overflow-hidden shadow-sm">
-            <div className="bg-muted px-4 py-2 flex items-center gap-2 text-xs font-medium border-b border-border">
-              <Wrench size={14} className="text-green-500" />
-              <span className="text-muted-foreground uppercase tracking-wider">Tool result</span>
-              {msg.name && <span className="text-foreground font-mono ml-auto">{msg.name}</span>}
-            </div>
-            {isJsonLike(displayContent) ? (
-              <pre className="json-viewer">
-                <code>{formatArgs(displayContent)}</code>
-              </pre>
-            ) : (
-              <div className="p-4 bg-background/30">
-                <MarkdownRenderer className="chat-markdown chat-markdown--detail" content={displayContent} />
-              </div>
-            )}
+          <div className="text-sm text-foreground leading-relaxed">
+            <MarkdownContent content={msg.content} />
           </div>
         </div>
       </div>
@@ -164,6 +254,20 @@ function MessageBubble({ msg }: { msg: Message }) {
   }
 
   return null;
+}
+
+function SessionMessageList({ messages }: { messages: Message[] }) {
+  const groups = groupSessionMessages(messages);
+  return (
+    <>
+      {groups.map(group => {
+        if (group.type === 'tool_group') {
+          return <InlineToolCallGroup key={group.key} tools={group.messages} />;
+        }
+        return <MessageBubble key={group.key} msg={group.msg} />;
+      })}
+    </>
+  );
 }
 
 function TypingIndicator() {
@@ -287,29 +391,45 @@ export default function SessionDetailPage() {
           }
           case 'tool_execution': {
             const toolName = String(payload.tool_name || '');
-            const args = payload.arguments || {};
+            const toolCallId = String(payload.tool_call_id || `tc_${Date.now()}`);
+            const args = (payload.arguments || {}) as Record<string, unknown>;
+            const msgId = `tool_${toolCallId}`;
             setMessages((prev) => [
               ...prev,
               {
-                role: 'assistant',
-                content: '',
-                tool_calls: [{
-                  id: payload.tool_call_id ? String(payload.tool_call_id) : `tc_${Date.now()}`,
-                  name: toolName,
-                  arguments: JSON.stringify(args),
-                }],
+                id: msgId,
+                role: 'tool',
+                name: toolName,
+                content: `Executing tool: ${toolName}`,
+                toolInfo: { name: toolName, arguments: args, status: 'running' },
               },
             ]);
             break;
           }
           case 'tool_result': {
             const toolName = String(payload.tool_name || '');
+            const toolCallId = String(payload.tool_call_id || '');
             const result = payload.result;
-            const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
-            setMessages((prev) => [
-              ...prev,
-              { role: 'tool', name: toolName, content: resultStr },
-            ]);
+            const success = Boolean(payload.success);
+            const error = String(payload.error || '');
+            const msgId = `tool_${toolCallId}`;
+            setMessages((prev) => {
+              const idx = prev.findIndex(m => m.id === msgId);
+              if (idx !== -1) {
+                return prev.map((m, i) => i === idx ? {
+                  ...m,
+                  content: `Tool Finished: ${toolName}`,
+                  toolInfo: { name: toolName, arguments: m.toolInfo?.arguments || {}, result, success, error, status: 'completed' as const },
+                } : m);
+              }
+              return [...prev, {
+                id: msgId,
+                role: 'tool',
+                name: toolName,
+                content: typeof result === 'string' ? result : JSON.stringify(result),
+                toolInfo: { name: toolName, arguments: {}, result, success, error, status: 'completed' as const },
+              }];
+            });
             break;
           }
           case 'turn_completed': {
@@ -568,9 +688,7 @@ export default function SessionDetailPage() {
                   </span>
                 </div>
               )}
-              {visibleMessages.map((msg, idx) => (
-                <MessageBubble key={idx} msg={msg} />
-              ))}
+              <SessionMessageList messages={visibleMessages} />
               {isTyping && <TypingIndicator />}
               <div ref={chatEndRef} />
             </div>

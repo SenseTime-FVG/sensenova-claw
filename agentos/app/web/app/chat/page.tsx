@@ -8,13 +8,31 @@ import {
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useFilePanel } from '@/contexts/FilePanelContext';
 import { type SessionItem, type ContextFileRef, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
-import { MessageBubble } from '@/components/chat/MessageBubble';
+import { MessageList } from '@/components/chat/MessageBubble';
 import { TypingIndicator } from '@/components/chat/TypingIndicator';
 import { ChatInput } from '@/components/chat/ChatInput';
-import { InteractionDialog } from '@/components/chat/QuestionDialog';
+import { SlideViewer, useSlideSet } from '@/components/ppt/PPTViewer';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+
+/* ── workdir 根目录缓存 ── */
+let _workdirRootCache: string | null | undefined;
+async function fetchWorkdirRoot(): Promise<string | null> {
+  if (_workdirRootCache !== undefined) return _workdirRootCache as string | null;
+  let result: string | null = null;
+  try {
+    const res = await authFetch(`${API_BASE}/api/files/roots`);
+    if (res.ok) {
+      const data = await res.json();
+      const entry = (data.roots || []).find((r: { name: string }) => r.name === 'Agent 工作区');
+      result = entry?.path ?? null;
+    }
+  } catch { /* ignore */ }
+  _workdirRootCache = result;
+  return result;
+}
 
 interface AgentBrief {
   id: string;
@@ -158,18 +176,13 @@ function ChatContent() {
     createSession,
     deleteSession,
     startNewChat,
-    resetIfNeeded,
     refreshTaskGroups,
     loadingSessions,
-    activeInteraction,
-    interactionSubmitting,
-    sendQuestionAnswer,
-    sendConfirmationResponse,
-    handleInteractionTimeout,
     handleSkillInvoke,
     cleanupEmptySession,
   } = useChatSession();
 
+  const { openToPath } = useFilePanel();
   const searchParams = useSearchParams();
   const agentFromUrl = searchParams.get('agent');
 
@@ -177,8 +190,28 @@ function ChatContent() {
   const [loadingAgents, setLoadingAgents] = useState(true);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(agentFromUrl);
   const [searchQuery, setSearchQuery] = useState('');
+  const [slidePreviewDir, setSlidePreviewDir] = useState<string | null>(null);
+  const [previewHeight, setPreviewHeight] = useState(350);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const requiredCheckDone = useRef(false);
+
+  const slideSet = useSlideSet(slidePreviewDir);
+
+  const onPreviewResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = previewHeight;
+    const onMove = (ev: MouseEvent) => {
+      const delta = startY - ev.clientY;
+      setPreviewHeight(Math.max(180, Math.min(window.innerHeight * 0.8, startH + delta)));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [previewHeight]);
 
   const loadAgents = useCallback(async () => {
     setLoadingAgents(true);
@@ -202,13 +235,44 @@ function ChatContent() {
   useEffect(() => { loadAgents(); }, [loadAgents]);
 
   useEffect(() => {
-    resetIfNeeded();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
+
+  // 监听 PPT 幻灯片预览事件
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { dir: string; isAbsolute: boolean };
+      let resolvedDir: string;
+
+      if (detail.isAbsolute) {
+        resolvedDir = detail.dir;
+      } else {
+        const curSession = sessions.find(s => s.session_id === currentSessionId);
+        const agentId = (curSession ? getAgentId(curSession.meta) : null) || selectedAgentId || 'default';
+        const firstSegment = detail.dir.split('/')[0];
+        resolvedDir = firstSegment === agentId ? detail.dir : `${agentId}/${detail.dir}`;
+
+        fetchWorkdirRoot().then(root => {
+          if (root) {
+            const sep = root.includes('\\') ? '\\' : '/';
+            const fullPath = [root, resolvedDir.replace(/\//g, sep)].join(sep);
+            openToPath(fullPath);
+          }
+        });
+      }
+
+      setSlidePreviewDir(resolvedDir);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    };
+
+    window.addEventListener('agentos:open-slide-preview', handler);
+    return () => window.removeEventListener('agentos:open-slide-preview', handler);
+  }, [selectedAgentId, currentSessionId, sessions, openToPath]);
+
+  // 切换会话时关闭预览
+  useEffect(() => {
+    setSlidePreviewDir(null);
+  }, [currentSessionId]);
 
   // 按 agent 分组 sessions
   const sessionsByAgent = sessions.reduce<Record<string, SessionItem[]>>((acc, s) => {
@@ -476,7 +540,7 @@ function ChatContent() {
                 </div>
               )}
               {/* 消息区 */}
-              <div className="flex-1 overflow-y-auto p-4 md:p-8">
+              <div className={cn("overflow-y-auto p-4 md:p-8", slideSet ? "min-h-0" : "", "flex-1")}>
                 {messages.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
                     <Bot size={32} className="text-primary/30" />
@@ -484,12 +548,25 @@ function ChatContent() {
                   </div>
                 ) : (
                   <>
-                    {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+                    <MessageList messages={messages} />
                     {isTyping && <TypingIndicator />}
                     <div ref={chatEndRef} />
                   </>
                 )}
               </div>
+
+              {/* PPT 幻灯片内联预览（可拖拽调整高度） */}
+              {slideSet && (
+                <div className="shrink-0 flex flex-col" style={{ height: previewHeight }}>
+                  <div
+                    className="flex items-center justify-center h-2 cursor-ns-resize hover:bg-primary/20 transition-colors group border-t border-border/60"
+                    onMouseDown={onPreviewResize}
+                  >
+                    <div className="w-8 h-0.5 rounded-full bg-border group-hover:bg-primary/50 transition-colors" />
+                  </div>
+                  <SlideViewer slideSet={slideSet} onClose={() => setSlidePreviewDir(null)} />
+                </div>
+              )}
 
               {/* 输入区 */}
               <ChatInput
@@ -498,22 +575,10 @@ function ChatContent() {
                 onSelectAgent={() => {}}
                 onSend={handleSend}
                 onSlashSubmit={handleSlashSubmit}
-                disabled={isTyping || !!activeInteraction || interactionSubmitting}
+                disabled={isTyping}
                 wsConnected={wsConnected}
                 handleSkillInvoke={handleSkillInvoke}
                 hideAgentSelector
-              />
-
-              {/* 交互对话框 */}
-              <InteractionDialog
-                open={!!activeInteraction}
-                interaction={activeInteraction}
-                submitting={interactionSubmitting}
-                wsConnected={wsConnected}
-                onQuestionSubmit={(answer) => sendQuestionAnswer(answer, false)}
-                onQuestionCancel={() => sendQuestionAnswer(null, true)}
-                onConfirmationSubmit={sendConfirmationResponse}
-                onTimeout={handleInteractionTimeout}
               />
             </>
           )}

@@ -59,6 +59,13 @@ class TitleRuntime:
         if session_id in self._processed_sessions:
             return
 
+        # 检查 session 是否已有标题，有则跳过
+        meta = await self.repo.get_session_meta(session_id)
+        existing_title = (meta or {}).get("title", "")
+        if existing_title and existing_title != "未命名会话":
+            self._processed_sessions.add(session_id)
+            return
+
         self._processed_sessions.add(session_id)
         content = str(event.payload.get("content", ""))
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Presentation, ChevronLeft, ChevronRight, Download, Maximize2, Minimize2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { type ChatMessage } from '@/lib/chatTypes';
 import { API_BASE, authFetch } from '@/lib/authFetch';
 
@@ -99,7 +100,7 @@ export function extractSlideDir(messages: ChatMessage[]): string | null {
 // 幻灯片列表加载
 // ────────────────────────────────────────
 
-function useSlideSet(dir: string | null): SlideSet | null {
+export function useSlideSet(dir: string | null): SlideSet | null {
   const [slideSet, setSlideSet] = useState<SlideSet | null>(null);
 
   useEffect(() => {
@@ -205,44 +206,51 @@ export function SlideViewer({ slideSet, onClose }: { slideSet: SlideSet; onClose
 
   const toggleFullscreen = useCallback(() => setIsFullscreen(f => !f), []);
 
-  const containerClass = isFullscreen
-    ? 'fixed inset-0 z-50 bg-black/95 flex flex-col'
+  const isFs = isFullscreen;
+
+  const containerClass = isFs
+    ? 'fixed inset-0 z-50 bg-neutral-950 flex flex-col'
     : 'flex-1 flex flex-col';
+
+  const btnClass = isFs ? 'text-white/70 hover:text-white hover:bg-white/10' : '';
 
   return (
     <div className={containerClass}>
       {/* 工具栏 */}
-      <div className="flex items-center justify-between px-4 py-2 bg-muted/30 border-b shrink-0">
+      <div className={cn(
+        "flex items-center justify-between px-4 py-2 shrink-0",
+        isFs ? "bg-white/5 border-b border-white/10" : "bg-muted/30 border-b",
+      )}>
         <div className="flex items-center gap-2 min-w-0">
-          <Presentation className="w-4 h-4 text-primary shrink-0" />
-          <span className="text-sm font-medium text-foreground truncate">
+          <Presentation className={cn("w-4 h-4 shrink-0", isFs ? "text-white/80" : "text-primary")} />
+          <span className={cn("text-sm font-medium truncate", isFs ? "text-white" : "text-foreground")}>
             {slideSet.dir.split('/').pop()}
           </span>
-          <span className="text-xs text-muted-foreground ml-1">
+          <span className={cn("text-xs ml-1", isFs ? "text-white/50" : "text-muted-foreground")}>
             ({total} 页)
           </span>
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon-sm" onClick={goPrev} disabled={current === 0}>
+          <Button variant="ghost" size="icon-sm" className={btnClass} onClick={goPrev} disabled={current === 0}>
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <span className="text-sm tabular-nums min-w-[3rem] text-center">
+          <span className={cn("text-sm tabular-nums min-w-[3rem] text-center", isFs && "text-white/80")}>
             {current + 1} / {total}
           </span>
-          <Button variant="ghost" size="icon-sm" onClick={goNext} disabled={current >= total - 1}>
+          <Button variant="ghost" size="icon-sm" className={btnClass} onClick={goNext} disabled={current >= total - 1}>
             <ChevronRight className="w-4 h-4" />
           </Button>
-          <div className="w-px h-4 bg-border mx-1" />
-          <Button variant="ghost" size="icon-sm" onClick={toggleFullscreen}>
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          <div className={cn("w-px h-4 mx-1", isFs ? "bg-white/15" : "bg-border")} />
+          <Button variant="ghost" size="icon-sm" className={btnClass} onClick={toggleFullscreen}>
+            {isFs ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </Button>
-          <Button variant="ghost" size="sm" asChild>
+          <Button variant="ghost" size="sm" className={btnClass} asChild>
             <a href={slideUrl} target="_blank" rel="noopener noreferrer">
               <Download className="w-3.5 h-3.5 mr-1" />
               打开
             </a>
           </Button>
-          {onClose && (
+          {onClose && !isFs && (
             <>
               <div className="w-px h-4 bg-border mx-1" />
               <Button variant="ghost" size="icon-sm" onClick={onClose} title="关闭预览">
@@ -256,7 +264,10 @@ export function SlideViewer({ slideSet, onClose }: { slideSet: SlideSet; onClose
       {/* 幻灯片渲染区 */}
       <div
         ref={containerRef}
-        className="flex-1 flex items-center justify-center bg-neutral-100 dark:bg-neutral-900 overflow-hidden relative"
+        className={cn(
+          "flex-1 flex items-center justify-center overflow-hidden relative",
+          isFs ? "bg-neutral-950" : "bg-neutral-100 dark:bg-neutral-900",
+        )}
       >
         {/* 左右翻页热区 */}
         <button
@@ -264,7 +275,7 @@ export function SlideViewer({ slideSet, onClose }: { slideSet: SlideSet; onClose
           onClick={goPrev}
           disabled={current === 0}
         >
-          <div className="w-8 h-8 rounded-full bg-black/40 flex items-center justify-center">
+          <div className={cn("w-8 h-8 rounded-full flex items-center justify-center", isFs ? "bg-white/15" : "bg-black/40")}>
             <ChevronLeft className="w-5 h-5 text-white" />
           </div>
         </button>
@@ -273,14 +284,17 @@ export function SlideViewer({ slideSet, onClose }: { slideSet: SlideSet; onClose
           onClick={goNext}
           disabled={current >= total - 1}
         >
-          <div className="w-8 h-8 rounded-full bg-black/40 flex items-center justify-center">
+          <div className={cn("w-8 h-8 rounded-full flex items-center justify-center", isFs ? "bg-white/15" : "bg-black/40")}>
             <ChevronRight className="w-5 h-5 text-white" />
           </div>
         </button>
 
         {/* 外层按缩放尺寸占位，内层按原始尺寸渲染并 transform 缩放 */}
         <div
-          className="rounded-lg shadow-2xl overflow-hidden relative"
+          className={cn(
+            "rounded-lg shadow-2xl overflow-hidden relative",
+            isFs && "ring-1 ring-white/20",
+          )}
           style={{
             width: Math.round(SLIDE_W * scale),
             height: Math.round(SLIDE_H * scale),
@@ -304,18 +318,29 @@ export function SlideViewer({ slideSet, onClose }: { slideSet: SlideSet; onClose
 
       {/* 缩略图条 */}
       {total > 1 && (
-        <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/30 border-t overflow-x-auto shrink-0">
+        <div className={cn(
+          "flex items-center gap-1.5 px-4 py-2 overflow-x-auto shrink-0",
+          isFs ? "bg-white/5 border-t border-white/10" : "bg-muted/30 border-t",
+        )}>
           {slideSet.slides.map((slide, idx) => (
             <button
               key={slide.name}
-              className={`shrink-0 w-16 h-9 rounded border-2 transition-all overflow-hidden cursor-pointer ${
+              className={cn(
+                "shrink-0 w-16 h-9 rounded border-2 transition-all overflow-hidden cursor-pointer",
                 idx === current
-                  ? 'border-primary shadow-sm ring-1 ring-primary/30'
-                  : 'border-transparent opacity-60 hover:opacity-100'
-              }`}
+                  ? isFs
+                    ? 'border-white/80 shadow-sm ring-1 ring-white/30'
+                    : 'border-primary shadow-sm ring-1 ring-primary/30'
+                  : isFs
+                    ? 'border-white/10 opacity-60 hover:opacity-100'
+                    : 'border-transparent opacity-60 hover:opacity-100',
+              )}
               onClick={() => setCurrent(idx)}
             >
-              <div className="w-full h-full bg-muted flex items-center justify-center text-[10px] text-muted-foreground font-medium">
+              <div className={cn(
+                "w-full h-full flex items-center justify-center text-[10px] font-medium",
+                isFs ? "bg-white/10 text-white/70" : "bg-muted text-muted-foreground",
+              )}>
                 {idx + 1}
               </div>
             </button>
