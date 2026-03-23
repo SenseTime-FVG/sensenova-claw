@@ -25,15 +25,13 @@ dependencies = [
   "keyring>=25.0.0",
   "tiktoken>=0.7.0",
   "watchdog>=4.0.0",
+  "discord.py>=2.4.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.3.0",
   "pytest-asyncio>=0.24.0",
-]
-telegram = [
-  "python-telegram-bot>=21.0",
 ]
 wecom = [
   "wechatpy>=1.8.0",

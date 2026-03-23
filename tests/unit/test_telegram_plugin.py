@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 telegram = pytest.importorskip("telegram", reason="python-telegram-bot not installed")
@@ -80,6 +82,24 @@ class TestRegister:
         assert len(registry._pending_channels) == 1
         assert registry._pending_channels[0].get_channel_id() == "telegram"
         assert len(registry._pending_tools) == 1
+
+    @pytest.mark.asyncio
+    async def test_missing_dependency_reports_failed_state(self):
+        api = _make_plugin_api({"enabled": True})
+        registry = api._registry
+        original_import = __import__
+        with patch(
+            "builtins.__import__",
+            side_effect=lambda name, *args, **kwargs: (
+                (_ for _ in ()).throw(ModuleNotFoundError(name="telegram"))
+                if name == "agentos.adapters.plugins.telegram.channel"
+                else original_import(name, *args, **kwargs)
+            ),
+        ):
+            await register(api)
+        assert registry._pending_channels == []
+        assert registry._plugin_states["telegram"]["status"] == "failed"
+        assert registry._plugin_states["telegram"]["error"] == "未安装依赖: python-telegram-bot"
 
     @pytest.mark.asyncio
     async def test_channel_config_passthrough(self):

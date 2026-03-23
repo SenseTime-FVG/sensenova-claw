@@ -23,6 +23,17 @@ class PluginDefinition:
     description: str = ""
 
 
+def format_missing_dependency_error(exc: ImportError, package_hint: str = "") -> str:
+    """将 ImportError 规范化为 Gateway 可展示的缺依赖提示。"""
+    package = package_hint.strip()
+    if not package and isinstance(exc, ModuleNotFoundError):
+        package = str(getattr(exc, "name", "")).strip()
+    if not package:
+        message = str(exc).strip() or type(exc).__name__
+        return f"依赖导入失败: {message}"
+    return f"未安装依赖: {package}"
+
+
 class PluginApi:
     """
     框架传给 Plugin 的注册接口（门面模式）。
@@ -36,6 +47,10 @@ class PluginApi:
     def register_channel(self, channel: Channel) -> None:
         """注册一个 Channel"""
         self._registry._pending_channels.append(channel)
+        self._registry._plugin_states.setdefault(self.plugin_id, {})
+        self._registry._plugin_states[self.plugin_id]["registered_channel_id"] = channel.get_channel_id()
+        self._registry._plugin_states[self.plugin_id]["status"] = "registered"
+        self._registry._plugin_states[self.plugin_id]["error"] = ""
 
     def register_tool(self, tool: Tool) -> None:
         """注册一个 Tool"""
@@ -44,6 +59,12 @@ class PluginApi:
     def register_hook(self, event_type: str, handler: Callable) -> None:
         """v0.7 预留接口，不实现 hook 分发"""
         self._registry._pending_hooks.append((event_type, handler))
+
+    def report_status(self, status: str, *, error: str = "") -> None:
+        """上报插件状态，供 Gateway 页面展示。"""
+        self._registry._plugin_states.setdefault(self.plugin_id, {})
+        self._registry._plugin_states[self.plugin_id]["status"] = status
+        self._registry._plugin_states[self.plugin_id]["error"] = error
 
     def get_config(self, key: str, default: Any = None) -> Any:
         """读取 config.yaml 中 plugins.<plugin_id>.<key>"""

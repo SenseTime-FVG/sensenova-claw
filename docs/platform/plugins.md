@@ -36,6 +36,14 @@ class PluginRegistry:
 
 ## 当前内置插件
 
+当前内置消息渠道插件包括：
+
+- `feishu`
+- `telegram`
+- `wecom`
+- `whatsapp`
+- `discord`
+
 ### FeishuChannel 插件
 
 飞书机器人接入插件，提供以下功能：
@@ -44,6 +52,15 @@ class PluginRegistry:
 - 将 Agent 响应渲染为飞书卡片格式
 - 支持 `OutboundCapable` 协议，实现主动推送消息
 - 处理 `cron.delivery_requested` 事件，向飞书用户/群组广播通知
+
+### DiscordChannel 插件
+
+Discord Bot 接入插件，提供以下功能：
+
+- 接收 Discord 私聊、群聊和线程文本消息
+- 支持群聊 `mention` 触发与线程级会话路由
+- 支持 `ask_user` 问答回传和通用 `MessageTool` 主动出站
+- 为 slash command、线程绑定增强等后续特性预留扩展接口
 
 ---
 
@@ -121,6 +138,15 @@ plugins:
     group_chat_allowlist: ["-1001234567890"]
     group_allowlist: ["123456789"]
     require_mention: true
+  discord:
+    enabled: true
+    bot_token: "discord-bot-token"
+    dm_policy: open
+    group_policy: allowlist
+    group_allowlist: ["123456789012345678"]
+    channel_allowlist: ["234567890123456789", "345678901234567890"]
+    require_mention: true
+    reply_in_thread: true
   my_plugin:
     enabled: true
     # 插件自定义配置...

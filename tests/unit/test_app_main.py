@@ -1,36 +1,64 @@
-"""agentos.app.main 的前端路径解析回归测试"""
+from __future__ import annotations
 
+import os
+import signal
+import sys
+import time
 from pathlib import Path
 
-from agentos.app import main as app_main
+import pytest
+
+from agentos.app.main import _spawn_managed_process, _terminate_managed_process
 
 
-def test_resolve_web_dir_prefers_project_root(tmp_path):
-    """project_root 下有 node_modules 时优先使用"""
-    web_dir = tmp_path / "agentos" / "app" / "web"
-    (web_dir / "node_modules").mkdir(parents=True)
+@pytest.mark.skipif(os.name == "nt", reason="该测试仅覆盖类 Unix 进程组行为")
+def test_terminate_managed_process_kills_child_process_tree(tmp_path: Path):
+    child_pid_file = tmp_path / "child.pid"
+    script = tmp_path / "spawn_child.py"
+    script.write_text(
+        """
+import subprocess
+import sys
+import time
+from pathlib import Path
 
-    assert app_main._resolve_web_dir(tmp_path) == web_dir
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+Path(sys.argv[1]).write_text(str(child.pid), encoding="utf-8")
+time.sleep(60)
+""".strip(),
+        encoding="utf-8",
+    )
+
+    proc = _spawn_managed_process(
+        [sys.executable, str(script), str(child_pid_file)],
+        cwd=str(tmp_path),
+        env=os.environ.copy(),
+    )
+
+    deadline = time.time() + 5
+    while not child_pid_file.exists() and time.time() < deadline:
+        time.sleep(0.05)
+
+    assert child_pid_file.exists()
+    child_pid = int(child_pid_file.read_text(encoding="utf-8").strip())
+    assert proc.poll() is None
+    os.kill(child_pid, 0)
+
+    _terminate_managed_process(proc, timeout=1)
+
+    assert proc.poll() is not None
+    with pytest.raises(ProcessLookupError):
+        os.kill(child_pid, 0)
 
 
-def test_resolve_web_dir_falls_back_to_installed(monkeypatch, tmp_path):
-    """project_root 下无 node_modules，回退到 AGENTOS_HOME/app"""
-    installed_web = tmp_path / "installed" / "app" / "agentos" / "app" / "web"
-    (installed_web / "node_modules").mkdir(parents=True)
-    monkeypatch.setenv("AGENTOS_HOME", str(tmp_path / "installed"))
-
-    # project_root 下没有 node_modules
-    project_root = tmp_path / "dev"
-    project_root.mkdir()
-
-    assert app_main._resolve_web_dir(project_root) == installed_web
-
-
-def test_resolve_web_dir_defaults_to_project_root(monkeypatch, tmp_path):
-    """都没有 node_modules 时返回 project_root 下的 web 目录"""
-    monkeypatch.setenv("AGENTOS_HOME", str(tmp_path / "empty"))
-
-    project_root = tmp_path / "dev"
-    project_root.mkdir()
-
-    assert app_main._resolve_web_dir(project_root) == project_root / "agentos" / "app" / "web"
+@pytest.mark.skipif(os.name == "nt", reason="该测试仅覆盖类 Unix 进程组行为")
+def test_spawn_managed_process_creates_new_process_group(tmp_path: Path):
+    proc = _spawn_managed_process(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        cwd=str(tmp_path),
+        env=os.environ.copy(),
+    )
+    try:
+        assert os.getpgid(proc.pid) == proc.pid
+    finally:
+        _terminate_managed_process(proc, timeout=1)

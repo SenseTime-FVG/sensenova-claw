@@ -988,3 +988,48 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 这类交互需求很容易在中途反复变化；如果先把 `+` 绑定到复杂弹窗或预创建逻辑，再回退会造成无谓代码噪音。应优先围绕”是否真的需要立即创建 session”这个核心约束做最小实现。
+
+### 2026-03-23 Discord Channel 插件迁移补充
+
+成功经验：
+- 对这类从外部项目迁移的 IM channel，先把范围收敛到“标准消息 channel 能力”最稳：`config/models/runtime/channel/plugin` 五层结构足以承载 DM、群聊 mention、线程路由、`ask_user` 出站和通用 `MessageTool`，不必一开始就卷入 slash command、语音或管理动作。
+- `discord.py` 依赖应延迟到 `runtime.start()` 再导入；这样即使本机没装 Discord SDK，插件发现、配置解析、channel 单测和进程内 e2e 仍可稳定执行，不会把“依赖缺失”误判成“插件结构错误”。
+- Discord 的会话键最好直接按 `dm:<sender_id> / group:<channel_id> / thread:<thread_id>` 划分；这样与 Telegram topic、WhatsApp group 的思路一致，后续扩展线程绑定或 channel 级功能时不需要重做会话模型。
+
+失败/风险经验：
+- `openclaw/extensions/discord` 里的能力远超 AgentOS 现有 channel 抽象；如果不先明确“只迁移消息渠道闭环”，很容易把 provider runtime、原生命令和复杂 reply delivery 一并带进来，导致首版范围失控。
+
+### 2026-03-23 Gateway 缺依赖插件展示补充
+
+成功经验：
+- 对“插件已启用但缺少运行依赖”的场景，最稳的做法不是让 channel 注册后启动失败，而是在 `PluginRegistry` 层保存一份 `plugin_state`，由 `/api/gateway/channels` 把“真实已注册 channel”和“失败但应展示的插件”合并返回。
+- `Gateway` 页面如果要展示这类失败态，后端响应里必须直接带 `error` 字段；前端只根据 `status=failed` 上色不够，用户仍然不知道是认证失败、网络失败还是本机没装依赖。
+- `stats.totalChannels` 与 channel 列表最好复用同一份合并结果，否则会出现“页面明明有一张失败卡片，但统计仍显示 0 channels”的割裂感。
+
+失败/风险经验：
+- 仅在插件 `register()` 里静默跳过依赖缺失，虽然能避免服务启动失败，但会让 `/gateway` 页面完全看不到该 channel，用户体验上等同于“配置没生效”，排查成本仍然很高。
+
+### 2026-03-23 npm install 同步 Python 可选依赖补充
+
+成功经验：
+- 对“用户只跑 `npm install`”的仓库，真正的一键安装要落在根目录 `postinstall`，而不是只在 README 里要求用户再手动执行 `uv sync`；当前仓库 `npm install` 已会执行 `scripts/postinstall.sh`，是接入 Python 可选依赖的正确位置。
+- Discord 这类 Python channel 依赖如果不放进 `uv sync --extra ...`，用户即使完成 `npm install` 也仍会在 Gateway 里看到“未安装依赖”；把 `--extra discord` 直接合入 postinstall 后，安装体验和用户预期才能对齐。
+
+失败/风险经验：
+- 不能把“某个包之前能 import”误判成“npm install 已经覆盖 Python 依赖”；像 `lark_oapi` 这类模块可能只是开发机全局 Python 环境里本来就有，和 npm 安装链路没有关系。
+
+### 2026-03-23 Channel 依赖收敛到默认安装补充
+
+成功经验：
+- 如果产品要求是“用户只跑一次 `npm install`”，最稳的方案不是继续堆 `uv sync --extra xxx`，而是把实际需要的 channel Python 依赖直接放进 `pyproject.toml` 的默认 `dependencies`，这样 `postinstall -> uv sync` 就天然覆盖到位。
+- 对已经进默认依赖的包，安装脚本应回到最简单的 `uv sync`；否则依赖声明和安装路径会双轨并存，后续很容易继续出现“某包在默认依赖里，脚本却还写着 extra”的漂移。
+
+### 2026-03-23 dev 退出残留子进程补充
+
+成功经验：
+- `agentos run` 用 `uvicorn --reload` 启动时，真正的根因不是某个 channel 卡住，而是当前清理逻辑只 `terminate()` 了父进程，没有回收整个进程组；一旦 reload/watch 或某些 runtime 生成子进程，就会留下孤儿进程继续占端口。
+- 对这类“父进程 + watcher + worker”模型，最稳的修法是启动时给每个子进程单独建进程组，退出时按进程组发送 `SIGTERM`，超时再 `SIGKILL`；仅杀父 PID 不足以保证端口释放。
+- 用真实子进程测试比 mock 更可靠：让父脚本再 spawn 一个 `sleep` 子进程，然后断言清理函数能把父子一起杀掉，能稳定覆盖这类端口残留问题。
+
+失败/风险经验：
+- 仅修 Discord runtime 的异常提示不能解决 `Ctrl+C` 后端口残留；如果 `app/main.py` 仍然按单 PID 清理，换成别的 channel 或热重载路径仍会复现类似问题。

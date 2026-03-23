@@ -328,6 +328,7 @@ async def lifespan(app: FastAPI):
     app.state.tool_registry = tool_registry
     app.state.skill_registry = skill_registry
     app.state.agent_registry = agent_registry
+    app.state.plugin_registry = plugin_registry
     app.state.config = config
     app.state.secret_store = secret_store
     app.state.agentos_home = agentos_home_str
