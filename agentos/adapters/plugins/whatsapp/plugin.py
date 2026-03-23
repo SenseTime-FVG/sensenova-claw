@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from agentos.adapters.plugins.base import PluginApi, PluginDefinition
+from agentos.adapters.plugins.base import PluginApi, PluginDefinition, format_missing_dependency_error
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,10 @@ async def register(api: PluginApi) -> None:
     try:
         from agentos.adapters.plugins.whatsapp.channel import WhatsAppChannel
         from agentos.adapters.plugins.whatsapp.config import WhatsAppConfig
-    except ImportError:
-        logger.info("WhatsApp 插件跳过：缺少依赖")
+    except ImportError as exc:
+        error = format_missing_dependency_error(exc)
+        api.report_status("failed", error=error)
+        logger.info("WhatsApp 插件跳过：%s", error)
         return
 
     from agentos.capabilities.tools.message_tool import MessageTool

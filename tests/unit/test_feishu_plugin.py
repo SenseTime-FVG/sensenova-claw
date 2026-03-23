@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import sys
+from unittest.mock import patch
+
 import pytest
 
 from agentos.kernel.events.bus import PublicEventBus
@@ -152,6 +155,22 @@ class TestRegister:
         assert channel._config.app_id == "my_app"
         assert channel._config.app_secret == "my_secret"
         assert channel._config.render_mode == "text"
+
+    async def test_missing_dependency_reports_failed_state(self):
+        api = _make_plugin_api({"enabled": True})
+        registry = api._registry
+        original_channel_module = sys.modules.pop("agentos.adapters.plugins.feishu.channel", None)
+        try:
+            with patch.dict(sys.modules, {"agentos.adapters.plugins.feishu.channel": None}):
+                await register(api)
+        finally:
+            if original_channel_module is not None:
+                sys.modules["agentos.adapters.plugins.feishu.channel"] = original_channel_module
+            else:
+                sys.modules.pop("agentos.adapters.plugins.feishu.channel", None)
+        assert registry._pending_channels == []
+        assert registry._plugin_states["feishu"]["status"] == "failed"
+        assert "依赖" in registry._plugin_states["feishu"]["error"]
 
 
 def test_builtin_plugin_module_points_to_plugins_package():

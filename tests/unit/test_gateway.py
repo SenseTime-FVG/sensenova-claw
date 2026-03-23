@@ -36,6 +36,28 @@ class MockChannel(Channel):
         self.received_events.append(event)
 
 
+class FailingChannel(Channel):
+    def __init__(self, channel_id: str, error: str = "start failed"):
+        self._channel_id = channel_id
+        self._error = error
+        self.started = False
+        self.stopped = False
+        self._agentos_status: dict[str, str] = {}
+
+    def get_channel_id(self) -> str:
+        return self._channel_id
+
+    async def start(self) -> None:
+        self.started = True
+        raise RuntimeError(self._error)
+
+    async def stop(self) -> None:
+        self.stopped = True
+
+    async def send_event(self, event: EventEnvelope) -> None:
+        del event
+
+
 class _RepoWithMeta:
     def __init__(self, meta_by_session: dict[str, dict[str, Any] | None]):
         self._meta_by_session = meta_by_session
@@ -221,3 +243,23 @@ async def test_gateway_dispatch_event_parent_loop_is_safe():
 
     assert len(channel.received_events) == 0
     assert "sess_a" not in gateway._session_bindings
+
+
+@pytest.mark.asyncio
+async def test_gateway_start_continues_when_one_channel_fails():
+    bus = PublicEventBus()
+    publisher = EventPublisher(bus=bus)
+    gateway = Gateway(publisher=publisher)
+
+    ok_channel = MockChannel("ok-channel")
+    failed_channel = FailingChannel("failed-channel", error="discord intents rejected")
+    gateway.register_channel(ok_channel)
+    gateway.register_channel(failed_channel)
+
+    await gateway.start()
+    await gateway.stop()
+
+    assert ok_channel.started is True
+    assert failed_channel.started is True
+    assert failed_channel._agentos_status["status"] == "failed"
+    assert failed_channel._agentos_status["error"] == "discord intents rejected"

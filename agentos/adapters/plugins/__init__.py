@@ -51,6 +51,7 @@ class PluginRegistry:
 
     def __init__(self):
         self._plugins: dict[str, PluginDefinition] = {}
+        self._plugin_states: dict[str, dict[str, Any]] = {}
         self._pending_channels: list[Channel] = []
         self._pending_tools: list[Tool] = []
         self._pending_hooks: list[tuple[str, Callable]] = []
@@ -99,6 +100,14 @@ class PluginRegistry:
                 logger.warning("Plugin id '%s' 冲突，后者覆盖", plugin_id)
 
             self._plugins[plugin_id] = definition
+            plugin_cfg = (config or {}).get("plugins", {}).get(plugin_id, {})
+            enabled = bool(plugin_cfg.get("enabled", False))
+            self._plugin_states[plugin_id] = {
+                "enabled": enabled,
+                "status": "discovered",
+                "error": "",
+                "registered_channel_id": None,
+            }
             api = PluginApi(plugin_id=plugin_id, registry=self)
 
             try:
@@ -106,7 +115,8 @@ class PluginRegistry:
                 logger.info("Plugin '%s' v%s 加载成功", definition.name, definition.version)
             except Exception:
                 logger.exception("Plugin '%s' register() 执行失败", plugin_id)
-                self._plugins.pop(plugin_id, None)
+                self._plugin_states[plugin_id]["status"] = "failed"
+                self._plugin_states[plugin_id]["error"] = "插件注册失败"
 
     async def apply(
         self,

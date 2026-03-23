@@ -93,7 +93,7 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.
 git clone https://github.com/SenseTime-FVG/agentos.git
 cd agentos
 
-# 安装依赖
+# 安装依赖（会同时安装前端依赖、后端默认 Python 依赖和 WhatsApp bridge 依赖）
 npm install
 
 # 配置

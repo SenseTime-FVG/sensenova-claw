@@ -271,6 +271,17 @@ plugins:
     webhook_path: "/telegram-webhook"
     webhook_host: "127.0.0.1"
     webhook_port: 8787
+  discord:
+    enabled: false
+    bot_token: "${DISCORD_BOT_TOKEN}"
+    dm_policy: "open"  # open | allowlist | disabled
+    group_policy: "allowlist"  # open | allowlist | disabled
+    allowlist: []
+    group_allowlist: []
+    channel_allowlist: []
+    require_mention: true
+    show_tool_progress: false
+    reply_in_thread: true
   whatsapp:
     enabled: false
     auth_dir: "~/.agentos/data/plugins/whatsapp/auth"

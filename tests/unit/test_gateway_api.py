@@ -140,6 +140,43 @@ def test_list_channels_marks_telegram_failed_when_runtime_has_error(client, app)
     assert data[0]["status"] == "failed"
 
 
+def test_list_channels_normalizes_ready_to_connected(client, app):
+    gw = app.state.services.gateway
+
+    class _Runtime:
+        _agentos_status = {"status": "ready"}
+
+    class _Channel:
+        _runtime = _Runtime()
+
+    gw._channels["discord"] = _Channel()
+
+    resp = client.get("/api/gateway/channels")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["id"] == "discord"
+    assert data[0]["status"] == "connected"
+
+
+def test_list_channels_omits_none_error_text_for_connected_channel(client, app):
+    gw = app.state.services.gateway
+
+    class _Runtime:
+        _agentos_status = {"status": "connected", "error": None}
+
+    class _Channel:
+        _runtime = _Runtime()
+
+    gw._channels["telegram"] = _Channel()
+
+    resp = client.get("/api/gateway/channels")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["id"] == "telegram"
+    assert data[0]["status"] == "connected"
+    assert data[0]["error"] == ""
+
+
 def test_list_channels_marks_wecom_failed_when_client_has_error(client, app):
     gw = app.state.services.gateway
 
@@ -171,6 +208,35 @@ def test_list_channels_marks_feishu_failed_when_channel_has_error(client, app):
     data = resp.json()
     assert data[0]["id"] == "feishu"
     assert data[0]["status"] == "failed"
+
+
+def test_list_channels_includes_enabled_plugin_when_dependency_missing(client, app):
+    app.state.config.data["plugins"]["discord"] = {"enabled": True}
+    app.state.plugin_registry = type(
+        "PluginRegistryStub",
+        (),
+        {
+            "_plugins": {
+                "discord": type("PluginDef", (), {"id": "discord", "name": "Discord"})(),
+            },
+            "_plugin_states": {
+                "discord": {
+                    "enabled": True,
+                    "status": "failed",
+                    "error": "未安装依赖: discord.py",
+                    "registered_channel_id": None,
+                }
+            },
+        },
+    )()
+
+    resp = client.get("/api/gateway/channels")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "discord"
+    assert data[0]["status"] == "failed"
+    assert data[0]["error"] == "未安装依赖: discord.py"
 
 
 def test_whatsapp_status_disabled(client):

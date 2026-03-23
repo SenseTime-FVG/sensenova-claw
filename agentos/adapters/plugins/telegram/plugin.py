@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from agentos.adapters.plugins.base import PluginApi, PluginDefinition
+from agentos.adapters.plugins.base import PluginApi, PluginDefinition, format_missing_dependency_error
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,10 @@ async def register(api: PluginApi) -> None:
     try:
         from agentos.adapters.plugins.telegram.channel import TelegramChannel
         from agentos.adapters.plugins.telegram.config import TelegramConfig
-    except ImportError:
-        logger.info("Telegram 插件跳过：缺少 python-telegram-bot 依赖（pip install python-telegram-bot）")
+    except ImportError as exc:
+        error = format_missing_dependency_error(exc, package_hint="python-telegram-bot")
+        api.report_status("failed", error=error)
+        logger.info("Telegram 插件跳过：%s（pip install python-telegram-bot）", error)
         return
 
     from agentos.capabilities.tools.message_tool import MessageTool

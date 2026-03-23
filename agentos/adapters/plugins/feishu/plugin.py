@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from agentos.adapters.plugins.base import PluginApi, PluginDefinition
+import logging
+
+from agentos.adapters.plugins.base import PluginApi, PluginDefinition, format_missing_dependency_error
+
+logger = logging.getLogger(__name__)
 
 definition = PluginDefinition(
     id="feishu",
@@ -14,8 +18,14 @@ definition = PluginDefinition(
 
 async def register(api: PluginApi) -> None:
     """注册飞书 Channel + MessageTool 到框架"""
-    from .channel import FeishuChannel
-    from .config import FeishuConfig
+    try:
+        from .channel import FeishuChannel
+        from .config import FeishuConfig
+    except ImportError as exc:
+        error = format_missing_dependency_error(exc)
+        api.report_status("failed", error=error)
+        logger.info("飞书插件跳过：%s", error)
+        return
 
     feishu_config = FeishuConfig.from_plugin_api(api)
     if not feishu_config.enabled:
