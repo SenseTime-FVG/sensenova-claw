@@ -61,12 +61,20 @@ class AgentRuntime:
         使 Worker 使用该 Agent 的独立配置。
         """
         agent_config = None
+        session_meta: dict | None = await self.repo.get_session_meta(session_id)
         if self.agent_registry:
-            session_meta = await self.repo.get_session_meta(session_id)
             agent_id = (session_meta or {}).get("agent_id", "default")
+            logger.info(
+                "Worker factory: session=%s, meta_agent_id=%s, registered_agents=%s",
+                session_id, agent_id,
+                list(self.agent_registry._agents.keys()),
+            )
             agent_config = self.agent_registry.get(agent_id)
             # 找不到则回退到 default
             if not agent_config:
+                logger.warning(
+                    "Agent '%s' not found in registry, falling back to default", agent_id,
+                )
                 agent_config = self.agent_registry.get("default")
 
         worker = AgentSessionWorker(
@@ -74,6 +82,7 @@ class AgentRuntime:
             private_bus=private_bus,
             runtime=self,
             agent_config=agent_config,
+            session_meta=session_meta,
         )
         self._workers[session_id] = worker
         await worker.start()
