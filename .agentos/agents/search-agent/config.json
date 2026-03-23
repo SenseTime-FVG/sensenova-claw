@@ -8,7 +8,7 @@
   "tools": ["serper_search", "fetch_url", "read_file", "write_file", "image_search", "send_message", "ask_user"],
   "skills": ["paddleocr-doc-parsing", "mineru-document-extractor-choice", "research-union", "union-search-plus"],
   "can_delegate_to": [],
-  "max_delegation_depth": 1,
+  "max_delegation_depth": 2,
   "max_pingpong_turns": 10,
   "enabled": true
 }

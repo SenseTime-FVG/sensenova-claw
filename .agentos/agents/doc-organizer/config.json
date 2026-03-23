@@ -8,7 +8,7 @@
   "tools": ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "feishu-drive", "ask_user"],
   "skills": ["markdown-converter", "docx-cn", "excel-xlsx", "pdf", "pdf-generator", "mineru-document-extractor", "openai-whisper-api", "feishu-doc", "feishu-wiki", "feishu-drive"],
   "can_delegate_to": [],
-  "max_delegation_depth": 1,
+  "max_delegation_depth": 2,
   "max_pingpong_turns": 10,
   "enabled": true
 }

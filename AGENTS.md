@@ -596,3 +596,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `tests/integration/test_send_message_tool.py:36` 当前存在语法错误，pytest 会在收集阶段直接中断；验证 `send_message` 相关改动时，不能把这个现有问题误判为新回归。
 - `tests/unit/test_cron_api.py::test_create_list_get_update_delete_cron_job` 在当前环境会长时间卡住；后续验证需要单独加超时隔离，避免整批测试假性悬挂。
+
+### 2026-03-23 Proactive Agent Prompt 重写补充
+
+成功经验：
+- `AGENTS.md` 在当前仓库里更适合作为“角色规范与行为边界”文档，而不是运行时配置清单；真正生效的工具和委派权限仍应以 `config.yml` / `config.json` 为准。
+- 对这类会被“用户直聊 + runtime 自动触发”双入口调用的 agent，`SYSTEM_PROMPT.md` 先区分“入口类型”，再区分“任务管理 / 任务执行”两种模式，最容易把行为写稳。
+- `proactive-agent` 这类角色最适合“强执行 + 低噪音 + 混合委派”：简单任务自己做，复杂工作流再调专业 agent，能同时减少空转和职责重叠。
+- prompt-only 改动也值得跑最贴边的轻量回归；`tests/unit/test_agent_registry.py` 能快速验证 agent prompt 文件加载链路未被破坏。
+
+失败/风险经验：
+- 如果在 `AGENTS.md` 里继续硬编码 `tools`、`can_delegate_to` 之类清单，文案很容易和真实运行时配置漂移，后续维护成本会越来越高。
+- 强执行型 prompt 如果不显式加入“无重要变化时保持简洁”“不要为了显得主动而主动”等约束，很容易把主动推送写成高频、低信息量的噪音输出。

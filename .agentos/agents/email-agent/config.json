@@ -8,7 +8,7 @@
   "tools": ["bash_command", "read_file", "write_file", "send_message", "send_email", "list_emails", "read_email", "download_attachment", "mark_email", "search_emails", "ask_user"],
   "skills": [],
   "can_delegate_to": [],
-  "max_delegation_depth": 1,
+  "max_delegation_depth": 2,
   "max_pingpong_turns": 10,
   "enabled": true
 }

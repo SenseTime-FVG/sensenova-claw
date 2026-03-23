@@ -8,7 +8,7 @@
   "tools": ["send_message", "ask_user"],
   "skills": [],
   "can_delegate_to": [],
-  "max_delegation_depth": 2,
+  "max_delegation_depth": 3,
   "max_pingpong_turns": 10,
   "enabled": true
 }

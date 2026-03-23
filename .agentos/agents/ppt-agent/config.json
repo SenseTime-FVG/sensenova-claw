@@ -8,7 +8,7 @@
   "tools": ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "send_message", "image_search", "ask_user"],
   "skills": ["ppt-superpower", "ppt-asset-plan", "ppt-html-gen", "ppt-image-selection", "ppt-page-assets", "ppt-page-html", "ppt-page-plan", "ppt-page-polish", "ppt-research-pack", "ppt-review", "ppt-source-analysis", "ppt-speaker-notes", "ppt-story-refine", "ppt-storyboard", "ppt-style-refine", "ppt-style-spec", "ppt-task-pack", "ppt-template-pack"],
   "can_delegate_to": [],
-  "max_delegation_depth": 1,
+  "max_delegation_depth": 2,
   "max_pingpong_turns": 10,
   "enabled": true
 }

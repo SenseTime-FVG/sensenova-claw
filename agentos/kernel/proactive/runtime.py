@@ -16,7 +16,6 @@ import uuid
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-import yaml
 
 from agentos.platform.config.config import config
 from agentos.adapters.storage.repository import Repository
@@ -180,10 +179,9 @@ class ProactiveRuntime:
     # ---------- Job 加载 ----------
 
     async def _load_all_jobs(self) -> None:
-        """从 YAML 配置 + DB 加载所有 jobs。"""
-        yaml_path = config.get("proactive.config_path", "PROACTIVE.yaml")
-        yaml_jobs = self._load_jobs_from_yaml(yaml_path)
-        for job in yaml_jobs:
+        """从 config.yml + DB 加载所有 jobs。"""
+        config_jobs = self._load_jobs_from_config()
+        for job in config_jobs:
             self._jobs[job.id] = job
             # 同步到 DB（upsert）
             existing = await self._repo.get_proactive_job(job.id)
@@ -198,29 +196,11 @@ class ProactiveRuntime:
                 self._jobs[job_id] = job_from_db_row(row)
 
         self._rebuild_event_index()
-        logger.info("Loaded %d proactive jobs (%d from YAML)", len(self._jobs), len(yaml_jobs))
+        logger.info("Loaded %d proactive jobs (%d from config)", len(self._jobs), len(config_jobs))
 
-    def _load_jobs_from_yaml(self, path: str) -> list[ProactiveJob]:
-        """解析 PROACTIVE.yaml 配置文件。"""
-        p = Path(path)
-        if not p.is_absolute():
-            from agentos.platform.config.config import PROJECT_ROOT
-            p = PROJECT_ROOT / p
-        if not p.exists():
-            logger.debug("PROACTIVE.yaml not found: %s", p)
-            return []
-
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-        except Exception:
-            logger.exception("Failed to parse PROACTIVE.yaml: %s", p)
-            return []
-
-        if not data or not isinstance(data, dict):
-            return []
-
-        items = data.get("jobs", [])
+    def _load_jobs_from_config(self) -> list[ProactiveJob]:
+        """从 config.yml 的 proactive.jobs 列表解析 job 定义。"""
+        items = config.get("proactive.jobs", [])
         if not isinstance(items, list):
             return []
 
@@ -228,14 +208,14 @@ class ProactiveRuntime:
         now_ms = int(time.time() * 1000)
         for item in items:
             try:
-                job = self._parse_yaml_job(item, now_ms)
+                job = self._parse_job_config(item, now_ms)
                 jobs.append(job)
             except Exception:
                 logger.exception("Failed to parse proactive job: %s", item.get("name", "?"))
         return jobs
 
-    def _parse_yaml_job(self, item: dict, now_ms: int) -> ProactiveJob:
-        """将 YAML 中的单个 job 配置解析为 ProactiveJob。"""
+    def _parse_job_config(self, item: dict, now_ms: int) -> ProactiveJob:
+        """将 config 中的单个 job 配置解析为 ProactiveJob。"""
         name = item["name"]
         job_id = f"pj_cfg_{hashlib.md5(name.encode()).hexdigest()[:12]}"
 

@@ -8,7 +8,6 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import yaml
 
 from agentos.kernel.proactive.models import (
     ConditionTrigger,
@@ -73,34 +72,69 @@ def _make_runtime(**overrides) -> ProactiveRuntime:
         mock_config.get = lambda path, default=None: {
             "proactive.enabled": True,
             "proactive.max_concurrent_runs": 3,
-            "proactive.config_path": "PROACTIVE.yaml",
         }.get(path, default)
         rt = ProactiveRuntime(**defaults)
 
     return rt
 
 
-# ---------- YAML 加载测试 ----------
+# ---------- Config 加载测试 ----------
 
 
-class TestLoadJobsFromYaml:
-    def test_load_time_trigger(self, tmp_path):
-        yaml_content = {
-            "jobs": [
-                {
-                    "name": "daily-report",
-                    "agent_id": "report-agent",
-                    "trigger": {"kind": "time", "every": "1h"},
-                    "task": {"prompt": "生成日报"},
-                    "delivery": {"channels": ["web"]},
-                }
-            ]
-        }
-        yaml_file = tmp_path / "PROACTIVE.yaml"
-        yaml_file.write_text(yaml.dump(yaml_content), encoding="utf-8")
+def _make_runtime_with_jobs(jobs_list):
+    """创建带 proactive.jobs 配置的 runtime。"""
+    bus = MagicMock()
+    bus._subscribers = set()
+    bus.publish = AsyncMock()
+    bus.subscribe = MagicMock()
 
-        rt = _make_runtime()
-        jobs = rt._load_jobs_from_yaml(str(yaml_file))
+    repo = MagicMock()
+    repo.create_proactive_job = AsyncMock()
+    repo.get_proactive_job = AsyncMock(return_value=None)
+    repo.list_proactive_jobs = AsyncMock(return_value=[])
+    repo.update_proactive_job = AsyncMock()
+    repo.delete_proactive_job = AsyncMock()
+    repo.create_proactive_run = AsyncMock()
+    repo.update_proactive_run = AsyncMock()
+
+    agent_runtime = MagicMock()
+    agent_runtime.spawn_agent_session = AsyncMock(return_value="turn_123")
+
+    notification_service = MagicMock()
+    notification_service.send = AsyncMock()
+
+    config_data = {
+        "proactive.enabled": True,
+        "proactive.max_concurrent_runs": 3,
+        "proactive.jobs": jobs_list,
+    }
+
+    with patch("agentos.kernel.proactive.runtime.config") as mock_config:
+        mock_config.get = lambda path, default=None: config_data.get(path, default)
+        rt = ProactiveRuntime(
+            bus=bus, repo=repo,
+            agent_runtime=agent_runtime,
+            notification_service=notification_service,
+        )
+    # 让 _load_jobs_from_config 也能读到 jobs
+    rt._config_get = lambda path, default=None: config_data.get(path, default)
+    with patch("agentos.kernel.proactive.runtime.config") as mock_config:
+        mock_config.get = lambda path, default=None: config_data.get(path, default)
+        jobs = rt._load_jobs_from_config()
+    return rt, jobs
+
+
+class TestLoadJobsFromConfig:
+    def test_load_time_trigger(self):
+        _, jobs = _make_runtime_with_jobs([
+            {
+                "name": "daily-report",
+                "agent_id": "report-agent",
+                "trigger": {"kind": "time", "every": "1h"},
+                "task": {"prompt": "生成日报"},
+                "delivery": {"channels": ["web"]},
+            }
+        ])
 
         assert len(jobs) == 1
         job = jobs[0]
@@ -112,77 +146,53 @@ class TestLoadJobsFromYaml:
         assert job.trigger.every == "1h"
         assert job.source == "config"
 
-    def test_load_event_trigger(self, tmp_path):
-        yaml_content = {
-            "jobs": [
-                {
-                    "name": "email-handler",
-                    "trigger": {
-                        "kind": "event",
-                        "event_type": "email.received",
-                        "debounce_ms": 10000,
-                    },
-                    "task": {"prompt": "处理邮件"},
-                }
-            ]
-        }
-        yaml_file = tmp_path / "PROACTIVE.yaml"
-        yaml_file.write_text(yaml.dump(yaml_content), encoding="utf-8")
-
-        rt = _make_runtime()
-        jobs = rt._load_jobs_from_yaml(str(yaml_file))
+    def test_load_event_trigger(self):
+        _, jobs = _make_runtime_with_jobs([
+            {
+                "name": "email-handler",
+                "trigger": {
+                    "kind": "event",
+                    "event_type": "email.received",
+                    "debounce_ms": 10000,
+                },
+                "task": {"prompt": "处理邮件"},
+            }
+        ])
 
         assert len(jobs) == 1
         assert isinstance(jobs[0].trigger, EventTrigger)
         assert jobs[0].trigger.event_type == "email.received"
         assert jobs[0].trigger.debounce_ms == 10000
 
-    def test_load_condition_trigger(self, tmp_path):
-        yaml_content = {
-            "jobs": [
-                {
-                    "name": "condition-check",
-                    "trigger": {
-                        "kind": "condition",
-                        "check_interval": "10m",
-                        "condition": "有未读邮件",
-                    },
-                    "task": {"prompt": "检查邮件"},
-                }
-            ]
-        }
-        yaml_file = tmp_path / "PROACTIVE.yaml"
-        yaml_file.write_text(yaml.dump(yaml_content), encoding="utf-8")
-
-        rt = _make_runtime()
-        jobs = rt._load_jobs_from_yaml(str(yaml_file))
+    def test_load_condition_trigger(self):
+        _, jobs = _make_runtime_with_jobs([
+            {
+                "name": "condition-check",
+                "trigger": {
+                    "kind": "condition",
+                    "check_interval": "10m",
+                    "condition": "有未读邮件",
+                },
+                "task": {"prompt": "检查邮件"},
+            }
+        ])
 
         assert len(jobs) == 1
         assert isinstance(jobs[0].trigger, ConditionTrigger)
         assert jobs[0].trigger.condition == "有未读邮件"
 
-    def test_missing_yaml_returns_empty(self):
-        rt = _make_runtime()
-        jobs = rt._load_jobs_from_yaml("/nonexistent/PROACTIVE.yaml")
+    def test_empty_jobs_returns_empty(self):
+        _, jobs = _make_runtime_with_jobs([])
         assert jobs == []
 
-    def test_invalid_yaml_returns_empty(self, tmp_path):
-        yaml_file = tmp_path / "PROACTIVE.yaml"
-        yaml_file.write_text("{{invalid yaml", encoding="utf-8")
-
-        rt = _make_runtime()
-        jobs = rt._load_jobs_from_yaml(str(yaml_file))
+    def test_none_jobs_returns_empty(self):
+        _, jobs = _make_runtime_with_jobs(None)
         assert jobs == []
 
-    def test_deterministic_id(self, tmp_path):
+    def test_deterministic_id(self):
         """同名 job 应生成相同 ID。"""
-        yaml_content = {"jobs": [{"name": "my-job", "task": {"prompt": "test"}}]}
-        yaml_file = tmp_path / "PROACTIVE.yaml"
-        yaml_file.write_text(yaml.dump(yaml_content), encoding="utf-8")
-
-        rt = _make_runtime()
-        jobs1 = rt._load_jobs_from_yaml(str(yaml_file))
-        jobs2 = rt._load_jobs_from_yaml(str(yaml_file))
+        _, jobs1 = _make_runtime_with_jobs([{"name": "my-job", "task": {"prompt": "test"}}])
+        _, jobs2 = _make_runtime_with_jobs([{"name": "my-job", "task": {"prompt": "test"}}])
         assert jobs1[0].id == jobs2[0].id
 
 

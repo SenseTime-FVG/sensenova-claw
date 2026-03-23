@@ -1,5 +1,6 @@
 # Proactive Agent 任务定义
 # 在此定义定时/事件/条件触发的自主任务
+# 注意：实际 job 从 config.yml 的 proactive.jobs 加载，此文件仅作参考
 
 jobs: []
 # 示例:
