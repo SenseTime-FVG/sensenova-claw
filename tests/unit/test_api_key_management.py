@@ -60,6 +60,18 @@ def test_get_api_key_status_masks_existing_key(client):
     assert data["brave_search"]["source"] == "empty"
 
 
+def test_get_api_key_status_includes_detailed_setup_guides(client):
+    response = client.get("/api/tools/api-keys")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert "Dashboard" in "\n".join(data["serper_search"]["setup_guide"])
+    assert "X-Subscription-Token" in "\n".join(data["brave_search"]["setup_guide"])
+    assert "Bearer" in "\n".join(data["baidu_search"]["setup_guide"])
+    assert "Authorization: Bearer" in "\n".join(data["tavily_search"]["setup_guide"])
+    assert data["baidu_search"]["example_format"].startswith("bce-v3/")
+
+
 def test_put_api_keys_persists_to_config(client, app):
     response = client.put("/api/tools/api-keys", json={
         "brave_search": "BSA-new-key-1234",

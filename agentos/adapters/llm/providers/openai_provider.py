@@ -55,7 +55,9 @@ class OpenAIProvider(LLMProvider):
                     "arguments": parsed,
                 })
 
-        return {
+        # 提取 reasoning_content（DeepSeek、MiniMax 等 OpenAI 兼容模型的思考过程）
+        reasoning_content = getattr(message, "reasoning_content", None) or ""
+        result: dict[str, Any] = {
             "content": message.content or "",
             "tool_calls": tool_calls,
             "finish_reason": "tool_calls" if tool_calls else (choice.finish_reason or "stop"),
@@ -65,6 +67,9 @@ class OpenAIProvider(LLMProvider):
                 "total_tokens": getattr(response.usage, "total_tokens", 0),
             },
         }
+        if reasoning_content:
+            result["reasoning_details"] = [{"type": "thinking", "thinking": reasoning_content}]
+        return result
 
     def _normalize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []

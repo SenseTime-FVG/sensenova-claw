@@ -382,7 +382,11 @@ export default function ToolsPage() {
 
                 <TabsContent value="api-keys" className="space-y-6">
                   {Object.entries(apiKeyStatus).map(([toolName, status]) => (
-                    <Card key={toolName} className="border-border/60 shadow-sm">
+                    <Card
+                      key={toolName}
+                      className="border-border/60 shadow-sm"
+                      data-testid={`api-key-card-${toolName}`}
+                    >
                       <CardHeader className="space-y-3">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
@@ -395,7 +399,10 @@ export default function ToolsPage() {
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-5">
-                        <details className="rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
+                        <details
+                          className="rounded-2xl border border-border/60 bg-muted/20 px-4 py-3"
+                          data-testid={`setup-guide-${toolName}`}
+                        >
                           <summary className="cursor-pointer text-sm font-bold text-foreground">
                             Setup Guide
                           </summary>

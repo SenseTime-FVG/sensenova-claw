@@ -208,6 +208,17 @@ tools:
 | `fetch_url` | `timeout` | int | `30` | 请求超时时间（秒） |
 | `file_operations` | `enabled` | bool | `true` | 是否启用文件读写 |
 
+#### 搜索工具 API Key 获取方式
+
+AgentOS 的 Tools 页面会直接展示以下步骤，用户不需要只依赖外部文档链接：
+
+| 工具 | 获取步骤 |
+|------|----------|
+| `serper_search` | 打开 `https://serper.dev/` 注册并登录，进入 `Dashboard`，在 `API Key` 区域复制 key。 |
+| `brave_search` | 打开 `https://api-dashboard.search.brave.com/app/documentation/web-search/get-started` 登录控制台，在 `Subscriptions` 订阅 `Web Search` plan，再复制 `X-Subscription-Token`。 |
+| `baidu_search` | 打开百度千帆快速开始文档并进入 `控制台-安全认证-API Key`，创建 API Key，勾选千帆 / AppBuilder / AI 搜索权限后复制 key；请求时按 `Bearer <api_key>` 使用。 |
+| `tavily_search` | 登录 `https://tavily.com/`，进入 `Dashboard / API Keys` 区域复制 key；请求时按 `Authorization: Bearer <api_key>` 使用。 |
+
 ### tools.permission 段 — 工具权限配置
 
 ```yaml
