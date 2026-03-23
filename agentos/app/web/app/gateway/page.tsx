@@ -21,6 +21,7 @@ interface Channel {
   name: string;
   type: string;
   status: string;
+  error?: string;
   config: Record<string, unknown>;
 }
 
@@ -184,6 +185,11 @@ export default function GatewayPage() {
                               </div>
                             </div>
                             <p className="text-xs font-mono text-muted-foreground/50 truncate">ID: {channel.id}</p>
+                            {channel.error ? (
+                              <p className="mt-3 text-sm font-medium text-red-600 dark:text-red-400">
+                                {channel.error}
+                              </p>
+                            ) : null}
                             {showAuthorizeButton ? (
                               <div className="mt-6">
                                 <Button onClick={() => router.push('/gateway/whatsapp')}>授权</Button>

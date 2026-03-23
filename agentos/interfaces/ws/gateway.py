@@ -166,7 +166,16 @@ class Gateway:
     async def start(self) -> None:
         """启动 Gateway 和所有 Channel"""
         for channel in self._channels.values():
-            await channel.start()
+            try:
+                await channel.start()
+            except Exception as exc:
+                status = getattr(channel, "_agentos_status", None)
+                if not isinstance(status, dict):
+                    channel._agentos_status = {}
+                    status = channel._agentos_status
+                status["status"] = "failed"
+                status["error"] = str(exc).strip() or type(exc).__name__
+                logger.exception("Failed to start channel: %s", channel.get_channel_id())
         self._task = asyncio.create_task(self._event_loop())
         logger.info("Gateway started")
 

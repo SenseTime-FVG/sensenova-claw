@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import os
 import signal
 import subprocess
@@ -43,6 +44,55 @@ def _find_npm() -> str:
     if not npm:
         return ""
     return npm
+
+
+def _spawn_managed_process(
+    cmd: list[str],
+    *,
+    cwd: str,
+    env: dict[str, str],
+) -> subprocess.Popen:
+    """启动受管进程，确保其位于独立进程组中。"""
+    kwargs: dict[str, object] = {
+        "cwd": cwd,
+        "env": env,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+    else:
+        kwargs["start_new_session"] = True
+    return subprocess.Popen(cmd, **kwargs)
+
+
+def _terminate_managed_process(proc: subprocess.Popen, timeout: float = 5) -> None:
+    """终止受管进程及其子进程。"""
+    if proc.poll() is not None:
+        return
+
+    try:
+        if os.name == "nt":
+            proc.terminate()
+        else:
+            os.killpg(proc.pid, signal.SIGTERM)
+    except OSError:
+        return
+
+    try:
+        proc.wait(timeout=timeout)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        if os.name == "nt":
+            proc.kill()
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        return
+
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=timeout)
 
 
 # ── agentos run ──────────────────────────────────────
@@ -91,16 +141,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     def cleanup(signum=None, frame=None):
         for p in procs:
-            try:
-                p.terminate()
-            except OSError:
-                pass
-        # 等待子进程退出
-        for p in procs:
-            try:
-                p.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                p.kill()
+            _terminate_managed_process(p, timeout=5)
 
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
@@ -120,7 +161,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "--port", str(backend_port),
     ]
     print(f"启动后端服务: http://localhost:{backend_port}")
-    backend_proc = subprocess.Popen(backend_cmd, cwd=str(project_root), env=env)
+    backend_proc = _spawn_managed_process(backend_cmd, cwd=str(project_root), env=env)
     procs.append(backend_proc)
 
     # 等待后端启动
@@ -141,7 +182,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"启动前端 dashboard: http://localhost:{frontend_port}")
             frontend_env = env.copy()
             frontend_env["PORT"] = str(frontend_port)
-            frontend_proc = subprocess.Popen(
+            frontend_proc = _spawn_managed_process(
                 [npm, "run", "dev"],
                 cwd=str(web_dir),
                 env=frontend_env,

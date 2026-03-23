@@ -470,6 +470,13 @@ class AgentSessionWorker(SessionWorker):
             return
 
         # 没有工具调用，结束本轮对话
+        # 后处理：将回复中的相对路径改写为绝对路径
+        from agentos.platform.config.workspace import resolve_agent_workdir, resolve_agentos_home
+        from agentos.kernel.runtime.path_rewriter import rewrite_relative_paths
+        _home = str(resolve_agentos_home(config))
+        _workdir = resolve_agent_workdir(_home, self.agent_config)
+        content = rewrite_relative_paths(content, _workdir)
+
         state.final_response = content
         await self.rt.repo.complete_turn(event.turn_id, agent_response=content)
 
