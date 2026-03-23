@@ -52,16 +52,19 @@ def client(app):
 
 
 def test_get_sections(client):
-    """正常获取三个可编辑 section"""
+    """正常获取四个可编辑 section"""
     resp = client.get("/api/config/sections")
     assert resp.status_code == 200
     data = resp.json()
     assert "llm" in data
     assert "agent" in data
     assert "plugins" in data
+    assert "miniapps" in data
     assert data["agent"]["model"] == "gpt-5.4"
     assert data["llm"]["providers"]["openai"]["api_key"]["configured"] is True
     assert data["llm"]["providers"]["openai"]["api_key"]["source"] == "plain"
+    assert data["miniapps"]["default_builder"] == "builtin"
+    assert data["miniapps"]["acp"]["request_timeout_seconds"] == 180
 
 
 def test_get_sections_has_defaults(client, app):
@@ -70,6 +73,7 @@ def test_get_sections_has_defaults(client, app):
     assert resp.status_code == 200
     data = resp.json()
     assert "plugins" in data
+    assert "miniapps" in data
 
 
 # ── 更新 sections ──
@@ -94,6 +98,17 @@ def test_update_sections_multiple(client, app):
     resp = client.put("/api/config/sections", json={
         "llm": {"providers": {"anthropic": {"api_key": "sk-yyy"}}},
         "plugins": {"search": {"enabled": True}},
+        "miniapps": {
+            "default_builder": "acp",
+            "acp": {
+                "enabled": True,
+                "command": "codex",
+                "args": ["--stdio"],
+                "env": {"OPENAI_API_KEY": "sk-acp"},
+                "startup_timeout_seconds": 45,
+                "request_timeout_seconds": 240,
+            },
+        },
     })
     assert resp.status_code == 200
     raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
@@ -102,9 +117,19 @@ def test_update_sections_multiple(client, app):
     )
     assert app.state.secret_store.get("agentos/llm.providers.anthropic.api_key") == "sk-yyy"
     assert raw["plugins"]["search"]["enabled"] is True
+    assert raw["miniapps"]["default_builder"] == "acp"
+    assert raw["miniapps"]["acp"]["enabled"] is True
+    assert raw["miniapps"]["acp"]["command"] == "codex"
+    assert raw["miniapps"]["acp"]["args"] == ["--stdio"]
+    assert raw["miniapps"]["acp"]["env"] == {"OPENAI_API_KEY": "sk-acp"}
+    assert raw["miniapps"]["acp"]["startup_timeout_seconds"] == 45
+    assert raw["miniapps"]["acp"]["request_timeout_seconds"] == 240
     sections = resp.json()["sections"]
     assert sections["llm"]["providers"]["anthropic"]["api_key"]["configured"] is True
     assert sections["llm"]["providers"]["anthropic"]["api_key"]["source"] == "secret"
+    assert sections["miniapps"]["default_builder"] == "acp"
+    assert sections["miniapps"]["acp"]["enabled"] is True
+    assert sections["miniapps"]["acp"]["command"] == "codex"
 
 
 def test_update_sections_empty_body(client):

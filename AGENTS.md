@@ -690,3 +690,116 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - Playwright 浏览器安装路径必须与测试运行时的 `PLAYWRIGHT_BROWSERS_PATH` 保持一致；只执行 `npx playwright install chromium` 而不带同样的环境变量，测试仍会报“Executable doesn't exist”。
+
+### 2026-03-22 Mini-App Workspace 补充
+
+成功经验：
+- 复用现有 `custom_pages` 入口比另起一套 `miniapps` 路由更稳：列表/导航无需重做，只要在后端把 page 元数据升级成“工作区 + builder + agent + runs”结构，前端 portal 和 `/features/[slug]` 就能平滑演进。
+- 专属 Agent 的工作目录最好直接落在 `AGENTOS_HOME/workdir/{agent_id}/miniapps/{slug}/app`；这样既能继续复用 `/api/files/workdir/...` 静态服务，又能让 Agent 通过默认 workdir 直接改页面文件，不需要额外路径映射。
+- 对页面内交互回传，最省心的协议是 iframe 里统一使用 `window.AgentOSMiniApp.emit(action, payload)`，外层页面通过 `postMessage -> /api/custom-pages/{slug}/interactions -> gateway.send_user_input` 转给 Agent；这条链路用进程内 mock provider e2e 很容易稳定锁住。
+- ACP 第一版不必一次做全，先实现 `initialize -> session/new -> session/prompt` 的最小 stdio JSON-RPC 客户端，再把通知原样落到 run logs，已经足够给 Claude Code / Codex 预留标准接入点。
+
+失败/风险经验：
+- 当前用户本机配置若在 `agents.default` 下仍保留 `system_prompt`，真实后端启动会在 `AgentRegistry.load_from_config()` 阶段直接报错；这会影响 Playwright 这类需要自动拉起 web server 的回归，不能误判成 mini-app 页面本身失败。
+- 本机 Playwright 仍缺浏览器可执行文件（`chrome-headless-shell` 不存在）；即使 spec 已能被 `--list` 识别，真正浏览器级回归仍需要先执行 `npx playwright install` 并满足系统库依赖。
+- 前端仓库级 `tsc` 目前仍被既有依赖问题阻塞（如 `rehype-highlight`、`@tailwindcss/typography`、`MessageList` 旧 props 错误）；新增页面若要做类型回归，需用 grep 过滤新增文件，不能把全仓历史问题算到本次改动上。
+
+### 2026-03-22 Playwright 认证与浏览器路径补充
+
+成功经验：
+- 当后端 token 每次启动都会刷新时，前端 e2e 不要硬编码旧 token；更稳的做法是让用例先走一次真实 `/login -> verify-token -> router.push` 流程，或在 URL 中带 token 并 mock `verify-token`。
+- Playwright 若在 dev 模式下 mock `WebSocket`，必须只拦截业务 `ws://localhost:8000/ws`，保留 Next HMR 自己的 websocket；否则会因为 `websocket.addEventListener is not a function` 直接触发客户端异常页。
+- `DashboardLayout` 会联动挂载 `GlobalFilePanel`，进入页面时会自动请求 `api/files/roots`；这类全局面板接口若未 mock，`authFetch` 命中真实后端 401 后会把页面重定向回 `/login`，很容易误判成主页面逻辑失败。
+- Playwright 配置里加入本机已安装浏览器的显式路径候选（如 `chrome-headless-shell` 的绝对路径）很有效，能避免浏览器安装在非默认 cache 目录时重复卡在 “Executable doesn't exist”。
+
+失败/风险经验：
+- Playwright strict mode 很容易把“页面可见”误判成失败：像 `Language Coach`、`sess_miniapp` 这类文本如果同时出现在导航、标题和状态徽标中，断言必须收窄到明确 locator，否则会被多匹配阻塞。
+
+### 2026-03-22 Mini-App 专属 Agent 继承补充
+
+成功经验：
+- 当前 `AgentConfig` 已不再保存 `provider` 字段，而是仅保存 `model`，provider 由运行时根据 `llm.models` 动态解析；派生新 agent 时应只继承 `model/temperature/max_tokens/extra_body/tools/skills/workdir` 等真实字段。
+- 对这类“线上 500 + 明确 traceback”的修复，直接复跑 `tests/unit/test_custom_pages_api.py` 最有效，因为它本身就覆盖了“创建 mini-app 并生成专属 agent”的主路径。
+
+失败/风险经验：
+- 旧思维里继续读取 `base_agent.provider` 会在真实创建工作区时直接报 `AttributeError`，哪怕 UI、路由和工作区文件生成逻辑都正确；这类问题属于配置模型漂移，新增 capability 时必须先对齐当前 dataclass 定义。
+
+### 2026-03-22 Mini-App 通用化与 ACP 超时补充
+
+成功经验：
+- 用户举“语言学习”这类例子时，不应顺手把该业务做成平台内置模板；更稳的做法是保持 builtin 生成器输出通用 workspace 壳体，把具体内容和工作流留给未来用户需求与 Agent 决定。
+- 将 ACP timeout 拆成 `startup_timeout_seconds` 和 `request_timeout_seconds` 很关键：初始化/建会话可以短，真正的 `session/prompt` 生成必须显著更长，否则 coding agent 极易在生成中途误超时。
+- 用一个极小的 `ACPClient` 单测直接锁住方法级 timeout 最省心；只需要 monkeypatch `call()`，就能验证 `initialize/new_session/prompt` 各自用了什么超时值。
+
+失败/风险经验：
+- 只改文档或前端文案不够；如果后端仍保留按关键词识别“语言学习”并走专用模板分支，平台语义还是会被悄悄拉向某个垂直场景，必须把实际生成逻辑一起改回通用模式。
+
+### 2026-03-22 Mini-App 动作分流补充
+
+成功经验：
+- mini-app 不应把所有按钮和表单都转给 Agent；在宿主页维护一层 `local/server/agent` 动作路由最稳，页面高频交互可继续像普通应用一样本地执行，只有少数需要判断或改造的动作才进入 Agent。
+- 页面桥接协议最好同时提供 `emit()`、`emitTo()` 和 `configureActionRouting()`：页面可以只声明动作和 payload，把默认路由和按 action 覆盖规则交给宿主页解释，后续复用现有页面时改造成本更低。
+- 后端把 `POST /api/custom-pages/{slug}/actions` 统一做成入口也更清晰：`server` 目标只记日志不建会话，`agent` 目标复用既有 interaction 链路，测试可以稳定断言“server 不创建 session、agent 才创建 session”。
+- Playwright 对这类分流功能的最佳断言是“三段式”：`local` 不发请求，`server` 命中新 actions 接口但不切会话，`agent` 命中新 actions 接口且返回并切到新 session。
+
+失败/风险经验：
+- 浏览器 e2e 里把中文直接塞进内联 iframe HTML payload 容易触发编码噪音，导致断言看到乱码；这类测试数据最好优先用 ASCII，避免把编码问题误判成动作路由失败。
+- Playwright strict mode 下，如果同时存在“动作路由日志”和“动作事件日志”，用宽泛正则断言 action 名会命中多处文本；应收窄到完整事件文案或更具体的 locator。
+
+### 2026-03-23 ACP 设置页补充
+
+成功经验：
+- mini-app ACP 配置最适合直接挂在现有 `config_api / config_manager / /settings` 链路上，不需要再造单独接口；只要把 `miniapps` 加进 `/api/config/sections` 默认返回集合，前端就能和 LLM 配置一起统一保存。
+- ACP 的 `args` 和 `env` 在前端用 “JSON textarea + 保存前校验” 很实用；相比动态 key-value 表单，实现更轻，且能完整覆盖 CLI 参数数组和环境变量对象两类结构。
+- 设置页 e2e 最稳的方式仍是直接 mock `window.fetch`：返回 `/api/config/sections` 初值，捕获 `PUT /api/config/sections` 请求体，最后断言 `miniapps.default_builder` 与 `miniapps.acp.*` 是否按用户输入写回。
+
+失败/风险经验：
+- 设置页这类信息密集页面很容易出现同名文案多处复用；Playwright 若直接 `getByText('Mini-App Builder')`，strict mode 会因为统计卡片和 section 标题重复而失败，断言应优先锁到具体输入控件或唯一容器。
+
+### 2026-03-23 ACP 导航入口补充
+
+成功经验：
+- 仅实现 `/settings` 页面不够，如果不把它挂进 `DashboardNav.adminNavItems`，用户在“管理”分组里根本发现不了；这类后台配置页必须和 `Tools`、`Skills` 一样进入统一的管理子导航。
+- `DashboardLayout` 里的 `ADMIN_PATHS` 也要同步补上新路由，否则虽然能打开页面，但还会带着右侧文件面板，和其他管理页的布局不一致。
+
+### 2026-03-23 ACP 路由迁移与 Codex Bridge 补充
+
+成功经验：
+- 把 ACP 正式入口迁到 `/acp` 时，最省心的做法是“新增 `/acp` 页面 + Next redirect 把 `/settings` 指过去”，这样新旧链接都能兼容，且不需要大规模搬运页面代码。
+- 当前本机 `codex` CLI 暴露的是 `exec` / `mcp-server` / `app-server`，不是 AgentOS builder 直接使用的 ACP 子集；要“自动用 Codex”，最务实的方案是加一个很薄的 `codex_acp_bridge`，把 `initialize/session/new/session/prompt` 转成一次 `codex exec`。
+- 对这类 bridge，优先把协议层和命令构造抽成纯函数最有效；单测只 mock runner，不依赖真实 Codex 登录态，也能稳定锁住 session 生命周期和最终返回格式。
+
+失败/风险经验：
+- 不能简单把 `miniapps.acp.command=codex` 当成可用配置写给用户；在当前安装版本下这会直接协议不匹配，必须明确区分 MCP/app-server 与 AgentOS 当前 ACP builder 的差异。
+
+### 2026-03-23 官方 codex-acp 适配器补充
+
+成功经验：
+- 用户给出 `zed-industries/codex-acp` 后，应优先切回官方适配器推荐，而不是继续把自定义 bridge 当主路径；AgentOS 当前 ACP client 本身已经能直接对接这个适配器。
+- 当前 Linux x64 环境下，`npx @zed-industries/codex-acp` 单独执行会因为 optional binary 包缺失失败，但 `npx -y -p @zed-industries/codex-acp -p @zed-industries/codex-acp-linux-x64 codex-acp --help` 可以正常启动，适合作为无需预安装的通用配置。
+- 当 `~/.agentos/config.yml` 尚无 `miniapps` 段时，直接补入 `default_builder: acp` 和 `codex-acp` 启动参数风险较低，且能让新 workspace 默认走 Codex。
+- 用真实后端创建一条 `builder_type=acp` 的 mini-app 很有必要；只有这样才能确认官方 `codex-acp` 不只是能启动，而是真的会把页面文件写到 `~/.agentos/workdir/.../app/` 并让 run 状态最终变成 `completed`。
+- 真实 ACP 生成是长任务，排查时不要只看首轮 API 返回的 `queued/running`；应同时检查 `custom_pages_runs/<slug>.json` 的日志流和工作区文件是否持续变化，避免把“仍在生成中”误判成“协议卡死”。
+
+失败/风险经验：
+- npm 主包版本与平台二进制包版本可能暂时不同步；仅凭 `npx 包名` 失败，不能立刻判断官方适配器不可用，先检查 optionalDependencies 和平台包安装方式。
+
+### 2026-03-23 Mini-App 构建消息流补充
+
+成功经验：
+- 对 workspace 右侧 Agent 面板这类 UI，若要展示 ACP/builder 生成过程，优先把 build run 日志转成“只读聊天转录”更稳，不要硬把构建日志塞进真实聊天 session；这样不会污染后续用户会话，也不依赖 Gateway 事件桥再造一遍。
+- `ACP agent_message_chunk` / `ACP agent_thought_chunk` 适合在前端按连续 chunk 聚合成 assistant 消息与思考块；只要在遇到普通系统日志时 flush，一页里就能同时看到“构建状态 + builder 输出 + 思考过程”。
+- 这类前端功能的 e2e 最稳方式是把“构建中 -> 刷新 -> 已就绪 -> 页面动作分流”串成同一条 Playwright 场景；复用同一套登录和全局 mock，比拆成第二条独立用例更不容易被鉴权状态机和全局布局请求干扰。
+
+失败/风险经验：
+- 单独为“构建消息流”再开一条浏览器用例时，若它和主用例走的认证初始化路径稍有不同，就很容易被 `ProtectedRoute` 重定向回 `/login`；这类页面测试应优先复用已经验证稳定的认证入口，而不是在第二条用例里重新发明一套登录前置。
+
+### 2026-03-23 Mini-App ACP 工具事件卡片补充
+
+成功经验：
+- 若前端需要把 ACP `tool_call` 渲染成结构化卡片，后端 run log 最好直接保留 `sessionUpdate + status + title` 三要素；像 `ACP tool_call [completed]: Edit app.js` 这种格式，前端无需额外上下文就能稳定解析出标题和状态。
+- 构建消息流里 assistant chunk 和 tool_call 是两种不同语义，前端聚合时要在遇到 tool/system 日志前先 flush assistant draft；否则工具卡片会被错误并入上一条 assistant 消息。
+- 给工具卡片补 `data-testid` 后，Playwright 可以直接断言“标题 + 状态”是否出现，明显比匹配整段日志文本更稳。
+
+失败/风险经验：
+- 前端把普通消息数组重构成 union item（chat/tool）后，像 `messages.length` 这种旧变量名很容易残留并只在运行期暴露；这类重构完成后要优先跑一次真实浏览器回归，而不只看 TypeScript 静态检查。
