@@ -25,6 +25,8 @@ export interface SessionItem {
   last_active: number;
   meta: string;
   status: string;
+  last_turn_status?: 'started' | 'completed' | 'cancelled' | 'error' | null;
+  last_turn_ended_at?: number | null;
 }
 
 export interface TaskGroup {
@@ -145,6 +147,15 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
       rebuilt.push({ id: makeId(), role: 'user', content: String(payload.content || ''), timestamp: Date.now() });
       continue;
     }
+    if (eventType === 'llm.call_result') {
+      const response = (payload.response || {}) as Record<string, unknown>;
+      const content = String(response.content || '');
+      const toolCalls = Array.isArray(response.tool_calls) ? response.tool_calls : [];
+      if (content && toolCalls.length > 0) {
+        rebuilt.push({ id: makeId(), role: 'assistant', content, timestamp: Date.now() });
+      }
+      continue;
+    }
     if (eventType === 'tool.call_requested') {
       const toolInfo: ToolInfo = {
         name: String(payload.tool_name || ''),
@@ -191,6 +202,35 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
     }
   }
   return rebuilt;
+}
+
+// --- 消息分组（将连续工具调用收拢到一个折叠组） ---
+
+export type MessageGroupItem =
+  | { type: 'message'; id: string; msg: ChatMessage }
+  | { type: 'tool_group'; id: string; messages: ChatMessage[] };
+
+export function groupMessages(messages: ChatMessage[]): MessageGroupItem[] {
+  const groups: MessageGroupItem[] = [];
+  let toolBuf: ChatMessage[] = [];
+
+  const flush = () => {
+    if (toolBuf.length > 0) {
+      groups.push({ type: 'tool_group', id: `tg_${toolBuf[0].id}`, messages: [...toolBuf] });
+      toolBuf = [];
+    }
+  };
+
+  for (const msg of messages) {
+    if (msg.role === 'tool') {
+      toolBuf.push(msg);
+    } else {
+      flush();
+      groups.push({ type: 'message', id: msg.id, msg });
+    }
+  }
+  flush();
+  return groups;
 }
 
 /** 从 session 事件中重建右侧面板的步骤和任务进度 */

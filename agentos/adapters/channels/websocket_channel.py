@@ -16,6 +16,7 @@ from agentos.kernel.events.types import (
     ERROR_RAISED,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
+    LLM_CALL_RESULT,
     NOTIFICATION_PUSH,
     NOTIFICATION_SESSION,
     TOOL_CALL_REQUESTED,
@@ -339,6 +340,18 @@ class WebSocketChannel(Channel):
                 "payload": {"step_type": "llm_call", "description": "正在调用模型..."},
                 "timestamp": event.ts,
             }
+        if event.type == LLM_CALL_RESULT:
+            response = event.payload.get("response") or {}
+            content = response.get("content", "")
+            tool_calls = response.get("tool_calls") or []
+            if content and tool_calls:
+                return {
+                    "type": "llm_result",
+                    "session_id": event.session_id,
+                    "payload": {"content": content},
+                    "timestamp": event.ts,
+                }
+            return None
         if event.type == LLM_CALL_COMPLETED:
             return None
         if event.type == TOOL_CALL_REQUESTED:

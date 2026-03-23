@@ -157,6 +157,7 @@ export default function DynamicFeaturePage() {
               emptyState={
                 <CustomTemplates page={page} onQuickTask={(msg) => sendMessage(msg)} />
               }
+              returnToMainLabel={`返回 ${page.name}`}
             />
           </div>
         </div>

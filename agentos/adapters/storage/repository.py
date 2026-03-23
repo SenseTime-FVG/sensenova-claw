@@ -189,7 +189,24 @@ class Repository:
 
     async def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
         conn = self._conn()
-        rows = conn.execute("SELECT * FROM sessions ORDER BY last_active DESC LIMIT ?", (limit,)).fetchall()
+        rows = conn.execute(
+            """
+            SELECT s.*,
+                   lt.status AS last_turn_status,
+                   lt.ended_at AS last_turn_ended_at
+            FROM sessions s
+            LEFT JOIN (
+                SELECT session_id,
+                       status,
+                       ended_at,
+                       ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY started_at DESC) AS rn
+                FROM turns
+            ) lt ON lt.session_id = s.session_id AND lt.rn = 1
+            ORDER BY s.last_active DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
 

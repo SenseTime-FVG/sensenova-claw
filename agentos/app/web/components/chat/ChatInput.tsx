@@ -60,7 +60,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       setTimeout(() => {
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
-          textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
+          textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 96) + 'px';
           textareaRef.current.focus();
         }
       });
@@ -75,7 +75,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
-        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
+        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 96) + 'px';
         textareaRef.current.focus();
       }
     });
@@ -171,26 +171,26 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     setInputValue(e.target.value);
     const ta = e.target;
     ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+    ta.style.height = Math.min(ta.scrollHeight, 96) + 'px';
   };
 
   return (
-    <div className="border-t bg-card/50 backdrop-blur-sm p-4 shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
+    <div className="border-t bg-card/50 backdrop-blur-sm px-4 pt-2.5 pb-2 shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center gap-3 mb-3 pl-1">
+        <div className="flex items-center gap-3 mb-2 pl-1">
           {!hideAgentSelector && (
             <TargetSelector selectedAgent={selectedAgent} onSelectAgent={onSelectAgent} locked={lockAgent} />
           )}
-          <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground bg-muted/50 px-2 py-1 rounded-full border">
-            <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
+          <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full border">
+            <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
             {wsConnected ? 'Connected' : 'Offline'}
           </span>
         </div>
 
         <div
           ref={dropRef as unknown as React.Ref<HTMLDivElement>}
-          className={`flex items-end gap-3 bg-background border rounded-[2rem] shadow-xl focus-within:ring-4 focus-within:ring-primary/10 focus-within:border-primary transition-all p-3 relative ${
-            isOver ? 'border-primary bg-primary/5 ring-4 ring-primary/20' : 'border-border/80'
+          className={`flex items-end gap-2 bg-background border rounded-[1.5rem] shadow-lg focus-within:ring-3 focus-within:ring-primary/10 focus-within:border-primary transition-all p-2 relative ${
+            isOver ? 'border-primary bg-primary/5 ring-3 ring-primary/20' : 'border-border/80'
           }`}
         >
           {/* 附件上传 */}
@@ -198,26 +198,26 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           <input ref={folderInputRef} type="file" className="hidden" onChange={handleFileSelect}
             {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
           />
-          <div className="relative mb-1.5 ml-1 shrink-0" ref={uploadMenuRef}>
+          <div className="relative mb-1 ml-0.5 shrink-0" ref={uploadMenuRef}>
             <button
               onClick={() => setShowUploadMenu(v => !v)}
               disabled={!wsConnected || disabled}
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title="添加文件引用"
             >
-              <Paperclip size={18} />
+              <Paperclip size={16} />
             </button>
             {showUploadMenu && (
               <div className="absolute bottom-full left-0 mb-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[120px] z-50">
                 <button
-                  className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-muted transition-colors text-left"
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted transition-colors text-left"
                   onClick={() => { fileInputRef.current?.click(); setShowUploadMenu(false); }}
                 >
                   <File size={14} className="text-muted-foreground" />
                   <span>选择文件</span>
                 </button>
                 <button
-                  className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-muted transition-colors text-left"
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted transition-colors text-left"
                   onClick={() => { folderInputRef.current?.click(); setShowUploadMenu(false); }}
                 >
                   <FolderOpen size={14} className="text-muted-foreground" />
@@ -236,24 +236,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               onKeyDown={handleKeyDown}
               placeholder={
                 wsConnected
-                  ? '输入消息… 拖拽文件到此处自动插入 @引用 (Enter 发送, Shift+Enter 换行)'
+                  ? '输入消息… 拖拽文件插入 @引用 (Enter 发送)'
                   : 'Waiting for connection...'
               }
               disabled={!wsConnected || disabled}
               rows={1}
-              className="w-full bg-transparent border-none px-5 py-4 text-lg text-foreground placeholder-muted-foreground/50 focus:outline-none focus:ring-0 resize-none disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
-              style={{ minHeight: '56px', maxHeight: '300px' }}
+              className="w-full bg-transparent border-none px-4 py-2.5 text-[15px] text-foreground placeholder-muted-foreground/50 focus:outline-none focus:ring-0 resize-none disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
+              style={{ minHeight: '40px', maxHeight: '240px' }}
             />
           </div>
           <button
             onClick={handleSend}
             disabled={!inputValue.trim() || !wsConnected || disabled}
-            className="w-14 h-14 mb-1 mr-1 rounded-2xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
+            className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-md shadow-primary/20"
           >
-            <Send size={24} className="ml-1" />
+            <Send size={20} className="ml-0.5" />
           </button>
         </div>
-        <div className="text-center mt-3 text-[10px] text-muted-foreground/70">
+        <div className="text-center mt-2 text-[10px] text-muted-foreground/70">
           AgentOS can make mistakes. Consider verifying important information.
         </div>
       </div>
