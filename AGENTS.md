@@ -144,38 +144,6 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `termios` 仅适用于类 Unix 终端；非 TTY/不支持环境需保留按行读取降级路径，避免脚本不可用。
 
-### 2026-03-07 CLI 交互修复补充
-
-成功经验：
-- `asyncio` 场景下仅在 `Prompt.ask` 外层捕获 `KeyboardInterrupt` 不够，需额外注册 `SIGINT` 处理器并在主循环兜底捕获，才能避免连续 `Ctrl+C` 直接退出。
-- 将命令输入统一做 `strip()` 后再分派，可稳定识别 ` / ` 与 `/quit`，避免因为前后空白导致命令失效。
-- 将输入分派提炼为纯函数（`parse_user_input`）后，可用轻量单测快速覆盖 `/` 菜单、`/quit` 退出和未知命令行为。
-
-失败/风险经验：
-- 当前环境运行 `uv` 默认缓存目录 `~/.cache/uv` 可能无权限，需要显式设置 `UV_CACHE_DIR=/tmp/uv_cache`。
-- 若本地未同步 dev 依赖，`uv run python -m pytest` 会报 `No module named pytest`，需先执行 `uv sync --extra dev`。
-
-### 2026-03-07 CLI 即时命令菜单补充
-
-成功经验：
-- 终端若使用按行读取（如 `Prompt.ask`），`/` 命令天然需要回车；要实现“按下 `/` 立即弹菜单”，需要切到逐字符读取（raw mode）。
-- 通过 `termios + tty.setraw` 在“输入缓冲为空且按下 `/`”时直接返回命令动作，可实现无需回车的命令菜单触发。
-- 将“是否触发即时菜单”抽成纯函数（`should_trigger_menu_on_keypress`）后，能用单测稳定覆盖该交互规则。
-
-失败/风险经验：
-- `termios` 仅适用于类 Unix 终端；非 TTY/不支持环境需保留按行读取降级路径，避免脚本不可用。
-
-### 2026-03-14 测试审查补充
-
-成功经验：
-- `tests/` 已是当前唯一有效的 pytest 根目录；对外脚本若继续引用旧 `test/`/`backend/` 结构，会直接造成“脚本存在但不覆盖真实测试”的假象，需尽快收敛到 `tests/`。
-- 为 agent 核心链路单独补一个进程内 e2e 用例最有效：验证“首轮 `llm.call_requested` -> `tool.call_requested/result` -> 二轮 `llm.call_requested` -> `agent.step_completed`”，同时断言第二轮消息里确实带有 assistant `tool_calls` 与 tool 结果消息。
-- 在当前受限环境下，测试脚本默认优先使用 `python3 -m pytest` 比自动走 `uv run` 更稳；若确实需要 `uv`，应显式开启并设置 `UV_CACHE_DIR=/tmp/uv_cache`。
-
-失败/风险经验：
-- `tests/e2e/run_e2e.py` 虽能做真实 API 回归，但它是手动脚本，不会被 `pytest tests/e2e/` 自动覆盖；核心链路断言不能只放在这个脚本里。
-- 真实 API 回归仍依赖网络与 API key；当前本机只能稳定验证 mock provider 的完整编排链路，不能在无密钥/无网络条件下宣称真实 provider 已回归。
-
 ### 2026-03-14 测试审查补充
 
 成功经验：
@@ -345,17 +313,6 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `npm run test:backend:e2e` 依赖 `pytest` 可执行文件，当前环境不存在该命令；需要使用 `python3 -m pytest` 或改脚本兼容。  
 
-### 2026-03-18 搜索工具扩展补充
-
-成功经验：
-- 为多个外部搜索工具统一输出结构（`provider/query/items`）最省心，Agent 侧和测试侧都无需为 Brave、Baidu、Tavily 分别写特殊分支。
-- 对需要 API key 的外部搜索工具，在 `ToolRegistry.as_llm_tools()` 中按 provider 动态过滤非常有效：`mock` provider 保留工具便于链路测试，真实 provider 则自动隐藏未配置 key 的工具，能显著减少模型误调用空工具。
-- `httpx.AsyncClient` 用 `AsyncMock + __aenter__/__aexit__` 包装后，工具级 HTTP 契约测试可稳定覆盖请求头、请求体和响应映射，不需要真实网络。
-
-失败/风险经验：
-- 当前环境下真实 `gemini` 进程内 e2e 仍不稳定：`serper_search` 返回 `403 Forbidden` 后，模型会回退到多次 `bash_command` 探测，最终超时，说明“真实 provider 回归”不能只看工具注册是否成功，还要验证外部 key 的真实性和可用性。
-- 新增的 `tests/e2e/test_live_search_tools.py` 只有在对应 `BRAVE_SEARCH_API_KEY`、`BAIDU_APPBUILDER_API_KEY`、`TAVILY_API_KEY` 配置后才会真正执行；无 key 场景下会全部 skip，不能误判为真实回归已完成。
-
 ### 2026-03-18 Cron/通知/API Key 面板补充
 
 成功经验：
@@ -366,18 +323,6 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境里 `python3 -m pytest` 仍不可用，验证新后端接口时要继续使用 `UV_CACHE_DIR=/tmp/uv_cache uv run python -m pytest ...`。
 - 当前前端类型检查仍会先卡在既有问题 `agentos/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为“本次改动失败”的依据。
-
-### 2026-03-18 前端重连恢复补充
-
-成功经验：
-- `/chat` 页面使用的是独立 WebSocket 状态机，不走 `WebSocketContext`；排查“服务重启后首次访问卡住、刷新恢复”时必须直接看 `agentos/app/web/app/chat/page.tsx`。
-- 仅修自动重连不够，重连成功后还要补拉 session 列表，并对当前 session 发 `load_session` 重新绑定 WebSocket，否则历史会话后续回复仍可能收不到。
-- Playwright 回归测试里如果要模拟业务 WebSocket，必须只拦截 `localhost:8000/ws` 这一条连接并保留 Next dev 的 HMR WebSocket；否则页面会因为开发态连接被破坏而卡在认证/加载阶段。
-- 对根入口 `/?token=...`，真正可靠的统一方式不是只改 `app/page.tsx`，而是让 `AuthProvider` 在根路径检测到 token 后立刻跳到 `/chat?...`；否则 `AuthProvider` 可能先把根路径里的 token 清掉，导致页面组件读到的 query 已经不完整。
-
-失败/风险经验：
-- `switchSession` 只做 HTTP 拉历史不能恢复事件投递；后端真正的 session-to-websocket 绑定发生在 `create_session`/`load_session` 这类 WS 消息里，不补这一层前端看起来“打开了会话”，实际收不到后续事件。
-- 当前前端全量构建仍存在与本次改动无关的既有类型错误：`agentos/app/web/components/ThemeProvider.tsx` 依赖 `next-themes/dist/types`，`npm run build` 会在该文件失败，因此不能把这次任务表述为“整个前端构建通过”。
 
 ### 2026-03-19 WhatsApp 405 调试补充
 
@@ -974,26 +919,6 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前自动化只能确认“脚本执行成功 + 快捷方式落盘 + 返回码正常”，无法直接断言用户桌面一定已经弹出可见通知；最终显示仍受 Windows 通知权限、专注助手和实际交互桌面会话影响。
-
-### 2026-03-23 Tools API Key 指引补充
-
-成功经验：
-- Tools 页的 API key 获取说明是由后端 `TOOL_API_KEY_SPECS` 直接驱动的；要让前端展示更具体的“如何拿 token”，优先补充 `setup_guide/docs_url/example_format`，比在前端硬编码文案更稳。
-- 对这类“内容增强但仍需用户可见回归”的改动，后端单测断言关键关键词，前端 Playwright 只断言一个代表性流程即可，维护成本最低。
-- 当前环境若已安装独立 `chrome-headless-shell`，可在 `playwright.config.ts` 中加入固定候选路径回退，避免每次测试都依赖 Playwright 自带浏览器缓存。
-
-失败/风险经验：
-- 第三方控制台的入口名称会变化，例如 `Dashboard`、`Subscriptions`、`API Keys` 等；文案应写到“足够具体但不强依赖像素级页面布局”，否则后续很容易因供应商改版过时。
-
-### 2026-03-23 Tabs orientation 布局补充
-
-成功经验：
-- Radix 这类组件如果运行时依赖 `data-orientation="horizontal"`，Tailwind 选择器必须写成 `data-[orientation=horizontal]:...` 或 `group-data-[orientation=horizontal]/...`；写成 `data-horizontal:` 只会匹配布尔属性，实际不会命中。
-- 当页面表现成“tab 栏在左、内容在右”时，先检查根组件是否仍是 `display:flex` 且没有被切成 `flex-col`；这种问题通常是状态类名没生效，不是业务页本身的布局问题。
-- 对布局修复，Playwright 最稳的断言不是截图，而是直接比较 `boundingBox`：验证 tablist 的 `y` 在内容上方、`x` 基本对齐即可。
-
-失败/风险经验：
-- 同类错误容易同时出现在 `Tabs`、`Separator`、`ScrollArea` 等多个基础组件中；只修单页通常会留下第二处同源问题。
 
 ### 2026-03-23 工作台新建会话 Agent 选择补充
 
