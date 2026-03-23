@@ -398,21 +398,29 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       }
       case 'turn_completed': {
         const final = String(payload.final_response || '');
-        if (final) {
-          // 更新最后一条 assistant 消息的内容（不创建新消息）
-          setMessages((prev) => {
-            // 从后往前找最后一条 assistant 消息
-            for (let i = prev.length - 1; i >= 0; i--) {
-              if (prev[i].role === 'assistant') {
+        setMessages((prev) => {
+          // 从后往前找最后一条 assistant 消息
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === 'assistant') {
+              const existing = prev[i];
+              // 如果 llm_result 已经设置了相同内容，只折叠思考状态
+              if (existing.content === final || !final) {
                 const next = [...prev];
-                next[i] = { ...next[i], content: final, thinkingState: 'collapsed' };
+                next[i] = { ...next[i], thinkingState: 'collapsed' };
                 return next;
               }
+              // 内容不同时才更新（不创建新消息）
+              const next = [...prev];
+              next[i] = { ...next[i], content: final, thinkingState: 'collapsed' };
+              return next;
             }
-            // 没找到 assistant 消息（理论上不会发生），追加一条
+          }
+          // 没找到 assistant 消息且有内容，追加一条
+          if (final) {
             return [...prev, { id: makeId(), role: 'assistant', content: final, timestamp: Date.now() }];
-          });
-        }
+          }
+          return prev;
+        });
         setIsTyping(false);
         clearInteractions();
         break;
