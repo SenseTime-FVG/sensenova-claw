@@ -759,3 +759,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 在当前环境下直接跑根目录联动启动仍可能触发 `uv` 的缓存权限或 `system-configuration` panic；前端回归若报在 `webServer` 启动阶段，先区分是页面断言失败还是基础启动链失败。
+
+### 2026-03-23 Agent 持久化修复补充
+
+成功经验：
+- Agent 重启丢失时，先核对启动期真实加载来源最关键；当前生效来源只有 `config.yml` 的 `agents` 段和 `AGENTOS_HOME/agents/<id>/SYSTEM_PROMPT.md`，没有任何 `config.json` 覆盖层读取逻辑，因此修复应直接写回这两处。
+- 对 Agent CRUD，最稳的持久化方式是复用 `ConfigManager.replace("agents", ...)` 做整段写回，同时只修改目标 agent 的记录；这样既能保留其他未知 key，又能触发既有的配置内存刷新与 `CONFIG_UPDATED` 事件。
+- Python 3.14 下旧式 `asyncio.get_event_loop().run_until_complete(...)` 很容易在测试 fixture 中直接报错；测试夹具应改成 `asyncio.run(...)` 才能稳定把失败推进到业务断言。
+
+失败/风险经验：
+- `tests/e2e/test_agents_preset_api_flow.py` 中“preset-agent 不允许删除”和“写 `config.json` 覆盖层”的假设已经过时；排查 Agent 持久化问题时，不能把旧测试名义上的预期当成当前产品事实。
