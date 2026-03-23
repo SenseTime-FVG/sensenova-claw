@@ -68,7 +68,7 @@ async def test_ensure_agentos_home_creates_structure(tmp_path):
     assert (home / "skills").is_dir()
     assert (home / "workdir" / "default").is_dir()
     assert (home / "agents" / "default" / "AGENTS.md").exists()
-    assert (home / "agents" / "default" / "USER.md").exists()
+    assert (home / "agents" / "USER.md").exists()
 
 
 @pytest.mark.asyncio
@@ -99,8 +99,8 @@ async def test_ensure_agentos_home_no_overwrite(tmp_path):
     await ensure_agentos_home(home)
 
     assert (agent_dir / "AGENTS.md").read_text(encoding="utf-8") == "# Custom"
-    # USER.md 缺失应被创建
-    assert (agent_dir / "USER.md").exists()
+    # 全局 USER.md 应被创建
+    assert (home / "agents" / "USER.md").exists()
 
 
 # ── resolve_agentos_home ──────────────────────────────
@@ -135,7 +135,8 @@ async def test_ensure_agent_workspace_creates_agent_dir(tmp_path):
 
     agent_dir = tmp_path / ".agentos" / "agents" / "researcher"
     assert (agent_dir / "AGENTS.md").exists()
-    assert (agent_dir / "USER.md").exists()
+    # USER.md 是全局文件，不在 per-agent 目录下
+    assert not (agent_dir / "USER.md").exists()
     # workdir 也应被创建
     assert (tmp_path / ".agentos" / "workdir" / "researcher").is_dir()
 
@@ -170,7 +171,6 @@ async def test_ensure_agent_workspace_no_overwrite(tmp_path):
     await ensure_agent_workspace(home, "researcher")
 
     assert (agent_dir / "AGENTS.md").read_text(encoding="utf-8") == "# My Custom"
-    assert (agent_dir / "USER.md").exists()
 
 
 # ── load_workspace_files ──────────────────────────────
@@ -189,18 +189,22 @@ async def test_load_workspace_files_per_agent(tmp_path):
 
     files = await load_workspace_files(home, agent_id="researcher")
     names = {f.name: f.content for f in files}
+    # 全局 AGENTS.md + per-agent AGENTS.md + 全局 USER.md
     assert "AGENTS.md" in names
-    assert names["AGENTS.md"] == "# Researcher Instructions"
+    assert "researcher/AGENTS.md" in names
+    assert names["researcher/AGENTS.md"] == "# Researcher Instructions"
+    assert "USER.md" in names
 
 
 @pytest.mark.asyncio
 async def test_load_workspace_files_default_agent(tmp_path):
-    """默认加载 agents/default/ 的文件"""
+    """默认加载全局 AGENTS.md + default AGENTS.md + USER.md"""
     home = str(tmp_path / ".agentos")
     await ensure_agentos_home(Path(home))
 
     files = await load_workspace_files(home)
-    assert len(files) == 2
+    # 全局 AGENTS.md + default/AGENTS.md + USER.md = 3
+    assert len(files) == 3
 
 
 @pytest.mark.asyncio
@@ -209,12 +213,14 @@ async def test_load_workspace_files_empty_file_skipped(tmp_path):
     home = str(tmp_path / ".agentos")
     await ensure_agentos_home(Path(home))
 
-    agent_dir = tmp_path / ".agentos" / "agents" / "default"
-    (agent_dir / "USER.md").write_text("", encoding="utf-8")
+    # 全局 USER.md 清空
+    (tmp_path / ".agentos" / "agents" / "USER.md").write_text("", encoding="utf-8")
 
     files = await load_workspace_files(home)
-    assert len(files) == 1
-    assert files[0].name == "AGENTS.md"
+    # 全局 AGENTS.md + default/AGENTS.md = 2（USER.md 被跳过）
+    assert len(files) == 2
+    names = [f.name for f in files]
+    assert "USER.md" not in names
 
 
 @pytest.mark.asyncio
