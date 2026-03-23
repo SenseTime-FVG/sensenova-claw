@@ -22,7 +22,7 @@ _MAX_TOTAL_CHARS = 50000
 
 @dataclass
 class ContextFile:
-    """Workspace 上下文文件（如 AGENTS.md / USER.md）"""
+    """Workspace 上下文文件（如 AGENTS.md（per-agent）/ USER.md（全局））"""
     name: str
     content: str
 
@@ -139,7 +139,7 @@ def _build_memory(memory_context: str | None) -> list[str]:
 
 
 def _build_context_files(context_files: list[ContextFile]) -> list[str]:
-    """Section 5: AGENTS.md / USER.md 上下文文件内容（有时）"""
+    """Section 5: AGENTS.md（per-agent）/ USER.md（全局）上下文文件内容（有时）"""
     if not context_files:
         return []
 
@@ -205,11 +205,19 @@ def _truncate_context_files(files: list[ContextFile]) -> list[ContextFile]:
 
     规则：
     - 单文件 > 20000 字符截断
-    - 总计 > 50000 字符按优先级裁剪（AGENTS.md > USER.md）
+    - 总计 > 50000 字符按优先级裁剪（全局 AGENTS.md > per-agent AGENTS.md > USER.md）
     """
-    # 优先级排序：AGENTS.md 优先于 USER.md，其余按原顺序
-    priority_order = {"AGENTS.md": 0, "USER.md": 1}
-    sorted_files = sorted(files, key=lambda f: priority_order.get(f.name, 99))
+    # 优先级排序：AGENTS.md 类文件优先于 USER.md，其余按原顺序
+    def _priority(name: str) -> int:
+        if name == "AGENTS.md":
+            return 0  # 全局 AGENTS.md
+        if name.endswith("/AGENTS.md"):
+            return 1  # per-agent AGENTS.md
+        if name == "USER.md":
+            return 2
+        return 99
+    priority_order = {}  # 保留变量兼容下方排序
+    sorted_files = sorted(files, key=lambda f: _priority(f.name))
 
     # 第一步：单文件截断
     truncated: list[ContextFile] = []
