@@ -1033,3 +1033,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅修 Discord runtime 的异常提示不能解决 `Ctrl+C` 后端口残留；如果 `app/main.py` 仍然按单 PID 清理，换成别的 channel 或热重载路径仍会复现类似问题。
+
+### 2026-03-24 网站图标 500 排查补充
+
+成功经验：
+- Next.js App Router 下，`app/icon.png` 会直接生成 `/icon.png` metadata route；如果同时存在 `public/icon.png`，干净启动时首次访问 `/icon.png` 会稳定报 `A conflicting public file and page file was found for path /icon.png`。
+- 这类静态资源问题最有效的验证方式是起一个干净的独立 `next dev` 端口后直接 `curl /icon.png`；复用已有 dev 进程时，热更新状态可能会暂时掩盖冲突。
+- 对这类“资源路径冲突”回归，使用 `node --test` 做文件级断言成本最低，不依赖浏览器环境，也能稳定卡住 `app/icon.png` 与 `public/icon.png` 的重复落盘。
+
+失败/风险经验：
+- 当前仓库把 `.next/` 产物纳入版本管理，调试前端路由时很容易产生大量噪音改动；完成后需要显式回退 `.next/`，只保留真实源码变更。

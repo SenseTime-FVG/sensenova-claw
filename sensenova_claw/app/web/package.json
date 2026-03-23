@@ -6,7 +6,8 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers playwright test"
+    "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers playwright test",
+    "test:icon-route": "node --test tests/icon-route-conflict.test.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
