@@ -45,7 +45,8 @@ class ModelUpdateBody(BaseModel):
     provider: str
     model_id: str
     timeout: int = 60
-    max_output_tokens: int = 8192
+    max_tokens: int = 128000
+    max_output_tokens: int = 16384
 
 
 class DefaultModelUpdateBody(BaseModel):
@@ -171,6 +172,7 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
         "provider": body.provider,
         "model_id": body.model_id,
         "timeout": body.timeout,
+        "max_tokens": body.max_tokens,
         "max_output_tokens": body.max_output_tokens,
     }
     llm_section["models"] = models
