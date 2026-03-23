@@ -194,6 +194,7 @@ function ChatContent() {
   const [previewHeight, setPreviewHeight] = useState(350);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const requiredCheckDone = useRef(false);
+  const creatingSessionForAgent = useRef<string | null>(null);
 
   const slideSet = useSlideSet(slidePreviewDir);
 
@@ -310,12 +311,16 @@ function ChatContent() {
   useEffect(() => {
     if (!selectedAgentId || !currentSessionId) return;
     if (currentSessionAgentId === selectedAgentId) return;
+    // 防止异步竞态导致重复创建 session
+    if (creatingSessionForAgent.current === selectedAgentId) return;
 
     if (selectedSessions.length > 0) {
+      creatingSessionForAgent.current = null;
       void switchSession(selectedSessions[0].session_id);
       return;
     }
 
+    creatingSessionForAgent.current = selectedAgentId;
     startNewChat();
     createSession(selectedAgentId);
   }, [
@@ -370,6 +375,7 @@ function ChatContent() {
 
   const handleNewChat = () => {
     if (!selectedAgentId) return;
+    creatingSessionForAgent.current = null;
     startNewChat();
     createSession(selectedAgentId);
   };
@@ -430,6 +436,7 @@ function ChatContent() {
                     hasUnread={false}
                     onClick={() => {
                       cleanupEmptySession();
+                      creatingSessionForAgent.current = null;
                       setSelectedAgentId(agent.id);
                     }}
                   />
