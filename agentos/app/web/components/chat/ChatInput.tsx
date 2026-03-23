@@ -230,6 +230,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           <div className="flex-1">
             <SlashCommandMenu inputValue={inputValue} onSelect={handleSlashSelect} visible={showMenu} />
             <textarea
+              data-testid="chat-input"
               ref={textareaRef}
               value={inputValue}
               onChange={handleInput}
@@ -246,6 +247,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             />
           </div>
           <button
+            data-testid="send-button"
             onClick={handleSend}
             disabled={!inputValue.trim() || !wsConnected || disabled}
             className="w-14 h-14 mb-1 mr-1 rounded-2xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
