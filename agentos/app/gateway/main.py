@@ -14,6 +14,10 @@ from agentos.platform.config.config import config
 from agentos.platform.logging.setup import setup_logging
 from agentos.kernel.scheduler.runtime import CronRuntime
 from agentos.kernel.scheduler.tool import CronTool
+from agentos.kernel.proactive.runtime import ProactiveRuntime
+from agentos.capabilities.tools.proactive_tools import (
+    CreateProactiveJobTool, ListProactiveJobsTool, ManageProactiveJobTool,
+)
 from agentos.adapters.storage.repository import Repository
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.persister import EventPersister
@@ -68,6 +72,7 @@ class Services:
     ws_channel: WebSocketChannel
     cron_runtime: CronRuntime
     heartbeat_runtime: HeartbeatRuntime
+    proactive_runtime: ProactiveRuntime
     notification_service: NotificationService
     # Token 认证服务（Jupyter-lab 风格）
     auth_service: TokenAuthService
@@ -204,6 +209,20 @@ async def lifespan(app: FastAPI):
 
     gateway = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
 
+    # v1.1: 初始化 ProactiveRuntime（主动任务）
+    proactive_runtime = ProactiveRuntime(
+        bus=bus,
+        repo=repo,
+        agent_runtime=agent_runtime,
+        notification_service=notification_service,
+        gateway=gateway,
+        memory_manager=memory_manager,
+    )
+    if config.get("proactive.enabled", False):
+        tool_registry.register(CreateProactiveJobTool(proactive_runtime))
+        tool_registry.register(ListProactiveJobsTool(proactive_runtime))
+        tool_registry.register(ManageProactiveJobTool(proactive_runtime))
+
     # v1.0: 注册 Agent-to-Agent 消息工具
     if config.get("delegation.enabled", True):
         from agentos.capabilities.tools.send_message_tool import SendMessageTool
@@ -234,6 +253,7 @@ async def lifespan(app: FastAPI):
     await tool_runtime.start()
     await agent_message_coordinator.start()
     await title_runtime.start()
+    await proactive_runtime.start()
     await gateway.start()
 
     # v0.8: Cron 定时任务 + Heartbeat 心跳巡检
@@ -266,6 +286,7 @@ async def lifespan(app: FastAPI):
         ws_channel=ws_channel,
         cron_runtime=cron_runtime,
         heartbeat_runtime=heartbeat_runtime,
+        proactive_runtime=proactive_runtime,
         notification_service=notification_service,
         auth_service=auth_service,
     )
@@ -300,6 +321,7 @@ async def lifespan(app: FastAPI):
     finally:
         # 关闭顺序：market_service → cron/heartbeat → runtimes → gateway → bus_router → persister
         await market_service.shutdown()
+        await proactive_runtime.stop()
         await cron_runtime.stop()
         await heartbeat_runtime.stop()
         await agent_runtime.stop()
