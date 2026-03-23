@@ -36,7 +36,7 @@ def test_skills_integration():
         system_msg = messages[0]
         assert system_msg["role"] == "system"
         assert "## Skill Usage" in system_msg["content"]
-        assert "If the user's request matches a skill by name or description" in system_msg["content"]
+        assert "当用户请求匹配到某个 skill 的名称或描述时" in system_msg["content"]
         assert "<available_skills>" in system_msg["content"]
         assert "<skill>" in system_msg["content"]
         assert "<name>test-skill</name>" in system_msg["content"]
@@ -67,3 +67,23 @@ def test_research_union_builtin_skills_in_prompt():
 
         assert "research-union" in system_msg
         assert "union-search-plus" in system_msg
+
+
+def test_mineru_choice_builtin_skill_in_prompt():
+    """验证内置 mineru 渠道选择 skill 能被注入 prompt。"""
+    project_root = Path(__file__).resolve().parents[2]
+    builtin_dir = project_root / ".agentos" / "skills"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry = SkillRegistry(
+            workspace_dir=Path(tmpdir),
+            builtin_dir=builtin_dir,
+        )
+        registry.load_skills({})
+
+        builder = ContextBuilder(skill_registry=registry)
+        messages = builder.build_messages("请帮我解析这个 PDF")
+        system_msg = messages[0]["content"]
+
+        assert "<name>mineru-document-extractor-choice</name>" in system_msg
+        assert "MinerU" in system_msg

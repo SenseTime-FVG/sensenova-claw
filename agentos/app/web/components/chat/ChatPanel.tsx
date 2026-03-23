@@ -86,6 +86,19 @@ export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockA
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 当切换 session 时，从 session meta 中提取 agent_id 并设置为当前选中的 agent
+  useEffect(() => {
+    if (currentSessionId) {
+      const currentSession = sessions.find(s => s.session_id === currentSessionId);
+      if (currentSession) {
+        const agentId = getAgentId(currentSession.meta);
+        if (agentId) {
+          setSelectedAgent(agentId);
+        }
+      }
+    }
+  }, [currentSessionId, sessions]);
+
   // 自动滚动到底部
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });

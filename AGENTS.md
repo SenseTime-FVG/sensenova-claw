@@ -467,6 +467,18 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前环境浏览器级 Playwright 仍缺系统库 `libnspr4.so`，即使越权能拉起 web server，也会在 Chromium 启动阶段失败；这类前端 e2e 结果不能作为功能缺陷依据，只能记录为环境阻塞。
 - `npx tsc --noEmit` 与 `next build` 仍会先被仓库既有问题 `components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入挡住；验证时必须区分”本次新增错误已清零”和”仓库老错误仍在”。
 
+### 2026-03-20 MinerU 渠道选择 Skill 设计补充
+
+成功经验：
+- 对”保留旧 skill + 新增选择型 skill”的需求，先把”是否改旧 skill””是否包含网页””结果是否统一落盘”三条边界问清，再写 spec，能明显减少后续实现分叉。
+- 使用官方 `mineru-open-api` CLI 的方案时，skill 文档最重要的不是安装说明，而是把”每次先 ask_user 选渠道、免费失败不自动切换、输出目录固定到 workspace”这几个行为约束写死。
+- 对这类远程 API CLI，资源要求说明应基于官方产品形态谨慎表述为”通常较轻量”，不要虚构 CPU/内存硬指标。
+- 若需求要求”CLI 未安装时由 skill 负责安装”，实现上不能把该 skill 用 `metadata.agentos.requires.bins` 做硬门控隐藏；否则 skill 在缺失 CLI 时不会被发现，也就无法触发安装流程。
+
+失败/风险经验：
+- 当前会话环境没有可调用的 spec reviewer 子代理能力；设计文档阶段只能采用人工自检退化方案，并需要在产物里显式注明，避免误称已完成完整 reviewer loop。
+- `docs/superpowers/specs/` 受 `.gitignore` 影响，后续提交 spec 时要记得 `git add -f`，否则文件会留在工作区但不会进入提交。
+
 ### 2026-03-19 Agents 删除入口补充
 
 成功经验：
@@ -504,6 +516,43 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `agentos` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
 - 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `AGENTOS_REPO_REF`。
+
+### 2026-03-20 办公 Team 覆盖评估补充
+
+成功经验：
+- 办公 team 当前主链路是清晰的：`office-main` 负责编排，`search-agent / ppt-agent / data-analyst / doc-organizer / email-agent` 负责专业任务；`can_send_message_to` 为空在运行时代表”可发给所有启用 agent”，不是禁用协作。
+- 根配置里 `serper_search` 与飞书插件都已开启，搜索调研与飞书文档读写更接近”当前可用能力”，不只是设计文档里的预留项。
+- PPT 体系现在应按”HTML slides 工件流”理解，不是原生 `.pptx`；评估办公覆盖时，把它归类为”汇报材料生成”更准确。
+
+失败/风险经验：
+- `send_message` 会受 `max_send_depth` 约束；当前 `ppt-agent / data-analyst / doc-organizer / email-agent / search-agent` 都配置为 `1`，这意味着子 agent 会话里基本无法再继续新建子会话，设计文档里的”subagent 互相委托”在现配置下并不稳。
+- `doc-organizer` 配置里写的是 `feishu-wiki` / `feishu-drive`，但实际工具名是 `feishu_wiki` / `feishu_drive`；由于 prompt 注入按精确工具名过滤，这两项能力可能实现了却不会正确暴露给模型。
+- 运行时实际加载的 skills 比配置声明少：`paddleocr-doc-parsing`、`openai-whisper-api`、`mineru-document-extractor-choice` 等并未都进入默认 skill 注册表，扫描 PDF / OCR / 音频转写场景不能按 prompt 文案直接视为已覆盖。
+- `tools.email.enabled=true` 不等于邮件可用；如果 `EMAIL_USERNAME` / `EMAIL_PASSWORD` 没有实际注入，邮件工具会在运行时直接报”配置不完整”。
+- 当前权限配置只自动放行 `low`；而 `send_message`、`write_file`、`feishu_doc`、`send_email`、`download_attachment`、`cron_manage` 等常见办公动作都是 `medium` 或更高，真实体验更像”半自动办公助手”而不是全自动流水线。
+
+### 2026-03-22 提交与验证补充
+
+成功经验：
+- 当前 sandbox 下，`git add` / `git commit` 会因 `.git/index.lock` 写入受限失败；直接按越权权限重跑对应 git 命令，是完成提交最稳的路径。
+- 当工作区混有 `.agentos/sess_*`、`.agentos/agent2agent_*`、`.agentos/data/*.db-journal` 这类运行产物时，优先用 `git add -u` 再显式添加新增目录，比 `git add -A` 更安全，能避免把临时文件误带进提交。
+- 提交前把验证拆成小粒度更高效：先用 `py_compile` 覆盖语法，再分别跑 `tests/unit/test_cron_models.py`、`tests/unit/test_gateway.py`、`tests/unit/test_cron_delivery.py`，证据更清晰。
+
+失败/风险经验：
+- `tests/integration/test_send_message_tool.py:36` 当前存在语法错误，pytest 会在收集阶段直接中断；验证 `send_message` 相关改动时，不能把这个现有问题误判为新回归。
+- `tests/unit/test_cron_api.py::test_create_list_get_update_delete_cron_job` 在当前环境会长时间卡住；后续验证需要单独加超时隔离，避免整批测试假性悬挂。
+
+### 2026-03-23 Proactive Agent Prompt 重写补充
+
+成功经验：
+- `AGENTS.md` 在当前仓库里更适合作为”角色规范与行为边界”文档，而不是运行时配置清单；真正生效的工具和委派权限仍应以 `config.yml` / `config.json` 为准。
+- 对这类会被”用户直聊 + runtime 自动触发”双入口调用的 agent，`SYSTEM_PROMPT.md` 先区分”入口类型”，再区分”任务管理 / 任务执行”两种模式，最容易把行为写稳。
+- `proactive-agent` 这类角色最适合”强执行 + 低噪音 + 混合委派”：简单任务自己做，复杂工作流再调专业 agent，能同时减少空转和职责重叠。
+- prompt-only 改动也值得跑最贴边的轻量回归；`tests/unit/test_agent_registry.py` 能快速验证 agent prompt 文件加载链路未被破坏。
+
+失败/风险经验：
+- 如果在 `AGENTS.md` 里继续硬编码 `tools`、`can_delegate_to` 之类清单，文案很容易和真实运行时配置漂移，后续维护成本会越来越高。
+- 强执行型 prompt 如果不显式加入”无重要变化时保持简洁””不要为了显得主动而主动”等约束，很容易把主动推送写成高频、低信息量的噪音输出。
 
 ### 2026-03-20 飞书 Wiki token 兼容修复补充
 
@@ -938,4 +987,4 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 这种行为比“点 `+` 就创建空 session”更稳，也避免用户误触后留下无内容会话；和现有 `sendMessage()` 的惰性创建模型一致。
 
 失败/风险经验：
-- 这类交互需求很容易在中途反复变化；如果先把 `+` 绑定到复杂弹窗或预创建逻辑，再回退会造成无谓代码噪音。应优先围绕“是否真的需要立即创建 session”这个核心约束做最小实现。
+- 这类交互需求很容易在中途反复变化；如果先把 `+` 绑定到复杂弹窗或预创建逻辑，再回退会造成无谓代码噪音。应优先围绕”是否真的需要立即创建 session”这个核心约束做最小实现。

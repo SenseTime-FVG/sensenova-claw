@@ -54,8 +54,9 @@ class SystemEventPayload:
 
 @dataclass
 class AgentTurnPayload:
-    """隔离会话 Agent Turn（Phase 2）"""
+    """隔离会话 Agent Turn"""
     kind: Literal["agentTurn"] = "agentTurn"
+    agent_id: str = "default"
     message: str = ""
     model: str | None = None
     timeout_seconds: int | None = None
@@ -148,6 +149,7 @@ def payload_to_json(payload: Payload) -> str:
     elif isinstance(payload, AgentTurnPayload):
         return json.dumps({
             "kind": "agentTurn",
+            "agent_id": payload.agent_id,
             "message": payload.message,
             "model": payload.model,
             "timeout_seconds": payload.timeout_seconds,
@@ -164,6 +166,7 @@ def payload_from_json(raw: str) -> Payload:
         return SystemEventPayload(text=d.get("text", ""))
     elif kind == "agentTurn":
         return AgentTurnPayload(
+            agent_id=d.get("agent_id", "default"),
             message=d.get("message", ""),
             model=d.get("model"),
             timeout_seconds=d.get("timeout_seconds"),

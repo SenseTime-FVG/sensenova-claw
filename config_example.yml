@@ -182,7 +182,7 @@ agents:
     description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
     temperature: 0.2
     tools: [serper_search, fetch_url, read_file, write_file, image_search, send_message, ask_user]
-    skills: [paddleocr-doc-parsing, research-union, union-search-plus]
+    skills: [paddleocr-doc-parsing, mineru-document-extractor-choice, research-union, union-search-plus]
 
   ppt-agent:
     name: PPT 生成助手
@@ -194,16 +194,16 @@ agents:
   data-analyst:
     name: 数据分析助手
     description: 数据分析、可视化和报告生成
-    temperature: 0.2
+    temperature: 0.6
     tools: [read_file, write_file, bash_command, send_message, feishu_doc, ask_user]
-    skills: [paddleocr-doc-parsing, openai-whisper-api]
+    skills: [excel-xlsx, python-dataviz, pdf, csv-pipeline, mineru-document-extractor, openai-whisper-api]
 
   doc-organizer:
     name: 文档整理助手
     description: 处理多种来源的文档，支持格式转换和整理
     temperature: 0.2
     tools: [read_file, write_file, bash_command, send_message, feishu_doc, feishu-wiki, feishu-drive, ask_user]
-    skills: [paddleocr-doc-parsing, openai-whisper-api, feishu-doc, feishu-wiki, feishu-drive]
+    skills: [markdown-converter, docx-cn, excel-xlsx, pdf, pdf-generator, mineru-document-extractor, openai-whisper-api, feishu-doc, feishu-wiki, feishu-drive]
 
   email-agent:
     name: 邮件助手

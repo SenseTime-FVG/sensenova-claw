@@ -131,6 +131,36 @@ CREATE TABLE IF NOT EXISTS cron_runs (
     FOREIGN KEY (job_id) REFERENCES cron_jobs(id)
 );
 CREATE INDEX IF NOT EXISTS idx_cron_runs_job ON cron_runs(job_id);
+
+CREATE TABLE IF NOT EXISTS proactive_jobs (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    trigger_json TEXT NOT NULL,
+    task_json TEXT NOT NULL,
+    delivery_json TEXT NOT NULL,
+    safety_json TEXT NOT NULL,
+    state_json TEXT NOT NULL DEFAULT '{}',
+    source TEXT DEFAULT 'config',
+    created_at_ms INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS proactive_runs (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    session_id TEXT,
+    status TEXT NOT NULL,
+    triggered_by TEXT NOT NULL,
+    started_at_ms INTEGER NOT NULL,
+    completed_at_ms INTEGER,
+    result_summary TEXT,
+    error_message TEXT,
+    FOREIGN KEY (job_id) REFERENCES proactive_jobs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_proactive_runs_job_id ON proactive_runs(job_id);
 """
 
 
@@ -710,3 +740,110 @@ class Repository:
         rows = conn.execute(sql, params).fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    # ---------- Proactive Jobs 表操作 ----------
+
+    async def create_proactive_job(self, row: dict[str, Any]) -> None:
+        """插入一条 proactive_jobs 记录"""
+        now_ms = int(time.time() * 1000)
+        conn = self._conn()
+        conn.execute(
+            """INSERT INTO proactive_jobs (id, agent_id, name, enabled, trigger_json,
+               task_json, delivery_json, safety_json, state_json, source,
+               created_at_ms, updated_at_ms)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                row["id"], row.get("agent_id", "proactive-agent"), row["name"],
+                row.get("enabled", 1), row["trigger_json"], row["task_json"],
+                row["delivery_json"], row["safety_json"],
+                row.get("state_json", "{}"), row.get("source", "config"),
+                row.get("created_at_ms", now_ms), row.get("updated_at_ms", now_ms),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+    async def get_proactive_job(self, job_id: str) -> dict[str, Any] | None:
+        """按 ID 查询单条 proactive job"""
+        conn = self._conn()
+        row = conn.execute("SELECT * FROM proactive_jobs WHERE id = ?", (job_id,)).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    async def list_proactive_jobs(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        """返回所有 proactive jobs"""
+        conn = self._conn()
+        if enabled_only:
+            rows = conn.execute(
+                "SELECT * FROM proactive_jobs WHERE enabled = 1 ORDER BY created_at_ms"
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM proactive_jobs ORDER BY created_at_ms").fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    async def update_proactive_job(self, job_id: str, updates: dict[str, Any]) -> None:
+        """更新 proactive job 的指定字段"""
+        if not updates:
+            return
+        set_parts = [f"{k} = ?" for k in updates]
+        values = list(updates.values()) + [job_id]
+        conn = self._conn()
+        conn.execute(f"UPDATE proactive_jobs SET {', '.join(set_parts)} WHERE id = ?", values)
+        conn.commit()
+        conn.close()
+
+    async def delete_proactive_job(self, job_id: str) -> None:
+        """删除 proactive job 及其 runs"""
+        conn = self._conn()
+        conn.execute("DELETE FROM proactive_runs WHERE job_id = ?", (job_id,))
+        conn.execute("DELETE FROM proactive_jobs WHERE id = ?", (job_id,))
+        conn.commit()
+        conn.close()
+
+    # ---------- Proactive Runs 表操作 ----------
+
+    async def create_proactive_run(self, row: dict[str, Any]) -> None:
+        """插入一条 proactive_runs 记录"""
+        conn = self._conn()
+        conn.execute(
+            """INSERT INTO proactive_runs (id, job_id, session_id, status, triggered_by,
+               started_at_ms, completed_at_ms, result_summary, error_message)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                row["id"], row["job_id"], row.get("session_id"),
+                row["status"], row["triggered_by"], row["started_at_ms"],
+                row.get("completed_at_ms"), row.get("result_summary"),
+                row.get("error_message"),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+    async def update_proactive_run(self, run_id: str, updates: dict[str, Any]) -> None:
+        """更新 proactive_runs 记录"""
+        if not updates:
+            return
+        set_parts = [f"{k} = ?" for k in updates]
+        values = list(updates.values()) + [run_id]
+        conn = self._conn()
+        conn.execute(f"UPDATE proactive_runs SET {', '.join(set_parts)} WHERE id = ?", values)
+        conn.commit()
+        conn.close()
+
+    async def list_proactive_runs(self, job_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        """按 started_at_ms 倒序列出 job 运行历史"""
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT * FROM proactive_runs WHERE job_id = ? ORDER BY started_at_ms DESC LIMIT ?",
+            (job_id, limit),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    async def get_proactive_run(self, run_id: str) -> dict[str, Any] | None:
+        """按 ID 查询单条 proactive run"""
+        conn = self._conn()
+        row = conn.execute("SELECT * FROM proactive_runs WHERE id = ?", (run_id,)).fetchone()
+        conn.close()
+        return dict(row) if row else None

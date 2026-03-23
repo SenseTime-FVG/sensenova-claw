@@ -207,7 +207,7 @@ export function NotificationDropdown() {
   const handleNavigate = async (sessionId: string) => {
     setOpen(false);
     await switchSession(sessionId);
-    router.push('/chat');
+    router.push('/');
   };
 
   // 处理卡片操作：根据类型发送 WebSocket 响应
