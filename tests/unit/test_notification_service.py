@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -110,7 +111,11 @@ def test_explicit_channels_bypass_per_channel_default_flags():
     [
         ("linux", {"notify-send": "/usr/bin/notify-send"}, ["/usr/bin/notify-send", "Cron", "Done"]),
         ("darwin", {"osascript": "/usr/bin/osascript"}, ["/usr/bin/osascript", "-e"]),
-        ("win32", {"powershell": "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"}, ["C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe", "-NoProfile", "-Command"]),
+        (
+            "win32",
+            {"powershell": "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"},
+            ["C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand"],
+        ),
     ],
 )
 def test_native_notification_provider_selects_platform_command(
@@ -140,3 +145,60 @@ def test_native_notification_provider_selects_platform_command(
     assert ok is True
     assert calls
     assert calls[0][: len(expected_prefix)] == expected_prefix
+
+
+def test_native_notification_provider_windows_script_registers_shortcut(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_which(name: str):
+        mapping = {
+            "powershell": "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+        }
+        return mapping.get(name)
+
+    def fake_run(args, **kwargs):
+        calls.append(list(args))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    from agentos.kernel.notification.providers import native as native_module
+
+    monkeypatch.setattr(native_module.sys, "platform", "win32")
+    monkeypatch.setattr(native_module.shutil, "which", fake_which)
+    monkeypatch.setattr(native_module.subprocess, "run", fake_run)
+
+    provider = NativeNotificationProvider()
+    ok = provider._send_sync(
+        Notification(title="Cron & $done", body="body with <xml> and 'quote'"),
+    )
+
+    assert ok is True
+    assert calls
+
+    encoded_script = calls[0][-1]
+    script = base64.b64decode(encoded_script).decode("utf-16le")
+
+    assert native_module._WINDOWS_TOAST_APP_ID in script
+    assert native_module._WINDOWS_TOAST_SHORTCUT_NAME in script
+    assert "AgentOSShortcutInstaller" in script
+    assert "CreateToastNotifier($appId).Show($toast)" in script
+    assert "<text>Cron &amp; $done</text>" in script
+    assert "<text>body with &lt;xml&gt; and 'quote'</text>" in script
+
+
+def test_native_notification_provider_returns_false_when_command_fails(monkeypatch):
+    def fake_which(name: str):
+        return {"powershell": "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"}.get(name)
+
+    def fake_run(args, **kwargs):
+        return SimpleNamespace(returncode=1, stdout="", stderr="boom")
+
+    from agentos.kernel.notification.providers import native as native_module
+
+    monkeypatch.setattr(native_module.sys, "platform", "win32")
+    monkeypatch.setattr(native_module.shutil, "which", fake_which)
+    monkeypatch.setattr(native_module.subprocess, "run", fake_run)
+
+    provider = NativeNotificationProvider()
+    ok = provider._send_sync(Notification(title="Cron", body="Done"))
+
+    assert ok is False
