@@ -64,3 +64,12 @@ PROACTIVE_JOB_FAILED = "proactive.job_failed"
 PROACTIVE_JOB_SKIPPED = "proactive.job_skipped"
 PROACTIVE_CONDITION_EVALUATED = "proactive.condition_evaluated"
 PROACTIVE_RESULT = "proactive.result"
+
+# 会话生命周期事件
+SESSION_CREATED = "session.created"
+
+# 配置变更事件
+CONFIG_UPDATED = "config.updated"
+
+# 系统级事件的 session_id（广播哨兵，不属于任何用户会话）
+SYSTEM_SESSION_ID = "__system__"

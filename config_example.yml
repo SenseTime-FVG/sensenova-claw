@@ -73,69 +73,79 @@ llm:
       provider: anthropic
       model_id: claude-opus-4-6
       timeout: 60
-      max_output_tokens: 8192
+      max_tokens: 200000
+      max_output_tokens: 16384
 
     claude-sonnet:
       provider: anthropic
       model_id: claude-sonnet-4-6
       timeout: 60
-      max_output_tokens: 8192
+      max_tokens: 200000
+      max_output_tokens: 16384
 
     # ── OpenAI ──
     gpt-5.4:
       provider: openai
       model_id: gpt-5.4
       timeout: 60
-      max_output_tokens: 8192
+      max_tokens: 128000
+      max_output_tokens: 16384
 
     # ── Gemini ──
     gemini-pro:
       provider: gemini
       model_id: gemini-2.0-flash
       timeout: 120
-      max_output_tokens: 8192
+      max_tokens: 1048576
+      max_output_tokens: 65536
 
     # ── Kimi (Moonshot) ──
     kimi-k2.5:
       provider: kimi
       model_id: kimi-k2.5
       timeout: 60
-      max_output_tokens: 262144
+      max_tokens: 262144
+      max_output_tokens: 16384
 
     # ── GLM (智谱) ──
     glm-5:
       provider: glm
       model_id: GLM-5
       timeout: 60
-      max_output_tokens: 200000
+      max_tokens: 200000
+      max_output_tokens: 16384
 
     # ── Minimax ──
     minimax-m2.7:
       provider: minimax
       model_id: MiniMax-M2.7-highspeed
       timeout: 60
-      max_output_tokens: 204800
+      max_tokens: 204800
+      max_output_tokens: 16384
 
     # ── Qwen (通义千问) ──
     qwen-3.5-plus:
       provider: qwen
       model_id: qwen3.5-plus
       timeout: 60
-      max_output_tokens: 1000000
+      max_tokens: 1000000
+      max_output_tokens: 16384
 
     # ── Deepseek ──
     deepseek-chat:
       provider: deepseek
       model_id: deepseek-chat
       timeout: 60
-      max_output_tokens: 128000
+      max_tokens: 128000
+      max_output_tokens: 16384
 
     # ── Step (阶跃星辰) ──
     step-3.5-flash:
       provider: step
       model_id: step-3.5-flash
       timeout: 60
-      max_output_tokens: 256000
+      max_tokens: 256000
+      max_output_tokens: 16384
 
   default_model: gemini-pro
 
@@ -153,7 +163,7 @@ agents:
     skills: []
 
   system-admin:
-    name: SystemAdmin
+    name: 系统运维管理员
     description: 系统运维管理员，负责 AgentOS 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作
     temperature: 0.2
     tools: [read_file, write_file, bash_command]
@@ -200,6 +210,13 @@ agents:
     description: 邮件收发、管理和定时提醒
     temperature: 0.2
     tools: [bash_command, read_file, write_file, send_message, send_email, list_emails, read_email, download_attachment, mark_email, search_emails, ask_user]
+    skills: []
+
+  philosopher:
+    name: 哲学家
+    description: 哲学思辨与深度思考，擅长多角度分析问题、引用中西方哲学经典
+    temperature: 0.7
+    tools: [serper_search, fetch_url, ask_user]
     skills: []
 
 # ════════════════════════════════════════════════════

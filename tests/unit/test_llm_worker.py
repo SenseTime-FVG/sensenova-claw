@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 
 import pytest
 import pytest_asyncio
@@ -17,8 +18,10 @@ from agentos.kernel.events.types import (
     LLM_CALL_REQUESTED,
     LLM_CALL_RESULT,
     LLM_CALL_STARTED,
+    NOTIFICATION_SESSION,
 )
 from agentos.kernel.runtime.workers.llm_worker import LLMSessionWorker
+from agentos.platform.config.config import config
 from tests.conftest import load_gemini_config, skip_if_gemini_unavailable
 
 
@@ -38,6 +41,86 @@ class _SilentTimeoutProvider(LLMProvider):
     async def call(self, **kwargs):
         _ = kwargs
         raise asyncio.TimeoutError()
+
+
+class _MaxTokensRangeProvider(LLMProvider):
+    """模拟 Qwen/DashScope max_tokens 越界报错。"""
+
+    async def call(self, **kwargs):
+        _ = kwargs
+        raise RuntimeError(
+            "Error code: 400 - {'error': {'message': "
+            "'<400> InternalError.Algo.InvalidParameter: Range of max_tokens should be [1, 65536]', "
+            "'type': 'invalid_request_error', 'code': 'invalid_parameter_error'}}"
+        )
+
+
+class _MiniMaxMaxTokensProvider(LLMProvider):
+    """模拟 MiniMax max_tokens 越界报错。"""
+
+    async def call(self, **kwargs):
+        _ = kwargs
+        raise RuntimeError(
+            "Error code: 400 - {'type': 'error', 'error': {'type': 'bad_request_error', "
+            "'message': 'invalid params, model[MiniMax-M2.7-highspeed] does not support "
+            "max tokens > 196608 (2013)', 'http_code': '400'}}"
+        )
+
+
+class _RetryableMaxTokensProvider(LLMProvider):
+    """首次报 max_tokens 越界，第二次成功。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def call(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            raise RuntimeError(
+                "Error code: 400 - {'error': {'message': "
+                "'<400> InternalError.Algo.InvalidParameter: Range of max_tokens should be [1, 65536]', "
+                "'type': 'invalid_request_error', 'code': 'invalid_parameter_error'}}"
+            )
+        return {
+            "content": "重试成功",
+            "tool_calls": [],
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+
+class _SuccessProvider(LLMProvider):
+    """始终成功的 Provider。"""
+
+    def __init__(self, content: str):
+        self.content = content
+        self.calls: list[dict] = []
+
+    async def call(self, **kwargs):
+        self.calls.append(kwargs)
+        return {
+            "content": self.content,
+            "tool_calls": [],
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+
+class _RetryableThenErrorProvider(LLMProvider):
+    """先触发 max_tokens 重试，再次调用仍失败。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def call(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            raise RuntimeError(
+                "Error code: 400 - {'error': {'message': "
+                "'<400> InternalError.Algo.InvalidParameter: Range of max_tokens should be [1, 65536]', "
+                "'type': 'invalid_request_error', 'code': 'invalid_parameter_error'}}"
+            )
+        raise RuntimeError("第二次调用仍失败")
 
 
 class _SimpleLLMRuntime:
@@ -209,45 +292,295 @@ class TestLLMWorkerError:
     """LLM 调用失败路径"""
 
     async def test_error_publishes_error_and_fallback_result(self, private_bus, public_bus):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "mock"
+            factory = LLMFactory()
+            factory._providers["mock"] = _ErrorProvider()
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 4)
+
+            event = _make_llm_event("mock", "mock-agent-v1", [{"role": "user", "content": "test"}])
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            types = [e.type for e in collected]
+            assert types[0] == LLM_CALL_STARTED
+            assert ERROR_RAISED in types
+            err = [e for e in collected if e.type == ERROR_RAISED][0]
+            assert "API 超时" in err.payload["error_message"]
+            fallback = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert "LLM调用失败" in fallback.payload["response"]["content"]
+            assert fallback.payload["finish_reason"] == "error"
+            assert LLM_CALL_COMPLETED in types
+        finally:
+            config.data = original
+
+    async def test_timeout_without_message_uses_exception_type(self, private_bus, public_bus):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "mock"
+            factory = LLMFactory()
+            factory._providers["mock"] = _SilentTimeoutProvider()
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 4)
+
+            event = _make_llm_event("mock", "mock-agent-v1", [{"role": "user", "content": "test"}])
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            err = [e for e in collected if e.type == ERROR_RAISED][0]
+            fallback = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert err.payload["error_message"] == "TimeoutError"
+            assert "TimeoutError" in fallback.payload["response"]["content"]
+        finally:
+            config.data = original
+
+    async def test_explicit_provider_unavailable_does_not_silently_fallback_to_mock(
+        self, private_bus, public_bus
+    ):
+        """显式请求 qwen 时，应提示并回退到 mock。"""
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "mock"
+            factory = LLMFactory()
+            factory._providers.pop("qwen", None)
+            factory._lazy.pop("qwen", None)
+            factory._PROVIDER_FACTORIES.pop("qwen", None)
+
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+            collected, done, task = await _collect_from_bus(public_bus, 4)
+
+            event = _make_llm_event("qwen", "qwen3.5-plus", [{"role": "user", "content": "你好"}])
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            types = [e.type for e in collected]
+            assert ERROR_RAISED not in types
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 2
+            assert "qwen:qwen3.5-plus" in notices[0].payload["body"]
+            assert "mock:mock-agent-v1" in notices[1].payload["body"]
+            fallback = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert "mock" in fallback.payload["response"]["content"].lower()
+            assert fallback.payload["finish_reason"] == "stop"
+        finally:
+            config.data = original
+
+    async def test_max_tokens_out_of_range_is_normalized_for_user(self, private_bus, public_bus):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "mock"
+            factory = LLMFactory()
+            factory._providers["qwen"] = _MaxTokensRangeProvider()
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 4)
+
+            event = _make_llm_event("qwen", "qwen3.5-plus", [{"role": "user", "content": "你好"}])
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            types = [e.type for e in collected]
+            assert ERROR_RAISED not in types
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 2
+            assert "qwen:qwen3.5-plus 调用失败" in notices[0].payload["body"]
+            assert "65536" in notices[0].payload["body"]
+            assert "mock:mock-agent-v1" in notices[1].payload["body"]
+        finally:
+            config.data = original
+
+    async def test_minimax_max_tokens_out_of_range_is_normalized_for_user(self, private_bus, public_bus):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "mock"
+            factory = LLMFactory()
+            factory._providers["minimax"] = _MiniMaxMaxTokensProvider()
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 4)
+
+            event = _make_llm_event("minimax", "MiniMax-M2.7-highspeed", [{"role": "user", "content": "你好"}])
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            types = [e.type for e in collected]
+            assert ERROR_RAISED not in types
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 2
+            assert "minimax:MiniMax-M2.7-highspeed 调用失败" in notices[0].payload["body"]
+            assert "196608" in notices[0].payload["body"]
+            assert "mock:mock-agent-v1" in notices[1].payload["body"]
+        finally:
+            config.data = original
+
+    async def test_max_tokens_out_of_range_retries_once_after_notification(self, private_bus, public_bus):
+        provider = _RetryableMaxTokensProvider()
         factory = LLMFactory()
-        factory._providers["error"] = _ErrorProvider()
+        factory._providers["qwen"] = provider
         runtime = _SimpleLLMRuntime(factory)
         worker = LLMSessionWorker("s1", private_bus, runtime)
 
         collected, done, task = await _collect_from_bus(public_bus, 4)
 
-        event = _make_llm_event("error", "m", [{"role": "user", "content": "test"}])
+        event = EventEnvelope(
+            type=LLM_CALL_REQUESTED,
+            session_id="s1",
+            turn_id="t1",
+            payload={
+                "llm_call_id": "llm_retry",
+                "provider": "qwen",
+                "model": "qwen3.5-plus",
+                "messages": [{"role": "user", "content": "你好"}],
+                "max_tokens": 1000000,
+            },
+        )
         await worker._handle(event)
         await asyncio.wait_for(done.wait(), timeout=5)
         task.cancel()
 
         types = [e.type for e in collected]
-        assert types[0] == LLM_CALL_STARTED
-        assert ERROR_RAISED in types
-        err = [e for e in collected if e.type == ERROR_RAISED][0]
-        assert "API 超时" in err.payload["error_message"]
-        fallback = [e for e in collected if e.type == LLM_CALL_RESULT][0]
-        assert "LLM调用失败" in fallback.payload["response"]["content"]
-        assert fallback.payload["finish_reason"] == "error"
-        assert LLM_CALL_COMPLETED in types
+        assert ERROR_RAISED not in types
+        assert NOTIFICATION_SESSION in types
+        notification = [e for e in collected if e.type == NOTIFICATION_SESSION][0]
+        assert "已自动调整为 65536 并重试" in notification.payload["body"]
+        result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+        assert result.payload["response"]["content"] == "重试成功"
+        assert provider.calls[0]["max_tokens"] == 1000000
+        assert provider.calls[1]["max_tokens"] == 65536
 
-    async def test_timeout_without_message_uses_exception_type(self, private_bus, public_bus):
-        factory = LLMFactory()
-        factory._providers["silent_timeout"] = _SilentTimeoutProvider()
-        runtime = _SimpleLLMRuntime(factory)
-        worker = LLMSessionWorker("s1", private_bus, runtime)
+    async def test_provider_failure_falls_back_to_default_model_with_notification(self, private_bus, public_bus):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "gemini-pro"
+            config.data["llm"]["models"]["gemini-pro"] = {
+                "provider": "gemini",
+                "model_id": "gemini-2.5-pro",
+            }
 
-        collected, done, task = await _collect_from_bus(public_bus, 4)
+            factory = LLMFactory()
+            factory._providers["qwen"] = _ErrorProvider()
+            gemini = _SuccessProvider("default fallback success")
+            factory._providers["gemini"] = gemini
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
 
-        event = _make_llm_event("silent_timeout", "m", [{"role": "user", "content": "test"}])
-        await worker._handle(event)
-        await asyncio.wait_for(done.wait(), timeout=5)
-        task.cancel()
+            collected, done, task = await _collect_from_bus(public_bus, 5)
 
-        err = [e for e in collected if e.type == ERROR_RAISED][0]
-        fallback = [e for e in collected if e.type == LLM_CALL_RESULT][0]
-        assert err.payload["error_message"] == "TimeoutError"
-        assert "TimeoutError" in fallback.payload["response"]["content"]
+            event = _make_llm_event("qwen", "qwen3.5-plus", [{"role": "user", "content": "test"}])
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            types = [e.type for e in collected]
+            assert ERROR_RAISED not in types
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 2
+            assert "qwen:qwen3.5-plus" in notices[0].payload["body"]
+            assert "gemini:gemini-2.5-pro" in notices[1].payload["body"]
+            result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert result.payload["response"]["content"] == "default fallback success"
+            assert gemini.calls[0]["model"] == "gemini-2.5-pro"
+        finally:
+            config.data = original
+
+    async def test_default_model_failure_falls_back_to_mock_with_notification(self, private_bus, public_bus):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "gemini-pro"
+            config.data["llm"]["models"]["gemini-pro"] = {
+                "provider": "gemini",
+                "model_id": "gemini-2.5-pro",
+            }
+
+            factory = LLMFactory()
+            factory._providers["qwen"] = _ErrorProvider()
+            factory._providers["gemini"] = _ErrorProvider()
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 7)
+
+            event = _make_llm_event("qwen", "qwen3.5-plus", [{"role": "user", "content": "test"}])
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            types = [e.type for e in collected]
+            assert ERROR_RAISED not in types
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 4
+            assert "qwen:qwen3.5-plus" in notices[0].payload["body"]
+            assert "gemini:gemini-2.5-pro" in notices[1].payload["body"]
+            assert "gemini:gemini-2.5-pro" in notices[2].payload["body"]
+            assert "mock:mock-agent-v1" in notices[3].payload["body"]
+            result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert "mock" in result.payload["response"]["content"].lower()
+            assert result.payload["finish_reason"] == "stop"
+        finally:
+            config.data = original
+
+    async def test_max_tokens_retry_failure_then_falls_back(self, private_bus, public_bus):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "gemini-pro"
+            config.data["llm"]["models"]["gemini-pro"] = {
+                "provider": "gemini",
+                "model_id": "gemini-2.5-pro",
+            }
+
+            qwen = _RetryableThenErrorProvider()
+            gemini = _SuccessProvider("fallback after retry failure")
+            factory = LLMFactory()
+            factory._providers["qwen"] = qwen
+            factory._providers["gemini"] = gemini
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 6)
+
+            event = EventEnvelope(
+                type=LLM_CALL_REQUESTED,
+                session_id="s1",
+                turn_id="t1",
+                payload={
+                    "llm_call_id": "llm_retry_fallback",
+                    "provider": "qwen",
+                    "model": "qwen3.5-plus",
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "max_tokens": 1000000,
+                },
+            )
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 3
+            assert "qwen:qwen3.5-plus 的 max_tokens 超出模型上限" in notices[0].payload["body"]
+            assert "已自动调整为 65536 并重试" in notices[0].payload["body"]
+            assert "qwen:qwen3.5-plus" in notices[1].payload["body"]
+            assert "gemini:gemini-2.5-pro" not in notices[1].payload["body"]
+            assert "gemini:gemini-2.5-pro" in notices[2].payload["body"]
+            result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert result.payload["response"]["content"] == "fallback after retry failure"
+            assert qwen.calls[0]["max_tokens"] == 1000000
+            assert qwen.calls[1]["max_tokens"] == 65536
+        finally:
+            config.data = original
 
 
 # ── 配置回退测试 ──────────────────────────────────────────
@@ -257,22 +590,27 @@ class TestLLMWorkerConfigFallback:
     """不传 provider/model 时使用全局配置默认值"""
 
     async def test_uses_config_defaults_when_payload_empty(self, private_bus, public_bus, runtime):
-        worker = LLMSessionWorker("s1", private_bus, runtime)
-        collected, done, task = await _collect_from_bus(public_bus, 3)
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "mock"
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+            collected, done, task = await _collect_from_bus(public_bus, 3)
 
-        event = EventEnvelope(
-            type=LLM_CALL_REQUESTED,
-            session_id="s1",
-            turn_id="t1",
-            payload={
-                "llm_call_id": "llm_1",
-                "messages": [{"role": "user", "content": "hello"}],
-            },
-        )
-        await worker._handle(event)
-        await asyncio.wait_for(done.wait(), timeout=5)
-        task.cancel()
+            event = EventEnvelope(
+                type=LLM_CALL_REQUESTED,
+                session_id="s1",
+                turn_id="t1",
+                payload={
+                    "llm_call_id": "llm_1",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+            )
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
 
-        result_events = [e for e in collected if e.type == LLM_CALL_RESULT]
-        assert len(result_events) == 1
-        assert result_events[0].payload["response"]["content"]
+            result_events = [e for e in collected if e.type == LLM_CALL_RESULT]
+            assert len(result_events) == 1
+            assert result_events[0].payload["response"]["content"]
+        finally:
+            config.data = original

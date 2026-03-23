@@ -1,24 +1,20 @@
-"""自定义功能页 CRUD API。
+"""自定义功能页 / mini-app API。
 
-用户可以创建自定义功能页，每个页面绑定一个 agent 和若干快捷模板。
-数据持久化到 {agentos_home}/custom_pages.json。
+当前 custom page 已升级为带工作区、专属 Agent 和生成任务状态的 mini-app 页面。
+原有列表/详情接口保持兼容。
 """
 
 from __future__ import annotations
 
-import json
-import time
-import uuid
-from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+
+from agentos.capabilities.miniapps.service import MiniAppService
 
 router = APIRouter(prefix="/api/custom-pages", tags=["custom-pages"])
 
-
-# ── 数据模型 ──
 
 class TemplateItem(BaseModel):
     title: str
@@ -30,121 +26,210 @@ class CustomPageCreate(BaseModel):
     slug: str = ""
     description: str = ""
     icon: str = "Sparkles"
-    agent_id: str = "office-main"
+    agent_id: str = "default"
     system_prompt: str = ""
     templates: list[TemplateItem] = Field(default_factory=list)
+    create_dedicated_agent: bool = True
+    workspace_mode: Literal["scratch", "reuse"] = "scratch"
+    source_project_path: str = ""
+    builder_type: Literal["builtin", "acp"] = "builtin"
+    generation_prompt: str = ""
 
 
 class CustomPageUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     icon: str | None = None
-    agent_id: str | None = None
     system_prompt: str | None = None
     templates: list[TemplateItem] | None = None
+    workspace_mode: Literal["scratch", "reuse"] | None = None
+    source_project_path: str | None = None
+    builder_type: Literal["builtin", "acp"] | None = None
+    generation_prompt: str | None = None
 
 
-# ── 存储辅助 ──
-
-def _storage_path(request: Request) -> Path:
-    home = request.app.state.agentos_home
-    return Path(home) / "custom_pages.json"
+class GenerateRequest(BaseModel):
+    prompt: str = ""
 
 
-def _load_pages(request: Request) -> list[dict[str, Any]]:
-    path = _storage_path(request)
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
+class MiniAppInteractionRequest(BaseModel):
+    action: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    message: str = ""
+    session_id: str = ""
 
 
-def _save_pages(request: Request, pages: list[dict[str, Any]]) -> None:
-    path = _storage_path(request)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(pages, ensure_ascii=False, indent=2), encoding="utf-8")
+class MiniAppActionRequest(BaseModel):
+    action: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    message: str = ""
+    session_id: str = ""
+    target: Literal["local", "server", "agent"] = "agent"
 
 
-def _slugify(name: str) -> str:
-    import re
-    slug = re.sub(r"[^\w\u4e00-\u9fff-]", "-", name.lower().strip())
-    slug = re.sub(r"-+", "-", slug).strip("-")
-    return slug or f"page-{uuid.uuid4().hex[:6]}"
+def _get_service(request: Request) -> MiniAppService:
+    service = getattr(request.app.state, "custom_page_service", None)
+    if service is not None:
+        return service
 
+    gateway = None
+    services = getattr(request.app.state, "services", None)
+    if services is not None:
+        gateway = getattr(services, "gateway", None)
 
-# ── 路由 ──
+    agentos_home = getattr(request.app.state, "agentos_home", "")
+    config = getattr(request.app.state, "config", None)
+    agent_registry = getattr(request.app.state, "agent_registry", None)
+    if not config or not agent_registry:
+        raise RuntimeError("custom page service dependencies are missing")
+
+    service = MiniAppService(
+        agentos_home=agentos_home,
+        config=config,
+        agent_registry=agent_registry,
+        gateway=gateway,
+    )
+    request.app.state.custom_page_service = service
+    return service
+
 
 @router.get("")
 async def list_custom_pages(request: Request):
-    pages = _load_pages(request)
-    return {"pages": pages}
+    service = _get_service(request)
+    return {"pages": service.load_pages()}
 
 
 @router.post("")
 async def create_custom_page(request: Request, body: CustomPageCreate):
-    pages = _load_pages(request)
-
-    slug = body.slug.strip() if body.slug else _slugify(body.name)
-    if any(p["slug"] == slug for p in pages):
-        slug = f"{slug}-{uuid.uuid4().hex[:4]}"
-
-    page: dict[str, Any] = {
-        "id": uuid.uuid4().hex,
-        "slug": slug,
-        "name": body.name,
-        "description": body.description,
-        "icon": body.icon,
-        "agent_id": body.agent_id,
-        "system_prompt": body.system_prompt,
-        "templates": [t.model_dump() for t in body.templates],
-        "created_at": int(time.time() * 1000),
-        "updated_at": int(time.time() * 1000),
-    }
-    pages.append(page)
-    _save_pages(request, pages)
+    service = _get_service(request)
+    page = await service.create_page(
+        {
+            "name": body.name,
+            "slug": body.slug,
+            "description": body.description,
+            "icon": body.icon,
+            "agent_id": body.agent_id,
+            "system_prompt": body.system_prompt,
+            "templates": [item.model_dump() for item in body.templates],
+            "create_dedicated_agent": body.create_dedicated_agent,
+            "workspace_mode": body.workspace_mode,
+            "source_project_path": body.source_project_path,
+            "builder_type": body.builder_type,
+            "generation_prompt": body.generation_prompt,
+        }
+    )
     return page
 
 
 @router.get("/{page_id}")
 async def get_custom_page(request: Request, page_id: str):
-    pages = _load_pages(request)
-    for p in pages:
-        if p["id"] == page_id or p["slug"] == page_id:
-            return p
-    return {"error": "not found"}, 404
+    service = _get_service(request)
+    page = service.get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"custom page not found: {page_id}")
+    page = dict(page)
+    page["runs"] = service.list_runs(page_id)[:5]
+    return page
 
 
 @router.put("/{page_id}")
 async def update_custom_page(request: Request, page_id: str, body: CustomPageUpdate):
-    pages = _load_pages(request)
-    for p in pages:
-        if p["id"] == page_id or p["slug"] == page_id:
-            if body.name is not None:
-                p["name"] = body.name
-            if body.description is not None:
-                p["description"] = body.description
-            if body.icon is not None:
-                p["icon"] = body.icon
-            if body.agent_id is not None:
-                p["agent_id"] = body.agent_id
-            if body.system_prompt is not None:
-                p["system_prompt"] = body.system_prompt
-            if body.templates is not None:
-                p["templates"] = [t.model_dump() for t in body.templates]
-            p["updated_at"] = int(time.time() * 1000)
-            _save_pages(request, pages)
-            return p
-    return {"error": "not found"}, 404
+    service = _get_service(request)
+    page = await service.update_page(
+        page_id,
+        {
+            "name": body.name,
+            "description": body.description,
+            "icon": body.icon,
+            "system_prompt": body.system_prompt,
+            "templates": [item.model_dump() for item in body.templates] if body.templates is not None else None,
+            "workspace_mode": body.workspace_mode,
+            "source_project_path": body.source_project_path,
+            "builder_type": body.builder_type,
+            "generation_prompt": body.generation_prompt,
+        },
+    )
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"custom page not found: {page_id}")
+    return page
 
 
 @router.delete("/{page_id}")
 async def delete_custom_page(request: Request, page_id: str):
-    pages = _load_pages(request)
-    new_pages = [p for p in pages if p["id"] != page_id and p["slug"] != page_id]
-    if len(new_pages) == len(pages):
-        return {"error": "not found"}, 404
-    _save_pages(request, new_pages)
+    service = _get_service(request)
+    deleted = await service.delete_page(page_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"custom page not found: {page_id}")
     return {"ok": True}
+
+
+@router.get("/{page_id}/runs")
+async def list_custom_page_runs(request: Request, page_id: str):
+    service = _get_service(request)
+    page = service.get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"custom page not found: {page_id}")
+    return {"runs": service.list_runs(page_id)}
+
+
+@router.post("/{page_id}/generate")
+async def trigger_custom_page_generation(
+    request: Request,
+    page_id: str,
+    body: GenerateRequest,
+):
+    service = _get_service(request)
+    page = service.get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"custom page not found: {page_id}")
+    run = await service.trigger_generation(
+        page_id,
+        prompt=body.prompt or str(page.get("generation_prompt") or page.get("description") or page.get("name") or ""),
+        requested_by="api.generate",
+    )
+    refreshed_page = service.get_page(page_id) or page
+    return {
+        "page": refreshed_page,
+        "run": run,
+    }
+
+
+@router.post("/{page_id}/interactions")
+async def dispatch_custom_page_interaction(
+    request: Request,
+    page_id: str,
+    body: MiniAppInteractionRequest,
+):
+    service = _get_service(request)
+    page = service.get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"custom page not found: {page_id}")
+    result = await service.dispatch_interaction(
+        page_id,
+        action=body.action,
+        payload=body.payload,
+        message=body.message,
+        session_id=body.session_id,
+    )
+    return result
+
+
+@router.post("/{page_id}/actions")
+async def dispatch_custom_page_action(
+    request: Request,
+    page_id: str,
+    body: MiniAppActionRequest,
+):
+    service = _get_service(request)
+    page = service.get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"custom page not found: {page_id}")
+    result = await service.dispatch_action(
+        page_id,
+        action=body.action,
+        payload=body.payload,
+        target=body.target,
+        message=body.message,
+        session_id=body.session_id,
+    )
+    return result

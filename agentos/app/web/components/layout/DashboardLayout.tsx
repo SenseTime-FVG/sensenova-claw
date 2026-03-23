@@ -12,9 +12,13 @@ import {
 import { Search, Bell } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 import { cn } from '@/lib/utils';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { authFetch, API_BASE } from '@/lib/authFetch';
+import { GlobalFilePanel } from '@/components/files/GlobalFilePanel';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 
 function GlobalReminderBell() {
   const [todayCount, setTodayCount] = useState(0);
@@ -52,11 +56,14 @@ interface DashboardLayoutProps {
   children: ReactNode;
 }
 
+const ADMIN_PATHS = ['/agents', '/sessions', '/llms', '/gateway', '/tools', '/skills', '/settings', '/acp'];
+
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
   const [manualGroup, setManualGroup] = useState<SubNavGroup>(null);
   const featureNavItems = useFeatureNavItems();
   const { startNewChat } = useChatSession();
+  const hideRightPanel = ADMIN_PATHS.some(p => pathname?.startsWith(p));
 
   const isFeatureActive = featureNavItems.some((item) =>
     pathname?.startsWith(item.path)
@@ -113,7 +120,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
             <GlobalReminderBell />
             <Avatar className="h-8 w-8 cursor-pointer">
-              <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
+              <AvatarImage src="/icon.png" alt="AgentOS" />
               <AvatarFallback>AO</AvatarFallback>
             </Avatar>
           </div>
@@ -144,9 +151,27 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
         </div>
       </div>
-      <div className="flex-1 overflow-auto bg-muted/10">
-        {children}
-      </div>
+      {hideRightPanel ? (
+        <div className="flex-1 overflow-auto bg-muted/10 p-3">
+          <div className="h-full rounded-2xl bg-background overflow-auto">
+            {children}
+          </div>
+        </div>
+      ) : (
+        <DndProvider backend={HTML5Backend}>
+          <ResizablePanelGroup orientation="horizontal" className="flex-1 p-3 gap-3 bg-muted/10">
+            <ResizablePanel id="dashboard-main" defaultSize="82%" minSize="40%" className="overflow-hidden">
+              <div className="h-full overflow-auto">
+                {children}
+              </div>
+            </ResizablePanel>
+            <ResizableHandle invisible />
+            <ResizablePanel id="dashboard-side" defaultSize="18%" minSize="10%" maxSize="40%" className="overflow-hidden">
+              <GlobalFilePanel />
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </DndProvider>
+      )}
     </div>
   );
 }

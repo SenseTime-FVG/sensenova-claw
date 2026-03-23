@@ -14,10 +14,12 @@ from agentos.kernel.events.types import (
     AGENT_UPDATE_TITLE_COMPLETED,
     CRON_DELIVERY_REQUESTED,
     ERROR_RAISED,
+    LLM_CALL_RESULT,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
     NOTIFICATION_PUSH,
     NOTIFICATION_SESSION,
+    SESSION_CREATED,
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
     TOOL_CONFIRMATION_REQUESTED,
@@ -304,6 +306,7 @@ class WebSocketChannel(Channel):
 
         # 部分事件为连接级广播（不依赖 session 绑定）
         if event.type in {
+            SESSION_CREATED,
             TOOL_CONFIRMATION_REQUESTED,
             USER_QUESTION_ASKED,
             USER_QUESTION_ANSWERED,
@@ -325,6 +328,16 @@ class WebSocketChannel(Channel):
 
     def _map(self, event: EventEnvelope) -> dict[str, Any] | None:
         """将事件映射为前端消息格式"""
+        if event.type == SESSION_CREATED:
+            return {
+                "type": "session_list_changed",
+                "session_id": event.session_id,
+                "payload": {
+                    "agent_id": event.payload.get("agent_id"),
+                    "reason": "send_message",
+                },
+                "timestamp": event.ts,
+            }
         if event.type == AGENT_STEP_STARTED:
             return {
                 "type": "agent_thinking",
@@ -337,6 +350,19 @@ class WebSocketChannel(Channel):
                 "type": "agent_thinking",
                 "session_id": event.session_id,
                 "payload": {"step_type": "llm_call", "description": "正在调用模型..."},
+                "timestamp": event.ts,
+            }
+        if event.type == LLM_CALL_RESULT:
+            response = event.payload.get("response", {}) or {}
+            return {
+                "type": "llm_result",
+                "session_id": event.session_id,
+                "payload": {
+                    "turn_id": event.turn_id,
+                    "content": response.get("content", ""),
+                    "tool_calls": response.get("tool_calls", []),
+                    "reasoning_details": response.get("reasoning_details", []),
+                },
                 "timestamp": event.ts,
             }
         if event.type == LLM_CALL_COMPLETED:
@@ -377,12 +403,16 @@ class WebSocketChannel(Channel):
                 "timestamp": event.ts,
             }
         if event.type == ERROR_RAISED:
+            user_message = event.payload.get("user_message") or event.payload.get("error_message")
             return {
                 "type": "error",
                 "session_id": event.session_id,
                 "payload": {
                     "error_type": event.payload.get("error_type"),
-                    "message": event.payload.get("error_message"),
+                    "error_code": event.payload.get("error_code"),
+                    "message": user_message,
+                    "user_message": user_message,
+                    "raw_message": event.payload.get("error_message"),
                     "details": event.payload.get("context", {}),
                 },
                 "timestamp": event.ts,

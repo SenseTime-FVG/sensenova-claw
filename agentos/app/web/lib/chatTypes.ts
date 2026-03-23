@@ -1,4 +1,5 @@
 // 共享类型定义和工具函数
+import { extractThinkContentFromReasoningDetails } from './assistantThink';
 
 export interface ToolInfo {
   name: string;
@@ -14,6 +15,11 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
   timestamp: number;
+  turnId?: string;
+  thinkingContent?: string;
+  thinkingState?: 'streaming' | 'collapsed';
+  /** 工具消息在无 toolInfo 时展示的工具名（如会话历史回放） */
+  name?: string;
   toolInfo?: ToolInfo;
 }
 
@@ -141,6 +147,25 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
 
     if (eventType === 'user.input') {
       rebuilt.push({ id: makeId(), role: 'user', content: String(payload.content || ''), timestamp: Date.now() });
+      continue;
+    }
+    if (eventType === 'llm.call_result') {
+      // 事件 payload 结构: {response: {content, tool_calls, reasoning_details}, ...}
+      const response = (payload.response || {}) as Record<string, unknown>;
+      const content = String(response.content || '');
+      const reasoningDetails = response.reasoning_details;
+      const thinkingContent = extractThinkContentFromReasoningDetails(reasoningDetails);
+      const hasToolCalls = Array.isArray(response.tool_calls) && (response.tool_calls as unknown[]).length > 0;
+      if (content || thinkingContent || hasToolCalls) {
+        rebuilt.push({
+          id: makeId(),
+          role: 'assistant',
+          content,
+          timestamp: Date.now(),
+          thinkingContent: thinkingContent || undefined,
+          thinkingState: thinkingContent ? 'collapsed' : undefined,
+        });
+      }
       continue;
     }
     if (eventType === 'tool.call_requested') {

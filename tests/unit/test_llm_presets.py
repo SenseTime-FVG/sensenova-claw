@@ -9,6 +9,8 @@ from agentos.platform.config.llm_presets import (
     get_provider,
     check_llm_configured,
 )
+from agentos.platform.secrets.refs import build_secret_ref
+from agentos.platform.secrets.store import InMemorySecretStore
 
 
 class TestLLMProviderCategories:
@@ -212,6 +214,41 @@ class TestCheckLLMConfigured:
         is_configured, configured_keys = check_llm_configured(config)
         assert is_configured is False
         assert "openai" not in configured_keys
+
+    def test_secret_ref_with_empty_secret(self):
+        """secret 引用解析后为空，应视为未配置"""
+        store = InMemorySecretStore()
+        ref = "agentos/llm.providers.openai.api_key"
+        config = {
+            "llm": {
+                "providers": {
+                    "openai": {"api_key": build_secret_ref(ref)}
+                }
+            }
+        }
+
+        is_configured, configured_keys = check_llm_configured(config, secret_store=store)
+
+        assert is_configured is False
+        assert "openai" not in configured_keys
+
+    def test_secret_ref_with_real_secret(self):
+        """secret 引用解析后有真实值，应视为已配置"""
+        store = InMemorySecretStore()
+        ref = "agentos/llm.providers.openai.api_key"
+        store.set(ref, "sk-real-from-secret-store")
+        config = {
+            "llm": {
+                "providers": {
+                    "openai": {"api_key": build_secret_ref(ref)}
+                }
+            }
+        }
+
+        is_configured, configured_keys = check_llm_configured(config, secret_store=store)
+
+        assert is_configured is True
+        assert "openai" in configured_keys
 
     def test_real_api_key(self):
         """真实 api_key 应视为已配置"""

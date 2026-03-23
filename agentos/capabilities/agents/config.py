@@ -19,10 +19,10 @@ class AgentConfig:
     description: str = ""                             # 描述（用于 LLM 选择委托目标）
 
     # LLM 配置
-    provider: str = "openai"                          # LLM 提供商
-    model: str = "gpt-4o-mini"                        # 模型名称
+    model: str = "gpt-4o-mini"                        # 模型名称（引用 llm.models 中的 key，provider 由 resolve_model 动态解析）
     temperature: float = 0.2                          # 温度参数
     max_tokens: int | None = None                     # 最大 token 数
+    extra_body: dict[str, Any] = field(default_factory=dict)  # 透传给 LLM API 的额外参数
 
     # 行为配置
     system_prompt: str = ""                           # 系统提示词
@@ -46,10 +46,10 @@ class AgentConfig:
             "id": self.id,
             "name": self.name,
             "description": self.description,
-            "provider": self.provider,
             "model": self.model,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
+            "extra_body": dict(self.extra_body),
             "system_prompt": self.system_prompt,
             "tools": list(self.tools),
             "skills": list(self.skills),
@@ -69,10 +69,10 @@ class AgentConfig:
             id=data["id"],
             name=data.get("name", data["id"]),
             description=data.get("description", ""),
-            provider=data.get("provider", "openai"),
             model=data.get("model", "gpt-4o-mini"),
             temperature=data.get("temperature", 0.2),
             max_tokens=data.get("max_tokens"),
+            extra_body=dict(data.get("extra_body", {})),
             system_prompt=data.get("system_prompt", ""),
             tools=list(data.get("tools", [])),
             skills=list(data.get("skills", [])),

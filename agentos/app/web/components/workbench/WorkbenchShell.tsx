@@ -1,9 +1,6 @@
 'use client';
 
-import { DndProvider } from 'react-dnd';
-import { HTML5Backend } from 'react-dnd-html5-backend';
 import { LeftNav } from './LeftNav';
-import { RightContext } from './RightContext';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 
 interface WorkbenchShellProps {
@@ -13,22 +10,16 @@ interface WorkbenchShellProps {
 
 export function WorkbenchShell({ children, agentFilter }: WorkbenchShellProps) {
   return (
-    <DndProvider backend={HTML5Backend}>
-      <ResizablePanelGroup orientation="horizontal" className="h-[calc(100vh-4rem)]">
-        <ResizablePanel id="workbench-left" defaultSize="16%" minSize="10%" maxSize="30%" className="bg-muted/20">
-          <LeftNav agentFilter={agentFilter} />
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel id="workbench-main" defaultSize="62%" minSize="30%">
-          <div className="flex flex-col h-full min-w-0">
-            {children}
-          </div>
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel id="workbench-right" defaultSize="22%" minSize="10%" maxSize="35%" className="bg-muted/20">
-          <RightContext />
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    </DndProvider>
+    <ResizablePanelGroup orientation="horizontal" className="h-full gap-3">
+      <ResizablePanel id="workbench-left" defaultSize="18%" minSize="10%" maxSize="30%" className="rounded-2xl border border-border/60 overflow-hidden bg-gradient-to-br from-indigo-100/20 via-background to-blue-200/20 dark:from-indigo-500/[0.06] dark:via-background dark:to-blue-500/[0.06]">
+        <LeftNav agentFilter={agentFilter} />
+      </ResizablePanel>
+      <ResizableHandle invisible />
+      <ResizablePanel id="workbench-main" defaultSize="82%" minSize="40%" className="rounded-2xl border border-border/60 overflow-hidden">
+        <div className="flex flex-col h-full min-w-0 bg-background">
+          {children}
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

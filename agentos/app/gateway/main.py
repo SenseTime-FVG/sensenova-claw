@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from agentos.platform.config.config import config
 from agentos.platform.logging.setup import setup_logging
+from agentos.capabilities.miniapps.service import MiniAppService
 from agentos.kernel.scheduler.runtime import CronRuntime
 from agentos.kernel.scheduler.tool import CronTool
 from agentos.kernel.proactive.runtime import ProactiveRuntime
@@ -45,6 +46,7 @@ from agentos.platform.config.workspace import (
     ensure_agent_workspace,
     resolve_agentos_home,
 )
+from agentos.platform.secrets.store import KeyringSecretStore
 from agentos.interfaces.http import agents, tools, gateway, skills, workspace, config_api, sessions
 from agentos.interfaces.http import cron_api, notification_api, proactive_api
 
@@ -81,6 +83,8 @@ class Services:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    secret_store = getattr(config, "_secret_store", None) or KeyringSecretStore()
+    config._secret_store = secret_store
 
     # 解析 AGENTOS_HOME（默认 ~/.agentos）
     from agentos.platform.config.config import PROJECT_ROOT
@@ -101,6 +105,9 @@ async def lifespan(app: FastAPI):
     await maintenance.run_maintenance()
 
     bus = PublicEventBus()
+    from agentos.platform.config.config_manager import ConfigManager
+    config_manager = ConfigManager(config=config, event_bus=bus, secret_store=secret_store)
+    config_manager.start_file_watcher()
     publisher = EventPublisher(bus=bus)
     notification_service = NotificationService(bus=bus)
 
@@ -147,6 +154,13 @@ async def lifespan(app: FastAPI):
     agent_registry = AgentRegistry(agentos_home=agentos_home)
     agent_registry.load_from_config(config.data)
 
+    custom_page_service = MiniAppService(
+        agentos_home=agentos_home_str,
+        config=config,
+        agent_registry=agent_registry,
+    )
+    await custom_page_service.restore_dedicated_agents()
+
     # 为所有已注册 agent 初始化 per-agent workspace 和 workdir
     for agent_cfg in agent_registry.list_all():
         await ensure_agent_workspace(agentos_home_str, agent_cfg.id)
@@ -185,6 +199,17 @@ async def lifespan(app: FastAPI):
     from agentos.adapters.storage.session_jsonl import SessionJsonlWriter
     jsonl_writer = SessionJsonlWriter(base_dir=agentos_home / "agents")
 
+    # 上下文压缩器
+    from agentos.kernel.runtime.context_compressor import ContextCompressor
+    default_provider, default_model = config.resolve_model()
+    context_compressor = ContextCompressor(
+        config=config,
+        llm_factory=llm_factory,
+        provider_name=default_provider,
+        model=default_model,
+        agentos_home=agentos_home_str,
+    )
+
     # Runtime 使用 BusRouter（管理者模式）
     agent_runtime = AgentRuntime(
         bus_router=bus_router,
@@ -195,6 +220,7 @@ async def lifespan(app: FastAPI):
         agent_registry=agent_registry,
         memory_manager=memory_manager,
         jsonl_writer=jsonl_writer,
+        context_compressor=context_compressor,
     )
     llm_runtime = LLMRuntime(bus_router=bus_router, factory=llm_factory)
     tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry,
@@ -205,9 +231,10 @@ async def lifespan(app: FastAPI):
         agent_runtime=agent_runtime,
         retry_backoff_seconds=list(config.get("delegation.retry.backoff_seconds", [0, 1, 3])),
     )
-    title_runtime = TitleRuntime(bus=bus, repo=repo)
+    title_runtime = TitleRuntime(bus=bus, repo=repo, agent_registry=agent_registry)
 
     gateway = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
+    custom_page_service.gateway = gateway
 
     # v1.1: 初始化 ProactiveRuntime（主动任务）
     proactive_runtime = ProactiveRuntime(
@@ -236,7 +263,7 @@ async def lifespan(app: FastAPI):
         )
         tool_registry.register(send_message_tool)
 
-    # v0.9: 加载插件（飞书 Channel + MessageTool + FeishuApiTool 等）
+    # v0.9: 加载插件（飞书 Channel、MessageTool 与各类渠道/专用工具）
     plugin_registry = PluginRegistry()
     await plugin_registry.load_plugins(
         config.data, gateway=gateway, publisher=publisher,
@@ -264,7 +291,14 @@ async def lifespan(app: FastAPI):
     await cron_runtime.start()
     await heartbeat_runtime.start()
 
-    # Token 认证服务（Jupyter-lab 风格，每次启动生成新 token）
+    # 配置变更监听
+    import asyncio
+    asyncio.create_task(llm_factory.start_config_listener(bus))
+    asyncio.create_task(agent_registry.start_config_listener(bus, config))
+    if memory_manager:
+        asyncio.create_task(memory_manager.start_config_listener(bus, lambda: config.data))
+
+    # Token 认证服务（首次生成，后续复用持久化 token）
     auth_service = TokenAuthService(agentos_home=agentos_home)
 
     # WebSocketChannel（注入 auth_service 用于连接认证）
@@ -295,8 +329,11 @@ async def lifespan(app: FastAPI):
     app.state.skill_registry = skill_registry
     app.state.agent_registry = agent_registry
     app.state.config = config
+    app.state.secret_store = secret_store
     app.state.agentos_home = agentos_home_str
     app.state.market_service = market_service
+    app.state.config_manager = config_manager
+    app.state.custom_page_service = custom_page_service
 
     # 注册认证路由
     auth_router = create_auth_router(auth_service=auth_service)
@@ -310,7 +347,7 @@ async def lifespan(app: FastAPI):
     print("  AgentOS Token Authentication")
     print(f"  访问地址: http://localhost:{frontend_port}/?token={auth_service.token}")
     print(f"  API 地址: http://localhost:{server_port}")
-    print("  (token 每次启动重新生成)")
+    print("  (token 已持久化，重启后自动复用)")
     print("=" * 60)
     print()
 
@@ -319,7 +356,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        # 关闭顺序：market_service → cron/heartbeat → runtimes → gateway → bus_router → persister
+        # 关闭顺序：config_manager → market_service → cron/heartbeat → runtimes → gateway → bus_router → persister
+        config_manager.stop_file_watcher()
         await market_service.shutdown()
         await proactive_runtime.stop()
         await cron_runtime.stop()

@@ -17,12 +17,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
 };
 
 const COLOR_THEMES = [
-  { bg: 'from-blue-500/10 to-indigo-500/5', iconBg: 'bg-blue-500/15', iconColor: 'text-blue-600 dark:text-blue-400', ring: 'ring-blue-500/10 hover:ring-blue-500/25' },
-  { bg: 'from-amber-500/10 to-orange-500/5', iconBg: 'bg-amber-500/15', iconColor: 'text-amber-600 dark:text-amber-400', ring: 'ring-amber-500/10 hover:ring-amber-500/25' },
-  { bg: 'from-violet-500/10 to-purple-500/5', iconBg: 'bg-violet-500/15', iconColor: 'text-violet-600 dark:text-violet-400', ring: 'ring-violet-500/10 hover:ring-violet-500/25' },
-  { bg: 'from-emerald-500/10 to-teal-500/5', iconBg: 'bg-emerald-500/15', iconColor: 'text-emerald-600 dark:text-emerald-400', ring: 'ring-emerald-500/10 hover:ring-emerald-500/25' },
-  { bg: 'from-rose-500/10 to-pink-500/5', iconBg: 'bg-rose-500/15', iconColor: 'text-rose-600 dark:text-rose-400', ring: 'ring-rose-500/10 hover:ring-rose-500/25' },
-  { bg: 'from-cyan-500/10 to-sky-500/5', iconBg: 'bg-cyan-500/15', iconColor: 'text-cyan-600 dark:text-cyan-400', ring: 'ring-cyan-500/10 hover:ring-cyan-500/25' },
+  { bg: 'from-blue-100/40 via-blue-50/20 to-indigo-100/30 dark:from-blue-500/15 dark:via-blue-500/8 dark:to-indigo-500/10', iconBg: 'bg-blue-500/15', iconColor: 'text-blue-600 dark:text-blue-400', ring: 'ring-blue-200/60 hover:ring-blue-300/80 dark:ring-blue-500/15 dark:hover:ring-blue-500/30' },
+  { bg: 'from-amber-100/40 via-amber-50/20 to-orange-100/30 dark:from-amber-500/15 dark:via-amber-500/8 dark:to-orange-500/10', iconBg: 'bg-amber-500/15', iconColor: 'text-amber-600 dark:text-amber-400', ring: 'ring-amber-200/60 hover:ring-amber-300/80 dark:ring-amber-500/15 dark:hover:ring-amber-500/30' },
+  { bg: 'from-violet-100/40 via-violet-50/20 to-purple-100/30 dark:from-violet-500/15 dark:via-violet-500/8 dark:to-purple-500/10', iconBg: 'bg-violet-500/15', iconColor: 'text-violet-600 dark:text-violet-400', ring: 'ring-violet-200/60 hover:ring-violet-300/80 dark:ring-violet-500/15 dark:hover:ring-violet-500/30' },
+  { bg: 'from-emerald-100/40 via-emerald-50/20 to-teal-100/30 dark:from-emerald-500/15 dark:via-emerald-500/8 dark:to-teal-500/10', iconBg: 'bg-emerald-500/15', iconColor: 'text-emerald-600 dark:text-emerald-400', ring: 'ring-emerald-200/60 hover:ring-emerald-300/80 dark:ring-emerald-500/15 dark:hover:ring-emerald-500/30' },
+  { bg: 'from-rose-100/40 via-rose-50/20 to-pink-100/30 dark:from-rose-500/15 dark:via-rose-500/8 dark:to-pink-500/10', iconBg: 'bg-rose-500/15', iconColor: 'text-rose-600 dark:text-rose-400', ring: 'ring-rose-200/60 hover:ring-rose-300/80 dark:ring-rose-500/15 dark:hover:ring-rose-500/30' },
+  { bg: 'from-cyan-100/40 via-cyan-50/20 to-sky-100/30 dark:from-cyan-500/15 dark:via-cyan-500/8 dark:to-sky-500/10', iconBg: 'bg-cyan-500/15', iconColor: 'text-cyan-600 dark:text-cyan-400', ring: 'ring-cyan-200/60 hover:ring-cyan-300/80 dark:ring-cyan-500/15 dark:hover:ring-cyan-500/30' },
 ];
 
 const builtinFeatures = [
@@ -48,6 +48,9 @@ export function TaskTemplates() {
       <div className="max-w-3xl mx-auto w-full">
         {/* 标题区 */}
         <div className="text-center pt-4 pb-10">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 flex items-center justify-center mx-auto mb-5 shadow-sm">
+            <Sparkles className="w-8 h-8 text-primary" />
+          </div>
           <h2 className="text-2xl font-bold text-foreground mb-2 tracking-tight">
             你想做什么？
           </h2>

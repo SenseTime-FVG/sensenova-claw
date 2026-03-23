@@ -14,11 +14,14 @@ import {
   type TaskProgressItem,
   type ContextFileRef,
   makeId,
+  formatArgs,
+  getAgentId,
   truncateResult,
   rebuildMessagesFromEvents,
   rebuildStepsFromEvents,
   groupSessionsToTasks,
 } from '@/lib/chatTypes';
+import { extractThinkContentFromReasoningDetails } from '@/lib/assistantThink';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 const WS_RECONNECT_INTERVAL_MS = 1000;
@@ -40,6 +43,8 @@ export interface ChatSessionContextValue {
   deleteSession: (sessionId: string) => Promise<void>;
   /** 页面挂载时调用：如果是通过 switchSession 跳转过来的则保留会话，否则重置 */
   resetIfNeeded: () => void;
+  /** 清理当前空会话（新建后未发消息） */
+  cleanupEmptySession: () => void;
 
   // 消息
   messages: ChatMessage[];
@@ -105,6 +110,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
   const pendingCreateMeta = useRef<Record<string, string> | null>(null);
+  // 追踪新建但未发消息的空会话，切换离开时自动删除
+  const emptySessionIdRef = useRef<string | null>(null);
   const skipNextResetRef = useRef(false);
   const shouldActivate = !isLoading && isAuthenticated && !BYPASS_PATHS.includes(pathname || '');
 
@@ -118,6 +125,61 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
   function addMsg(role: ChatMessage['role'], content: string) {
     setMessages(prev => [...prev, { id: makeId(), role, content, timestamp: Date.now() }]);
+  }
+
+  function upsertAssistantMessage(message: {
+    turnId?: string;
+    content: string;
+    thinkingContent?: string;
+    thinkingState?: 'streaming' | 'collapsed';
+  }) {
+    const { turnId, content, thinkingContent, thinkingState } = message;
+    setMessages((prev) => {
+      if (turnId) {
+        const existingIndex = prev.findIndex((item) => item.role === 'assistant' && item.turnId === turnId);
+        if (existingIndex !== -1) {
+          // 检查该 assistant 消息之后是否已经插入了 tool 消息
+          // 如果有，说明这是新一轮 LLM 调用的结果，应创建新消息而不是覆盖
+          const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
+          if (hasToolAfter) {
+            // 新一轮 LLM 思考，追加新的 assistant 消息
+            return [
+              ...prev,
+              {
+                id: makeId(),
+                role: 'assistant' as const,
+                content,
+                timestamp: Date.now(),
+                turnId: `${turnId}_${Date.now()}`,
+                thinkingContent,
+                thinkingState,
+              },
+            ];
+          }
+          // 同一轮 LLM 调用的流式更新，原地更新
+          const next = [...prev];
+          next[existingIndex] = {
+            ...next[existingIndex],
+            content,
+            thinkingContent,
+            thinkingState,
+          };
+          return next;
+        }
+      }
+      return [
+        ...prev,
+        {
+          id: makeId(),
+          role: 'assistant',
+          content,
+          timestamp: Date.now(),
+          turnId,
+          thinkingContent,
+          thinkingState,
+        },
+      ];
+    });
   }
 
   const bindSessionToCurrentSocket = useCallback((sid: string | null) => {
@@ -250,6 +312,9 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
             timestamp: Date.now() / 1000,
           });
           pendingInputRef.current = null;
+          emptySessionIdRef.current = null;
+        } else {
+          emptySessionIdRef.current = newSid;
         }
         break;
       }
@@ -268,7 +333,19 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         break;
       case 'llm_result': {
         const content = String(payload.content || '');
-        if (content) addMsg('assistant', content);
+        const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
+        const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
+        const hasToolCalls = Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0;
+        // 有内容、有思考过程、或有工具调用时，都创建 assistant 消息
+        // 确保工具调用前的思考过程不会丢失
+        if (content || thinkingContent || hasToolCalls) {
+          upsertAssistantMessage({
+            turnId,
+            content,
+            thinkingContent,
+            thinkingState: thinkingContent ? 'streaming' : undefined,
+          });
+        }
         break;
       }
       case 'tool_execution': {
@@ -295,6 +372,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const mid = toolCallMapRef.current.get(toolCallId);
         if (mid) {
           setMessages(prev => prev.map(m => m.id === mid ? { ...m, content: `Tool Finished: ${toolName}`, toolInfo: { name: toolName, arguments: m.toolInfo?.arguments || {}, result, success, error, status: 'completed' } } : m));
+        } else {
+          const fallbackContent = typeof result === 'string'
+            ? result
+            : formatArgs(result);
+          setMessages(prev => [...prev, {
+            id: makeId(),
+            role: 'tool',
+            name: toolName,
+            content: fallbackContent,
+            timestamp: Date.now(),
+          }]);
         }
         const stepIdx = toolStepMapRef.current.get(toolCallId);
         if (stepIdx !== undefined) {
@@ -310,7 +398,21 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       }
       case 'turn_completed': {
         const final = String(payload.final_response || '');
-        if (final) addMsg('assistant', final);
+        if (final) {
+          // 更新最后一条 assistant 消息的内容（不创建新消息）
+          setMessages((prev) => {
+            // 从后往前找最后一条 assistant 消息
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i].role === 'assistant') {
+                const next = [...prev];
+                next[i] = { ...next[i], content: final, thinkingState: 'collapsed' };
+                return next;
+              }
+            }
+            // 没找到 assistant 消息（理论上不会发生），追加一条
+            return [...prev, { id: makeId(), role: 'assistant', content: final, timestamp: Date.now() }];
+          });
+        }
         setIsTyping(false);
         clearInteractions();
         break;
@@ -328,6 +430,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         }));
         break;
       }
+      case 'session_list_changed': {
+        // 后端通知有新 session（如 send_message 创建），刷新列表
+        loadSessionList();
+        break;
+      }
       case 'session_deleted': {
         const deletedSid = String(payload.session_id || '');
         if (deletedSid) {
@@ -339,7 +446,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         break;
       }
       case 'error':
-        addMsg('system', `Error: ${payload.message || payload.error_type || 'Unknown Error'}`);
+        addMsg('system', String(payload.user_message || payload.message || payload.error_type || 'Unknown Error'));
         setIsTyping(false);
         clearInteractions();
         break;
@@ -491,9 +598,27 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
   // ── 对外接口 ──
 
+  const doCleanupEmptySession = useCallback((excludeSid?: string) => {
+    const emptyId = emptySessionIdRef.current;
+    if (emptyId && emptyId !== excludeSid) {
+      emptySessionIdRef.current = null;
+      setSessions(prev => prev.filter(s => s.session_id !== emptyId));
+      authFetch(`${API_BASE}/api/sessions/${emptyId}`, { method: 'DELETE' }).catch(() => {});
+    }
+  }, []);
+
+  const getCurrentSessionAgentId = useCallback(() => {
+    const activeSessionId = sessionIdRef.current;
+    if (!activeSessionId) return null;
+    const activeSession = sessions.find((item) => item.session_id === activeSessionId);
+    if (!activeSession) return null;
+    return getAgentId(activeSession.meta);
+  }, [sessions]);
+
   const switchSession = useCallback(async (sid: string) => {
+    doCleanupEmptySession(sid);
     await reloadSessionHistory(sid);
-  }, [reloadSessionHistory]);
+  }, [reloadSessionHistory, doCleanupEmptySession]);
 
   const createSession = useCallback((agentId: string, taskId?: string) => {
     const meta: Record<string, string> = { title: '新对话' };
@@ -507,6 +632,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   }, [wsSend]);
 
   const startNewChat = useCallback(() => {
+    doCleanupEmptySession();
     setSessionId(null);
     sessionIdRef.current = null;
     setMessages([]);
@@ -516,7 +642,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     setRightSteps([]);
     setRightTaskProgress([]);
     toolStepMapRef.current.clear();
-  }, []);
+  }, [doCleanupEmptySession]);
 
   const deleteSession = useCallback(async (sid: string) => {
     try {
@@ -538,6 +664,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
     if (!content.trim() || !wsConnected) return;
 
+    const targetAgentId = agentId || 'default';
+    const currentSessionAgentId = getCurrentSessionAgentId();
+    if (sessionIdRef.current && currentSessionAgentId && currentSessionAgentId !== targetAgentId) {
+      startNewChat();
+    }
+
+    emptySessionIdRef.current = null;
     addMsg('user', content);
 
     const filePaths = contextFiles?.map(f => f.path) || [];
@@ -547,7 +680,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       const meta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
       wsSend({
         type: 'create_session',
-        payload: { agent_id: agentId || 'default', meta },
+        payload: { agent_id: targetAgentId, meta },
         timestamp: Date.now() / 1000,
       });
     } else {
@@ -559,7 +692,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       });
     }
     setIsTyping(true);
-  }, [wsConnected, wsSend]);
+  }, [getCurrentSessionAgentId, startNewChat, wsConnected, wsSend]);
 
   const sendQuestionAnswerFn = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     const interaction = activeInteractionRef.current;
@@ -628,6 +761,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     deleteSession,
     startNewChat,
     resetIfNeeded,
+    cleanupEmptySession: doCleanupEmptySession,
     messages,
     isTyping,
     sendMessage,

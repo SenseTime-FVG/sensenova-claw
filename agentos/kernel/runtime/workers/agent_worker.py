@@ -67,28 +67,45 @@ class AgentSessionWorker(SessionWorker):
         """解析 provider 名称：从 agent_config.model → llm.models → provider"""
         model_key = self._get_model_key()
         provider, _ = config.resolve_model(model_key)
+        # 向后兼容：部分 Agent 仍直接填写 model_id，此时保留显式 provider。
+        explicit_provider = getattr(self.agent_config, "provider", None) if self.agent_config else None
+        if provider == "mock" and explicit_provider:
+            return explicit_provider
         return provider
 
     def _get_model(self) -> str:
         """解析实际 model_id（传给 LLM API 的模型名）"""
         model_key = self._get_model_key()
-        _, model_id = config.resolve_model(model_key)
+        provider, model_id = config.resolve_model(model_key)
+        if provider == "mock" and self.agent_config and self.agent_config.model:
+            return self.agent_config.model
         return model_id
 
     def _get_model_key(self) -> str:
         """获取 model key（llm.models 中的 key）"""
         if self.agent_config and self.agent_config.model:
             return self.agent_config.model
-        return (
-            config.get("agent.model")
-            or config.get("agent.default_model")
-            or config.get("llm.default_model", "mock")
-        )
+        return config.get("llm.default_model", "mock")
 
     def _get_temperature(self) -> float:
         if self.agent_config:
             return self.agent_config.temperature
         return config.get("agent.temperature", 0.2)
+
+    def _get_max_tokens(self) -> int:
+        """获取 max_output_tokens：agent 级别覆盖 model 级别"""
+        if self.agent_config and self.agent_config.max_tokens:
+            return self.agent_config.max_tokens
+        model_key = self._get_model_key()
+        return config.get_model_max_output_tokens(model_key)
+
+    def _get_extra_body(self) -> dict:
+        """获取 extra_body：agent 级别覆盖 model 级别"""
+        model_key = self._get_model_key()
+        model_extra = config.get_model_extra_body(model_key)
+        if self.agent_config and self.agent_config.extra_body:
+            model_extra.update(self.agent_config.extra_body)
+        return model_extra
 
     def _get_filtered_tools(self) -> list[dict]:
         """根据 Agent 配置过滤可用工具"""
@@ -288,6 +305,17 @@ class AgentSessionWorker(SessionWorker):
             self.session_id, self.rt.repo,
         )
 
+        # 上下文压缩：LLM 调用前兜底
+        if self.rt.context_compressor:
+            try:
+                _agent_id = self.agent_config.id if self.agent_config else "default"
+                history = await self.rt.context_compressor.compress_if_needed(
+                    self.session_id, history, agent_id=_agent_id,
+                )
+                self.rt.state_store.replace_history(self.session_id, history)
+            except Exception:
+                logger.warning("上下文压缩失败，使用原始历史 session=%s", self.session_id, exc_info=True)
+
         # v0.6: 加载 MEMORY.md 注入 system prompt
         memory_context = None
         if self.rt.memory_manager:
@@ -342,6 +370,8 @@ class AgentSessionWorker(SessionWorker):
                     "messages": messages,
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
+                    "max_tokens": self._get_max_tokens(),
+                    "extra_body": self._get_extra_body(),
                 },
             )
         )
@@ -450,6 +480,10 @@ class AgentSessionWorker(SessionWorker):
         # 注意：消息已在 _handle_user_input / _handle_llm_result / _handle_tool_result
         # 中增量持久化到 SQLite，此处无需再批量保存
 
+        # 上下文压缩：轮末异步压缩
+        if self.rt.context_compressor:
+            asyncio.create_task(self._compress_history_safe(event.session_id))
+
         await self.bus.publish(
             EventEnvelope(
                 type=AGENT_STEP_COMPLETED,
@@ -469,6 +503,20 @@ class AgentSessionWorker(SessionWorker):
             asyncio.create_task(
                 self._summarize_turn_safe(state.messages, agent_id=agent_id)
             )
+
+    async def _compress_history_safe(self, session_id: str) -> None:
+        """异步执行上下文压缩，不影响主流程。"""
+        try:
+            history = self.rt.state_store.get_session_history(session_id)
+            if not history:
+                return
+            _agent_id = self.agent_config.id if self.agent_config else "default"
+            compressed = await self.rt.context_compressor.compress_async(
+                session_id, history, agent_id=_agent_id,
+            )
+            self.rt.state_store.replace_history(session_id, compressed)
+        except Exception:
+            logger.warning("轮末上下文压缩失败 session=%s", session_id, exc_info=True)
 
     async def _handle_tool_result(self, event: EventEnvelope) -> None:
         """处理工具返回结果，收集结果并在所有工具完成后触发下一轮 LLM 调用"""
@@ -540,6 +588,8 @@ class AgentSessionWorker(SessionWorker):
                     "messages": state.messages,
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
+                    "max_tokens": self._get_max_tokens(),
+                    "extra_body": self._get_extra_body(),
                 },
             )
         )

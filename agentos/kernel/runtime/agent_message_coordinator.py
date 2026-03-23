@@ -14,6 +14,7 @@ from agentos.kernel.events.types import (
     AGENT_MESSAGE_REQUESTED,
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
+    SESSION_CREATED,
     USER_TURN_CANCEL_REQUESTED,
 )
 from agentos.kernel.runtime.message_record import MessageRecord
@@ -226,22 +227,34 @@ class AgentMessageCoordinator:
                     },
                 )
             else:
+                meta = {
+                    "title": f"[send_message] {message[:30]}",
+                    "record_id": record.id,
+                    "send_depth": depth,
+                    "send_chain": send_chain + [target_id],
+                    "parent_turn_id": parent_turn_id,
+                    "parent_tool_call_id": parent_tool_call_id,
+                    "message_trace_id": record.id,
+                }
                 turn_id = await self._agent_runtime.spawn_agent_session(
                     agent_id=target_id,
                     session_id=child_session_id,
                     user_input=message,
                     parent_session_id=parent_session_id,
                     trace_id=record.id,
-                    meta={
-                        "title": f"[send_message] {message[:30]}",
-                        "record_id": record.id,
-                        "send_depth": depth,
-                        "send_chain": send_chain + [target_id],
-                        "parent_turn_id": parent_turn_id,
-                        "parent_tool_call_id": parent_tool_call_id,
-                        "message_trace_id": record.id,
-                    },
+                    meta=meta,
                 )
+                # 通知前端有新 session 创建
+                await self._bus.publish(EventEnvelope(
+                    type=SESSION_CREATED,
+                    session_id=child_session_id,
+                    source="agent_message_coordinator",
+                    payload={
+                        "session_id": child_session_id,
+                        "agent_id": target_id,
+                        "meta": meta,
+                    },
+                ))
         except Exception as exc:  # noqa: BLE001
             logger.exception("agent_message 启动目标会话失败 record=%s", record.id)
             await self.cancel_message(

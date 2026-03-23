@@ -1,7 +1,9 @@
 """AgentOS Home 目录管理
 
 管理 AGENTOS_HOME（默认 ~/.agentos/）目录结构：
-- agents/{agent_id}/   — per-agent 配置（AGENTS.md、USER.md、config.json）
+- agents/AGENTS.md     — 全局 Agent 规则（所有 Agent 共享）
+- agents/USER.md       — 全局用户画像（所有 Agent 共享）
+- agents/{agent_id}/   — per-agent 配置（SYSTEM_PROMPT.md、AGENTS.md）
 - workdir/{agent_id}/  — per-agent 工作目录（bash_command 默认 cwd）
 - data/                — 数据库
 - skills/              — 用户安装的 skills
@@ -79,7 +81,9 @@ async def ensure_agentos_home(home: Path, project_root: Path | None = None) -> N
     """确保 AGENTOS_HOME 目录结构存在，从代码仓库复制内置资源（不覆盖已有）。
 
     目录结构：
-        {home}/agents/default/   — 默认 agent（AGENTS.md、USER.md）
+        {home}/agents/AGENTS.md  — 全局 Agent 规则（所有 Agent 共享）
+        {home}/agents/USER.md    — 全局用户画像（所有 Agent 共享）
+        {home}/agents/default/   — 默认 agent（AGENTS.md）
         {home}/workdir/default/  — 默认工作目录
         {home}/data/             — 数据库
         {home}/skills/           — 用户 skills
@@ -94,19 +98,33 @@ async def ensure_agentos_home(home: Path, project_root: Path | None = None) -> N
         if builtin_dir.is_dir():
             _copy_builtin_resources(builtin_dir, home)
 
-    # 确保 default agent 有 AGENTS.md / USER.md
+    # 全局文件（所有 Agent 共享）
+    (home / "agents").mkdir(parents=True, exist_ok=True)
+    _ensure_file(home / "agents" / "AGENTS.md", DEFAULT_AGENTS_MD)
+    _ensure_file(home / "agents" / "USER.md", DEFAULT_USER_MD)
+
+    # 确保 default agent 有 per-agent AGENTS.md
     default_agent_dir = home / "agents" / "default"
     _ensure_file(default_agent_dir / "AGENTS.md", DEFAULT_AGENTS_MD)
-    _ensure_file(default_agent_dir / "USER.md", DEFAULT_USER_MD)
 
     logger.info("AGENTOS_HOME initialized: %s", home)
 
 
 def _copy_builtin_resources(builtin_dir: Path, home: Path) -> None:
-    """从代码仓库 .agentos/ 复制内置 agent 配置和 skills 到用户目录（不覆盖）"""
+    """从代码仓库 .agentos/ 复制内置资源到用户目录（不覆盖）"""
     # 复制内置 agent 模板
     builtin_agents = builtin_dir / "agents"
     if builtin_agents.is_dir():
+        # 复制 agents/ 下的根级文件（如 USER.md）到 {home}/agents/
+        agents_target = home / "agents"
+        agents_target.mkdir(parents=True, exist_ok=True)
+        for f in builtin_agents.iterdir():
+            if f.is_file():
+                target_file = agents_target / f.name
+                if not target_file.exists():
+                    shutil.copy2(f, target_file)
+                    logger.info("Copied builtin file: %s", target_file)
+        # 复制 agents/ 下的子目录（per-agent 配置）
         for agent_dir in builtin_agents.iterdir():
             if agent_dir.is_dir():
                 target = home / "agents" / agent_dir.name
@@ -134,22 +152,16 @@ async def ensure_agent_workspace(agentos_home: str, agent_id: str) -> None:
     agent_dir = home / "agents" / agent_id
     agent_dir.mkdir(parents=True, exist_ok=True)
 
-    # 从 default agent 复制模板，否则用默认内容
-    default_dir = home / "agents" / "default"
-    templates = {
-        "AGENTS.md": DEFAULT_AGENTS_MD,
-        "USER.md": DEFAULT_USER_MD,
-    }
-    for filename, default_content in templates.items():
-        agent_file = agent_dir / filename
-        if not agent_file.exists():
-            source = default_dir / filename
-            if source.exists():
-                content = source.read_text(encoding="utf-8")
-            else:
-                content = default_content
-            agent_file.write_text(content, encoding="utf-8")
-            logger.info("Created agent file: %s", agent_file)
+    # 确保 AGENTS.md 存在（从 default agent 复制模板，否则用默认内容）
+    agents_file = agent_dir / "AGENTS.md"
+    if not agents_file.exists():
+        default_source = home / "agents" / "default" / "AGENTS.md"
+        if default_source.exists():
+            content = default_source.read_text(encoding="utf-8")
+        else:
+            content = DEFAULT_AGENTS_MD
+        agents_file.write_text(content, encoding="utf-8")
+        logger.info("Created agent file: %s", agents_file)
 
     # 创建 workdir
     workdir = home / "workdir" / agent_id
@@ -169,21 +181,39 @@ def resolve_agent_workdir(agentos_home: str, agent_config: Any = None) -> str:
 async def load_workspace_files(
     agentos_home: str, agent_id: str | None = None,
 ) -> list[ContextFile]:
-    """读取 agent 引导文件（AGENTS.md / USER.md），缺失或空文件自动跳过。
+    """读取全局和 per-agent 引导文件，缺失或空文件自动跳过。
 
-    从 {agentos_home}/agents/{agent_id}/ 加载；
-    不传 agent_id 时从 agents/default/ 加载。
+    加载顺序（注入 system prompt 的优先级从高到低）：
+    1. 全局 AGENTS.md — {agentos_home}/agents/AGENTS.md（所有 Agent 共享的基础规则）
+    2. per-agent AGENTS.md — {agentos_home}/agents/{agent_id}/AGENTS.md（Agent 专属指令）
+    3. 全局 USER.md — {agentos_home}/agents/USER.md（用户画像）
     """
+    home = Path(agentos_home)
     aid = agent_id or "default"
-    dir_path = Path(agentos_home) / "agents" / aid
 
     files: list[ContextFile] = []
-    for name in ["AGENTS.md", "USER.md"]:
-        path = dir_path / name
-        if path.exists():
-            content = path.read_text(encoding="utf-8").strip()
-            if content:
-                files.append(ContextFile(name=name, content=content))
+
+    # 全局 AGENTS.md（所有 Agent 共享的基础规则）
+    global_agents_md = home / "agents" / "AGENTS.md"
+    if global_agents_md.exists():
+        content = global_agents_md.read_text(encoding="utf-8").strip()
+        if content:
+            files.append(ContextFile(name="AGENTS.md", content=content))
+
+    # per-agent AGENTS.md（Agent 专属指令，可覆盖全局规则）
+    agent_agents_md = home / "agents" / aid / "AGENTS.md"
+    if agent_agents_md.exists():
+        content = agent_agents_md.read_text(encoding="utf-8").strip()
+        if content:
+            files.append(ContextFile(name=f"{aid}/AGENTS.md", content=content))
+
+    # 全局 USER.md（用户画像）
+    user_md = home / "agents" / "USER.md"
+    if user_md.exists():
+        content = user_md.read_text(encoding="utf-8").strip()
+        if content:
+            files.append(ContextFile(name="USER.md", content=content))
+
     return files
 
 
@@ -194,4 +224,4 @@ async def ensure_workspace(workspace_dir: str) -> None:
     dir_path = Path(workspace_dir)
     dir_path.mkdir(parents=True, exist_ok=True)
     _ensure_file(dir_path / "AGENTS.md", DEFAULT_AGENTS_MD)
-    _ensure_file(dir_path / "USER.md", DEFAULT_USER_MD)
+    _ensure_file(dir_path / "USER.md", DEFAULT_USER_MD)  # 兼容旧逻辑
