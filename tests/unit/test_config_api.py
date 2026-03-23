@@ -245,6 +245,30 @@ def test_update_single_model_and_rename_default_model(client, app):
     assert written["llm"]["default_model"] == "gpt-4.1-mini"
 
 
+def test_update_default_model_only(client, app):
+    """单项更新 default_model 时只修改默认模型字段。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["models"]["gpt-4o-mini"] = {
+        "provider": "openai",
+        "model_id": "gpt-4o-mini",
+        "timeout": 60,
+        "max_output_tokens": 8192,
+    }
+    raw["llm"]["default_model"] = "gpt-5.4"
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.put("/api/config/llm/default-model", json={
+        "default_model": "gpt-4o-mini",
+    })
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["default_model"] == "gpt-4o-mini"
+    assert "gpt-5.4" in written["llm"]["models"]
+    assert "gpt-4o-mini" in written["llm"]["models"]
+
+
 # ── 必配清单检查 ──
 
 

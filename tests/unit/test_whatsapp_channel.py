@@ -53,6 +53,12 @@ class _FakeWhatsAppBridge:
         return {"success": True, "message_id": f"msg:{target}"}
 
 
+class _TimeoutOnStartBridge(_FakeWhatsAppBridge):
+    async def start(self) -> None:
+        self.started = True
+        raise TimeoutError("WhatsApp sidecar command timed out: start")
+
+
 def _make_channel(
     *,
     dm_policy: str = "open",
@@ -99,6 +105,25 @@ class TestLifecycle:
         assert bridge.started is True
         assert bridge.stopped is True
         assert bridge.handler is not None
+
+    @pytest.mark.asyncio
+    async def test_start_timeout_does_not_crash_channel_startup(self):
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus=bus)
+        gateway = Gateway(publisher=publisher)
+        bridge = _TimeoutOnStartBridge()
+        channel = WhatsAppChannel(
+            config=WhatsAppConfig(enabled=True, auth_dir="/tmp/agentos-whatsapp-auth"),
+            plugin_api=_SimplePluginApi(gateway=gateway),
+            bridge=bridge,
+        )
+
+        await channel.start()
+
+        assert bridge.started is True
+        assert channel._runtime_state.connected is False
+        assert channel._runtime_state.state == "error"
+        assert channel._runtime_state.last_error == "WhatsApp sidecar command timed out: start"
 
 
 class TestShouldRespond:

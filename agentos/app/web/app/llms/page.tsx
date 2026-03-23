@@ -25,6 +25,7 @@ interface ModelConfig {
   provider: string;
   model_id: string;
   timeout: number;
+  max_tokens: number;
   max_output_tokens: number;
 }
 
@@ -61,9 +62,11 @@ export default function LlmsPage() {
   const [editingAll, setEditingAll] = useState(false);
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [editingModel, setEditingModel] = useState<string | null>(null);
+  const [editingDefaultModel, setEditingDefaultModel] = useState(false);
   const [providerDrafts, setProviderDrafts] = useState<Record<string, ProviderDraft>>({});
   const [modelDrafts, setModelDrafts] = useState<Record<string, ModelDraft>>({});
   const [globalDraft, setGlobalDraft] = useState<GlobalDraft | null>(null);
+  const [defaultModelDraft, setDefaultModelDraft] = useState('');
 
   const loadConfig = () => {
     authFetch(`${API_BASE}/api/config/sections`)
@@ -83,9 +86,11 @@ export default function LlmsPage() {
         setEditingAll(false);
         setEditingProvider(null);
         setEditingModel(null);
+        setEditingDefaultModel(false);
         setProviderDrafts({});
         setModelDrafts({});
         setGlobalDraft(null);
+        setDefaultModelDraft('');
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -118,6 +123,7 @@ export default function LlmsPage() {
         provider: draft.provider,
         model_id: draft.model_id,
         timeout: draft.timeout,
+        max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
       },
     ]));
@@ -362,7 +368,8 @@ export default function LlmsPage() {
         provider: providerName,
         model_id: '',
         timeout: 60,
-        max_output_tokens: 8192,
+        max_tokens: 128000,
+        max_output_tokens: 16384,
         name: nextName,
       };
     if (editingAll && globalDraft) {
@@ -522,6 +529,8 @@ export default function LlmsPage() {
 
   const startEditProvider = (name: string) => {
     setEditingModel(null);
+    setEditingDefaultModel(false);
+    setDefaultModelDraft('');
     setEditingProvider(name);
     setProviderDrafts((prev) => ({
       ...prev,
@@ -566,6 +575,8 @@ export default function LlmsPage() {
 
   const startEditModel = (name: string) => {
     setEditingProvider(null);
+    setEditingDefaultModel(false);
+    setDefaultModelDraft('');
     setEditingModel(name);
     setModelDrafts((prev) => ({
       ...prev,
@@ -593,7 +604,38 @@ export default function LlmsPage() {
         provider: draft.provider,
         model_id: draft.model_id,
         timeout: draft.timeout,
+        max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setSaveMsg(err.detail || '保存失败');
+      return;
+    }
+    setSaveMsg('已保存');
+    loadConfig();
+  };
+
+  const startEditDefaultModel = () => {
+    setEditingProvider(null);
+    setEditingModel(null);
+    setEditingDefaultModel(true);
+    setDefaultModelDraft(defaultModel);
+  };
+
+  const cancelEditDefaultModel = () => {
+    setEditingDefaultModel(false);
+    setDefaultModelDraft('');
+  };
+
+  const saveDefaultModel = async () => {
+    setSaveMsg('');
+    const res = await authFetch(`${API_BASE}/api/config/llm/default-model`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        default_model: defaultModelDraft,
       }),
     });
     if (!res.ok) {
@@ -608,6 +650,7 @@ export default function LlmsPage() {
   const startEditAll = () => {
     setEditingProvider(null);
     setEditingModel(null);
+    setEditingDefaultModel(false);
     setEditingAll(true);
     setGlobalDraft({
       providers: cloneProvidersToDrafts(providers),
@@ -619,6 +662,7 @@ export default function LlmsPage() {
   const cancelEditAll = () => {
     setEditingAll(false);
     setGlobalDraft(null);
+    setDefaultModelDraft('');
   };
 
   if (loading) {
@@ -676,7 +720,7 @@ export default function LlmsPage() {
                 type="button"
                 data-testid="edit-all-llm-config"
                 onClick={startEditAll}
-                disabled={Boolean(editingProvider || editingModel)}
+                disabled={Boolean(editingProvider || editingModel || editingDefaultModel)}
                 className="rounded-xl bg-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-50"
               >
                 编辑所有配置
@@ -691,17 +735,53 @@ export default function LlmsPage() {
           <Card className="border-border/60 shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
               <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Default Model</CardTitle>
-              <Save className="h-5 w-5 text-primary" />
+              {editingAll ? (
+                <Save className="h-5 w-5 text-primary" />
+              ) : editingDefaultModel ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="default-model-cancel"
+                    onClick={cancelEditDefaultModel}
+                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-foreground transition-all hover:bg-muted/40"
+                  >
+                    取消编辑
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="default-model-save"
+                    onClick={saveDefaultModel}
+                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground transition-all hover:bg-primary/90"
+                  >
+                    保存
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="default-model-edit"
+                  onClick={startEditDefaultModel}
+                  disabled={Boolean(editingProvider || editingModel)}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
+                >
+                  编辑
+                </button>
+              )}
             </CardHeader>
             <CardContent className="space-y-3">
               <select
                 data-testid="default-model-select"
-                value={editingAll && globalDraft ? globalDraft.defaultModel : defaultModel}
+                value={editingAll && globalDraft ? globalDraft.defaultModel : editingDefaultModel ? defaultModelDraft : defaultModel}
                 onChange={(e) => {
-                  if (!editingAll || !globalDraft) return;
-                  setGlobalDraft({ ...globalDraft, defaultModel: e.target.value });
+                  if (editingAll && globalDraft) {
+                    setGlobalDraft({ ...globalDraft, defaultModel: e.target.value });
+                    return;
+                  }
+                  if (editingDefaultModel) {
+                    setDefaultModelDraft(e.target.value);
+                  }
                 }}
-                disabled={!editingAll}
+                disabled={!editingAll && !editingDefaultModel}
                 className="w-full cursor-pointer rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
                 <option value="">未设置</option>
@@ -782,7 +862,7 @@ export default function LlmsPage() {
                       type="button"
                       data-testid={`provider-edit-${providerName}`}
                       onClick={() => startEditProvider(providerName)}
-                      disabled={Boolean(editingModel)}
+                      disabled={Boolean(editingModel || editingDefaultModel)}
                       className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
                     >
                       编辑
@@ -951,12 +1031,20 @@ export default function LlmsPage() {
                                 onChange={(value) => updateModelField(modelName, 'timeout', parseInt(value, 10) || 60)}
                               />
                               <FieldInput
+                                label="Max Tokens"
+                                type="number"
+                                value={String(getModelDraft(modelName).max_tokens || 128000)}
+                                dataTestId={`llm-max-tokens-input-${modelName}`}
+                                disabled={!isModelEditable(modelName)}
+                                onChange={(value) => updateModelField(modelName, 'max_tokens', parseInt(value, 10) || 128000)}
+                              />
+                              <FieldInput
                                 label="Max Output Tokens"
                                 type="number"
-                                value={String(getModelDraft(modelName).max_output_tokens || 8192)}
+                                value={String(getModelDraft(modelName).max_output_tokens || 16384)}
                                 dataTestId={`llm-max-output-tokens-input-${modelName}`}
                                 disabled={!isModelEditable(modelName)}
-                                onChange={(value) => updateModelField(modelName, 'max_output_tokens', parseInt(value, 10) || 8192)}
+                                onChange={(value) => updateModelField(modelName, 'max_output_tokens', parseInt(value, 10) || 16384)}
                               />
                             </div>
                             <div className="flex items-start justify-end md:justify-center">
@@ -980,14 +1068,14 @@ export default function LlmsPage() {
                                   </button>
                                 </div>
                               ) : (
-                                <button
-                                  type="button"
-                                  data-testid={`llm-edit-${modelName}`}
-                                  onClick={() => startEditModel(modelName)}
-                                  disabled={Boolean(editingProvider)}
-                                  className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
-                                >
-                                  编辑
+                                  <button
+                                    type="button"
+                                    data-testid={`llm-edit-${modelName}`}
+                                    onClick={() => startEditModel(modelName)}
+                                    disabled={Boolean(editingProvider || editingDefaultModel)}
+                                    className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
+                                  >
+                                    编辑
                                 </button>
                               )}
                               <button
@@ -1140,7 +1228,8 @@ function normalizeModels(input: Record<string, unknown>): Record<string, ModelCo
           provider: String(model.provider || ''),
           model_id: String(model.model_id || ''),
           timeout: Number(model.timeout || 60),
-          max_output_tokens: Number(model.max_output_tokens || 8192),
+          max_tokens: Number(model.max_tokens || 128000),
+          max_output_tokens: Number(model.max_output_tokens || 16384),
         },
       ];
     }),
@@ -1191,6 +1280,7 @@ function buildModelPayloadsFromDrafts(models: Record<string, ModelDraft>): Recor
         provider: draft.provider,
         model_id: draft.model_id,
         timeout: draft.timeout,
+        max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
       },
     ]),

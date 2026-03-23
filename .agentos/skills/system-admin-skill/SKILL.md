@@ -38,12 +38,13 @@ bash_command: ls -la {AGENTOS_HOME}/
 {AGENTOS_HOME}/
 ├── agents/          # Agent 配置目录
 │   └── {id}/
-│       └── config.json
+│       ├── SYSTEM_PROMPT.md   # Agent 系统提示词（必须放在此文件）
+│       └── ...
 ├── skills/          # 用户级 Skill 目录
 │   └── {skill-name}/
 │       └── SKILL.md
 ├── skills_state.json  # Skill 启用/禁用状态
-└── .agent_preferences.json  # Agent 工具偏好设置
+└── .agent_preferences.json  # Agent 工具/技能偏好设置
 ```
 
 项目根目录（通常是运行 `agentos run` 的目录）包含：
@@ -73,22 +74,25 @@ llm:
     openai:
       api_key: ${OPENAI_API_KEY}
       base_url: https://api.openai.com/v1  # 可省略，使用默认值
+      timeout: 60
+      max_retries: 3
     deepseek:
       api_key: ${DEEPSEEK_API_KEY}
       base_url: https://api.deepseek.com/v1
-      provider: openai  # OpenAI 兼容接口统一用 openai
   models:
     gpt_4o_mini:
       provider: openai
-      model: gpt-4o-mini
+      model_id: gpt-4o-mini
+      timeout: 60
+      max_output_tokens: 8192
     deepseek_chat:
       provider: deepseek
-      model: deepseek-chat
+      model_id: deepseek-chat
   default_model: gpt_4o_mini  # 引用 llm.models 中的 key
 
 agent:
-  model: gpt_4o_mini  # 引用 llm.models 中的 key
   temperature: 0.2
+  system_prompt: "全局默认系统提示词（当 Agent 无独立 SYSTEM_PROMPT.md 时使用）"
 ```
 
 ### 添加新 LLM Provider
@@ -97,7 +101,38 @@ agent:
 
 修改 `config.yml` 时使用 `write_file` 工具。修改前先用 `read_file` 读取完整内容，再写回完整修改后的内容。
 
-修改配置后，提醒用户：**需要重启 AgentOS 服务才能生效**。
+**v1.2 热更新**：LLM 配置支持通过 ConfigManager 热更新。修改 `config.yml` 后，ConfigFileWatcher 会自动检测变更并触发 `CONFIG_UPDATED` 事件，下游模块（LLMFactory）自动刷新，**无需重启服务**。
+
+### 测试 LLM 连通性
+
+配置完成后可测试连通性：
+
+```bash
+# 通过 REST API 测试（需要服务已启动）
+bash_command: curl -s -X POST http://localhost:8000/api/config/test-llm \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"openai","api_key":"sk-...","base_url":"","model_id":"gpt-4o-mini"}'
+```
+
+### 查询可用模型
+
+```bash
+# 列出某个 provider 的所有可用模型
+bash_command: curl -s -X POST http://localhost:8000/api/config/list-models \
+  -H "Content-Type: application/json" \
+  -d '{"api_key":"sk-...","base_url":"","provider":"openai"}'
+```
+
+### Secret 管理
+
+API key 等敏感信息可通过系统密钥环（keyring）安全存储，避免明文写入 `config.yml`：
+
+```bash
+# 将 config.yml 中的明文密钥迁移到密钥环
+bash_command: curl -s -X POST http://localhost:8000/api/config/migrate-secrets
+```
+
+迁移后，`config.yml` 中的明文值会被替换为 `$secret_ref:...` 引用。
 
 ---
 
@@ -106,55 +141,96 @@ agent:
 ### 列出所有 Agent
 
 ```bash
+# 通过 REST API 获取（推荐，包含完整详情）
+bash_command: curl -s http://localhost:8000/api/agents | python3 -m json.tool
+```
+
+或通过文件系统：
+
+```bash
 bash_command: ls {AGENTOS_HOME}/agents/
 ```
 
 ### 查看 Agent 配置
 
-```
-read_file: {AGENTOS_HOME}/agents/{id}/config.json
+```bash
+# 通过 REST API
+bash_command: curl -s http://localhost:8000/api/agents/{id} | python3 -m json.tool
 ```
 
-### Agent 配置 JSON Schema
+### Agent 配置结构
 
-```json
-{
-  "id": "my-agent",
-  "name": "My Agent",
-  "description": "Agent 描述",
-  "model": "gpt_4o_mini",
-  "temperature": 0.2,
-  "system_prompt": "系统提示词",
-  "tools": ["bash_command", "read_file"],
-  "skills": ["skill-name"],
-  "enabled": true,
-  "can_send_message_to": [],
-  "max_send_depth": 3,
-  "max_pingpong_turns": 10
-}
+Agent 配置分布在两个位置：
+
+**1. `config.yml` 的 `agents` 段**（行为参数）：
+
+```yaml
+agents:
+  my-agent:
+    name: My Agent
+    description: Agent 描述
+    model: gpt_4o_mini          # 引用 llm.models 中的 key
+    temperature: 0.2
+    max_tokens: null
+    extra_body: {}              # 透传给 LLM API 的额外参数
+    tools: []                   # 允许使用的工具列表（空 = 全部）
+    skills: []                  # 允许使用的 Skills 列表（空 = 全部）
+    workdir: ""                 # 工作目录（空=自动解析为 workspace/workdir/{id}）
+    can_delegate_to: []         # 可委托的 Agent ID 列表（空 = 全部）
+    max_delegation_depth: 3     # 最大委托深度
+    max_pingpong_turns: 10      # 单个子会话最大往返轮数
+    enabled: true
 ```
+
+**2. `{AGENTOS_HOME}/agents/{id}/SYSTEM_PROMPT.md`**（系统提示词）：
+
+```markdown
+你是一个专业的 AI 助手...
+```
+
+**重要：`system_prompt` 不允许写在 `config.yml` 中，必须放在 `SYSTEM_PROMPT.md` 文件中，否则启动会报错。**
 
 ### 创建新 Agent
 
-1. 在 `{AGENTOS_HOME}/agents/{new-id}/` 目录下创建 `config.json`
-2. 写入符合上述 schema 的配置
+**方式一：通过 REST API（推荐）**
+
+```bash
+bash_command: curl -s -X POST http://localhost:8000/api/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "my-agent",
+    "name": "My Agent",
+    "description": "Agent 描述",
+    "model": "gpt_4o_mini",
+    "system_prompt": "你是一个专业的 AI 助手",
+    "tools": [],
+    "skills": [],
+    "can_delegate_to": [],
+    "max_delegation_depth": 3
+  }'
+```
+
+**方式二：通过文件系统**
+
+1. 在 `config.yml` 的 `agents` 段添加配置
+2. 创建 system prompt 文件：
 
 ```bash
 bash_command: mkdir -p {AGENTOS_HOME}/agents/{new-id}
 ```
 
 ```
-write_file: {AGENTOS_HOME}/agents/{new-id}/config.json
-内容: { ...配置 JSON... }
+write_file: {AGENTOS_HOME}/agents/{new-id}/SYSTEM_PROMPT.md
+内容: 系统提示词...
 ```
 
 ### 更新 Agent 配置
 
-先读取现有配置，修改后写回：
-
-```
-read_file: {AGENTOS_HOME}/agents/{id}/config.json
-write_file: {AGENTOS_HOME}/agents/{id}/config.json
+```bash
+# 通过 REST API
+bash_command: curl -s -X PUT http://localhost:8000/api/agents/{id}/config \
+  -H "Content-Type: application/json" \
+  -d '{"name":"新名称","temperature":0.3}'
 ```
 
 ### 删除 Agent
@@ -162,7 +238,32 @@ write_file: {AGENTOS_HOME}/agents/{id}/config.json
 **注意：不能删除 `default` Agent。**
 
 ```bash
-bash_command: rm -rf {AGENTOS_HOME}/agents/{id}
+# 通过 REST API（推荐）
+bash_command: curl -s -X DELETE http://localhost:8000/api/agents/{id}
+```
+
+### Agent 工具/技能偏好
+
+通过 `{AGENTOS_HOME}/.agent_preferences.json` 控制工具和技能的启用/禁用：
+
+```json
+{
+  "tools": {
+    "bash_command": true,
+    "serper_search": false
+  },
+  "skills": {
+    "ppt-superpower": true
+  }
+}
+```
+
+也可通过 REST API 更新：
+
+```bash
+bash_command: curl -s -X PUT http://localhost:8000/api/agents/{id}/preferences \
+  -H "Content-Type: application/json" \
+  -d '{"tools":{"bash_command":false},"skills":{"some-skill":true}}'
 ```
 
 ---
@@ -189,6 +290,13 @@ tools:
 
 未配置 API key 的搜索工具不会暴露给 LLM。
 
+### 检查工具配置状态
+
+```bash
+# 检查搜索工具和邮件配置是否已完成
+bash_command: curl -s http://localhost:8000/api/config/required-check | python3 -m json.tool
+```
+
 ### 邮件工具配置
 
 ```yaml
@@ -212,21 +320,19 @@ tools:
 
 ### 启用/禁用工具（Agent 级别）
 
-通过 `{AGENTOS_HOME}/.agent_preferences.json` 控制特定 Agent 的工具可用性：
-
-```json
-{
-  "agent-id": {
-    "disabled_tools": ["bash_command"]
-  }
-}
-```
+通过 Agent 偏好设置控制（见 Agent 管理 > Agent 工具/技能偏好）。
 
 ---
 
 ## 5. Skill 管理
 
 ### 列出已安装的 Skill
+
+**通过 REST API（推荐）：**
+
+```bash
+bash_command: curl -s http://localhost:8000/api/skills | python3 -m json.tool
+```
 
 **用户级 Skill（持久化）：**
 
@@ -240,15 +346,36 @@ bash_command: ls {AGENTOS_HOME}/skills/
 bash_command: ls {PROJECT_ROOT}/.agentos/skills/
 ```
 
+### Skill 加载优先级
+
+Skill 按以下优先级加载（后加载的覆盖先加载的同名 Skill）：
+1. 内置 Skill（`{PROJECT_ROOT}/.agentos/skills`）
+2. 用户 Skill（`~/.agentos/skills`）
+3. 工作区 Skill（`{workspace_dir}/skills`）
+4. 配置额外目录（`config.yml` 中的 `skills.extra_dirs`）
+
 ### 查看 Skill 内容
 
 ```
 read_file: {AGENTOS_HOME}/skills/{skill-name}/SKILL.md
 ```
 
-### Skill 启用/禁用状态
+### Skill 启用/禁用
 
-状态存储在 `{AGENTOS_HOME}/skills_state.json`：
+启用状态按以下优先级判断：
+1. `{AGENTOS_HOME}/skills_state.json`（最高优先级）
+2. `config.yml` 中的 `skills.entries.{name}.enabled`
+3. 二进制依赖检查（SKILL.md 中声明的 `metadata.agentos.requires.bins`）
+
+**修改启用状态：**
+
+```bash
+# 通过 REST API（推荐）
+bash_command: curl -s -X PUT http://localhost:8000/api/skills/{skill-name}/enable
+bash_command: curl -s -X PUT http://localhost:8000/api/skills/{skill-name}/disable
+```
+
+或手动修改 `{AGENTOS_HOME}/skills_state.json`：
 
 ```json
 {
@@ -256,13 +383,6 @@ read_file: {AGENTOS_HOME}/skills/{skill-name}/SKILL.md
     "enabled": true
   }
 }
-```
-
-修改启用状态：
-
-```
-read_file: {AGENTOS_HOME}/skills_state.json
-write_file: {AGENTOS_HOME}/skills_state.json
 ```
 
 ### 安装新 Skill
@@ -285,6 +405,10 @@ SKILL.md 格式：
 ---
 name: skill-name
 description: Skill 描述
+metadata:
+  agentos:
+    requires:
+      bins: [binary1, binary2]  # 可选：声明二进制依赖
 ---
 
 # Skill 内容
@@ -298,14 +422,23 @@ description: Skill 描述
 bash_command: rm -rf {AGENTOS_HOME}/skills/{skill-name}
 ```
 
+### 热重载 Skill
+
+单个 Skill 可以在不重启服务的情况下重载：
+
+```bash
+# 通过 REST API
+bash_command: curl -s -X POST http://localhost:8000/api/skills/{skill-name}/reload
+```
+
 ---
 
 ## 6. Plugin 管理
 
-Plugin 配置在 `config.yml` 的 `channels` 段（如飞书、企微）：
+Plugin 通过 PluginRegistry 动态发现和加载，配置在 `config.yml` 的 `plugins` 段：
 
 ```yaml
-channels:
+plugins:
   feishu:
     enabled: true
     app_id: ${FEISHU_APP_ID}
@@ -321,35 +454,117 @@ channels:
     corp_id: ${WECOM_CORP_ID}
     agent_id: ${WECOM_AGENT_ID}
     secret: ${WECOM_SECRET}
+  whatsapp:
+    enabled: false
 ```
 
-修改 Plugin 配置后需重启服务。
+**内置 Plugin：** feishu（飞书）、wecom（企业微信）、whatsapp
+
+每个 Plugin 可注册 Channel、Tool 或 Hook。修改 Plugin 配置后需重启服务。
 
 ---
 
 ## 7. Cron 管理
 
-Cron 任务配置在 `config.yml` 的 `cron` 段：
+**v1.2 重要变更：Cron 任务已改为数据库驱动（SQLite `cron_jobs` 表），不再存储在 `config.yml` 中。**
 
-```yaml
-cron:
-  jobs:
-    - id: daily-report
-      name: 每日报告
-      cron: "0 9 * * *"  # 标准 cron 表达式
-      agent_id: default
-      message: "请生成今日工作报告"
-      enabled: true
+### 通过 REST API 管理 Cron
+
+**列出所有任务：**
+
+```bash
+bash_command: curl -s http://localhost:8000/api/cron/jobs | python3 -m json.tool
 ```
 
-Cron 表达式格式：`分 时 日 月 周`
+**创建新任务：**
 
-常用示例：
+```bash
+bash_command: curl -s -X POST http://localhost:8000/api/cron/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "每日报告",
+    "schedule_type": "cron",
+    "schedule_value": "0 9 * * *",
+    "timezone": "Asia/Shanghai",
+    "text": "请生成今日工作报告",
+    "session_target": "main",
+    "enabled": true
+  }'
+```
+
+**调度类型：**
+
+| schedule_type | schedule_value 格式 | 说明 |
+|:---|:---|:---|
+| `cron` | `分 时 日 月 周` | 标准 cron 表达式 |
+| `every` | 毫秒数（如 `1800000`） | 每隔指定毫秒触发 |
+| `at` | ISO 8601 时间（如 `2026-03-25T09:00:00`） | 一次性定时触发 |
+
+**常用 cron 表达式：**
 - `0 9 * * *` — 每天 09:00
 - `0 9 * * 1` — 每周一 09:00
 - `*/30 * * * *` — 每 30 分钟
 
-修改 Cron 配置后需重启服务生效。
+**查看单个任务：**
+
+```bash
+bash_command: curl -s http://localhost:8000/api/cron/jobs/{job_id} | python3 -m json.tool
+```
+
+**更新任务：**
+
+```bash
+bash_command: curl -s -X PUT http://localhost:8000/api/cron/jobs/{job_id} \
+  -H "Content-Type: application/json" \
+  -d '{"name":"新名称","enabled":false}'
+```
+
+**删除任务：**
+
+```bash
+bash_command: curl -s -X DELETE http://localhost:8000/api/cron/jobs/{job_id}
+```
+
+**手动触发：**
+
+```bash
+bash_command: curl -s -X POST http://localhost:8000/api/cron/jobs/{job_id}/trigger
+```
+
+**查看执行历史：**
+
+```bash
+# 单个任务的执行记录
+bash_command: curl -s http://localhost:8000/api/cron/jobs/{job_id}/runs | python3 -m json.tool
+
+# 所有任务的执行记录
+bash_command: curl -s http://localhost:8000/api/cron/runs | python3 -m json.tool
+```
+
+### Cron 全局配置
+
+`config.yml` 中的 `cron` 段控制全局行为（非具体任务）：
+
+```yaml
+cron:
+  enabled: true
+  max_concurrent_runs: 3
+```
+
+### Heartbeat 心跳
+
+Heartbeat 是内置周期性检查机制，配置在 `config.yml`：
+
+```yaml
+heartbeat:
+  enabled: true
+  every: 300000          # 毫秒
+  target: main
+  prompt: "系统心跳检查"
+  active_hours:
+    start: 9
+    end: 18
+```
 
 ---
 
@@ -359,6 +574,19 @@ Cron 表达式格式：`分 时 日 月 周`
 
 ```
 read_file: config.yml
+```
+
+### 通过 REST API 查看配置
+
+```bash
+# 查看 llm / agent / plugins 配置
+bash_command: curl -s http://localhost:8000/api/config/sections | python3 -m json.tool
+
+# 检查 LLM 是否已配置
+bash_command: curl -s http://localhost:8000/api/config/llm-status | python3 -m json.tool
+
+# 查看 LLM 提供商预设列表
+bash_command: curl -s http://localhost:8000/api/config/llm-presets | python3 -m json.tool
 ```
 
 ### 查看数据库大小
@@ -379,9 +607,30 @@ bash_command: tail -n 50 {PROJECT_ROOT}/var/agentos.log 2>/dev/null || echo "未
 bash_command: ls -la {PROJECT_ROOT}/workspace/
 ```
 
+### 查看可用工具
+
+```bash
+bash_command: curl -s http://localhost:8000/api/tools | python3 -m json.tool
+```
+
 ---
 
-## 9. 安全规范
+## 9. REST API 速查
+
+| 模块 | 端点前缀 | 主要功能 |
+|:---|:---|:---|
+| Config | `/api/config` | 配置读写、LLM provider/model 管理、连通性测试、Secret 迁移 |
+| Agents | `/api/agents` | Agent CRUD、偏好管理 |
+| Skills | `/api/skills` | 列表、安装、卸载、启用/禁用、热重载 |
+| Cron | `/api/cron` | 定时任务 CRUD、手动触发、执行历史 |
+| Tools | `/api/tools` | 列出可用工具 |
+| Sessions | `/api/sessions` | 会话管理 |
+| Files | `/api/files` | 文件上传/下载 |
+| Notifications | `/api/notifications` | 通知状态和渠道 |
+
+---
+
+## 10. 安全规范
 
 **操作前必须遵循以下规范：**
 
@@ -396,13 +645,11 @@ bash_command: ls -la {PROJECT_ROOT}/workspace/
 
 4. **禁止操作数据库文件**：不要直接读写 `.db` 文件，数据库由系统内部管理。
 
-5. **敏感数据提醒**：配置文件中可能包含 API key 等敏感信息，提醒用户不要将配置分享给他人。
+5. **敏感数据提醒**：配置文件中可能包含 API key 等敏感信息，提醒用户不要将配置分享给他人。建议使用 Secret 迁移功能将明文密钥存入系统密钥环。
 
-6. **重启提醒**：以下修改需要重启 AgentOS 服务才能生效：
-   - LLM provider/model 配置变更
-   - Plugin（渠道）配置变更
-   - Cron 任务配置变更
-   - 工具配置变更
+6. **热更新与重启**：
+   - **无需重启**：LLM 配置（provider/model）、Agent 配置、Skill 启用/禁用 — 通过 ConfigManager 热更新
+   - **需要重启**：Plugin（渠道）配置变更、全局 Cron 开关
 
    重启命令：
    ```bash

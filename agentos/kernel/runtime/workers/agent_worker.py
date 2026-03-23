@@ -62,12 +62,18 @@ class AgentSessionWorker(SessionWorker):
         """解析 provider 名称：从 agent_config.model → llm.models → provider"""
         model_key = self._get_model_key()
         provider, _ = config.resolve_model(model_key)
+        # 向后兼容：部分 Agent 仍直接填写 model_id，此时保留显式 provider。
+        explicit_provider = getattr(self.agent_config, "provider", None) if self.agent_config else None
+        if provider == "mock" and explicit_provider:
+            return explicit_provider
         return provider
 
     def _get_model(self) -> str:
         """解析实际 model_id（传给 LLM API 的模型名）"""
         model_key = self._get_model_key()
-        _, model_id = config.resolve_model(model_key)
+        provider, model_id = config.resolve_model(model_key)
+        if provider == "mock" and self.agent_config and self.agent_config.model:
+            return self.agent_config.model
         return model_id
 
     def _get_model_key(self) -> str:
@@ -80,6 +86,13 @@ class AgentSessionWorker(SessionWorker):
         if self.agent_config:
             return self.agent_config.temperature
         return config.get("agent.temperature", 0.2)
+
+    def _get_max_tokens(self) -> int:
+        """获取 max_output_tokens：agent 级别覆盖 model 级别"""
+        if self.agent_config and self.agent_config.max_tokens:
+            return self.agent_config.max_tokens
+        model_key = self._get_model_key()
+        return config.get_model_max_output_tokens(model_key)
 
     def _get_extra_body(self) -> dict:
         """获取 extra_body：agent 级别覆盖 model 级别"""
@@ -296,6 +309,7 @@ class AgentSessionWorker(SessionWorker):
                     "messages": messages,
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
+                    "max_tokens": self._get_max_tokens(),
                     "extra_body": self._get_extra_body(),
                 },
             )
@@ -493,6 +507,7 @@ class AgentSessionWorker(SessionWorker):
                     "messages": state.messages,
                     "tools": self._get_filtered_tools(),
                     "temperature": self._get_temperature(),
+                    "max_tokens": self._get_max_tokens(),
                     "extra_body": self._get_extra_body(),
                 },
             )

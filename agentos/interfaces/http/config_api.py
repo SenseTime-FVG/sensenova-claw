@@ -45,7 +45,12 @@ class ModelUpdateBody(BaseModel):
     provider: str
     model_id: str
     timeout: int = 60
-    max_output_tokens: int = 8192
+    max_tokens: int = 128000
+    max_output_tokens: int = 16384
+
+
+class DefaultModelUpdateBody(BaseModel):
+    default_model: str = ""
 
 
 @router.get("/secret")
@@ -115,11 +120,16 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
         raise HTTPException(400, f"Provider 已存在: {next_name}")
 
     existing = providers.pop(provider_name)
-    provider_payload = {
+    provider_payload: dict[str, Any] = {
         "base_url": body.base_url,
         "timeout": body.timeout,
         "max_retries": body.max_retries,
     }
+    if body.api_key is not None:
+        provider_payload["api_key"] = body.api_key
+    elif isinstance(existing, dict) and "api_key" in existing:
+        provider_payload["api_key"] = existing["api_key"]
+
     providers[next_name] = provider_payload
     llm_section["providers"] = providers
 
@@ -127,36 +137,17 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
         for model in models.values():
             if isinstance(model, dict) and model.get("provider") == provider_name:
                 model["provider"] = next_name
-        llm_section["models"] = models
+    llm_section["models"] = models
 
-    # 处理 API key
-    if body.api_key is not None:
-        # 先通过 ConfigManager 写入 api_key（含 secret 处理）
-        await config_manager.update("llm", {"providers": {next_name: {"api_key": body.api_key}}})
-        # 重新读取，获取写入 secret ref 后的 raw
-        raw_config = config_manager._load_raw_yaml()
-        raw_providers = raw_config.get("llm", {}).get("providers", {})
-        # 合并 api_key 到 provider_payload
-        raw_provider = raw_providers.get(next_name, {})
-        if "api_key" in raw_provider:
-            provider_payload["api_key"] = raw_provider["api_key"]
-        providers[next_name] = provider_payload
-        llm_section["providers"] = providers
-    else:
-        current_raw = existing if isinstance(existing, dict) else {}
-        if "api_key" in current_raw:
-            provider_payload["api_key"] = current_raw["api_key"]
-            providers[next_name] = provider_payload
-            llm_section["providers"] = providers
+    try:
+        updated_llm = await config_manager.replace("llm", llm_section)
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
 
-    # 整体写回 llm section
-    raw_config = config_manager._load_raw_yaml()
-    raw_config["llm"] = llm_section
-    config_manager._write_raw_yaml(raw_config)
-    config_manager._reload_memory()
-
-    cfg = request.app.state.config
-    return {"status": "saved", "provider": config_manager.get_section("llm").get("providers", {}).get(next_name, {})}
+    return {
+        "status": "saved",
+        "provider": updated_llm.get("providers", {}).get(next_name, {}),
+    }
 
 
 @router.put("/llm/models/{model_name}")
@@ -181,26 +172,55 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
         "provider": body.provider,
         "model_id": body.model_id,
         "timeout": body.timeout,
+        "max_tokens": body.max_tokens,
         "max_output_tokens": body.max_output_tokens,
     }
     llm_section["models"] = models
     if llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
 
-    # 整体写回 llm section
+    try:
+        updated_llm = await config_manager.replace("llm", llm_section)
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
+
+    return {
+        "status": "saved",
+        "model": updated_llm.get("models", {}).get(next_name, {}),
+    }
+
+
+@router.put("/llm/default-model")
+async def update_llm_default_model(body: DefaultModelUpdateBody, request: Request):
+    """更新默认模型，不修改 provider/model 其他配置。"""
+    config_manager = request.app.state.config_manager
     raw_config = config_manager._load_raw_yaml()
-    raw_config["llm"] = llm_section
-    config_manager._write_raw_yaml(raw_config)
-    config_manager._reload_memory()
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    models = deepcopy(llm_section.get("models", {}))
 
-    return {"status": "saved", "model": config_manager.get_section("llm").get("models", {}).get(next_name, {})}
+    if body.default_model and body.default_model not in models:
+        raise HTTPException(400, f"Model 不存在: {body.default_model}")
 
+    llm_section["default_model"] = body.default_model
+
+    try:
+        updated_llm = await config_manager.replace("llm", llm_section)
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
+
+    return {
+        "status": "saved",
+        "default_model": updated_llm.get("default_model", ""),
+    }
 
 @router.get("/llm-status")
 async def get_llm_status(request: Request):
     """检测当前配置中是否至少有一个 LLM 提供商已配置有效 API key"""
     cfg = request.app.state.config
-    is_configured, providers = check_llm_configured(cfg.data)
+    is_configured, providers = check_llm_configured(
+        cfg.data,
+        secret_store=getattr(cfg, "_secret_store", None),
+    )
     return {"configured": is_configured, "providers": providers}
 
 

@@ -25,6 +25,7 @@ interface ModelConfig {
   provider: string;
   model_id: string;
   timeout: number;
+  max_tokens: number;
   max_output_tokens: number;
 }
 
@@ -205,7 +206,7 @@ export default function SettingsPage() {
     const firstProvider = Object.keys(providers)[0] || '';
     setModels(prev => ({
       ...prev,
-      [name]: { provider: firstProvider, model_id: '', timeout: 60, max_output_tokens: 8192 },
+      [name]: { provider: firstProvider, model_id: '', timeout: 60, max_tokens: 128000, max_output_tokens: 16384 },
     }));
     setExpandedModels(prev => ({ ...prev, [name]: true }));
     setNewModelName('');
@@ -517,8 +518,10 @@ env: {}`}</pre>
                               onChange={v => updateModel(name, 'model_id', v)} />
                             <FieldInput label="Timeout (s)" value={String(models[name]?.timeout || 60)} type="number"
                               onChange={v => updateModel(name, 'timeout', parseInt(v) || 60)} />
-                            <FieldInput label="Max Output Tokens" value={String(models[name]?.max_output_tokens || 8192)} type="number"
-                              onChange={v => updateModel(name, 'max_output_tokens', parseInt(v) || 8192)} />
+                            <FieldInput label="Max Tokens" value={String(models[name]?.max_tokens || 128000)} type="number"
+                              onChange={v => updateModel(name, 'max_tokens', parseInt(v) || 128000)} />
+                            <FieldInput label="Max Output Tokens" value={String(models[name]?.max_output_tokens || 16384)} type="number"
+                              onChange={v => updateModel(name, 'max_output_tokens', parseInt(v) || 16384)} />
                           </div>
                         </div>
                       )}

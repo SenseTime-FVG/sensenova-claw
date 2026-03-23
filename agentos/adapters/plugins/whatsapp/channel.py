@@ -77,7 +77,17 @@ class WhatsAppChannel(Channel):
         self._bridge.set_message_handler(self.handle_incoming_message)
         if hasattr(self._bridge, "set_event_handler"):
             self._bridge.set_event_handler(self._handle_bridge_event)
-        await self._bridge.start()
+        try:
+            await self._bridge.start()
+        except Exception as exc:
+            self._runtime_state.state = "error"
+            self._runtime_state.connected = False
+            self._runtime_state.last_error = str(exc).strip() or type(exc).__name__
+            self._runtime_state.last_event = "start_failed"
+            self._runtime_state.last_event_at = time.time()
+            self._runtime_state.debug_message = "bridge start failed"
+            logger.exception("WhatsAppChannel start failed")
+            return
         logger.info("WhatsAppChannel started")
 
     async def stop(self) -> None:

@@ -4,7 +4,10 @@ LLM 提供商预设配置模块
 提供各主流 LLM 提供商的默认配置，供 CLI 和 Web 前端使用。
 """
 
-from typing import Optional
+from typing import Any, Optional
+
+from agentos.platform.secrets.refs import is_secret_ref, parse_secret_ref
+from agentos.platform.secrets.store import SecretStoreError
 
 
 # 每个模型的结构：{"key": str, "model_id": str}
@@ -124,13 +127,43 @@ def get_provider(provider_key: str) -> Optional[dict]:
     return None
 
 
-def check_llm_configured(config_data: dict) -> tuple[bool, list[str]]:
-    """
-    检查配置中是否存在至少一个非 mock 的提供商并配置了真实 API key。
+def _has_effective_api_key(api_key: str, secret_store: Any | None = None) -> bool:
+    """判断 api_key 是否可视为已配置。
 
-    有效的 API key 定义为：非空字符串，且不以 "${" 开头（未解析的环境变量占位符）。
+    规则：
+    - 明文非空字符串：已配置
+    - `${secret:...}`：读取 secret store，解析后非空才算已配置
+    - 其他 `${...}` 占位符：未配置
+    """
+    if not api_key:
+        return False
+
+    if is_secret_ref(api_key):
+        if secret_store is None:
+            return False
+        try:
+            secret_value = secret_store.get(parse_secret_ref(api_key))
+        except (SecretStoreError, ValueError, AttributeError):
+            return False
+        return bool(isinstance(secret_value, str) and secret_value.strip())
+
+    if api_key.startswith("${"):
+        return False
+
+    return bool(api_key.strip())
+
+
+def check_llm_configured(config_data: dict, secret_store: Any | None = None) -> tuple[bool, list[str]]:
+    """
+    检查配置中是否存在至少一个非 mock 的提供商并配置了有效 API key。
+
+    有效的 API key 定义为：
+    - 明文非空字符串
+    - 或 `${secret:...}` 且能从 secret store 读到非空明文
+    - 普通 `${...}` 占位符不算有效
 
     :param config_data: 配置字典，结构同 config.yml 加载后的 dict
+    :param secret_store: 可选 secret store，用于解析 `${secret:...}` 引用
     :return: (is_configured, configured_provider_keys)
         - is_configured: 是否已配置
         - configured_provider_keys: 已配置的提供商 key 列表
@@ -157,8 +190,7 @@ def check_llm_configured(config_data: dict) -> tuple[bool, list[str]]:
         if not isinstance(api_key, str):
             continue
 
-        # 有效 key：非空且不是未解析的环境变量占位符
-        if api_key and not api_key.startswith("${"):
+        if _has_effective_api_key(api_key, secret_store=secret_store):
             configured.append(provider_key)
 
     return (len(configured) > 0, configured)

@@ -351,8 +351,15 @@ class ContextCompressor:
         if len(turns) <= 1:
             return history
 
-        compressible = turns[:-1]
+        compressible = [
+            turn
+            for turn in turns[:-1]
+            if not (turn["messages"] and turn["messages"][0].get("__phase2_compressed__"))
+        ]
         last_turn = turns[-1]
+
+        if not compressible:
+            return history
 
         # 按 chunk_ratio 分块
         chunks: list[dict[str, Any]] = []
@@ -399,8 +406,18 @@ class ContextCompressor:
                 logger.warning("保存第二阶段压缩原文失败 session=%s chunk=%d", session_id, ci, exc_info=True)
 
             marker = COMPRESSION_MARKER.format(file_path=file_path) if file_path else ""
-            new_history.append({"role": "user", "content": f"[历史对话摘要 #{ci + 1}]"})
-            new_history.append({"role": "assistant", "content": summary + marker})
+            new_history.append({
+                "role": "user",
+                "content": f"[历史对话摘要 #{ci + 1}]",
+                "__compressed__": True,
+                "__phase2_compressed__": True,
+            })
+            new_history.append({
+                "role": "assistant",
+                "content": summary + marker,
+                "__compressed__": True,
+                "__phase2_compressed__": True,
+            })
 
         # 追加最后一个 turn
         new_history.extend(last_turn["messages"])

@@ -116,13 +116,13 @@ function SessionListItem({
       className={cn(
         'flex items-center gap-2.5 px-3 py-2.5 mx-2 rounded-xl cursor-pointer transition-all text-sm group relative',
         'animate-in fade-in slide-in-from-left-2 duration-200',
-        isActive ? 'bg-primary/8 text-foreground shadow-sm border border-primary/15' : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
+        isActive ? 'bg-blue-100 dark:bg-blue-900/40 text-foreground shadow-md' : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
       )}
       style={{ animationDelay: `${index * 30}ms`, animationFillMode: 'both' }}
     >
       <MessageSquare className={cn(
         'w-4 h-4 shrink-0',
-        isActive ? 'text-primary' : 'text-muted-foreground',
+        isActive ? 'text-blue-500' : 'text-muted-foreground',
       )} />
       <div className="flex-1 min-w-0">
         <div className="truncate font-medium text-xs">{getTitle(session.meta)}</div>

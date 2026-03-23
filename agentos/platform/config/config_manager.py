@@ -107,6 +107,61 @@ class ConfigManager:
 
             return self.get_section(section)
 
+    async def replace(self, section: str, data: dict) -> dict:
+        """整段替换指定 section，用于需要删除旧 key 的重命名场景。"""
+        async with self._lock:
+            raw_config = self._load_raw_yaml()
+            original_section = deepcopy(raw_config.get(section, {}))
+            original_raw_values = {
+                path: value
+                for path, value in _flatten(original_section, prefix=section).items()
+                if is_secret_path(path)
+            }
+
+            raw_config[section] = deepcopy(data)
+            flat_updates = _flatten(data, prefix=section)
+
+            for path, value in flat_updates.items():
+                if is_secret_path(path) and self._secret_store is not None:
+                    if value:
+                        ref = f"agentos/{path}"
+                        try:
+                            self._secret_store.set(ref, value)
+                            _set_nested(raw_config, path, build_secret_ref(ref))
+                        except Exception:
+                            logger.warning("secret store 不可用，%s 将明文写入 config.yml", path)
+                            _set_nested(raw_config, path, value)
+                    else:
+                        ref = f"agentos/{path}"
+                        existing_raw = original_raw_values.get(path)
+                        if isinstance(existing_raw, str) and is_secret_ref(existing_raw):
+                            try:
+                                self._secret_store.delete(ref)
+                            except Exception:
+                                logger.warning("secret store 不可用，跳过删除 %s", path)
+                        _set_nested(raw_config, path, "")
+
+            self._write_raw_yaml(raw_config)
+            self._reload_memory()
+
+            changes = {}
+            for path, value in flat_updates.items():
+                if is_secret_path(path):
+                    changes[path] = {"new": _mask_secret(value)}
+                else:
+                    changes[path] = {"new": value}
+
+            if changes:
+                event = EventEnvelope(
+                    type=CONFIG_UPDATED,
+                    session_id=SYSTEM_SESSION_ID,
+                    source="system",
+                    payload={"section": section, "changes": changes},
+                )
+                await self._event_bus.publish(event)
+
+            return self.get_section(section)
+
     def get_section(self, section: str) -> dict:
         """读取指定 section（从内存），secret 脱敏"""
         resolved = deepcopy(self._config.data.get(section, {}))

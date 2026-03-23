@@ -817,3 +817,81 @@ python的运行先conda activate base, 再uv run python xxx.py
 成功经验：
 - 这类悬浮页签不应强行维持“始终有一个选中项”；把状态从 `WorkspaceTab` 放宽到 `WorkspaceTab | null`，再用统一 `toggleOverlayTab()` 处理“点击当前按钮即收起”，实现最直接也最不容易漏分支。
 - Playwright 对显隐切换最好直接断言 `toBeHidden()`，这样能发现“视觉上像收起了，但其实仍在页面上拦截事件”的问题。
+### 2026-03-22 dev 合并到 wdh/dev 补充
+
+成功经验：
+- 当用户要求“只在 `wdh/dev` 上操作”时，可以用 detached worktree 基于 `dev` 先做只读验证，再回到当前分支执行合并；这样既不污染 `dev` 分支，也能在合并前确认 `dev` 本身是否已经带着失败用例。
+- 处理冲突时，`config_api` 这类配置写回入口应优先保留 `ConfigManager` 单入口实现；否则容易绕开 secret 路径处理、内存热重载和 `CONFIG_UPDATED` 事件发布。
+- 这次最有效的回归组合是“后端定向 pytest + 进程内 e2e + 前端关键 Playwright”。仅看 merge 是否成功不够，必须同时验证 `test_config_api / test_agent_worker / test_agent_config`、`test_agent_llm_core_flow` 和 `setup-model-list/chat-markdown`。
+
+失败/风险经验：
+- `dev` 上的失败不一定来自当前改动；这次先在 detached worktree 跑测试，就提前暴露了 `tests/unit/test_agent_worker.py` 对本机模型配置的脆弱依赖，以及 `AgentConfig.provider` 已删除但运行时代码仍直接访问的兼容性问题。
+- Playwright 不能并行复用同一个 `webServer.port=3000` 配置直接起两套服务；并发跑多个 spec 容易报 `Address already in use`，这类前端回归在当前仓库更适合串行执行或拆分端口。
+
+### 2026-03-22 WhatsApp 启动超时补充
+
+成功经验：
+- 对可选 channel，启动失败不应直接拖垮 FastAPI lifespan；像 WhatsApp sidecar 这类外部子进程超时，更稳的策略是 channel 自己记录 `state=error/last_error`，让主服务继续启动，状态页再暴露失败原因。
+- 这类问题最有效的 TDD 用例不是去模拟完整 sidecar，而是让 fake bridge 的 `start()` 直接抛 `TimeoutError`，断言 `WhatsAppChannel.start()` 不再向上抛异常且会写入运行时错误状态。
+
+失败/风险经验：
+- 当前 sidecar 的 `start` 命令响应时机仍依赖 Node runtime 完成一段真实初始化；在网络慢、Baileys 初始化卡住或登录态异常时，`start` 仍可能超时。当前修复解决的是“主服务被带崩”，不是“WhatsApp 一定能成功连上”。
+
+### 2026-03-22 WhatsApp 版本探测卡顿补充
+
+成功经验：
+- 真实日志如果稳定停在 `auth state loaded` 之后、`socket created` 之前，优先怀疑 `fetchLatestBaileysVersion()` 这类启动期远端探测，而不是扫码或 Python sidecar 协议本身。
+- 给 sidecar runtime 增加“版本探测超时回退到内置版本”的兜底后，`start` 可以继续完成 socket 创建；这类修复最适合用 `node:test` 直接把 `fetchLatestBaileysVersion` mock 成永不返回，再断言 `runtime.start()` 仍会在短时间内返回并使用 fallback version。
+
+失败/风险经验：
+- 当前沙箱环境直接跑 `python3 -m agentos.app.main run --no-frontend` 仍可能被 `watchfiles` 权限拦住（`[Errno 1] Operation not permitted`）；这种失败不能用来判断 WhatsApp 启动逻辑是否仍有 bug，需优先看单测和用户本机真实启动日志。
+
+### 2026-03-22 WhatsApp 自聊 protocolMessage 补充
+
+成功经验：
+- “给自己发 WhatsApp 纯文本”在真实设备上不一定走 `conversation`/`extendedTextMessage`；这次样本最外层是 `protocolMessage`，如果 sidecar 只解常规 wrapper，就会持续出现 `messages.upsert received` 但 `ignored: no text content`。
+- 对这类协议兼容问题，最稳的流程是先在 `runtime.test.mjs` 补失败样本，再在 `unwrapMessage()` 中按最小范围扩展 wrapper；这次补 `protocolMessage.editedMessage.message` 后，自聊文本即可进入现有提取链。
+- 在 `no text content` 的 debug 日志中带上 `protocol_type`，后续能更快区分“真空消息”还是“漏解某种 protocol wrapper”。
+
+失败/风险经验：
+- 仅覆盖“self chat + conversation”这种理想化测试不够；真实 WhatsApp 多设备/自聊场景的消息结构会漂移，自聊链路必须保留协议级样本测试。
+
+### 2026-03-22 LLM 默认模型编辑补充
+
+成功经验：
+- `/llms` 页面采用“单项编辑 + 编辑所有配置”双模式时，`default_model` 也必须进入同一套编辑状态机；否则顶部卡片会变成唯一不能单项编辑的配置项。
+- `default_model` 这类单字段更新，单独提供 `PUT /api/config/llm/default-model` 比复用整份 `llm` section 保存更稳，前后端都更容易保持“只更新当前一项”的语义。
+- Playwright 对顶部配置卡片最有效的断言顺序是“默认禁用 -> 编辑后可改 -> 取消恢复 -> 保存发单独请求”，这样能同时覆盖 UI 状态切换与接口契约。
+
+失败/风险经验：
+- 当前环境跑 Playwright 需要同时满足两件事：浏览器具备越权启动权限，且 `http://localhost:3000` 上已有 Next dev 进程；缺任一条件都会失败，但报错表象不同，容易误判到页面逻辑。
+
+### 2026-03-23 LLM 配置状态判定补充
+
+成功经验：
+- `llm-status` 这类“是否已配置”接口不应只按字符串字面值判断；若配置支持 `${secret:...}`，就必须结合 secret store 解析后再判空，否则前端会把已登录用户错误重定向到 `/setup`。
+- 将 secret 解析能力收敛到 `check_llm_configured(..., secret_store=...)` 这一层最稳，Web 接口和 CLI 启动提示共用同一规则，避免状态判断分叉。
+- 对配置判定问题，最小高价值测试是三类：普通 `${ENV}` 占位符、`${secret:...}` 且 secret 为空、`${secret:...}` 且 secret 有值。
+
+失败/风险经验：
+- 当前环境仍无法直接跑 pytest：`.venv` 缺少 `pytest`，`uv run python -m pytest` 又会在 `system-configuration` 依赖层 panic；完成修改后需要至少补做 `python3` 级函数断言和 `py_compile` 校验，并在完整依赖环境复跑正式单测。
+
+### 2026-03-23 Tools API Key 指引补充
+
+成功经验：
+- Tools 页的 API key 获取说明是由后端 `TOOL_API_KEY_SPECS` 直接驱动的；要让前端展示更具体的“如何拿 token”，优先补充 `setup_guide/docs_url/example_format`，比在前端硬编码文案更稳。
+- 对这类“内容增强但仍需用户可见回归”的改动，后端单测断言关键关键词，前端 Playwright 只断言一个代表性流程即可，维护成本最低。
+- 当前环境若已安装独立 `chrome-headless-shell`，可在 `playwright.config.ts` 中加入固定候选路径回退，避免每次测试都依赖 Playwright 自带浏览器缓存。
+
+失败/风险经验：
+- 第三方控制台的入口名称会变化，例如 `Dashboard`、`Subscriptions`、`API Keys` 等；文案应写到“足够具体但不强依赖像素级页面布局”，否则后续很容易因供应商改版过时。
+
+### 2026-03-23 Tabs orientation 布局补充
+
+成功经验：
+- Radix 这类组件如果运行时依赖 `data-orientation="horizontal"`，Tailwind 选择器必须写成 `data-[orientation=horizontal]:...` 或 `group-data-[orientation=horizontal]/...`；写成 `data-horizontal:` 只会匹配布尔属性，实际不会命中。
+- 当页面表现成“tab 栏在左、内容在右”时，先检查根组件是否仍是 `display:flex` 且没有被切成 `flex-col`；这种问题通常是状态类名没生效，不是业务页本身的布局问题。
+- 对布局修复，Playwright 最稳的断言不是截图，而是直接比较 `boundingBox`：验证 tablist 的 `y` 在内容上方、`x` 基本对齐即可。
+
+失败/风险经验：
+- 同类错误容易同时出现在 `Tabs`、`Separator`、`ScrollArea` 等多个基础组件中；只修单页通常会留下第二处同源问题。
