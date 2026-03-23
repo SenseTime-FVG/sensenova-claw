@@ -33,7 +33,7 @@ pytestmark = pytest.mark.asyncio
 async def _build_runtime(repo, tmp_path):
     bus = PublicEventBus()
     bus_router = BusRouter(public_bus=bus, ttl_seconds=60, gc_interval=60)
-    registry = AgentRegistry() / "agents")
+    registry = AgentRegistry(agentos_home=tmp_path / "agents")
     registry.register(AgentConfig.create(id="default", name="Default"))
     registry.register(AgentConfig.create(id="helper", name="Helper"))
     runtime = AgentRuntime(
