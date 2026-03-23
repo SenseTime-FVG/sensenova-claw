@@ -216,6 +216,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
               if (event.event_type === 'user.input') {
                 historyMessages.push(toMessage('user', payload.content || ''));
+              } else if (event.event_type === 'llm.call_result') {
+                const response = payload.response || {};
+                const content = response.content || '';
+                const toolCalls = Array.isArray(response.tool_calls) ? response.tool_calls : [];
+                if (content && toolCalls.length > 0) {
+                  historyMessages.push(toMessage('assistant', content));
+                }
               } else if (event.event_type === 'tool.call_requested') {
                 const toolInfo: ToolInfo = {
                   name: payload.tool_name || '',

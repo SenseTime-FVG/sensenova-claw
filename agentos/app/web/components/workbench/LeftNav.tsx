@@ -128,11 +128,14 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
-        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.15em]">
-          最近对话
-        </span>
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
+          <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-[0.15em]">
+            最近对话
+          </span>
+        </div>
+        <div className="flex items-center gap-0.5">
           <button
             onClick={handleNewChat}
             data-testid="recent-chats-new-button"
@@ -143,7 +146,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
           <button
             onClick={handleRefresh}
             disabled={loadingAgents || loadingSessions}
-            className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-all disabled:opacity-50"
           >
             <RefreshCw className={cn('w-3 h-3', (loadingAgents || loadingSessions) && 'animate-spin')} />
           </button>

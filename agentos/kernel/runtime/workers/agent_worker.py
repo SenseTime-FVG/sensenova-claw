@@ -50,11 +50,16 @@ class AgentSessionWorker(SessionWorker):
         private_bus: PrivateEventBus,
         runtime: AgentRuntime,
         agent_config: AgentConfig | None = None,
+        session_meta: dict | None = None,
     ):
         super().__init__(session_id, private_bus)
         self.rt = runtime
         self.agent_config = agent_config
         self._consecutive_errors = 0
+        # 安全限制（仅对 proactive 会话生效）
+        self._session_meta: dict | None = session_meta
+        self._llm_call_count = 0
+        self._tool_call_count = 0
 
     # ── 配置读取辅助 ──────────────────────────────────
 
@@ -106,11 +111,60 @@ class AgentSessionWorker(SessionWorker):
         """根据 Agent 配置过滤可用工具"""
         all_tools = self.rt.tool_registry.as_llm_tools()
         if not self.agent_config or not self.agent_config.tools:
-            return all_tools  # 空列表 = 全部工具
-        allowed = set(self.agent_config.tools)
-        # 始终保留 send_message 工具
-        always_keep = {"send_message"}
-        return [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
+            tools = all_tools  # 空列表 = 全部工具
+        else:
+            allowed = set(self.agent_config.tools)
+            # 始终保留 send_message 工具
+            always_keep = {"send_message"}
+            tools = [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
+
+        # 仅对 proactive 会话应用安全限制
+        if self._session_meta and self._session_meta.get("proactive_job_id"):
+            allowed_tools = self._session_meta.get("allowed_tools")
+            blocked_tools = self._session_meta.get("blocked_tools")
+            if allowed_tools:
+                tools = [t for t in tools if t["name"] in allowed_tools or t["name"] == "send_message"]
+            elif blocked_tools:
+                tools = [t for t in tools if t["name"] not in blocked_tools]
+
+        return tools
+
+    def _is_proactive_session(self) -> bool:
+        """判断当前会话是否为 proactive 会话"""
+        return bool(self._session_meta and self._session_meta.get("proactive_job_id"))
+
+    async def _force_complete_on_limit(
+        self,
+        session_id: str,
+        turn_id: str | None,
+        limit_type: str,
+    ) -> None:
+        """超出安全限制时强制结束当前轮次"""
+        msg = f"已达到安全限制：{limit_type}"
+        logger.warning(
+            "Safety limit reached session=%s turn=%s limit=%s",
+            session_id, turn_id, limit_type,
+        )
+        if turn_id:
+            await self.rt.repo.update_turn_status(turn_id, status="completed", agent_response=msg)
+            state = self.rt.state_store.get_turn(session_id, turn_id)
+            if state:
+                new_messages = state.messages[state.history_offset:]
+                self.rt.state_store.append_to_history(session_id, new_messages)
+        await self.bus.publish(
+            EventEnvelope(
+                type=AGENT_STEP_COMPLETED,
+                session_id=session_id,
+                turn_id=turn_id,
+                source="agent",
+                payload={
+                    "step_type": "final",
+                    "result": {"content": msg},
+                    "next_action": "end",
+                    "exceeded_limit": limit_type,
+                },
+            )
+        )
 
     # ── 持久化辅助 ─────────────────────────────────────
 
@@ -295,6 +349,13 @@ class AgentSessionWorker(SessionWorker):
         )
 
         llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
+        # 计数并检查 LLM 调用限制（仅 proactive 会话）
+        self._llm_call_count += 1
+        if self._is_proactive_session():
+            max_llm = self._session_meta.get("max_llm_calls")  # type: ignore[union-attr]
+            if max_llm and self._llm_call_count > max_llm:
+                await self._force_complete_on_limit(self.session_id, turn_id, "max_llm_calls")
+                return
         await self.bus.publish(
             EventEnvelope(
                 type=LLM_CALL_REQUESTED,
@@ -492,7 +553,27 @@ class AgentSessionWorker(SessionWorker):
         if state.pending_tool_calls:
             return
 
+        # 计数并检查工具调用限制（仅 proactive 会话，每批工具完成后累计）
+        if self._is_proactive_session():
+            # 统计本批次完成的工具调用数（从 tool_results 推断）
+            self._tool_call_count = len(state.tool_results)
+            max_tools = self._session_meta.get("max_tool_calls")  # type: ignore[union-attr]
+            if max_tools and self._tool_call_count >= max_tools:
+                await self._force_complete_on_limit(
+                    event.session_id, event.turn_id, "max_tool_calls"
+                )
+                return
+
         llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
+        # 计数并检查 LLM 调用限制（仅 proactive 会话）
+        self._llm_call_count += 1
+        if self._is_proactive_session():
+            max_llm = self._session_meta.get("max_llm_calls")  # type: ignore[union-attr]
+            if max_llm and self._llm_call_count > max_llm:
+                await self._force_complete_on_limit(
+                    event.session_id, event.turn_id, "max_llm_calls"
+                )
+                return
         await self.bus.publish(
             EventEnvelope(
                 type=LLM_CALL_REQUESTED,

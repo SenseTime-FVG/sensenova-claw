@@ -4,12 +4,15 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Folder, FolderOpen, File, ChevronRight, ChevronDown,
   Loader2, RefreshCw, CheckCircle2,
+  Search, Presentation, Cog, Sparkles, Plus,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useDrag } from 'react-dnd';
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useFilePanel } from '@/contexts/FilePanelContext';
 import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useFeatureNavItems } from '@/components/layout/DashboardNav';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 
 interface FileItem {
@@ -192,53 +195,83 @@ function mergeProgress(items: { task: string; step: number; total: number; statu
   return merged;
 }
 
-/* ── AI 工作区（执行步骤 + 任务进度） ── */
+/* ── AI 工作区（空闲：功能入口 / 对话中：执行进度） ── */
+
+const FEATURE_ICONS: Record<string, React.ReactNode> = {
+  '深度研究': <Search className="w-4 h-4" />,
+  'PPT': <Presentation className="w-4 h-4" />,
+  '自动化': <Cog className="w-4 h-4" />,
+  '+ 创建': <Plus className="w-4 h-4" />,
+};
 
 function AIWorkspace() {
-  const { taskProgress } = useChatSession();
-
+  const { currentSessionId, taskProgress } = useChatSession();
+  const featureNavItems = useFeatureNavItems();
   const mergedProgress = useMemo(() => mergeProgress(taskProgress), [taskProgress]);
+
+  const isInConversation = Boolean(currentSessionId);
+  const hasProgress = mergedProgress.length > 0;
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-3 shrink-0 border-b border-border/60">
-        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.15em]">
-          AI 工作区
-        </span>
+      <div className="flex items-center justify-between px-4 py-3 shrink-0 border-b border-border/40">
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-primary/60" />
+          <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-[0.15em]">
+            AI 工作区
+          </span>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-2">
-        {mergedProgress.length === 0 && (
-          <div className="text-[10px] text-muted-foreground/50 px-1 py-4 text-center">
-            暂无执行任务
-          </div>
-        )}
-
-        {mergedProgress.length > 0 && (
-          <div className="space-y-1.5">
-            {mergedProgress.map((task, index) => {
-              const isDone = task.done >= task.total;
-              return (
-                <div key={index} className="flex items-center gap-2 px-1 py-1">
-                  {isDone
-                    ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />
-                    : <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" />
-                  }
-                  <span className={cn(
-                    'text-xs truncate flex-1 min-w-0',
-                    isDone ? 'text-muted-foreground' : 'text-foreground font-medium',
-                  )}>
-                    {task.task}
-                  </span>
-                  <span className={cn(
-                    'text-[10px] font-medium shrink-0',
-                    isDone ? 'text-muted-foreground' : 'text-amber-500',
-                  )}>
-                    {task.done}/{task.total}
-                  </span>
-                </div>
-              );
-            })}
+        {isInConversation ? (
+          /* ── 对话中：显示任务执行状态 ── */
+          hasProgress ? (
+            <div className="space-y-1 pt-2">
+              {mergedProgress.map((task, index) => {
+                const isDone = task.done >= task.total;
+                return (
+                  <div key={index} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors">
+                    {isDone
+                      ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      : <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
+                    }
+                    <span className={cn(
+                      'text-xs truncate flex-1 min-w-0',
+                      isDone ? 'text-muted-foreground' : 'text-foreground font-medium',
+                    )}>
+                      {task.task}
+                    </span>
+                    <span className={cn(
+                      'text-[10px] font-semibold shrink-0 tabular-nums',
+                      isDone ? 'text-muted-foreground/60' : 'text-amber-500',
+                    )}>
+                      {task.done}/{task.total}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-[10px] text-muted-foreground/50 px-1 py-4 text-center">
+              暂无执行任务
+            </div>
+          )
+        ) : (
+          /* ── 空闲：显示功能入口 ── */
+          <div className="space-y-1.5 pt-2">
+            {featureNavItems.map((item) => (
+              <Link
+                key={item.path}
+                href={item.path}
+                className="flex items-center gap-2.5 rounded-xl border border-border/30 bg-muted/20 px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 hover:border-border/60 transition-all duration-150"
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/8 text-primary">
+                  {FEATURE_ICONS[item.label] || <Sparkles className="w-4 h-4" />}
+                </span>
+                <span>{item.label}</span>
+              </Link>
+            ))}
           </div>
         )}
       </div>
@@ -281,13 +314,16 @@ export function GlobalFilePanel() {
   const bestRoot = bestMatchRoot(roots, focusPath);
 
   return (
-    <ResizablePanelGroup orientation="vertical" className="h-full gap-3">
+    <ResizablePanelGroup orientation="vertical" className="h-full gap-2.5">
       {/* 文件区 */}
-      <ResizablePanel id="file-tree" defaultSize="50%" minSize="20%" className="rounded-xl border border-border/40 overflow-hidden bg-gradient-to-br from-cyan-100/20 via-background to-teal-200/20 dark:from-cyan-500/[0.06] dark:via-background dark:to-teal-500/[0.06]">
+      <ResizablePanel id="file-tree" defaultSize="50%" minSize="20%" className="rounded-[var(--panel-radius)] border border-border/40 overflow-hidden bg-background shadow-sm">
         <div className="flex flex-col h-full">
-          <div className="flex items-center justify-between px-4 py-3 shrink-0 border-b border-border/60">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.15em]">文件区</span>
-            <button onClick={loadRoots} className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+          <div className="flex items-center justify-between px-4 py-3 shrink-0 border-b border-border/40">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-teal-500/60" />
+              <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-[0.15em]">文件区</span>
+            </div>
+            <button onClick={loadRoots} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-all">
               <RefreshCw className="w-3 h-3" />
             </button>
           </div>
@@ -314,7 +350,7 @@ export function GlobalFilePanel() {
       <ResizableHandle invisible orientation="vertical" />
 
       {/* AI 工作区 */}
-      <ResizablePanel id="ai-workspace" defaultSize="50%" minSize="15%" className="rounded-xl border border-border/40 overflow-hidden bg-gradient-to-br from-pink-100/15 via-background to-purple-200/20 dark:from-pink-500/[0.05] dark:via-background dark:to-purple-500/[0.06]">
+      <ResizablePanel id="ai-workspace" defaultSize="50%" minSize="15%" className="rounded-[var(--panel-radius)] border border-border/40 overflow-hidden bg-background shadow-sm">
         <AIWorkspace />
       </ResizablePanel>
     </ResizablePanelGroup>

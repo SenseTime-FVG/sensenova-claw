@@ -20,35 +20,35 @@ const researchTemplates = [
 
 function ResearchTemplates({ onQuickTask }: { onQuickTask: (msg: string) => void }) {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
+    <div className="flex-1 flex flex-col items-center justify-center p-5">
       <div className="max-w-2xl mx-auto w-full">
-        <div className="text-center py-8">
-          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-5 shadow-sm">
-            <BookOpen className="w-8 h-8 text-primary" />
+        <div className="text-center py-3">
+          <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-3 shadow-sm">
+            <BookOpen className="w-5.5 h-5.5 text-primary" />
           </div>
-          <h2 className="text-2xl font-bold text-foreground mb-2 tracking-tight">开始深度调研</h2>
-          <p className="text-muted-foreground text-sm mb-8">
+          <h2 className="text-xl font-bold text-foreground mb-1 tracking-tight">开始深度调研</h2>
+          <p className="text-muted-foreground text-xs mb-4">
             使用下方快捷动作快速开始，或在下方输入框描述你的调研需求
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-5">
+        <div className="grid grid-cols-2 gap-3">
           {researchTemplates.map((tmpl, i) => {
             const Icon = tmpl.icon;
             return (
               <div
                 key={i}
                 className={cn(
-                  'relative rounded-2xl p-6 bg-gradient-to-br ring-1 transition-all duration-300 cursor-pointer',
+                  'relative rounded-xl p-4 bg-gradient-to-br ring-1 transition-all duration-300 cursor-pointer',
                   'hover:shadow-lg hover:-translate-y-0.5',
                   tmpl.bg, tmpl.ring,
                 )}
                 onClick={() => onQuickTask(tmpl.title)}
               >
-                <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center mb-4', tmpl.iconBg)}>
-                  <Icon className={cn('w-5 h-5', tmpl.iconColor)} />
+                <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center mb-2.5', tmpl.iconBg)}>
+                  <Icon className={cn('w-4 h-4', tmpl.iconColor)} />
                 </div>
-                <h3 className="font-bold text-foreground mb-1.5 text-sm">{tmpl.title}</h3>
+                <h3 className="font-bold text-foreground mb-1 text-sm">{tmpl.title}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">{tmpl.desc}</p>
               </div>
             );
@@ -66,7 +66,8 @@ export default function ResearchPage() {
         <ChatPanel
           defaultAgentId="search-agent"
           lockAgent
-          emptyState={(fillInput) => <ResearchTemplates onQuickTask={fillInput} />}
+          emptyState={({ fillInput }) => <ResearchTemplates onQuickTask={fillInput} />}
+          returnToMainLabel="返回深度研究"
         />
       </WorkbenchShell>
     </DashboardLayout>

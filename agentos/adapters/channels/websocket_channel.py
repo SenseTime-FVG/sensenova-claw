@@ -17,6 +17,7 @@ from agentos.kernel.events.types import (
     LLM_CALL_RESULT,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
+    LLM_CALL_RESULT,
     NOTIFICATION_PUSH,
     NOTIFICATION_SESSION,
     SESSION_CREATED,

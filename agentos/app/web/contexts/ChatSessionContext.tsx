@@ -80,7 +80,7 @@ const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
 // ── Provider ──
 
 export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
-  const { pushNotification } = useNotification();
+  const { pushNotification, pushCard } = useNotification();
   const { isAuthenticated, isLoading } = useAuth();
   const pathname = usePathname();
 
@@ -398,23 +398,44 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       }
       case 'turn_completed': {
         const final = String(payload.final_response || '');
-        if (final) {
-          // 更新最后一条 assistant 消息的内容（不创建新消息）
-          setMessages((prev) => {
-            // 从后往前找最后一条 assistant 消息
-            for (let i = prev.length - 1; i >= 0; i--) {
-              if (prev[i].role === 'assistant') {
+        setMessages((prev) => {
+          // 从后往前找最后一条 assistant 消息
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === 'assistant') {
+              const existing = prev[i];
+              // 如果 llm_result 已经设置了相同内容，只折叠思考状态
+              if (existing.content === final || !final) {
                 const next = [...prev];
-                next[i] = { ...next[i], content: final, thinkingState: 'collapsed' };
+                next[i] = { ...next[i], thinkingState: 'collapsed' };
                 return next;
               }
+              // 内容不同时才更新（不创建新消息）
+              const next = [...prev];
+              next[i] = { ...next[i], content: final, thinkingState: 'collapsed' };
+              return next;
             }
-            // 没找到 assistant 消息（理论上不会发生），追加一条
+          }
+          // 没找到 assistant 消息且有内容，追加一条
+          if (final) {
             return [...prev, { id: makeId(), role: 'assistant', content: final, timestamp: Date.now() }];
-          });
-        }
+          }
+          return prev;
+        });
         setIsTyping(false);
         clearInteractions();
+        // 推送任务完成通知卡片
+        const completedSessionId = incomingSessionId || '';
+        if (completedSessionId) {
+          pushCard({
+            kind: 'task_completed',
+            title: '任务完成',
+            body: final ? (final.length > 100 ? final.slice(0, 100) + '...' : final) : '一个任务已完成',
+            level: 'success',
+            source: 'agent',
+            sessionId: completedSessionId,
+            actions: [{ label: '查看会话 →', value: 'view_session' }],
+          });
+        }
         break;
       }
       case 'turn_cancelled':
@@ -465,6 +486,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
             toast: metadata.show_toast !== false,
             browser: metadata.show_browser === true,
           });
+          // 同时推送到通知中心卡片
+          const notifSessionId = typeof data.session_id === 'string' ? data.session_id : undefined;
+          pushCard({
+            kind: 'general',
+            title,
+            body,
+            level: String(payload.level || 'info') as 'info' | 'warning' | 'error' | 'success',
+            source: String(payload.source || 'system'),
+            sessionId: notifSessionId,
+            actions: notifSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined,
+          });
         }
         const targetSessionId = typeof data.session_id === 'string' ? data.session_id : null;
         if (body && Boolean(metadata.append_to_chat) && (!targetSessionId || targetSessionId === sessionIdRef.current)) {
@@ -476,17 +508,23 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const toolCallId = String(payload.tool_call_id || '');
         const sourceSessionId = incomingSessionId || '';
         if (!toolCallId || !sourceSessionId) break;
-        enqueueInteraction({
-          kind: 'confirmation',
-          interactionId: toolCallId,
-          sourceSessionId,
-          timeout: Number(payload.timeout || 300),
-          createdAt: Date.now(),
-          toolName: String(payload.tool_name || ''),
-          riskLevel: String(payload.risk_level || 'high'),
-          arguments: (payload.arguments || {}) as Record<string, unknown>,
-        });
+        // 不再弹出 InteractionDialog，改为通知卡片处理
         setIsTyping(true);
+        console.log('[NotificationCard] pushing tool_confirmation card:', toolCallId, payload.tool_name);
+        pushCard({
+          id: `confirm_${toolCallId}`,
+          kind: 'tool_confirmation',
+          title: '需要授权',
+          body: `工具 "${payload.tool_name}" 需要你的确认才能执行`,
+          level: 'warning',
+          source: 'tool',
+          sessionId: sourceSessionId,
+          interactionId: toolCallId,
+          actions: [
+            { label: '批准', value: 'approve' },
+            { label: '拒绝', value: 'deny' },
+          ],
+        });
         break;
       }
       case 'user_question_asked': {
@@ -495,19 +533,22 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         if (!questionId || !sourceSessionId) break;
         const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
         const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
-        enqueueInteraction({
-          kind: 'question',
-          interactionId: questionId,
-          sourceSessionId,
-          sourceAgentId,
-          sourceAgentName,
-          question: String(payload.question || ''),
-          options: Array.isArray(payload.options) ? payload.options.map(String) : null,
-          multiSelect: Boolean(payload.multi_select),
-          timeout: Number(payload.timeout || 300),
-          createdAt: Date.now(),
-        });
+        // 不再弹出 InteractionDialog，改为通知卡片处理
         setIsTyping(true);
+        const questionOptions = Array.isArray(payload.options)
+          ? payload.options.map((o: unknown) => ({ label: String(o), value: String(o) }))
+          : undefined;
+        pushCard({
+          id: `question_${questionId}`,
+          kind: 'user_question',
+          title: `${sourceAgentName} 需要你的回复`,
+          body: String(payload.question || '请做出选择'),
+          level: 'info',
+          source: sourceAgentName,
+          sessionId: sourceSessionId,
+          interactionId: questionId,
+          actions: questionOptions,
+        });
         break;
       }
       case 'user_question_answered_event': {
@@ -607,6 +648,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     }
   }, []);
 
+  const switchedSessionRef = useRef(false);
   const getCurrentSessionAgentId = useCallback(() => {
     const activeSessionId = sessionIdRef.current;
     if (!activeSessionId) return null;
@@ -616,6 +658,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   }, [sessions]);
 
   const switchSession = useCallback(async (sid: string) => {
+    switchedSessionRef.current = true;
     doCleanupEmptySession(sid);
     await reloadSessionHistory(sid);
   }, [reloadSessionHistory, doCleanupEmptySession]);
@@ -658,6 +701,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   }, [startNewChat]);
 
   const resetIfNeeded = useCallback(() => {
+    // 如果是通过 switchSession 跳转过来的，保留会话不重置
+    if (switchedSessionRef.current) {
+      switchedSessionRef.current = false;
+      return;
+    }
     startNewChat();
   }, [startNewChat]);
 

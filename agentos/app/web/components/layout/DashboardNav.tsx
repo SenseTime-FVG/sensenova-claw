@@ -11,6 +11,7 @@ import { useChatSession } from '@/contexts/ChatSessionContext';
 const mainNavItems = [
   { path: '/', label: '工作台', exact: true },
   { path: '/chat', label: '消息' },
+  { path: '/office', label: '办公室' },
 ];
 
 export type SubNavGroup = 'features' | 'admin' | null;
@@ -22,7 +23,7 @@ export const builtinFeatureNavItems = [
 ];
 
 export const adminNavItems = [
-  { path: '/agents', label: 'Dashboard' },
+  { path: '/agents', label: 'Agents' },
   { path: '/sessions', label: 'Sessions' },
   { path: '/llms', label: 'LLMs' },
   { path: '/gateway', label: 'Gateway' },
@@ -84,7 +85,7 @@ export function DashboardNav({
 
   return (
     <nav
-      className={cn('flex items-center space-x-4 lg:space-x-6', className)}
+      className={cn('flex items-center gap-0.5', className)}
       {...props}
     >
       {mainNavItems.map((item) => (
@@ -93,19 +94,26 @@ export function DashboardNav({
           href={item.path}
           onClick={() => { if (isActive(item)) startNewChat(); }}
           className={cn(
-            'text-sm font-medium transition-colors hover:text-primary',
-            isActive(item) ? 'text-primary' : 'text-muted-foreground'
+            'px-3 py-1.5 text-[13px] font-medium rounded-lg transition-all duration-150',
+            isActive(item)
+              ? 'text-foreground bg-[var(--nav-pill-active)]'
+              : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
           )}
         >
           {item.label}
         </Link>
       ))}
 
+      {/* 分隔点 */}
+      <div className="w-1 h-1 rounded-full bg-border mx-1.5" />
+
       <button
         onClick={() => handleGroupClick('features')}
         className={cn(
-          'text-sm font-medium transition-colors hover:text-primary flex items-center gap-1',
-          showFeatures ? 'text-primary' : 'text-muted-foreground'
+          'px-3 py-1.5 text-[13px] font-medium rounded-lg transition-all duration-150 flex items-center gap-1.5',
+          showFeatures
+            ? 'text-primary bg-primary/8'
+            : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
         )}
       >
         <Zap className="h-3.5 w-3.5" />
@@ -121,8 +129,10 @@ export function DashboardNav({
       <button
         onClick={() => handleGroupClick('admin')}
         className={cn(
-          'text-sm font-medium transition-colors hover:text-primary flex items-center gap-1',
-          showAdmin ? 'text-primary' : 'text-muted-foreground'
+          'px-3 py-1.5 text-[13px] font-medium rounded-lg transition-all duration-150 flex items-center gap-1.5',
+          showAdmin
+            ? 'text-primary bg-primary/8'
+            : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
         )}
       >
         <Settings className="h-3.5 w-3.5" />

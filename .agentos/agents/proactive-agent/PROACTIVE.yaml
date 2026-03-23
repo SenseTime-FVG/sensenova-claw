@@ -1,0 +1,18 @@
+# Proactive Agent 任务定义
+# 在此定义定时/事件/条件触发的自主任务
+# 注意：实际 job 从 config.yml 的 proactive.jobs 加载，此文件仅作参考
+
+jobs: []
+# 示例:
+#  - name: "每日邮件摘要"
+#    trigger:
+#      kind: time
+#      cron: "0 9 * * *"
+#    task:
+#      prompt: "检查今日未读邮件，按重要程度分类，生成摘要报告"
+#      use_memory: false
+#    delivery:
+#      channels: ["web"]
+#    safety:
+#      allowed_tools: ["send_message", "fetch_url"]
+#      max_tool_calls: 30
