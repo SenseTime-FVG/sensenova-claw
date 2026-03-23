@@ -56,6 +56,15 @@ AGENT_MESSAGE_REQUESTED = "agent.message_requested"
 AGENT_MESSAGE_COMPLETED = "agent.message_completed"
 AGENT_MESSAGE_FAILED = "agent.message_failed"
 
+# Proactive 事件
+PROACTIVE_JOB_TRIGGERED = "proactive.job_triggered"
+PROACTIVE_JOB_STARTED = "proactive.job_started"
+PROACTIVE_JOB_COMPLETED = "proactive.job_completed"
+PROACTIVE_JOB_FAILED = "proactive.job_failed"
+PROACTIVE_JOB_SKIPPED = "proactive.job_skipped"
+PROACTIVE_CONDITION_EVALUATED = "proactive.condition_evaluated"
+PROACTIVE_RESULT = "proactive.result"
+
 # 会话生命周期事件
 SESSION_CREATED = "session.created"
 

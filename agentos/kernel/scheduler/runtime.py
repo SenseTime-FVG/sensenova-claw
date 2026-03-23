@@ -8,10 +8,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from agentos.platform.config.config import config
 from agentos.kernel.scheduler.models import (
+    AgentTurnPayload,
     AtSchedule,
     CronDelivery,
     CronJob,
@@ -23,6 +25,7 @@ from agentos.adapters.storage.repository import Repository
 from agentos.kernel.events.bus import PublicEventBus
 from agentos.kernel.events.envelope import EventEnvelope
 from agentos.kernel.events.types import (
+    AGENT_STEP_COMPLETED,
     CRON_DELIVERY_REQUESTED,
     CRON_JOB_ADDED,
     CRON_JOB_FINISHED,
@@ -37,6 +40,7 @@ from agentos.kernel.notification.models import Notification
 if TYPE_CHECKING:
     from agentos.interfaces.ws.gateway import Gateway
     from agentos.kernel.notification.service import NotificationService
+    from agentos.kernel.runtime.agent_runtime import AgentRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +58,13 @@ class CronRuntime:
         repo: Repository,
         gateway: Gateway | None = None,
         notification_service: NotificationService | None = None,
+        agent_runtime: AgentRuntime | None = None,
     ):
         self._bus = bus
         self._repo = repo
         self._gateway = gateway
         self._notification_service = notification_service
+        self._agent_runtime = agent_runtime
         self._running = False
         self._timer_task: asyncio.Task | None = None
         self._enabled = config.get("cron.enabled", True)
@@ -301,8 +307,7 @@ class CronRuntime:
             if job.session_target == "main":
                 await self._execute_main_session(job)
             else:
-                logger.warning("Isolated session 尚未实现 (Phase 2)，跳过 job %s", job.id)
-                raise NotImplementedError("Isolated session not yet supported")
+                await self._execute_isolated_session(job)
 
             # 成功
             end_ms = int(time.time() * 1000)
@@ -395,6 +400,68 @@ class CronRuntime:
                 source="cron",
                 payload={"reason": f"cron_job:{job.id}", "text": text},
             ))
+
+    async def _execute_isolated_session(self, job: CronJob) -> None:
+        """隔离会话执行：创建独立 Agent 会话，注入消息，等待完成。"""
+        if not self._agent_runtime:
+            raise RuntimeError("agent_runtime 未注入，无法执行隔离会话")
+
+        payload = job.payload
+        if not isinstance(payload, AgentTurnPayload):
+            raise TypeError(f"隔离会话需要 AgentTurnPayload，实际为 {type(payload).__name__}")
+
+        agent_id = payload.agent_id or "default"
+        message = payload.message
+        timeout = payload.timeout_seconds or 300
+        session_id = f"cron_{job.id}_{uuid.uuid4().hex[:8]}"
+
+        logger.info(
+            "Cron isolated session: job=%s agent=%s session=%s timeout=%ds",
+            job.id, agent_id, session_id, timeout,
+        )
+
+        # 订阅公共总线，等待目标 session 的 agent.step_completed
+        queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
+        self._bus._subscribers.add(queue)
+
+        try:
+            # 创建会话并注入 user.input
+            await self._agent_runtime.spawn_agent_session(
+                agent_id=agent_id,
+                session_id=session_id,
+                user_input=message,
+            )
+
+            # 等待 AGENT_STEP_COMPLETED 事件（按 session_id 过滤）
+            result = await self._wait_for_completion(queue, session_id, timeout)
+
+            logger.info("Cron isolated session completed: job=%s session=%s", job.id, session_id)
+
+            # 投递结果
+            result_text = result.get("content", "") or result.get("text", "")
+            if result_text and self._gateway:
+                await self._deliver_text(job, result_text)
+            if result_text:
+                await self._send_delivery_notifications(job, result_text)
+
+        except asyncio.TimeoutError:
+            logger.warning("Cron isolated session timed out: job=%s session=%s", job.id, session_id)
+            raise TimeoutError(f"隔离会话超时 ({timeout}s): agent={agent_id}")
+        finally:
+            self._bus._subscribers.discard(queue)
+
+    async def _wait_for_completion(
+        self, queue: asyncio.Queue[EventEnvelope], session_id: str, timeout: float
+    ) -> dict[str, Any]:
+        """从事件队列中等待指定 session 的 AGENT_STEP_COMPLETED 事件。"""
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            event = await asyncio.wait_for(queue.get(), timeout=remaining)
+            if event.type == AGENT_STEP_COMPLETED and event.session_id == session_id:
+                return event.payload
 
     async def _deliver_text(self, job: CronJob, text: str) -> None:
         """将 cron 文本直接投递到目标 channels"""

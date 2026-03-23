@@ -151,3 +151,21 @@ class TestAgentRegistry:
         })
         agent = r.get("test-agent")
         assert agent.system_prompt == "全局默认"
+
+    def test_get_sendable_includes_self_when_empty_whitelist(self):
+        """空 can_send_message_to 时，get_sendable 应包含自身（支持自我委派）"""
+        r = AgentRegistry()
+        r.register(AgentConfig.create(id="search", name="Search", can_send_message_to=[]))
+        r.register(AgentConfig.create(id="helper", name="Helper"))
+        sendable_ids = [a.id for a in r.get_sendable("search")]
+        assert "search" in sendable_ids
+        assert "helper" in sendable_ids
+
+    def test_get_sendable_explicit_whitelist_unchanged(self):
+        """显式 can_send_message_to 列表行为不变"""
+        r = AgentRegistry()
+        r.register(AgentConfig.create(id="main", name="M", can_send_message_to=["a"]))
+        r.register(AgentConfig.create(id="a", name="A"))
+        r.register(AgentConfig.create(id="b", name="B"))
+        sendable_ids = [a.id for a in r.get_sendable("main")]
+        assert sendable_ids == ["a"]
