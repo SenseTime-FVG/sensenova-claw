@@ -36,7 +36,12 @@ export function buildBackground(bgIR) {
     // 背景图片 url(...)
     const urlMatch = backgroundImage.match(/url\(["']?([^"')]+)["']?\)/);
     if (urlMatch) {
-      return { path: urlMatch[1] };
+      let imgPath = urlMatch[1];
+      // 浏览器会把相对路径解析为 file:// URL，需要还原为文件系统路径
+      if (imgPath.startsWith('file://')) {
+        imgPath = imgPath.slice(7); // 去掉 'file://'
+      }
+      return { path: imgPath };
     }
   }
 
@@ -190,6 +195,10 @@ export function buildImageElement(node, deckDir) {
 
   // 解析图片路径
   let imgPath = node.src;
+  // 浏览器可能把相对路径解析为 file:// URL，需要还原为文件系统路径
+  if (imgPath.startsWith('file://')) {
+    imgPath = imgPath.slice(7);
+  }
   if (!imgPath.startsWith('/')) {
     imgPath = resolve(deckDir, 'pages', imgPath);
   }
