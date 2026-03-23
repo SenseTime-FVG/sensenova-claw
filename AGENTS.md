@@ -964,3 +964,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 同类错误容易同时出现在 `Tabs`、`Separator`、`ScrollArea` 等多个基础组件中；只修单页通常会留下第二处同源问题。
+
+### 2026-03-23 Windows 原生通知修复补充
+
+成功经验：
+- Windows 下 `ToastNotificationManager.CreateToastNotifier(appId)` 不能只传任意字符串；若开始菜单里不存在同一 `AppUserModelID` 的快捷方式，PowerShell 即使返回成功，系统通知也可能完全不显示。
+- 对 PowerShell 通知脚本，改用 `-EncodedCommand` 比直接 `-Command` 稳定得多，能避免 XML、引号、`$` 和换行内容在通知正文里被二次解析。
+- 当前 Windows 环境里，新的通知脚本可真实执行并返回 `0`，同时成功创建 `AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\AgentOS Notifications.lnk`；通知单测可通过 `uv run --extra dev python -m pytest tests/unit/test_notification_service.py` 稳定回归。
+
+失败/风险经验：
+- 当前自动化只能确认“脚本执行成功 + 快捷方式落盘 + 返回码正常”，无法直接断言用户桌面一定已经弹出可见通知；最终显示仍受 Windows 通知权限、专注助手和实际交互桌面会话影响。
