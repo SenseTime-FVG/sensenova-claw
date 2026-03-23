@@ -749,3 +749,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前环境仍无法直接跑 pytest：`.venv` 缺少 `pytest`，`uv run python -m pytest` 又会在 `system-configuration` 依赖层 panic；完成修改后需要至少补做 `python3` 级函数断言和 `py_compile` 校验，并在完整依赖环境复跑正式单测。
+
+### 2026-03-23 /agents 创建模型下拉补充
+
+成功经验：
+- `/agents` 创建弹窗与 `/agents/[id]` 编辑页若都需要模型列表，最省事的做法是统一复用 `/api/config/sections` 中的 `llm.models/default_model`，前端直接按 key 生成下拉，无需新增专门接口。
+- 这类“把输入框改成选择框”的前端改动，最高价值的 Playwright 断言是“默认值来自 `default_model` + 提交请求体带上用户选中的 model”，比只看界面上出现选项更能锁住真实行为。
+- 当前仓库跑前端 e2e 时，若 `playwright.config.ts` 的 `webServer.command` 会触发根目录 `npm run dev`，可以先保证 3000 端口已有服务，再用 `reuseExistingServer` 跳过那条启动链，避免把 `uv` 环境问题误判成页面失败。
+
+失败/风险经验：
+- 在当前环境下直接跑根目录联动启动仍可能触发 `uv` 的缓存权限或 `system-configuration` panic；前端回归若报在 `webServer` 启动阶段，先区分是页面断言失败还是基础启动链失败。
