@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from agentos.platform.config.config import config
 from agentos.platform.logging.setup import setup_logging
+from agentos.capabilities.miniapps.service import MiniAppService
 from agentos.kernel.scheduler.runtime import CronRuntime
 from agentos.kernel.scheduler.tool import CronTool
 from agentos.adapters.storage.repository import Repository
@@ -148,6 +149,13 @@ async def lifespan(app: FastAPI):
     agent_registry = AgentRegistry(agentos_home=agentos_home)
     agent_registry.load_from_config(config.data)
 
+    custom_page_service = MiniAppService(
+        agentos_home=agentos_home_str,
+        config=config,
+        agent_registry=agent_registry,
+    )
+    await custom_page_service.restore_dedicated_agents()
+
     # 为所有已注册 agent 初始化 per-agent workspace 和 workdir
     for agent_cfg in agent_registry.list_all():
         await ensure_agent_workspace(agentos_home_str, agent_cfg.id)
@@ -221,6 +229,7 @@ async def lifespan(app: FastAPI):
     title_runtime = TitleRuntime(bus=bus, repo=repo, agent_registry=agent_registry)
 
     gateway = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
+    custom_page_service.gateway = gateway
 
     # v1.0: 注册 Agent-to-Agent 消息工具
     if config.get("delegation.enabled", True):
@@ -303,6 +312,7 @@ async def lifespan(app: FastAPI):
     app.state.agentos_home = agentos_home_str
     app.state.market_service = market_service
     app.state.config_manager = config_manager
+    app.state.custom_page_service = custom_page_service
 
     # 注册认证路由
     auth_router = create_auth_router(auth_service=auth_service)

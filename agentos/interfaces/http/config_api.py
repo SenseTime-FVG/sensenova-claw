@@ -79,9 +79,9 @@ async def migrate_secrets(request: Request):
 
 @router.get("/sections")
 async def get_config_sections(request: Request):
-    """返回 llm / agent / plugins 三个 section 的当前值"""
+    """返回 llm / agent / plugins / miniapps 四个 section 的当前值"""
     config_manager = request.app.state.config_manager
-    default_sections = ["llm", "agent", "plugins"]
+    default_sections = ["llm", "agent", "plugins", "miniapps"]
     return config_manager.get_sections(default_sections)
 
 

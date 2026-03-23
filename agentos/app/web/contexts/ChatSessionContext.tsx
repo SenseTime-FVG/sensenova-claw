@@ -334,7 +334,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const content = String(payload.content || '');
         const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
         const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
-        if (content || thinkingContent) {
+        const hasToolCalls = Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0;
+        // 有内容、有思考过程、或有工具调用时，都创建 assistant 消息
+        // 确保工具调用前的思考过程不会丢失
+        if (content || thinkingContent || hasToolCalls) {
           upsertAssistantMessage({
             turnId,
             content,

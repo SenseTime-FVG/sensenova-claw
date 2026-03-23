@@ -56,7 +56,7 @@ interface DashboardLayoutProps {
   children: ReactNode;
 }
 
-const ADMIN_PATHS = ['/agents', '/sessions', '/llms', '/gateway', '/tools', '/skills'];
+const ADMIN_PATHS = ['/agents', '/sessions', '/llms', '/gateway', '/tools', '/skills', '/settings', '/acp'];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
