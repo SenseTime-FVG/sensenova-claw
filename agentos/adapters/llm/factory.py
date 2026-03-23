@@ -53,6 +53,7 @@ class LLMFactory:
                 self._lazy[name] = factory
 
     def get_provider(self, provider_name: str | None = None) -> LLMProvider:
+        requested_provider = provider_name
         if not provider_name:
             provider_name, _ = config.resolve_model()
 
@@ -72,6 +73,9 @@ class LLMFactory:
             provider = self._PROVIDER_FACTORIES[provider_name]()
             self._providers[provider_name] = provider
             return provider
+
+        if requested_provider:
+            raise RuntimeError(f"LLM provider '{provider_name}' 未配置或当前不可用")
 
         return self._providers["mock"]
 

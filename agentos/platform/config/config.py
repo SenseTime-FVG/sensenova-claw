@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 from agentos.platform.secrets.refs import is_secret_ref, parse_secret_ref
-from agentos.platform.secrets.store import KeyringSecretStore
+from agentos.platform.secrets.store import KeyringSecretStore, SecretStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -473,7 +473,11 @@ class Config:
                 logger.warning("secret store 不可用，跳过解析 %s", value)
                 return ""
             ref = parse_secret_ref(value)
-            secret = self._secret_store.get(ref)
+            try:
+                secret = self._secret_store.get(ref)
+            except SecretStoreError as exc:
+                logger.warning("secret 读取失败，跳过解析 %s: %s", value, exc)
+                return ""
             return secret or ""
         pattern = re.compile(r"\$\{([^}]+)\}")
         for env_name in pattern.findall(value):

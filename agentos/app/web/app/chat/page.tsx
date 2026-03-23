@@ -237,6 +237,32 @@ function ChatContent() {
     : [];
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
+  const currentSessionAgentId = useMemo(() => {
+    if (!currentSessionId) return null;
+    const currentSession = sessions.find((session) => session.session_id === currentSessionId);
+    return currentSession ? getAgentId(currentSession.meta) : null;
+  }, [currentSessionId, sessions]);
+
+  useEffect(() => {
+    if (!selectedAgentId || !currentSessionId) return;
+    if (currentSessionAgentId === selectedAgentId) return;
+
+    if (selectedSessions.length > 0) {
+      void switchSession(selectedSessions[0].session_id);
+      return;
+    }
+
+    startNewChat();
+    createSession(selectedAgentId);
+  }, [
+    createSession,
+    currentSessionAgentId,
+    currentSessionId,
+    selectedAgentId,
+    selectedSessions,
+    startNewChat,
+    switchSession,
+  ]);
 
   const filteredAgents = searchQuery.trim()
     ? agents.filter(a =>
