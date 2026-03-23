@@ -204,13 +204,14 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
     if (eventType === 'agent.step_completed') {
       const response = String(payload.final_response || '') || String(((payload.result as Record<string, unknown> | undefined)?.content) || '');
       if (response) {
-        // 查找最后一条 assistant 消息，如果内容相同则跳过（避免与 llm.call_result 重复）
+        // 查找最后一条 assistant 消息，避免与 llm.call_result 重复
         let lastAssistantIdx = -1;
         for (let i = rebuilt.length - 1; i >= 0; i--) {
           if (rebuilt[i].role === 'assistant') { lastAssistantIdx = i; break; }
         }
         if (lastAssistantIdx !== -1 && rebuilt[lastAssistantIdx].content === response) {
-          // 已有相同内容的 assistant 消息，跳过
+          // 内容相同，只折叠思考状态
+          rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], thinkingState: rebuilt[lastAssistantIdx].thinkingContent ? 'collapsed' : undefined };
         } else if (lastAssistantIdx !== -1 && !rebuilt[lastAssistantIdx].content) {
           // 最后一条 assistant 消息内容为空（可能是中间轮次），更新它
           rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], content: response };
