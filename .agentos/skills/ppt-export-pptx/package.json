@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/test_style_parser.mjs test/test_pptx_builder.mjs"
   },
   "dependencies": {
     "pptxgenjs": "^3.12.0",
