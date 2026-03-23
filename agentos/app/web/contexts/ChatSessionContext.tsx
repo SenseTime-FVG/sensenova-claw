@@ -30,6 +30,16 @@ const BYPASS_PATHS = ['/login', '/setup'];
 
 // ── Context 值类型 ──
 
+/** 全局 agent 工作状态（跨会话） */
+export interface GlobalAgentActivity {
+  /** 是否有任意 agent 正在工作 */
+  anyWorking: boolean;
+  /** 正在工作的 session id 集合 */
+  workingSessionIds: Set<string>;
+  /** 最近一个正在执行的工具名（跨会话） */
+  lastToolName: string;
+}
+
 export interface ChatSessionContextValue {
   // 连接
   wsConnected: boolean;
@@ -71,6 +81,9 @@ export interface ChatSessionContextValue {
   // 斜杠命令
   handleSkillInvoke: (skillName: string, args: string) => void;
 
+  // 全局 agent 活动状态
+  globalActivity: GlobalAgentActivity;
+
   // 底层发送
   wsSend: (msg: Record<string, unknown>) => void;
 }
@@ -98,6 +111,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const [rightSteps, setRightSteps] = useState<StepItem[]>([]);
   const [rightTaskProgress, setRightTaskProgress] = useState<TaskProgressItem[]>([]);
   const toolStepMapRef = useRef<Map<string, number>>(new Map());
+
+  // 全局 agent 活动追踪（跨会话）
+  const [globalWorkingSessions, setGlobalWorkingSessions] = useState<Set<string>>(new Set());
+  const [globalLastToolName, setGlobalLastToolName] = useState('');
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -294,6 +311,26 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     const isGlobalInteractionEvent = eventType === 'tool_confirmation_requested'
       || eventType === 'user_question_asked'
       || eventType === 'user_question_answered_event';
+
+    // ── 全局 agent 活动追踪（在 session 过滤之前处理，跨会话） ──
+    if (incomingSessionId) {
+      if (eventType === 'agent_thinking') {
+        setGlobalWorkingSessions(prev => {
+          const next = new Set(prev);
+          next.add(incomingSessionId);
+          return next;
+        });
+      } else if (eventType === 'turn_completed' || eventType === 'turn_cancelled' || eventType === 'error') {
+        setGlobalWorkingSessions(prev => {
+          const next = new Set(prev);
+          next.delete(incomingSessionId);
+          return next;
+        });
+      } else if (eventType === 'tool_execution') {
+        setGlobalLastToolName(String(payload.tool_name || ''));
+      }
+    }
+
     if (incomingSessionId && sessionIdRef.current && incomingSessionId !== sessionIdRef.current && !isGlobalInteractionEvent) {
       return;
     }
@@ -825,6 +862,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     sendConfirmationResponse: sendConfirmationResponseFn,
     handleInteractionTimeout: handleInteractionTimeoutFn,
     handleSkillInvoke,
+    globalActivity: {
+      anyWorking: globalWorkingSessions.size > 0,
+      workingSessionIds: globalWorkingSessions,
+      lastToolName: globalLastToolName,
+    },
     wsSend,
   };
 

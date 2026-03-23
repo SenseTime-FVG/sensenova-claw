@@ -15,7 +15,7 @@ export const LAYOUT = {
     sofa: { x: 670, y: 144, origin: { x: 0, y: 0 }, depth: 10 },
     desk: { x: 218, y: 417, origin: { x: 0.5, y: 0.5 }, depth: 1000 },
     flower: { x: 310, y: 390, origin: { x: 0.5, y: 0.5 }, depth: 1100, scale: 0.8 },
-    starWorking: { x: 217, y: 333, origin: { x: 0.5, y: 0.5 }, depth: 900, scale: 1.32 },
+    starWorking: { x: 217, y: 333, origin: { x: 0.5, y: 0.5 }, depth: 900, scale: 0.3 },
     plants: [
       { x: 565, y: 178, depth: 5 },
       { x: 230, y: 185, depth: 5 },

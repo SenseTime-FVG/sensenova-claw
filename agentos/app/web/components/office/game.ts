@@ -32,7 +32,7 @@ export class OfficeScene extends Phaser.Scene {
     this.load.image('office_bg', `${base}/office_bg_small.webp`);
     // 主角
     this.load.spritesheet('star_idle', `${base}/icon.png`, { frameWidth: 256, frameHeight: 256 });
-    this.load.spritesheet('star_working', `${base}/star-working-spritesheet-grid.webp`, { frameWidth: 230, frameHeight: 144 });
+    this.load.spritesheet('star_working', `${base}/icon.png`, { frameWidth: 256, frameHeight: 256 });
     // 家具
     this.load.image('sofa_idle', `${base}/sofa-idle-v3.png`);
     this.load.image('desk', `${base}/desk-v3.webp`);
@@ -59,8 +59,8 @@ export class OfficeScene extends Phaser.Scene {
     // 主角 idle 精灵（沙发上休息）
     this.anims.create({
       key: 'star_idle',
-      frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 47 }),
-      frameRate: 8, repeat: -1,
+      frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 0 }),
+      frameRate: 1, repeat: -1,
     });
     // 放在沙发座面上
     this.star = this.physics.add.sprite(780, 250, 'star_idle')
@@ -70,8 +70,8 @@ export class OfficeScene extends Phaser.Scene {
     // 工作动画精灵（桌前，初始隐藏）
     this.anims.create({
       key: 'star_working',
-      frames: this.anims.generateFrameNumbers('star_working', { start: 0, end: 99 }),
-      frameRate: 12, repeat: -1,
+      frames: this.anims.generateFrameNumbers('star_working', { start: 0, end: 0 }),
+      frameRate: 1, repeat: -1,
     });
     const sw = LAYOUT.furniture.starWorking;
     this.starWorking = this.add.sprite(sw.x, sw.y, 'star_working', 0)
