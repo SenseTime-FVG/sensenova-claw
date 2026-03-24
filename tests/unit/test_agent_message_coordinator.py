@@ -11,6 +11,8 @@ from sensenova_claw.kernel.events.types import (
     AGENT_MESSAGE_REQUESTED,
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
+    LLM_CALL_REQUESTED,
+    TOOL_CALL_COMPLETED,
     USER_TURN_CANCEL_REQUESTED,
 )
 from sensenova_claw.kernel.runtime.agent_message_coordinator import AgentMessageCoordinator
@@ -269,4 +271,63 @@ class TestAgentMessageCoordinator:
         assert record is not None
         assert record.status == "timed_out"
         assert payload["status"] == "timed_out"
+        await coordinator.stop()
+
+    async def test_heartbeat_resets_timeout(self, test_repo):
+        """子 Agent 有心跳时不应超时"""
+        bus = PublicEventBus()
+        runtime = _FakeAgentRuntime()
+        coordinator = AgentMessageCoordinator(
+            bus=bus, repo=test_repo, agent_runtime=runtime,
+        )
+        await coordinator.start()
+        await asyncio.sleep(0)  # let event loop subscribe
+        waiter = coordinator.register_sync_waiter("record_hb")
+
+        await bus.publish(EventEnvelope(
+            type=AGENT_MESSAGE_REQUESTED,
+            session_id="parent",
+            trace_id="record_hb",
+            payload={
+                "record_id": "record_hb",
+                "target_id": "helper",
+                "message": "心跳任务",
+                "mode": "sync",
+                "depth": 1,
+                "send_chain": ["default"],
+                "parent_session_id": "parent",
+                "timeout_seconds": 0.3,
+                "max_retries": 0,
+            },
+        ))
+        await asyncio.sleep(0.1)  # let coordinator process event
+
+        record = await test_repo.get_message_record("record_hb")
+        assert record is not None
+        child_sid = record.child_session_id
+
+        # Send heartbeats before timeout expires (every 0.15s, 3 times = 0.45s > timeout 0.3s)
+        for _ in range(3):
+            await asyncio.sleep(0.15)
+            await bus.publish(EventEnvelope(
+                type=LLM_CALL_REQUESTED,
+                session_id=child_sid,
+                payload={},
+            ))
+
+        # Wait a bit more to confirm no timeout
+        await asyncio.sleep(0.1)
+        record = await test_repo.get_message_record("record_hb")
+        assert record is not None
+        assert record.status == "running", f"Expected running but got {record.status}"
+
+        # Manually complete
+        await bus.publish(EventEnvelope(
+            type=AGENT_STEP_COMPLETED,
+            session_id=child_sid,
+            turn_id=record.active_turn_id,
+            payload={"result": {"content": "done"}},
+        ))
+        payload = await asyncio.wait_for(waiter, timeout=5)
+        assert payload["status"] == "completed"
         await coordinator.stop()

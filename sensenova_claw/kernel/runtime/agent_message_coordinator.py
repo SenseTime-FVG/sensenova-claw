@@ -14,7 +14,12 @@ from sensenova_claw.kernel.events.types import (
     AGENT_MESSAGE_REQUESTED,
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
+    LLM_CALL_COMPLETED,
+    LLM_CALL_REQUESTED,
     SESSION_CREATED,
+    TOOL_CALL_COMPLETED,
+    TOOL_CALL_REQUESTED,
+    USER_QUESTION_ASKED,
     USER_TURN_CANCEL_REQUESTED,
 )
 from sensenova_claw.kernel.runtime.message_record import MessageRecord
@@ -32,6 +37,12 @@ class AgentMessageCoordinator:
 
     FINAL_STATUSES = {"completed", "failed", "cancelled", "timed_out"}
 
+    HEARTBEAT_TYPES = {
+        LLM_CALL_REQUESTED, LLM_CALL_COMPLETED,
+        TOOL_CALL_REQUESTED, TOOL_CALL_COMPLETED,
+        USER_QUESTION_ASKED,
+    }
+
     def __init__(
         self,
         bus: PublicEventBus,
@@ -48,6 +59,7 @@ class AgentMessageCoordinator:
         self._child_session_index: dict[str, str] = {}
         self._timeout_tasks: dict[str, asyncio.Task] = {}
         self._retry_tasks: dict[str, asyncio.Task] = {}
+        self._last_heartbeat: dict[str, float] = {}
 
     async def start(self) -> None:
         self._agent_runtime.bus_router.on_destroy(self._on_session_destroy)
@@ -147,6 +159,11 @@ class AgentMessageCoordinator:
                     await self._handle_child_failed(event)
                 elif event.type == USER_TURN_CANCEL_REQUESTED:
                     await self._handle_cancel_requested(event)
+                # 心跳续期（独立 if，不与上面 elif 冲突）
+                if event.type in self.HEARTBEAT_TYPES:
+                    record_id = self._child_session_index.get(event.session_id)
+                    if record_id and record_id in self._last_heartbeat:
+                        self._last_heartbeat[record_id] = time.time()
             except Exception:  # noqa: BLE001
                 logger.exception("AgentMessageCoordinator 处理事件失败")
 
@@ -275,6 +292,7 @@ class AgentMessageCoordinator:
         record.status = "running"
         record.active_turn_id = turn_id
         await self._repo.update_message_record(record)
+        self._last_heartbeat[record.id] = time.time()
         self._ensure_timeout_watch(record)
 
     async def _handle_child_completed(self, event: EventEnvelope) -> None:
@@ -463,18 +481,24 @@ class AgentMessageCoordinator:
         )
 
     async def _timeout_after(self, record_id: str, timeout_seconds: float) -> None:
+        """心跳无活动超时检查：循环检查 last_heartbeat，超过 timeout 才触发超时。"""
+        interval = min(max(timeout_seconds / 3, 0.05), 30)
         try:
-            await asyncio.sleep(timeout_seconds)
-            record = await self._repo.get_message_record(record_id)
-            if not record or record.status in self.FINAL_STATUSES:
-                return
-            await self.cancel_message(
-                record_id=record_id,
-                reason=f"send_message 总超时（{timeout_seconds} 秒）",
-                status="timed_out",
-                propagate_to_child=True,
-                source_session_id=record.parent_session_id or None,
-            )
+            while True:
+                await asyncio.sleep(interval)
+                record = await self._repo.get_message_record(record_id)
+                if not record or record.status in self.FINAL_STATUSES:
+                    return
+                last_hb = self._last_heartbeat.get(record_id, 0)
+                if time.time() - last_hb > timeout_seconds:
+                    await self.cancel_message(
+                        record_id=record_id,
+                        reason=f"send_message 无活动超时（{timeout_seconds} 秒）",
+                        status="timed_out",
+                        propagate_to_child=True,
+                        source_session_id=record.parent_session_id or None,
+                    )
+                    return
         except asyncio.CancelledError:
             raise
         finally:
@@ -519,6 +543,8 @@ class AgentMessageCoordinator:
             record.status = "running"
             record.active_turn_id = turn_id
             await self._repo.update_message_record(record)
+            self._last_heartbeat[record.id] = time.time()
+            self._ensure_timeout_watch(record)
             logger.info(
                 "agent_message retry started record=%s child_session=%s turn=%s attempt=%s/%s",
                 record.id,
@@ -639,6 +665,7 @@ class AgentMessageCoordinator:
     def _cancel_record_tasks(self, record_id: str) -> None:
         self._cancel_timeout_task(record_id)
         self._cancel_retry_task(record_id)
+        self._last_heartbeat.pop(record_id, None)
 
     def _cancel_timeout_task(self, record_id: str) -> None:
         task = self._timeout_tasks.pop(record_id, None)
