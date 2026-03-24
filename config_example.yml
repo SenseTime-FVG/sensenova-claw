@@ -223,6 +223,12 @@ tools:
     timeout: 15
     max_results: 10
 
+  image_search:
+    enabled: true
+    api_key: ""   # 留空时复用 SERPER_API_KEY 也可
+    timeout: 30
+    top_k: 10
+
 # Skills 配置
 skills:
   extra_dirs: []
