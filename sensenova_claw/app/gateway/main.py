@@ -265,6 +265,8 @@ async def lifespan(app: FastAPI):
             coordinator=agent_message_coordinator,
             timeout=float(config.get("delegation.default_timeout", 300)),
             default_max_retries=int(config.get("delegation.retry.max_retries", 0)),
+            max_tool_calls=int(config.get("delegation.max_tool_calls", 30)),
+            max_llm_calls=int(config.get("delegation.max_llm_calls", 15)),
         )
         tool_registry.register(send_message_tool)
 

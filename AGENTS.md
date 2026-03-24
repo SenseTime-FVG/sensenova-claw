@@ -594,6 +594,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 如果在 `AGENTS.md` 里继续硬编码 `tools`、`can_delegate_to` 之类清单，文案很容易和真实运行时配置漂移，后续维护成本会越来越高。
 - 强执行型 prompt 如果不显式加入”无重要变化时保持简洁””不要为了显得主动而主动”等约束，很容易把主动推送写成高频、低信息量的噪音输出。
 
+### 2026-03-24 Uvicorn 关闭噪音补充
+
+成功经验：
+- 当堆栈同时出现 `uvicorn.server.capture_signals -> signal.raise_signal(...) -> asyncio.runners._on_sigint -> KeyboardInterrupt`，并伴随 `starlette`/`uvicorn.lifespan.on.receive_queue.get()` 的 `CancelledError` 时，优先判断为”收到 SIGINT/SIGTERM 后的关闭链路”，不应先怀疑业务代码抛异常。
+- 判断是否是业务层 shutdown 真失败，最直接的方法是看堆栈里是否落到项目自己的 `lifespan finally` 清理代码；如果只有框架内部 `receive()`/`capture_signals()`，通常只是退出时的噪音日志。
+- 根目录 `npm run dev` 实际会走 `agentos.app.main` 的父进程监管逻辑；当前端退出、父进程收到 `Ctrl+C`，或 IDE 停止按钮终止父进程时，父进程会反向 `terminate()` 后端，后端打印这类信号关闭堆栈是符合预期的。
+
+失败/风险经验：
+- `uvicorn --reload` 会让”父进程/重载进程/工作进程”的信号传播更绕；如果只盯着后端最后那条 `CancelledError`，很容易误判为服务内部 bug，而忽略真正先退出的是前端、父进程或外层进程管理器。
+
 ### 2026-03-20 飞书 Wiki token 兼容修复补充
 
 成功经验：
@@ -1094,6 +1104,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前仓库把 `.next/` 产物纳入版本管理，调试前端路由时很容易产生大量噪音改动；完成后需要显式回退 `.next/`，只保留真实源码变更。
 
+### 2026-03-24 Proactive Agent Prompt 收敛补充
+
+成功经验：
+- 对这类“runtime 自动触发 + 用户直聊”双入口 agent，`SYSTEM_PROMPT.md` 最适合承载硬规则、判断顺序和执行协议，`AGENTS.md` 更适合承载角色边界、默认协作策略和风格偏好；两者分层清楚后，提示词更稳也更容易维护。
+- Prompt 文案应尽量贴真实运行时能力来写，例如 proactive 当前稳定支持的是 `time/event` 触发，以及 `list/create/enable/disable/delete` 管理动作；把不存在的“条件触发”“字段级 update”写进 prompt，只会让模型产生幻觉。
+- 对这类 prompt-only 改动，跑 `./.venv/bin/python -m pytest tests/unit/test_agent_registry.py` 作为最小回归很高效，能快速确认 `SYSTEM_PROMPT.md` 的加载链路未被破坏。
+
+失败/风险经验：
+- 当前 `proactive` 任务虽然支持 `system_prompt_override` 元数据注入，但是否在完整消息构建链路中被最终消费，仍需后续单独核查；不能仅凭字段存在就默认该能力已稳定可用。
 ### 2026-03-24 setup 跳过按钮补充
 
 成功经验：

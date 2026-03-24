@@ -15,7 +15,7 @@ def mock_runtime():
     rt.add_job = AsyncMock()
     rt.remove_job = AsyncMock()
     rt.set_job_enabled = AsyncMock()
-    rt.list_jobs = MagicMock(return_value=[])
+    rt.list_jobs = AsyncMock(return_value=[])
     return rt
 
 
