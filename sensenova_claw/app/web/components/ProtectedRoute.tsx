@@ -7,6 +7,14 @@ import { authGet, API_BASE } from '@/lib/authFetch';
 
 // 不拦截的路径（登录页和配置引导页）
 const BYPASS_PATHS = ['/login', '/setup'];
+const AUTH_JUST_VERIFIED_KEY = 'auth_just_verified';
+const LLM_SETUP_SKIPPED_KEY = 'llm_setup_skipped';
+const LLM_JUST_CONFIGURED_KEY = 'llm_just_configured';
+
+function hasSessionFlag(key: string): boolean {
+  if (typeof window === 'undefined') return false;
+  return sessionStorage.getItem(key) === '1';
+}
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -16,13 +24,20 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   // LLM 配置检查状态
   const [llmChecked, setLlmChecked] = useState(false);
   const [llmConfigured, setLlmConfigured] = useState(true);
+  const authJustVerified = hasSessionFlag(AUTH_JUST_VERIFIED_KEY);
 
   // 未认证时重定向到登录页
   useEffect(() => {
-    if (!isLoading && !isAuthenticated && !BYPASS_PATHS.includes(pathname)) {
+    if (!isLoading && isAuthenticated && authJustVerified) {
+      sessionStorage.removeItem(AUTH_JUST_VERIFIED_KEY);
+    }
+  }, [authJustVerified, isAuthenticated, isLoading]);
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated && !authJustVerified && !BYPASS_PATHS.includes(pathname)) {
       router.push('/login');
     }
-  }, [isAuthenticated, isLoading, pathname, router]);
+  }, [authJustVerified, isAuthenticated, isLoading, pathname, router]);
 
   // 已认证时检查 LLM 配置状态
   useEffect(() => {
@@ -35,9 +50,15 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     const checkLlmConfig = async () => {
       try {
         // Setup 刚完成时跳过检查，避免因 secret store 延迟导致误跳回
-        const justConfigured = sessionStorage.getItem('llm_just_configured');
-        if (justConfigured) {
-          sessionStorage.removeItem('llm_just_configured');
+        if (hasSessionFlag(LLM_JUST_CONFIGURED_KEY)) {
+          sessionStorage.removeItem(LLM_JUST_CONFIGURED_KEY);
+          setLlmConfigured(true);
+          setLlmChecked(true);
+          return;
+        }
+
+        // 用户明确选择“稍后配置”后，在当前浏览器会话内不再强制打回 setup
+        if (hasSessionFlag(LLM_SETUP_SKIPPED_KEY)) {
           setLlmConfigured(true);
           setLlmChecked(true);
           return;
@@ -75,7 +96,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   }
 
   // 未认证且不在 bypass 路径，显示跳转中
-  if (!isAuthenticated && !BYPASS_PATHS.includes(pathname)) {
+  if (!isAuthenticated && !authJustVerified && !BYPASS_PATHS.includes(pathname)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
