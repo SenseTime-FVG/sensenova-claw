@@ -331,3 +331,192 @@ class TestAgentMessageCoordinator:
         payload = await asyncio.wait_for(waiter, timeout=5)
         assert payload["status"] == "completed"
         await coordinator.stop()
+
+    async def test_no_heartbeat_triggers_timeout(self, test_repo):
+        """子 Agent 无活动超过 timeout 应触发超时"""
+        bus = PublicEventBus()
+        runtime = _FakeAgentRuntime()
+        coordinator = AgentMessageCoordinator(
+            bus=bus, repo=test_repo, agent_runtime=runtime,
+        )
+        await coordinator.start()
+        await asyncio.sleep(0)  # let event loop subscribe
+        waiter = coordinator.register_sync_waiter("record_no_hb")
+
+        await bus.publish(EventEnvelope(
+            type=AGENT_MESSAGE_REQUESTED,
+            session_id="parent",
+            trace_id="record_no_hb",
+            payload={
+                "record_id": "record_no_hb",
+                "target_id": "helper",
+                "message": "无心跳任务",
+                "mode": "sync",
+                "depth": 1,
+                "send_chain": ["default"],
+                "parent_session_id": "parent",
+                "timeout_seconds": 0.3,
+                "max_retries": 0,
+            },
+        ))
+        # No heartbeats sent, wait for timeout
+        payload = await asyncio.wait_for(waiter, timeout=5)
+        assert payload["status"] == "timed_out"
+
+        record = await test_repo.get_message_record("record_no_hb")
+        assert record is not None
+        assert record.status == "timed_out"
+        await coordinator.stop()
+
+    async def test_heartbeat_cleanup_on_completion(self, test_repo):
+        """任务完成后 _last_heartbeat 应被清理"""
+        bus = PublicEventBus()
+        runtime = _FakeAgentRuntime()
+        coordinator = AgentMessageCoordinator(
+            bus=bus, repo=test_repo, agent_runtime=runtime,
+        )
+        await coordinator.start()
+        await asyncio.sleep(0)  # let event loop subscribe
+
+        await bus.publish(EventEnvelope(
+            type=AGENT_MESSAGE_REQUESTED,
+            session_id="parent",
+            trace_id="record_cleanup",
+            payload={
+                "record_id": "record_cleanup",
+                "target_id": "helper",
+                "message": "清理测试",
+                "mode": "async",
+                "depth": 1,
+                "send_chain": ["default"],
+                "parent_session_id": "parent",
+                "timeout_seconds": 30,
+                "max_retries": 0,
+            },
+        ))
+        await asyncio.sleep(0.1)
+        assert "record_cleanup" in coordinator._last_heartbeat
+
+        record = await test_repo.get_message_record("record_cleanup")
+        await bus.publish(EventEnvelope(
+            type=AGENT_STEP_COMPLETED,
+            session_id=record.child_session_id,
+            turn_id=record.active_turn_id,
+            payload={"result": {"content": "done"}},
+        ))
+        await asyncio.sleep(0.1)
+        assert "record_cleanup" not in coordinator._last_heartbeat
+        await coordinator.stop()
+
+    async def test_heartbeat_isolation_between_records(self, test_repo):
+        """两个并行 delegation，一个有心跳一个没有，验证互不影响"""
+        bus = PublicEventBus()
+        runtime = _FakeAgentRuntime()
+        coordinator = AgentMessageCoordinator(
+            bus=bus, repo=test_repo, agent_runtime=runtime,
+        )
+        await coordinator.start()
+        await asyncio.sleep(0)  # let event loop subscribe
+        waiter_a = coordinator.register_sync_waiter("record_a")
+
+        # Create record_a (short timeout, no heartbeat → should timeout)
+        await bus.publish(EventEnvelope(
+            type=AGENT_MESSAGE_REQUESTED,
+            session_id="parent",
+            trace_id="record_a",
+            payload={
+                "record_id": "record_a",
+                "target_id": "helper",
+                "message": "任务A",
+                "mode": "sync",
+                "depth": 1,
+                "send_chain": ["default"],
+                "parent_session_id": "parent",
+                "timeout_seconds": 0.3,
+                "max_retries": 0,
+            },
+        ))
+        await asyncio.sleep(0.05)
+
+        # Create record_b (longer timeout, with heartbeat → should NOT timeout)
+        await bus.publish(EventEnvelope(
+            type=AGENT_MESSAGE_REQUESTED,
+            session_id="parent2",
+            trace_id="record_b",
+            payload={
+                "record_id": "record_b",
+                "target_id": "helper",
+                "message": "任务B",
+                "mode": "async",
+                "depth": 1,
+                "send_chain": ["default"],
+                "parent_session_id": "parent2",
+                "timeout_seconds": 2.0,
+                "max_retries": 0,
+            },
+        ))
+        await asyncio.sleep(0.05)
+
+        record_b = await test_repo.get_message_record("record_b")
+        child_b = record_b.child_session_id
+
+        # Only send heartbeats to record_b
+        for _ in range(3):
+            await asyncio.sleep(0.15)
+            await bus.publish(EventEnvelope(
+                type=TOOL_CALL_COMPLETED,
+                session_id=child_b,
+                payload={},
+            ))
+
+        # record_a should have timed out
+        payload_a = await asyncio.wait_for(waiter_a, timeout=5)
+        assert payload_a["status"] == "timed_out"
+
+        # record_b should still be running
+        record_b = await test_repo.get_message_record("record_b")
+        assert record_b.status == "running"
+        await coordinator.stop()
+
+    async def test_unrelated_session_heartbeat_ignored(self, test_repo):
+        """非子 session 的心跳事件不应影响任何 record 的计时器"""
+        bus = PublicEventBus()
+        runtime = _FakeAgentRuntime()
+        coordinator = AgentMessageCoordinator(
+            bus=bus, repo=test_repo, agent_runtime=runtime,
+        )
+        await coordinator.start()
+        await asyncio.sleep(0)  # let event loop subscribe
+        waiter = coordinator.register_sync_waiter("record_unrelated")
+
+        await bus.publish(EventEnvelope(
+            type=AGENT_MESSAGE_REQUESTED,
+            session_id="parent",
+            trace_id="record_unrelated",
+            payload={
+                "record_id": "record_unrelated",
+                "target_id": "helper",
+                "message": "无关测试",
+                "mode": "sync",
+                "depth": 1,
+                "send_chain": ["default"],
+                "parent_session_id": "parent",
+                "timeout_seconds": 0.3,
+                "max_retries": 0,
+            },
+        ))
+        await asyncio.sleep(0.05)
+
+        # Send heartbeats from unrelated session
+        for _ in range(3):
+            await asyncio.sleep(0.15)
+            await bus.publish(EventEnvelope(
+                type=LLM_CALL_REQUESTED,
+                session_id="totally_unrelated_session",
+                payload={},
+            ))
+
+        # Should still timeout (unrelated heartbeats don't renew)
+        payload = await asyncio.wait_for(waiter, timeout=5)
+        assert payload["status"] == "timed_out"
+        await coordinator.stop()
