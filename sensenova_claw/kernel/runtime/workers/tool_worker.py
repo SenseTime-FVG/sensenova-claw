@@ -51,7 +51,7 @@ class ToolSessionWorker(SessionWorker):
         elif event.type == USER_QUESTION_ANSWERED:
             self._resolve_question(event)
 
-    def _truncate_result(self, result: Any, tool_call_id: str) -> Any:
+    def _truncate_result(self, result: Any, tool_call_id: str, agent_id: str | None = None) -> Any:
         """Token 截断：统一控制传给 LLM 的结果长度"""
         result_str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
 
@@ -62,13 +62,15 @@ class ToolSessionWorker(SessionWorker):
             return result
 
         save_dir = config.get("tools.result_truncation.save_dir", "workspace")
-        from sensenova_claw.platform.config.workspace import resolve_sensenova_claw_home
+        from sensenova_claw.platform.config.workspace import (
+            resolve_sensenova_claw_home,
+            resolve_session_artifact_dir,
+        )
         home = resolve_sensenova_claw_home(config)
         if save_dir == "workspace":
-            base_dir = home
+            session_dir = resolve_session_artifact_dir(home, self.session_id, agent_id=agent_id)
         else:
-            base_dir = Path(save_dir)
-        session_dir = base_dir / self.session_id
+            session_dir = resolve_session_artifact_dir(save_dir, self.session_id, agent_id=agent_id)
         session_dir.mkdir(parents=True, exist_ok=True)
 
         file_name = f"tool_result_{tool_call_id[:8]}_{uuid.uuid4().hex[:6]}.txt"
@@ -309,9 +311,8 @@ class ToolSessionWorker(SessionWorker):
         agent_workdir = event.payload.get("_agent_workdir")
         if agent_workdir:
             exec_kwargs["_agent_workdir"] = agent_workdir
-        exec_kwargs["_source_agent_id"] = (
-            str(event.payload.get("_source_agent_id") or event.agent_id or "").strip() or "default"
-        )
+        source_agent_id = str(event.payload.get("_source_agent_id") or event.agent_id or "").strip() or "default"
+        exec_kwargs["_source_agent_id"] = source_agent_id
         if event.turn_id:
             exec_kwargs["_turn_id"] = event.turn_id
         if tool_call_id:
@@ -324,7 +325,7 @@ class ToolSessionWorker(SessionWorker):
                 tool.execute(**exec_kwargs, _session_id=event.session_id),
                 timeout=timeout,
             )
-            result = self._truncate_result(result, tool_call_id)
+            result = self._truncate_result(result, tool_call_id, agent_id=source_agent_id)
         except Exception as exc:  # noqa: BLE001
             success = False
             error = str(exc).strip() or type(exc).__name__
