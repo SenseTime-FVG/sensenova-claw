@@ -171,7 +171,10 @@ function ChatContent() {
     sessions,
     messages,
     isTyping,
+    activeInteraction,
+    interactionSubmitting,
     sendMessage,
+    sendQuestionAnswer,
     switchSession,
     createSession,
     deleteSession,
@@ -381,8 +384,12 @@ function ChatContent() {
   };
 
   const handleSend = useCallback((content: string, contextFiles?: ContextFileRef[]) => {
+    if (activeInteraction?.kind === 'question') {
+      sendQuestionAnswer(content, false);
+      return;
+    }
     sendMessage(content, contextFiles, selectedAgentId || 'default');
-  }, [sendMessage, selectedAgentId]);
+  }, [activeInteraction, sendMessage, sendQuestionAnswer, selectedAgentId]);
 
   const handleSlashSubmit = useCallback(() => false, []);
 
@@ -582,7 +589,7 @@ function ChatContent() {
                 onSelectAgent={() => {}}
                 onSend={handleSend}
                 onSlashSubmit={handleSlashSubmit}
-                disabled={isTyping}
+                disabled={interactionSubmitting || activeInteraction?.kind === 'confirmation' || (isTyping && activeInteraction?.kind !== 'question')}
                 wsConnected={wsConnected}
                 handleSkillInvoke={handleSkillInvoke}
                 hideAgentSelector

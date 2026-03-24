@@ -160,6 +160,37 @@ class TestSaveOriginalMessages:
             assert data["phase"] == 2
             assert "chunk0" in Path(path).name
 
+    @pytest.mark.asyncio
+    async def test_compress_if_needed_saves_under_agent_session_dir(self, tmp_path):
+        """压缩原文应落到 agents/<agent>/sessions/<session_id>/ 下。"""
+        cfg = _make_config({
+            "context_compression.max_context_tokens": 100,
+            "context_compression.phase1_threshold": 0.5,
+            "context_compression.user_input_max_tokens": 5,
+            "context_compression.tool_summary_max_tokens": 10,
+        })
+        provider = _make_llm_provider("压缩后的内容")
+        factory = _make_llm_factory(provider)
+        compressor = ContextCompressor(
+            config=cfg,
+            llm_factory=factory,
+            provider_name="mock",
+            model="mock-v1",
+            sensenova_claw_home=str(tmp_path),
+        )
+        history = [
+            {"role": "user", "content": "A" * 300},
+            {"role": "assistant", "content": "B" * 300},
+            {"role": "user", "content": "latest question"},
+            {"role": "assistant", "content": "latest answer"},
+        ]
+
+        await compressor.compress_if_needed("sess_artifact", history, agent_id="doc-organizer")
+
+        expected_dir = tmp_path / "agents" / "doc-organizer" / "sessions" / "sess_artifact"
+        saved_files = list(expected_dir.glob("compression_phase1_*.json"))
+        assert saved_files
+
 
 # ── ContextCompressor 测试辅助 ──────────────────────────────
 

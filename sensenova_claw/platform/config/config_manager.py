@@ -301,6 +301,7 @@ def _sanitize_section(path: str, resolved: Any, raw: Any) -> Any:
         return {
             "configured": bool(resolved),
             "masked_value": _mask_secret(resolved),
+            "length": len(resolved) if isinstance(resolved, str) else 0,
             "source": _detect_secret_source(raw),
         }
     if isinstance(resolved, dict):

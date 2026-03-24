@@ -4,6 +4,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { authGet, authFetch, API_BASE } from '@/lib/authFetch';
 
+const LLM_JUST_CONFIGURED_KEY = 'llm_just_configured';
+const LLM_SETUP_SKIPPED_KEY = 'llm_setup_skipped';
+
 // 步骤类型
 type Step = 'category' | 'provider' | 'config' | 'model';
 
@@ -257,7 +260,8 @@ export default function SetupPage() {
       });
 
       // 标记已完成配置，避免 ProtectedRoute 再次跳回 setup
-      sessionStorage.setItem('llm_just_configured', '1');
+      sessionStorage.removeItem(LLM_SETUP_SKIPPED_KEY);
+      sessionStorage.setItem(LLM_JUST_CONFIGURED_KEY, '1');
       router.push('/chat?agent=system-admin');
     } catch (e) {
       console.error('保存配置失败:', e);
@@ -269,6 +273,7 @@ export default function SetupPage() {
 
   // 跳过
   const handleSkip = () => {
+    sessionStorage.setItem(LLM_SETUP_SKIPPED_KEY, '1');
     router.push('/');
   };
 

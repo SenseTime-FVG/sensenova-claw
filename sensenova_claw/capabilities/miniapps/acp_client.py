@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,9 @@ class ACPClient:
 
         env = os.environ.copy()
         env.update(self._env)
+        resolved_command = self._resolve_command()
         self._proc = await asyncio.create_subprocess_exec(
-            self._command,
+            resolved_command,
             *self._args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -68,7 +70,7 @@ class ACPClient:
             env=env,
         )
         self._reader_task = asyncio.create_task(self._reader_loop())
-        logger.info("ACP process started: %s %s", self._command, " ".join(self._args))
+        logger.info("ACP process started: %s %s", resolved_command, " ".join(self._args))
 
     async def close(self) -> None:
         proc = self._proc
@@ -241,3 +243,14 @@ class ACPClient:
                         await maybe_awaitable
                 except Exception:
                     logger.warning("ACP notification callback failed", exc_info=True)
+
+    def _resolve_command(self) -> str:
+        command = str(self._command or "").strip()
+        if not command:
+            raise ACPClientError("ACP command 未配置")
+        if os.path.isabs(command):
+            return command
+        resolved = shutil.which(command, path=self._env.get("PATH") or os.environ.get("PATH"))
+        if resolved:
+            return resolved
+        return command

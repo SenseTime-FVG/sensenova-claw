@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, Save, Server, Trash2 } from 'lucide-react';
+import { CheckCircle, ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, Save, Server, Trash2, XCircle, Zap } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { authFetch, API_BASE } from '@/lib/authFetch';
@@ -9,6 +9,7 @@ import { authFetch, API_BASE } from '@/lib/authFetch';
 interface SecretValueStatus {
   configured: boolean;
   masked_value?: string | null;
+  length?: number;
   source: string;
 }
 
@@ -67,6 +68,8 @@ export default function LlmsPage() {
   const [modelDrafts, setModelDrafts] = useState<Record<string, ModelDraft>>({});
   const [globalDraft, setGlobalDraft] = useState<GlobalDraft | null>(null);
   const [defaultModelDraft, setDefaultModelDraft] = useState('');
+  const [testingModel, setTestingModel] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
 
   const loadConfig = () => {
     authFetch(`${API_BASE}/api/config/sections`)
@@ -522,7 +525,8 @@ export default function LlmsPage() {
       return currentProvider.api_key;
     }
     if (currentProvider.api_key_meta?.configured) {
-      return '******';
+      const len = currentProvider.api_key_meta.length || 6;
+      return '*'.repeat(len);
     }
     return currentProvider.api_key;
   };
@@ -645,6 +649,58 @@ export default function LlmsPage() {
     }
     setSaveMsg('已保存');
     loadConfig();
+  };
+
+  const testModel = async (modelName: string) => {
+    const model = activeModels[modelName];
+    if (!model) return;
+    const providerName = model.provider;
+    const provider = activeProviders[providerName];
+    if (!provider) return;
+
+    setTestingModel(modelName);
+    setTestResults((prev) => {
+      const next = { ...prev };
+      delete next[modelName];
+      return next;
+    });
+
+    try {
+      // 获取 api_key：如果在 secret store 中需要先 reveal
+      let apiKey = provider.api_key;
+      if (!apiKey && provider.api_key_meta?.configured) {
+        const secret = await revealSecret(`llm.providers.${providerName}.api_key`);
+        apiKey = secret.value || '';
+      }
+      if (!apiKey) {
+        setTestResults((prev) => ({ ...prev, [modelName]: { success: false, message: '未配置 API Key' } }));
+        return;
+      }
+
+      const res = await authFetch(`${API_BASE}/api/config/test-llm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: providerName,
+          api_key: apiKey,
+          base_url: provider.base_url || '',
+          model_id: model.model_id || modelName,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTestResults((prev) => ({ ...prev, [modelName]: { success: true, message: data.message || '连接成功' } }));
+      } else {
+        setTestResults((prev) => ({ ...prev, [modelName]: { success: false, message: data.error || '测试失败' } }));
+      }
+    } catch (error) {
+      setTestResults((prev) => ({
+        ...prev,
+        [modelName]: { success: false, message: error instanceof Error ? error.message : '测试失败' },
+      }));
+    } finally {
+      setTestingModel(null);
+    }
   };
 
   const startEditAll = () => {
@@ -1047,45 +1103,78 @@ export default function LlmsPage() {
                                 onChange={(value) => updateModelField(modelName, 'max_output_tokens', parseInt(value, 10) || 16384)}
                               />
                             </div>
-                            <div className="flex items-start justify-end md:justify-center">
-                              {editingAll ? null : editingModel === modelName ? (
-                                <div className="flex gap-2">
-                                  <button
-                                    type="button"
-                                    data-testid={`llm-cancel-${modelName}`}
-                                    onClick={() => cancelEditModel(modelName)}
-                                    className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40"
-                                  >
-                                    取消编辑
-                                  </button>
-                                  <button
-                                    type="button"
-                                    data-testid={`llm-save-${modelName}`}
-                                    onClick={() => void saveModel(modelName)}
-                                    className="rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
-                                  >
-                                    保存
-                                  </button>
-                                </div>
-                              ) : (
-                                  <button
-                                    type="button"
-                                    data-testid={`llm-edit-${modelName}`}
-                                    onClick={() => startEditModel(modelName)}
-                                    disabled={Boolean(editingProvider || editingDefaultModel)}
-                                    className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
-                                  >
-                                    编辑
+                            <div className="flex flex-col items-end gap-2">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  data-testid={`llm-test-${modelName}`}
+                                  onClick={() => void testModel(modelName)}
+                                  disabled={testingModel === modelName}
+                                  className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 px-3 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+                                >
+                                  {testingModel === modelName ? (
+                                    <Loader2 size={16} className="animate-spin" />
+                                  ) : (
+                                    <Zap size={16} />
+                                  )}
+                                  测试
                                 </button>
+                                {editingAll ? null : editingModel === modelName ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      data-testid={`llm-cancel-${modelName}`}
+                                      onClick={() => cancelEditModel(modelName)}
+                                      className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40"
+                                    >
+                                      取消编辑
+                                    </button>
+                                    <button
+                                      type="button"
+                                      data-testid={`llm-save-${modelName}`}
+                                      onClick={() => void saveModel(modelName)}
+                                      className="rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
+                                    >
+                                      保存
+                                    </button>
+                                  </>
+                                ) : (
+                                    <button
+                                      type="button"
+                                      data-testid={`llm-edit-${modelName}`}
+                                      onClick={() => startEditModel(modelName)}
+                                      disabled={Boolean(editingProvider || editingDefaultModel)}
+                                      className="rounded-xl border border-border px-3 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
+                                    >
+                                      编辑
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  data-testid={`delete-llm-button-${modelName}`}
+                                  onClick={() => removeModel(modelName)}
+                                  className="rounded-xl border border-destructive/20 px-3 py-2 text-destructive transition-colors hover:bg-destructive/10"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                              {testResults[modelName] && (
+                                <div
+                                  data-testid={`llm-test-result-${modelName}`}
+                                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                                    testResults[modelName].success
+                                      ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                                      : 'bg-destructive/10 text-destructive'
+                                  }`}
+                                >
+                                  {testResults[modelName].success ? (
+                                    <CheckCircle size={14} />
+                                  ) : (
+                                    <XCircle size={14} />
+                                  )}
+                                  {testResults[modelName].message}
+                                </div>
                               )}
-                              <button
-                                type="button"
-                                data-testid={`delete-llm-button-${modelName}`}
-                                onClick={() => removeModel(modelName)}
-                                className="rounded-xl border border-destructive/20 px-3 py-2 text-destructive transition-colors hover:bg-destructive/10"
-                              >
-                                <Trash2 size={16} />
-                              </button>
                             </div>
                           </div>
                         ))}

@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 from sensenova_claw.platform.secrets.refs import is_secret_ref, parse_secret_ref
-from sensenova_claw.platform.secrets.store import KeyringSecretStore, SecretStoreError
+from sensenova_claw.platform.secrets.store import SecretStoreError, build_default_secret_store
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +319,7 @@ class Config:
         user_config_dir: Path | None = None,
         secret_store: Any | None = None,
     ):
-        self._secret_store = secret_store or KeyringSecretStore()
+        self._secret_store = secret_store or build_default_secret_store()
         # 新方式：通过 project_root 自动发现配置
         if project_root is not None:
             self._project_root = Path(project_root).resolve()
@@ -531,9 +531,23 @@ class Config:
             (provider_name, model_id) 元组
         """
         if not model_key:
-            model_key = self.get("llm.default_model", "mock")
+            model_key = self.get("llm.default_model") or None
 
         models = self.get("llm.models", {})
+
+        # default_model 未设置时，自动选取第一个有有效 api_key 的 model
+        if not model_key:
+            for key, entry in models.items():
+                if not isinstance(entry, dict):
+                    continue
+                provider_name = entry.get("provider", "")
+                provider_cfg = self.get(f"llm.providers.{provider_name}", {})
+                api_key = str(provider_cfg.get("api_key", ""))
+                if api_key and not api_key.startswith("${"):
+                    logger.info("default_model 未设置，自动选用: %s (provider=%s)", key, provider_name)
+                    return provider_name, entry.get("model_id", key)
+            logger.warning("没有找到任何已配置 api_key 的模型，使用 mock provider")
+            return "mock", "mock"
 
         # 精确匹配 models 注册表
         if model_key in models:

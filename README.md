@@ -1,6 +1,10 @@
 <div align="center">
-  <h1>Sensenova-Claw</h1>
-  <p><strong>基于事件驱动架构的 AI Agent 平台</strong></p>
+  <table><tr><td>
+    <img src="assets/icon.png" alt="Sensenova-Claw Logo" width="80">
+  </td><td>
+    <h1>Sensenova-Claw</h1>
+    <strong>基于事件驱动架构的 AI Agent 平台</strong>
+  </td></tr></table>
   <p>
     <img src="https://img.shields.io/badge/python-≥3.12-blue" alt="Python">
     <img src="https://img.shields.io/badge/node-≥18-green" alt="Node.js">
