@@ -1156,3 +1156,33 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前环境执行 `uv run ...` 会把 `uv.lock` 重写成本机镜像源 URL，即使业务代码没变也会产生超大噪音 diff；完成测试后要记得把 `uv.lock` 恢复回仓库版本，再做最终状态检查。
+
+### 2026-03-24 edit 工具移植补充
+
+成功经验：
+- 文件精确编辑工具最稳的落点是独立模块，而不是继续扩张 `builtin.py`；这次新增 `sensenova_claw/capabilities/tools/edit_tool.py` 后，路径解析、替换校验、diff 生成和恢复逻辑都能独立测试。
+- `edit` 的核心契约必须锁死为“`oldText` 恰好命中一次”；把“未命中 / 多次命中 / `_agent_workdir` 相对路径 / post-write recovery”都放进集成测试后，行为边界会清晰很多。
+- `openclaw` 的 post-write recovery 很值得保留：当文件已经写成功但 diff/格式化阶段报错时，重新读盘并按最终内容恢复成功结果，可以避免误向用户报告假失败。
+
+失败/风险经验：
+- 当前实现虽然兼容了 `old_text/new_text` 与 `old_string/new_string`，但对外主 schema 仍以 `oldText/newText` 为中心；若后续要继续补更多上游兼容别名，需要先核对各 provider 的 tool schema 约束，避免把参数面扩得过宽。
+
+### 2026-03-24 apply_patch 工具移植补充
+
+成功经验：
+- `apply_patch` 这类复杂文件变更能力，适合像 `edit` 一样拆成独立模块；把解析、路径解析、更新替换和 summary 输出都放在 `sensenova_claw/capabilities/tools/apply_patch_tool.py` 后，测试与后续演进都更稳。
+- 从 `openclaw` 移植时，优先保留补丁格式契约（`*** Begin/End Patch`、`Add/Delete/Update File`、`Move to`、`@@` chunk）而不是生搬硬套它的 sandbox 安全层，能更好地贴合当前仓库的 `_agent_workdir` 工具语义。
+- 对这类工具最有效的测试组合是“一个多 hunk 端到端用例 + 一个 `_agent_workdir` 相对路径用例 + 一个非法边界用例 + 一个 `_path_policy` 拦截用例”，既覆盖 happy path，也锁住关键失败态。
+
+失败/风险经验：
+- 当前 `apply_patch` 的 `_path_policy` 接入是按已解析的绝对路径做 `check_write`，这和 `PathPolicy` 内部“相对路径默认基于 workspace”语义并不完全一致；若后续要把所有文件工具统一到严格路径策略，需要整体收敛 `read_file/write_file/edit/apply_patch`，不能只单独加强一个。
+
+### 2026-03-24 apply_patch 解析器对齐补充
+
+成功经验：
+- 如果目标是“严格对齐上游解析器”，最稳的方法不是口头比对，而是直接把上游 parser 的失败态一个个翻译成测试：非法 hunk header、第二个 update chunk 缺 `@@`、update hunk 非法行、`<<EOF ... EOF` 包裹的 lenient boundary，都应先红后绿。
+- `openclaw` 的 parser 有一个关键细节：首个 update chunk 可以省略 `@@`，但后续 chunk 不行；只有把 `allowMissingContext` 这条规则一起移过来，错误行号和报错文案才能真正对齐。
+- 对模型友好的做法不是自动兼容错误方言，而是像上游一样在 schema/description 里只展示一种合法格式，并在解析失败时返回带“Valid hunk headers ...”的明确错误。
+
+失败/风险经验：
+- 看起来像“第二个 chunk 缺少 `@@`”的补丁，未必真的会分裂成第二个 chunk；像 `+tail` 这种行在上游仍会被视为同一个 chunk 的新增行，测试样例必须先按 parser 规则推演，不然容易把错误归因到实现。
