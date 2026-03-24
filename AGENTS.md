@@ -1135,3 +1135,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前仓库的 Playwright 默认 `webServer` 仍依赖根目录 `npm run dev`，而这条链路会受 `uv` 缓存权限和 `uv` 自身 panic 影响；前端单用例失败时，必须先区分是页面断言失败还是测试基础设施没起来。
+
+### 2026-03-24 LLM 回退链路补充
+
+成功经验：
+- 当回退策略从“当前模型 -> default -> mock”扩展为“当前模型 -> default -> 任意可用 LLM -> mock”时，最稳的落点是集中改 `llm_worker._fallback_targets()`，不要把“找备用模型”的逻辑分散到 `LLMFactory` 或 `AgentWorker`。
+- “任意可用 LLM”如果不想引入额外配置，直接按 `llm.models` 的定义顺序扫描、结合 provider `api_key` 可用性判断即可，行为可预测，也方便测试锁定。
+- 这类回退改动最适合用 `tests/unit/test_llm_worker.py` 做 TDD：先写“default 失败后应落到第三跳可用模型”的失败用例，再跑整份文件补齐旧断言，能快速识别哪些是新行为，哪些只是历史测试文案过窄。
+
+失败/风险经验：
+- 现有 `MockProvider` 的兜底文案并不包含字符串 `mock`，而是“当前没有可用的 LLM...”；如果测试把“回退到 mock”硬编码成断言回复里必须出现 `mock`，会把文案实现细节误当成行为契约。
