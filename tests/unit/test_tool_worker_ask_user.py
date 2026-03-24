@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import sensenova_claw.kernel.runtime.workers.tool_worker as tool_worker_module
+from sensenova_claw.adapters.storage.repository import Repository
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
     ERROR_RAISED,
@@ -79,6 +81,46 @@ async def test_ask_user_handler_creates_future(worker, mock_bus):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+@pytest.mark.asyncio
+async def test_truncate_result_saves_under_agent_session_dir(tmp_path, mock_bus, monkeypatch):
+    """超长工具结果应写到 agents/<agent>/sessions/<session_id>/ 下。"""
+    runtime = MagicMock()
+    runtime.registry = MagicMock()
+    runtime.agent_registry = None
+    runtime.repo = Repository(db_path=str(tmp_path / "test.db"))
+    await runtime.repo.init()
+    monkeypatch.setenv("SENSENOVA_CLAW_HOME", str(tmp_path))
+
+    worker = ToolSessionWorker("agent2agent_abc123", mock_bus, runtime)
+
+    original_get = tool_worker_module.config.get
+    tool_worker_module.config.get = lambda key, default=None: {
+        "tools.result_truncation.max_tokens": 1,
+        "tools.result_truncation.save_dir": "workspace",
+    }.get(key, original_get(key, default))
+    try:
+        result = worker._truncate_result(
+            "x" * 100,
+            "call_fun_123456",
+            agent_id="doc-organizer",
+        )
+    finally:
+        tool_worker_module.config.get = original_get
+
+    expected_dir = (
+        tmp_path
+        / "agents"
+        / "doc-organizer"
+        / "sessions"
+        / "agent2agent_abc123"
+    )
+    saved_files = list(expected_dir.glob("tool_result_call_fun_*.txt"))
+
+    assert saved_files
+    assert saved_files[0].read_text(encoding="utf-8") == "x" * 100
+    assert str(saved_files[0]) in result
 
 
 @pytest.mark.asyncio

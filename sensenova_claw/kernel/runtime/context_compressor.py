@@ -183,8 +183,9 @@ class ContextCompressor:
         """清理会话相关资源（锁），防止内存泄漏。"""
         self._locks.pop(session_id, None)
 
-    def _get_save_dir(self, agent_id: str) -> str:
-        return str(Path(self._sensenova_claw_home) / "agents" / agent_id / "sessions")
+    def _get_save_dir(self, session_id: str, agent_id: str) -> str:
+        from sensenova_claw.platform.config.workspace import resolve_session_artifact_dir
+        return str(resolve_session_artifact_dir(self._sensenova_claw_home, session_id, agent_id=agent_id).parent)
 
     def _cfg(self, key: str, default: Any = None) -> Any:
         return self._config.get(f"context_compression.{key}", default)
@@ -274,7 +275,7 @@ class ContextCompressor:
         # 从前往后处理，跟踪累积偏移量
         new_history = list(history)
         offset = 0
-        save_dir = self._get_save_dir(agent_id)
+        save_dir = self._get_save_dir(session_id, agent_id)
 
         for turn_idx in turns_to_compress:
             turn = turns[turn_idx]
@@ -380,7 +381,7 @@ class ContextCompressor:
 
         # 合并压缩每个 chunk
         new_history: list[dict[str, Any]] = []
-        save_dir = self._get_save_dir(agent_id)
+        save_dir = self._get_save_dir(session_id, agent_id)
 
         for ci, chunk in enumerate(chunks):
             original_msgs = chunk["messages"]

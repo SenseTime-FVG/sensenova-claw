@@ -18,6 +18,7 @@ from sensenova_claw.platform.config.workspace import (
     ensure_workspace,
     load_workspace_files,
     resolve_agent_workdir,
+    resolve_session_artifact_dir,
     resolve_sensenova_claw_home,
 )
 
@@ -258,6 +259,38 @@ def test_resolve_agent_workdir_custom(tmp_path):
     custom = str(tmp_path / "custom_work")
     result = resolve_agent_workdir(str(tmp_path / ".sensenova-claw"), FakeConfig(workdir=custom))
     assert result == str((tmp_path / "custom_work").resolve())
+
+
+def test_resolve_session_artifact_dir_for_agent(tmp_path):
+    """session 附件应落到 agents/<agent>/sessions/<session_id>/ 下。"""
+    result = resolve_session_artifact_dir(
+        str(tmp_path / ".sensenova-claw"),
+        session_id="sess_123",
+        agent_id="doc-organizer",
+    )
+    assert result == (
+        (tmp_path / ".sensenova-claw").resolve()
+        / "agents"
+        / "doc-organizer"
+        / "sessions"
+        / "sess_123"
+    )
+
+
+def test_resolve_session_artifact_dir_defaults_to_default_agent(tmp_path):
+    """未提供 agent_id 时应回退到 default。"""
+    result = resolve_session_artifact_dir(
+        str(tmp_path / ".sensenova-claw"),
+        session_id="sess_456",
+        agent_id="",
+    )
+    assert result == (
+        (tmp_path / ".sensenova-claw").resolve()
+        / "agents"
+        / "default"
+        / "sessions"
+        / "sess_456"
+    )
 
 
 def test_resolve_agent_workdir_no_config():
