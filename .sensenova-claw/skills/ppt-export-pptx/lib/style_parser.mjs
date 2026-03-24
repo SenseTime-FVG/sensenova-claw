@@ -204,6 +204,65 @@ export function parseLinearGradient(cssValue) {
 }
 
 // ---------------------------------------------------------------------------
+// parseRadialGradient — 解析 CSS radial-gradient()
+// ---------------------------------------------------------------------------
+/**
+ * 解析 radial-gradient() CSS 值，提取颜色停止点。
+ * pptxgenjs 不支持径向渐变，提取 stops 后可用线性渐变近似。
+ * @param {string} cssValue
+ * @returns {{type:'radial', stops:Array<{position?:number, color:string}>}|null}
+ */
+export function parseRadialGradient(cssValue) {
+  if (!cssValue) return null;
+  const trimmed = cssValue.trim();
+
+  if (!/radial-gradient\s*\(/i.test(trimmed)) return null;
+
+  // 提取括号内容
+  const inner = trimmed.replace(/^.*?radial-gradient\s*\(\s*/i, '').replace(/\s*\)$/, '');
+
+  // 将 rgb()/rgba() 内部逗号临时替换
+  let safeInner = inner.replace(/rgba?\s*\([^)]*\)/gi, m => m.replace(/,/g, '§'));
+
+  const parts = safeInner.split(',').map(p => p.replace(/§/g, ',').trim());
+
+  if (parts.length < 2) return null;
+
+  // 第一部分可能是 shape/position 描述（circle at 80% 20%），跳过
+  let stopParts = parts;
+  const firstPart = parts[0].trim().toLowerCase();
+  if (firstPart.includes('circle') || firstPart.includes('ellipse') ||
+      firstPart.includes('at ') || firstPart.includes('closest') ||
+      firstPart.includes('farthest')) {
+    stopParts = parts.slice(1);
+  }
+
+  // 解析颜色停止点（与 parseLinearGradient 相同逻辑）
+  const stops = [];
+  for (const part of stopParts) {
+    const p = part.trim();
+    if (!p) continue;
+
+    const stopMatch = p.match(/^(.*?)\s+([\d.]+)%\s*$/);
+    if (stopMatch) {
+      const colorHex = cssColorToHex(stopMatch[1].trim());
+      if (colorHex !== null) {
+        stops.push({ position: parseFloat(stopMatch[2]), color: colorHex });
+      }
+    } else {
+      const colorHex = cssColorToHex(p);
+      if (colorHex !== null) {
+        stops.push({ color: colorHex });
+      }
+    }
+  }
+
+  if (stops.length === 0) return null;
+
+  return { type: 'radial', stops };
+}
+
+// ---------------------------------------------------------------------------
 // parseBoxShadow — 解析 CSS box-shadow
 // ---------------------------------------------------------------------------
 /**

@@ -13,6 +13,13 @@ description: 当需要根据 style-spec、storyboard 和 asset-plan 逐页生成
 
 如果 `task-pack.json` 已记录 `deck_dir`，则所有 HTML 也必须写回该目录下的 `pages/`。
 
+## 用户回显要求
+
+- `开始反馈`：说明当前要生成哪些页面、会写入哪个 `pages/` 目录。
+- `进行中反馈`：如果需要连续生成多页，可补 1 条进度更新，说明已完成页数或当前页范围。
+- `完成反馈`：总结已生成的页面文件数量、是否保留了占位或未解决项，以及 `下一步`。
+- 如果某页因为依赖缺失、资产缺失或布局冲突无法完成，必须立即告诉用户具体页码和卡点，不要静默跳过。
+
 ## 前置检查
 
 - 消费前必须先确认 `task-pack.json`、`style-spec.json`、`storyboard.json` 以及要用到的 `asset-plan.json` 真实存在且可读。

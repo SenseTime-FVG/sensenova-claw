@@ -1,7 +1,7 @@
 // PPTX 构建器：将 IR 映射为 pptxgenjs slide 对象
 import PptxGenJS from 'pptxgenjs';
 import {
-  cssColorToHex, isTransparent, parseLinearGradient,
+  cssColorToHex, isTransparent, parseLinearGradient, parseRadialGradient,
   parseBoxShadow, parseFontFamily, parseBorder, pxToInch,
   extractCssAlpha,
 } from './style_parser.mjs';
@@ -69,6 +69,16 @@ function parseMultiLayerBackground(bgImage) {
   }
 
   return { imageUrl, overlayColor, overlayAlpha };
+}
+
+/**
+ * 归一化渐变 stops：确保每个 stop 都有 position（0-100），pptxgenjs 要求。
+ */
+function normalizeGradientStops(stops) {
+  return stops.map((s, i) => ({
+    color: s.color,
+    position: s.position !== undefined ? s.position : Math.round(i * 100 / Math.max(stops.length - 1, 1)),
+  }));
 }
 
 /**
@@ -153,13 +163,20 @@ export function buildBackground(bgIR, bodyBgColor, deckDir) {
   }
 
   // --- 情况 3：仅 gradient（无图片 url）---
+  // 注意：pptxgenjs v3.x 的 ShapeFillProps 不支持 gradient fill，
+  // 只能降级为纯色。取第一个 stop 颜色作为最佳近似。
   if (backgroundImage && backgroundImage !== 'none') {
-    const gradient = parseLinearGradient(backgroundImage);
-    if (gradient) {
-      result.slideBackground = { fill: gradient.stops[0].color };
+    const linearGrad = parseLinearGradient(backgroundImage);
+    if (linearGrad && linearGrad.stops.length > 0) {
+      result.slideBackground = { fill: linearGrad.stops[0].color };
       return result;
     }
-    // radial/conic gradient 降级
+    const radialGrad = parseRadialGradient(backgroundImage);
+    if (radialGrad && radialGrad.stops.length > 0) {
+      result.slideBackground = { fill: radialGrad.stops[0].color };
+      return result;
+    }
+    // 其他 gradient 类型降级：取第一个颜色
     const colorMatch = backgroundImage.match(/(?:rgb|rgba)\s*\([^)]*\)|#[0-9a-fA-F]{3,8}/);
     if (colorMatch) {
       const hex = cssColorToHex(colorMatch[0]);
@@ -436,17 +453,30 @@ export function buildListElement(node) {
   const b = node.bounds;
   const isOrdered = node.listType === 'ordered';
 
-  const runs = node.listData.map((item, idx) => ({
-    text: item.text,
-    options: {
-      fontSize: pxToPt(parseFloat(item.styles?.fontSize) || 16),
-      fontFace: parseFontFamily(item.styles?.fontFamily),
-      color: cssColorToHex(item.styles?.color) || '000000',
-      bold: parseInt(item.styles?.fontWeight) >= 700,
-      bullet: isOrdered ? { type: 'number', startAt: idx + 1 } : { code: '2022' }, // • bullet
-      breakLine: true,
+  const runs = node.listData.map((item, idx) => {
+    // 确定 bullet 样式：优先使用 CSS ::before 伪元素中的自定义字符（如 ✓）
+    let bullet;
+    if (isOrdered) {
+      bullet = { type: 'number', startAt: idx + 1 };
+    } else if (item.bulletChar) {
+      // 自定义 bullet 字符：用 Unicode code point
+      bullet = { code: item.bulletChar.codePointAt(0).toString(16).toUpperCase() };
+    } else {
+      bullet = { code: '2022' }; // 默认 • bullet
     }
-  }));
+
+    return {
+      text: item.text,
+      options: {
+        fontSize: pxToPt(parseFloat(item.styles?.fontSize) || 16),
+        fontFace: parseFontFamily(item.styles?.fontFamily),
+        color: cssColorToHex(item.styles?.color) || '000000',
+        bold: parseInt(item.styles?.fontWeight) >= 700,
+        bullet,
+        breakLine: true,
+      }
+    };
+  });
 
   return {
     text: runs,

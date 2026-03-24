@@ -98,9 +98,23 @@ const BROWSER_EXTRACT_FN = () => {
   function extractListData(listEl) {
     const items = [];
     for (const li of listEl.querySelectorAll(':scope > li')) {
+      // 提取 ::before 伪元素内容（如 ✓、★ 等自定义 bullet）
+      let bulletChar = null;
+      try {
+        const beforeContent = window.getComputedStyle(li, '::before').getPropertyValue('content');
+        // content 返回格式如 '"✓"' 或 'none'
+        if (beforeContent && beforeContent !== 'none' && beforeContent !== 'normal') {
+          const cleaned = beforeContent.replace(/^["']|["']$/g, '');
+          if (cleaned && cleaned.length <= 3) {
+            bulletChar = cleaned;
+          }
+        }
+      } catch (e) { /* 忽略 */ }
+
       items.push({
         text: li.innerText || '',
         styles: extractStyles(li),
+        bulletChar,
       });
     }
     return items;

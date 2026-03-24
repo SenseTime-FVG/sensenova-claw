@@ -194,6 +194,19 @@
 - `images/...`
 - `review.md`
 
+### 3.8 阶段性结果回显是默认交互
+
+长链路 PPT 任务不能一旦开始就持续沉默。除了产出工件，还必须持续给用户最小但有用的进度感知。
+
+总原则：
+
+- `fast` 也要有简短阶段回显，但默认非阻塞，不要求用户每步确认。
+- `guided` 除了阶段回显，还要在关键停点明确等待用户确认。
+- `surgical` 的回显必须说明当前只改哪个页面、槽位或控制面，避免用户误以为会重跑整套。
+- 回显内容优先包含：当前阶段、已产出工件、未解决项、下一步。
+- 搜图下载、逐页 HTML、整套 review、导出 PPTX 这类明显耗时阶段，可以补 1 条进行中反馈，但不能刷屏。
+- 依赖缺失、路径不一致、下载失败、页面失败等异常要立即回显，不允许静默跳过。
+
 ---
 
 ## 4. 新 Skill 体系
@@ -266,58 +279,29 @@
 - `ppt-style-refine`
 - `ppt-story-refine`
 
-### 4.4 新方案流程图
+### 4.4 技能清单速览
 
-下面这张流程图描述了新体系的完整推进方式：默认先走 `fast` 快路径，只在命中触发器时插入研究、模板、资产、讲稿或局部修复链路。
+流程图可以由使用方按需要自行绘制；这里保留技能清单表，明确每个 skill 的职责和用户可见反馈点。
 
-```mermaid
-flowchart TD
-    A[用户输入<br/>需求 / 文件 / 链接 / 截图 / 模板] --> B[ppt-superpower]
-    B --> C{是否存在已有工件<br/>可继续推进?}
-    C -- 是 --> D[复用已有 task-pack / style-spec / storyboard]
-    C -- 否 --> E{是否有上传来源?}
-
-    E -- 是 --> F[ppt-source-analysis<br/>产出 source-map.json]
-    E -- 否 --> G[ppt-task-pack<br/>产出 task-pack.json]
-    F --> G
-
-    G --> H{是否存在内容缺口<br/>或事实敏感?}
-    H -- 是 --> I[ppt-research-pack<br/>产出 research-pack]
-    H -- 否 --> J{是否存在模板参考?}
-    I --> J
-
-    J -- 是 --> K[ppt-template-pack<br/>产出 template-pack.json]
-    J -- 否 --> L[ppt-style-spec<br/>产出 style-spec.json<br/>默认必产]
-    K --> L
-
-    D --> L
-    L --> M[ppt-storyboard<br/>产出 storyboard.json<br/>默认必产 / 前端契约]
-    M --> N{是否存在图片或视觉资产缺口?}
-    N -- 是 --> O[ppt-asset-plan<br/>产出 asset-plan.json / image_search_results.json / image_selection.json / images]
-    N -- 否 --> P[ppt-page-html<br/>产出 pages/page_XX.html]
-    O --> P
-
-    P --> Q{是否需要讲稿?}
-    Q -- 是 --> R[ppt-speaker-notes<br/>产出 speaker-notes]
-    Q -- 否 --> S[ppt-review]
-    R --> S
-
-    S --> T{Review 是否发现问题?}
-    T -- 否 --> U[交付当前结果]
-    T -- 是 --> V{问题级别}
-
-    V -- 单页规划 --> W[ppt-page-plan]
-    V -- 单页资产 --> X[ppt-page-assets]
-    V -- 单页抛光 --> Y[ppt-page-polish]
-    V -- 全局风格 --> Z[ppt-style-refine]
-    V -- 叙事结构 --> AA[ppt-story-refine]
-
-    W --> P
-    X --> P
-    Y --> P
-    Z --> M
-    AA --> M
-```
+| Skill | 类型 | 触发时机 | 主要输入 | 主要产物 | 用户回显 |
+| --- | --- | --- | --- | --- | --- |
+| `ppt-superpower` | 总控入口 | 用户提出整套生成、继续已有 deck、局部修改、阶段确认时 | 用户 query、上传文件、已有 deck 工件 | `deck_dir`、mode、下一步 skill 选择 | 首条消息说明目标 / mode / `deck_dir` / 第一步；后续统一要求各阶段给 `开始反馈`、`完成反馈`、必要时给 `进行中反馈` 或 `阻塞反馈` |
+| `ppt-source-analysis` | 来源分析 | 有报告、网页、截图、模板、已有 deck 等上传来源时 | 原始文件、链接、截图 | `source-map.json` | 回显识别出的来源角色、限制和推荐 `下一步` |
+| `ppt-task-pack` | 任务收敛 | 新建 deck、重新明确页数、受众、语言、交付物时 | 用户目标、来源分析结果、输出要求 | `task-pack.json` | 回显主题、页数、mode、`deck_dir` 和关键假设 |
+| `ppt-research-pack` | 研究补充 | 内容缺口明显、主题涉及事实或需要补充外部资料时 | `task-pack.json`、来源材料、检索结果 | `research-pack.md` / `research-pack.json` | 回显核心结论、不确定性和 `下一步` |
+| `ppt-template-pack` | 模板拆解 | 用户提供模板 deck、参考版式或样页时 | 模板文件、参考页面、`task-pack.json` | `template-pack.json` | 回显识别出的布局规则、组件约束和可复用范围 |
+| `ppt-style-spec` | 设计控制面 | 默认必产；明确 deck 级设计语言时 | `task-pack.json`、模板约束、风格参考 | `style-spec.json` | 回显设计主题、风格关键词、主色 / 字体方向和 `下一步` |
+| `ppt-storyboard` | 叙事控制面 | 默认必产；确定分页结构与前端契约时 | `task-pack.json`、`style-spec.json`、`research-pack` | `storyboard.json` | 回显页数、章节结构、未解决项；`guided` 下提示用户先审阅 |
+| `ppt-asset-plan` | 资产规划 | 页面存在图片、背景、图标等视觉资产缺口时 | `task-pack.json`、`storyboard.json`、可选 `style-spec.json` | `asset-plan.json`、`image_search_results.json`、`image_selection.json`、`images/` | 回显待补槽位数、下载进度、成功落地数量、未解决槽位和 `下一步` |
+| `ppt-page-html` | 页面生成 | 需要按页落地 HTML 或局部重做页面时 | `task-pack.json`、`style-spec.json`、`storyboard.json`、`asset-plan.json` | `pages/page_XX.html` | 回显当前页范围、进度、已生成页数、保留的占位或残留问题 |
+| `ppt-speaker-notes` | 讲稿生成 | 用户要求讲稿、备注页、演讲词时 | `storyboard.json`、页面 HTML | `speaker-notes.json` / `speaker-notes.md` | 回显讲稿覆盖页数、语气方向和 `下一步` |
+| `ppt-review` | 结果审查 | 页面生成后统一检查叙事、风格、页面质量和资产状态时 | `task-pack.json`、`style-spec.json`、`storyboard.json`、页面与资产 | `review.md` / `review.json` | 回显总体结论、问题数量、建议下钻 skill 和是否可直接交付 |
+| `ppt-page-plan` | 单页规划修复 | 只改某一页结构、布局意图或内容块时 | 指定页规划、`storyboard.json`、用户反馈 | 单页规划更新 | 回显锁定的 `page_id`、影响范围和 `下一步` |
+| `ppt-page-assets` | 单页资产修复 | 只换某页或某槽位的图片 / 图标 / 背景时 | 指定页、`asset-plan.json`、`storyboard.json` | 单页资产更新与本地图片 | 回显锁定槽位、资产替换结果、未解决项和 `下一步` |
+| `ppt-page-polish` | 单页视觉抛光 | 单页结构基本正确，但视觉质量需要微调时 | 指定页 HTML、`style-spec.json`、用户反馈 | 抛光后的单页 HTML | 回显本页抛光目标、已做调整和残留问题 |
+| `ppt-style-refine` | 全局风格修复 | 全局风格方向对，但品牌感、变化度或一致性不足时 | `style-spec.json`、若干页面 HTML、用户反馈 | 更新后的 `style-spec.json` | 回显增强了哪些全局规则、影响哪些页面类型和 `下一步` |
+| `ppt-story-refine` | 叙事修正 | 故事线、章节顺序、页数分配需要调整时 | `storyboard.json`、`task-pack.json`、用户反馈 | 更新后的 `storyboard.json` | 回显调整后的故事线、影响页数和 `下一步` |
+| `ppt-export-pptx` | 导出交付 | 页面和 review 基本就绪，需要导出最终 PPTX 时 | `deck_dir`、`pages/page_XX.html`、可选 `style-spec.json` / `storyboard.json` | `<deck_dir>/<目录名>.pptx` | 回显导出开始、处理页数、失败页数、输出路径和 `下一步` |
 
 ---
 
@@ -603,6 +587,8 @@ class SpeakerNotePage:
 - 只生成必要工件
 - 优先尽快得到整套结果
 - 只在必要时下钻
+- 必须给用户简短阶段回显，但默认非阻塞
+- 除非触发阻塞条件，否则每次回显后自动进入 `下一步`
 
 #### `guided`
 
@@ -611,9 +597,9 @@ class SpeakerNotePage:
 - 如果用户说“先看大纲”“先确认大纲”“先看风格和大纲”或“确认后再生成”，必须进入 `guided`
 - 在用户确认前，不要直接生成 `pages/page_XX.html`
 - 不要只返回一段自由文本大纲，应展示已落盘的结构化工件
-
 - 更稳定地产出中间工件
 - 更适合前端阶段性确认
+- 完成关键工件后必须明确提示用户现在可查看什么，以及确认后的 `下一步`
 
 #### `surgical`
 
@@ -621,6 +607,41 @@ class SpeakerNotePage:
 
 - 不重跑整套
 - 只改指定页面、指定槽位、指定风格或叙事局部
+- 阶段回显必须点明当前锁定的 `page_id`、`slot_id` 或被修改工件范围
+
+### 6.4 阶段回显协议
+
+建议所有阶段回显都遵循同一最小结构：
+
+```python
+from typing import Literal
+
+FeedbackStatus = Literal[
+    "started",
+    "in_progress",
+    "completed",
+    "blocked",
+    "awaiting_confirmation",
+]
+
+
+class StageFeedback:
+    stage: str
+    status: FeedbackStatus
+    scope: str
+    artifacts: list[str]
+    highlights: list[str]
+    unresolved: list[str]
+    next_step: str
+```
+
+执行要求：
+
+- 第一条反馈必须说明目标、mode、`deck_dir` 和第一步。
+- 每个关键阶段至少有一条 `开始反馈` 和一条 `完成反馈`。
+- 搜图、逐页 HTML、review、导出 PPTX 允许补一条 `进行中反馈`，但不要刷屏。
+- 遇到缺依赖、路径错误、下载失败、导出失败时，要立即发 `阻塞反馈`。
+- `guided` 在等待用户决策时使用 `awaiting_confirmation` 语义，并明确告诉用户当前停在哪个工件。
 
 ---
 
@@ -756,6 +777,8 @@ class SpeakerNotePage:
 7. `ppt-page-html` 明确消费 `style-spec.json` 与本地图片，不退回通用默认样式，同时恢复严格的 `1280x720` / 页脚安全区约束
 8. `ppt-speaker-notes` 明确标注可选交付物
 9. 设计文档中的术语与新 skill 体系一致
+10. `ppt-superpower` 与关键子 skill 明确声明阶段回显协议，避免长链路静默执行
+11. 设计文档明确 `fast / guided / surgical` 的交互反馈差异与 `StageFeedback` 结构
 
 ### 11.2 场景测试矩阵
 
@@ -823,6 +846,15 @@ class SpeakerNotePage:
 
 - 只标记该槽位 unresolved
 - 其他页面继续生成
+
+#### 用例 10：长链路默认阶段回显
+
+期望：
+
+- `fast` 也会在关键阶段给出简短 `开始反馈` / `完成反馈`
+- `guided` 会在关键停点显式等待用户确认
+- 搜图、逐页 HTML、review、导出 PPTX 可补 1 条 `进行中反馈`
+- 遇到阻塞时会立刻告诉用户卡点和 `下一步`
 
 #### 用例 10：用户要求讲稿
 

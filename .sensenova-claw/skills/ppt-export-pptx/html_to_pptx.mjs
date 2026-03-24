@@ -8,7 +8,7 @@ import { extractPages } from './lib/dom_extractor.mjs';
 import { buildPptx } from './lib/pptx_builder.mjs';
 
 function parseArgs(args) {
-  const result = { deckDir: null, output: 'deck.pptx' };
+  const result = { deckDir: null, output: null };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--deck-dir' && args[i + 1]) {
       result.deckDir = resolve(args[i + 1]);
@@ -57,8 +57,9 @@ async function main() {
   console.error('步骤 1/2: 提取 DOM...');
   const pages = await extractPages(htmlFiles);
 
-  // PPTX 构建
-  const outputPath = resolve(args.deckDir, args.output);
+  // PPTX 构建：默认文件名与 deck_dir 目录名一致
+  const outputFilename = args.output || (basename(args.deckDir) + '.pptx');
+  const outputPath = resolve(args.deckDir, outputFilename);
   console.error('步骤 2/2: 生成 PPTX...');
   const result = await buildPptx(pages, args.deckDir, outputPath);
 
