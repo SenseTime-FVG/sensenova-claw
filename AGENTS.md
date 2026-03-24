@@ -665,6 +665,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅依赖前端不回传某些字段不够稳；一旦用户浏览器缓存了旧前端，或历史配置里已存在异常 secret ref，后端仍会再次踩到删除异常。对 secret 清空链路，后端必须保证幂等。
 
+### 2026-03-24 Secret 文件回退补充
+
+成功经验：
+- 把“keyring 主存储”和“本地 `secret.yml` 回退存储”拆成 `FallbackSecretStore(primary, fallback)` 最稳，`Config`、`ConfigManager`、迁移与 reveal API 都不需要改调用协议。
+- 回退文件用单个 YAML 扁平映射 `{ref: value}` 最省事，直接复用现有 secret ref（如 `sensenova_claw/llm.providers.openai.api_key`）作为 key，避免路径编码和目录散落问题。
+- `get()` 不能只在 keyring 抛错时回退；当历史写入曾回退到文件、而当前 keyring 恢复但查不到值时，也需要在 primary 返回空值时继续查 fallback，才能真正读回旧 secret。
+
+失败/风险经验：
+- 文档里“keyring 不可用时降级为明文写 config.yml”的旧口径容易过时；现在行为改成落到 `~/.sensenova-claw/data/secret/secret.yml` 后，配置与安全文档必须一起更新，否则会误导排查。
+
 ### 2026-03-21 LLM 编辑态补充
 
 成功经验：

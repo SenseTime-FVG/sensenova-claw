@@ -46,7 +46,7 @@ from sensenova_claw.platform.config.workspace import (
     ensure_agent_workspace,
     resolve_sensenova_claw_home,
 )
-from sensenova_claw.platform.secrets.store import KeyringSecretStore
+from sensenova_claw.platform.secrets.store import build_default_secret_store
 from sensenova_claw.interfaces.http import agents, tools, gateway, skills, workspace, config_api, sessions
 from sensenova_claw.interfaces.http import cron_api, notification_api, proactive_api
 
@@ -83,7 +83,7 @@ class Services:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    secret_store = getattr(config, "_secret_store", None) or KeyringSecretStore()
+    secret_store = getattr(config, "_secret_store", None) or build_default_secret_store()
     config._secret_store = secret_store
 
     # 解析 SENSENOVA_CLAW_HOME（默认 ~/.sensenova-claw）

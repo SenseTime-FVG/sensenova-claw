@@ -37,7 +37,7 @@ Sensenova-Claw 采用 Jupyter-lab 风格的 Token 认证：
 
 Sensenova-Claw 通过 Setup 页面保存 API Key 时，优先使用 **keyring** 安全存储，config.yml 中只写入引用（如 `secret:sensenova_claw/llm.providers.openai.api_key`），密钥本身不出现在配置文件中。
 
-如果 keyring 不可用，会自动降级为明文写入 config.yml。
+如果 keyring 不可用或调用失败，会自动回退到本地文件 `~/.sensenova-claw/data/secret/secret.yml`，不会把密钥明文写回 `config.yml`。
 
 ### 启用 keyring
 
