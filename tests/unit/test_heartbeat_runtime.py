@@ -7,16 +7,16 @@ import contextlib
 import pytest
 import pytest_asyncio
 
-from agentos.adapters.storage.repository import Repository
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     CRON_SYSTEM_EVENT,
     HEARTBEAT_WAKE_REQUESTED,
 )
-from agentos.kernel.heartbeat.runtime import HeartbeatRuntime, _parse_every_to_seconds
-from agentos.platform.config.config import Config
+from sensenova_claw.kernel.heartbeat.runtime import HeartbeatRuntime, _parse_every_to_seconds
+from sensenova_claw.platform.config.config import Config
 
 
 # ── 时间字符串解析测试 ──────────────────────────────────────

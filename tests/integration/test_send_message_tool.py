@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from agentos.capabilities.agents.config import AgentConfig
-from agentos.capabilities.agents.registry import AgentRegistry
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.capabilities.tools.send_message_tool import SendMessageTool
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.router import BusRouter
-from agentos.kernel.events.types import (
+from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.capabilities.tools.send_message_tool import SendMessageTool
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.events.types import (
     AGENT_MESSAGE_COMPLETED,
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
@@ -22,10 +22,10 @@ from agentos.kernel.events.types import (
     USER_QUESTION_ASKED,
     USER_TURN_CANCEL_REQUESTED,
 )
-from agentos.kernel.runtime.agent_message_coordinator import AgentMessageCoordinator
-from agentos.kernel.runtime.agent_runtime import AgentRuntime
-from agentos.kernel.runtime.context_builder import ContextBuilder
-from agentos.kernel.runtime.state import SessionStateStore
+from sensenova_claw.kernel.runtime.agent_message_coordinator import AgentMessageCoordinator
+from sensenova_claw.kernel.runtime.agent_runtime import AgentRuntime
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.kernel.runtime.state import SessionStateStore
 
 pytestmark = pytest.mark.asyncio
 
@@ -33,7 +33,7 @@ pytestmark = pytest.mark.asyncio
 async def _build_runtime(repo, tmp_path):
     bus = PublicEventBus()
     bus_router = BusRouter(public_bus=bus, ttl_seconds=60, gc_interval=60)
-    registry = AgentRegistry(config_dir=Path(tmp_path) / "agents")
+    registry = AgentRegistry(sensenova_claw_home=tmp_path / "agents")
     registry.register(AgentConfig.create(id="default", name="Default"))
     registry.register(AgentConfig.create(id="helper", name="Helper"))
     runtime = AgentRuntime(
@@ -401,6 +401,147 @@ class TestSendMessageTool:
         assert record.status == "timed_out"
 
         collector_task.cancel()
+        await coordinator.stop()
+        await runtime.stop()
+        await bus_router.stop()
+
+    async def test_self_delegation_allowed(self, test_repo, tmp_path):
+        """agent 向自己发送消息（自我委派）应被允许"""
+        bus, bus_router, registry, runtime, coordinator = await _build_runtime(test_repo, tmp_path)
+        registry.register(AgentConfig.create(id="searcher", name="Searcher", max_send_depth=2))
+        await test_repo.create_session(
+            "parent",
+            meta={"agent_id": "searcher", "send_depth": 0, "send_chain": ["searcher"]},
+        )
+
+        seen_child = asyncio.Event()
+
+        async def fake_child():
+            async for event in bus.subscribe():
+                if event.type == USER_INPUT and event.session_id.startswith("agent2agent_"):
+                    seen_child.set()
+                    await bus.publish(
+                        EventEnvelope(
+                            type=AGENT_STEP_COMPLETED,
+                            session_id=event.session_id,
+                            source="test",
+                            payload={"result": {"content": "self-delegated result"}},
+                        )
+                    )
+                    return
+
+        fake_task = asyncio.create_task(fake_child())
+        await asyncio.sleep(0)
+
+        tool = SendMessageTool(
+            agent_registry=registry,
+            bus=bus,
+            repo=test_repo,
+            coordinator=coordinator,
+            timeout=5,
+        )
+        result = await tool.execute(
+            target_agent="searcher",
+            message="子任务",
+            _session_id="parent",
+            _turn_id="turn_1",
+            _tool_call_id="tc_1",
+        )
+
+        assert "self-delegated result" in result
+        assert seen_child.is_set()
+
+        fake_task.cancel()
+        await coordinator.stop()
+        await runtime.stop()
+        await bus_router.stop()
+
+    async def test_real_cycle_still_blocked(self, test_repo, tmp_path):
+        """真正的循环（A→B→A）仍应被拦截"""
+        bus, bus_router, registry, runtime, coordinator = await _build_runtime(test_repo, tmp_path)
+        registry.register(AgentConfig.create(id="agent_a", name="A", max_send_depth=3))
+        registry.register(AgentConfig.create(id="agent_b", name="B", max_send_depth=3))
+        await test_repo.create_session(
+            "b_session",
+            meta={"agent_id": "agent_b", "send_depth": 1, "send_chain": ["agent_a", "agent_b"]},
+        )
+
+        tool = SendMessageTool(
+            agent_registry=registry,
+            bus=bus,
+            repo=test_repo,
+            coordinator=coordinator,
+            timeout=5,
+        )
+        result = await tool.execute(
+            target_agent="agent_a",
+            message="回环",
+            _session_id="b_session",
+            _turn_id="turn_b",
+            _tool_call_id="tc_b",
+        )
+
+        assert "循环链路" in result
+
+        await coordinator.stop()
+        await runtime.stop()
+        await bus_router.stop()
+
+    async def test_parallel_self_delegation(self, test_repo, tmp_path):
+        """多目标并行自我委派应全部成功"""
+        bus, bus_router, registry, runtime, coordinator = await _build_runtime(test_repo, tmp_path)
+        registry.register(AgentConfig.create(id="searcher", name="Searcher", max_send_depth=2))
+        await test_repo.create_session(
+            "parent",
+            meta={"agent_id": "searcher", "send_depth": 0, "send_chain": ["searcher"]},
+        )
+
+        child_count = 0
+
+        async def fake_children():
+            nonlocal child_count
+            async for event in bus.subscribe():
+                if event.type == USER_INPUT and event.session_id.startswith("agent2agent_"):
+                    child_count += 1
+                    await bus.publish(
+                        EventEnvelope(
+                            type=AGENT_STEP_COMPLETED,
+                            session_id=event.session_id,
+                            source="test",
+                            payload={"result": {"content": f"result-{child_count}"}},
+                        )
+                    )
+                    if child_count >= 3:
+                        return
+
+        fake_task = asyncio.create_task(fake_children())
+        await asyncio.sleep(0)
+
+        tool = SendMessageTool(
+            agent_registry=registry,
+            bus=bus,
+            repo=test_repo,
+            coordinator=coordinator,
+            timeout=5,
+        )
+        result = await tool.execute(
+            targets=[
+                {"target_agent": "searcher", "message": "[子任务模式] 任务1"},
+                {"target_agent": "searcher", "message": "[子任务模式] 任务2"},
+                {"target_agent": "searcher", "message": "[子任务模式] 任务3"},
+            ],
+            mode="sync",
+            timeout_seconds=5,
+            _session_id="parent",
+            _turn_id="turn_1",
+            _tool_call_id="tc_1",
+        )
+
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert all(r["status"] == "completed" for r in result)
+
+        fake_task.cancel()
         await coordinator.stop()
         await runtime.stop()
         await bus_router.stop()

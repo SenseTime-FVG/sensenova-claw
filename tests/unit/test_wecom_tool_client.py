@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.adapters.channels.wecom.config import WecomConfig
-from agentos.adapters.channels.wecom.tool_client import WecomIncomingMessage, WecomToolClient
+from sensenova_claw.adapters.plugins.wecom.config import WecomConfig
+from sensenova_claw.adapters.plugins.wecom.tool_client import WecomIncomingMessage, WecomToolClient
 
 
 class _FakeSdkClient:

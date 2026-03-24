@@ -1,20 +1,37 @@
-# AgentOS 安装指南
+# Sensenova-Claw 安装指南
 
 ## 一键安装
 
 ### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash
 ```
 
 ### Windows（PowerShell）
 
 ```powershell
-irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
 ```
 
 > 如果 PowerShell 提示执行策略限制，先运行: `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`
+
+### 指定安装版本
+
+安装脚本默认拉取 `dev` 分支，也支持通过环境变量显式指定分支或 tag，便于发布验证与回滚。
+
+Linux / macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_REPO_REF=v0.5.0 bash
+```
+
+Windows（PowerShell）:
+
+```powershell
+$env:SENSENOVA_CLAW_REPO_REF="v0.5.0"
+irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
+```
 
 ## 安装脚本做了什么
 
@@ -22,27 +39,34 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.
 
 | 步骤 | 说明 |
 |------|------|
-| 1. 选择安装路径 | 默认 `~/.agentos`，可自定义 |
+| 1. 选择安装路径 | 默认 `~/.sensenova-claw`，可自定义 |
 | 2. 地区检测 | 通过 iping.cc API 判断国内/海外，国内自动配置 npm 和 pip 镜像 |
 | 3. 安装 Python | 通过 [uv](https://docs.astral.sh/uv/) 安装 Python 3.12+（已有则跳过） |
 | 4. 安装 Node.js | 通过 [nvm](https://github.com/nvm-sh/nvm)（Linux/macOS）或 [fnm](https://github.com/Schniz/fnm)（Windows）安装 Node.js 18+（已有则跳过） |
-| 5. 克隆仓库 | 将 AgentOS 克隆到 `{安装路径}/app/`（已存在则更新） |
+| 5. 克隆仓库 | 将 Sensenova-Claw 克隆到 `{安装路径}/app/`（已存在则更新） |
 | 6. 安装依赖 | `npm install` 自动安装 Node.js 和 Python 依赖 |
-| 7. 初始化目录 | 创建 AGENTOS_HOME 目录结构，复制预置 agents 和 skills |
-| 8. 交互配置 | 引导选择 LLM 提供商、输入 API Key，自动生成 `config.yml` |
-| 9. 注册命令 | 注册全局 `agentos` 命令 |
+| 7. 初始化目录 | 创建 SENSENOVA_CLAW_HOME 目录结构，复制预置 agents 和 skills |
+| 8. 初始化配置 | 从 `config_example.yml` 生成 `config.yml`（已有则跳过） |
+| 9. 注册命令 | 以 editable 模式注册全局 `sensenova-claw` 命令，避免 CLI 与安装目录代码漂移 |
 
 ## 安装完成后
 
+**1. 启动服务**
+
 ```bash
-# 启动服务（后端 + 前端 Dashboard）
-agentos run
+sensenova-claw run
+```
 
-# 仅启动后端
-agentos run --no-frontend
+**2. 配置 LLM 等设置**
 
-# 启动 CLI 客户端（需先启动服务）
-agentos cli
+启动后，打开 Web 界面进行配置：
+
+- Web Dashboard: http://localhost:3000
+
+或使用 CLI 客户端（需先启动服务）：
+
+```bash
+sensenova-claw cli
 ```
 
 首次启动时，终端会打印带 token 的访问 URL，复制到浏览器即可访问 Dashboard。
@@ -52,8 +76,8 @@ agentos cli
 安装完成后的目录结构：
 
 ```
-~/.agentos/                # AGENTOS_HOME（可自定义）
-├── app/                   # AgentOS 程序代码（git 仓库）
+~/.sensenova-claw/                # SENSENOVA_CLAW_HOME（可自定义）
+├── app/                   # Sensenova-Claw 程序代码（git 仓库）
 │   ├── config.yml         # 配置文件（安装时自动生成）
 │   ├── config_example.yml # 配置示例
 │   └── ...
@@ -105,8 +129,8 @@ npm config delete registry                                 # 取消
 ### 2. 克隆并安装
 
 ```bash
-git clone https://github.com/SenseTime-FVG/agentos.git ~/.agentos/app
-cd ~/.agentos/app
+git clone https://github.com/SenseTime-FVG/sensenova-claw.git ~/.sensenova-claw/app
+cd ~/.sensenova-claw/app
 npm install
 ```
 
@@ -114,11 +138,11 @@ npm install
 
 ```bash
 # 复制预置 agents 和 skills
-cp -rn .agentos/agents/* ~/.agentos/agents/
-cp -rn .agentos/skills/* ~/.agentos/skills/
+cp -rn .sensenova-claw/agents/* ~/.sensenova-claw/agents/
+cp -rn .sensenova-claw/skills/* ~/.sensenova-claw/skills/
 
 # 创建数据目录
-mkdir -p ~/.agentos/{data,db,workdir/default}
+mkdir -p ~/.sensenova-claw/{data,db,workdir/default}
 ```
 
 ### 4. 配置
@@ -131,9 +155,9 @@ cp config_example.yml config.yml
 ### 5. 启动
 
 ```bash
-agentos run
+sensenova-claw run
 # 或
-python3 -m agentos.app.main run
+python3 -m sensenova_claw.app.main run
 ```
 
 ## 系统要求
@@ -149,7 +173,7 @@ python3 -m agentos.app.main run
 
 ## 常见问题
 
-### Q: 安装后 `agentos` 命令找不到
+### Q: 安装后 `sensenova-claw` 命令找不到
 
 重新打开终端，或手动将 `~/.local/bin` 添加到 PATH：
 
@@ -182,10 +206,10 @@ uv python install 3.12  # 手动安装
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-### Q: 如何更新 AgentOS
+### Q: 如何更新 Sensenova-Claw
 
 ```bash
-cd ~/.agentos/app
+cd ~/.sensenova-claw/app
 git pull origin dev
 npm install
 ```
@@ -195,7 +219,7 @@ npm install
 直接编辑配置文件：
 
 ```bash
-vim ~/.agentos/app/config.yml
+vim ~/.sensenova-claw/app/config.yml
 ```
 
 或重新运行安装脚本（会询问是否覆盖现有配置）。
@@ -204,10 +228,10 @@ vim ~/.agentos/app/config.yml
 
 ```bash
 # 删除安装目录
-rm -rf ~/.agentos
+rm -rf ~/.sensenova-claw
 
 # 移除全局命令
-uv tool uninstall agentos
+uv tool uninstall sensenova-claw
 
 # 可选：移除镜像配置
 rm -f ~/.config/uv/uv.toml

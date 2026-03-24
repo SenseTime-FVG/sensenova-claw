@@ -8,8 +8,8 @@ telegram_mod = pytest.importorskip("telegram", reason="python-telegram-bot not i
 from telegram import Update
 from unittest.mock import AsyncMock, patch
 
-from agentos.adapters.channels.telegram.config import TelegramConfig
-from agentos.adapters.channels.telegram.runtime import TelegramRuntime
+from sensenova_claw.adapters.plugins.telegram.config import TelegramConfig
+from sensenova_claw.adapters.plugins.telegram.runtime import TelegramRuntime
 
 
 class TestPolling:
@@ -23,14 +23,14 @@ class TestPolling:
             dispatched.append(message)
 
         runtime.set_message_handler(collect)
-        runtime.set_bot_username("agentos_bot")
+        runtime.set_bot_username("sensenova_claw_bot")
 
         update = Update.de_json(
             {
                 "update_id": 100,
                 "message": {
                     "message_id": 10,
-                    "text": "@agentos_bot hi",
+                    "text": "@sensenova_claw_bot hi",
                     "chat": {"id": -100123, "type": "supergroup"},
                     "from": {
                         "id": 1001,
@@ -51,7 +51,7 @@ class TestPolling:
         await runtime.handle_update(update)
 
         assert dispatched
-        assert dispatched[0].text == "@agentos_bot hi"
+        assert dispatched[0].text == "@sensenova_claw_bot hi"
         assert dispatched[0].chat_id == "-100123"
         assert dispatched[0].message_thread_id == 777
         assert dispatched[0].mentioned_bot is True
@@ -94,7 +94,7 @@ class TestWebhook:
             dispatched.append(message)
 
         runtime.set_message_handler(collect)
-        runtime.set_bot_username("agentos_bot")
+        runtime.set_bot_username("sensenova_claw_bot")
 
         update = Update.de_json(
             {

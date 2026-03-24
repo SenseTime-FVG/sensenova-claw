@@ -5,15 +5,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import agentos.kernel.runtime.workers.tool_worker as tool_worker_module
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+import sensenova_claw.kernel.runtime.workers.tool_worker as tool_worker_module
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     ERROR_RAISED,
     TOOL_CALL_RESULT,
     USER_QUESTION_ANSWERED,
     USER_QUESTION_ASKED,
 )
-from agentos.kernel.runtime.workers.tool_worker import ToolSessionWorker
+from sensenova_claw.kernel.runtime.workers.tool_worker import ToolSessionWorker
 
 
 class _QuickTool:
@@ -41,7 +41,6 @@ class _CaptureSourceAgentTool:
 def mock_runtime():
     runtime = MagicMock()
     runtime.registry = MagicMock()
-    runtime.path_policy = None
     runtime.agent_registry = None
     return runtime
 

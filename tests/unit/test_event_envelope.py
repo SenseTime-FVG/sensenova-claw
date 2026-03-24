@@ -1,5 +1,5 @@
 """B01: EventEnvelope 创建/序列化"""
-from agentos.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.envelope import EventEnvelope
 
 
 class TestEventEnvelope:

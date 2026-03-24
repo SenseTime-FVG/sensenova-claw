@@ -1,6 +1,6 @@
 import pytest
 
-from agentos.capabilities.tools.ask_user_tool import AskUserTool
+from sensenova_claw.capabilities.tools.ask_user_tool import AskUserTool
 
 
 @pytest.mark.asyncio

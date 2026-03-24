@@ -1,126 +1,89 @@
-# 安全策略 PathPolicy
+# 安全策略
 
-> 路径：`agentos/platform/security/`
+> 路径：`sensenova_claw/platform/security/`
 
-PathPolicy 是 AgentOS 的文件系统安全模块，通过三区域模型控制 Agent 对文件系统的读写权限。
-
----
-
-## 设计概览
-
-```python
-class PathPolicy:
-    workspace: Path              # 绿色区域（始终允许）
-    _granted: list[Path]         # 黄色区域（预授权）
-
-    classify(target: Path) -> PathZone  # GREEN, YELLOW, RED
-    check_read(file_path) -> PathVerdict   # ALLOW, DENY, NEED_GRANT
-    check_write(file_path) -> PathVerdict
-    grant(dir_path) -> Path      # 添加到黄色区域
-    revoke(dir_path)             # 从黄色区域移除
-```
+Sensenova-Claw 的安全模块提供 Token 认证、系统路径保护等能力。
 
 ---
 
-## 三区域模型
+## 文件系统访问
 
-PathPolicy 将文件系统划分为三个区域，每个区域有不同的访问权限：
+文件操作工具（`read_file`、`write_file`、`bash_command`）不设置路径限制：
 
-| 区域 | 颜色 | 权限 | 说明 |
-|------|------|------|------|
-| GREEN | 绿色 | 始终允许读写 | `workspace` 目录及其子目录 |
-| YELLOW | 黄色 | 预授权允许读写 | `config.yml` 中 `granted_paths` 配置的目录 |
-| RED | 红色 | 拒绝访问 | 其他所有路径 |
-
-**分类逻辑**：
-
-```python
-def classify(target: Path) -> PathZone:
-    if target 在 workspace 目录下:
-        return PathZone.GREEN
-    if target 在任一 granted 目录下:
-        return PathZone.YELLOW
-    return PathZone.RED
-```
-
----
-
-## 权限检查
-
-### check_read / check_write
-
-返回值类型 `PathVerdict`：
-
-| 值 | 含义 |
-|----|------|
-| `ALLOW` | 允许操作 |
-| `DENY` | 拒绝操作 |
-| `NEED_GRANT` | 需要用户授权（当前未实现交互式授权） |
-
-### 系统路径保护
-
-`is_system_path()` 检测系统关键路径，这些路径**始终被阻止**访问，无论配置如何：
-
-- `/etc/`、`/usr/`、`/bin/`、`/sbin/` 等系统目录
-- `/proc/`、`/sys/` 等虚拟文件系统
-
----
-
-## 在工具中的应用
-
-PathPolicy 在文件操作工具执行前进行权限检查：
-
-```python
-# read_file 工具
-async def read_file(file_path: str):
-    verdict = path_policy.check_read(file_path)
-    if verdict != PathVerdict.ALLOW:
-        return f"拒绝访问: {file_path}"
-    # 执行读取...
-
-# write_file 工具
-async def write_file(file_path: str, content: str):
-    verdict = path_policy.check_write(file_path)
-    if verdict != PathVerdict.ALLOW:
-        return f"拒绝访问: {file_path}"
-    # 执行写入...
-```
+- `read_file` / `write_file`：相对路径基于 Agent 工作目录（`_agent_workdir`）解析，绝对路径直接使用
+- `bash_command`：`working_dir` 参数指定工作目录，默认使用 Agent 工作目录
 
 **路径解析规则**：
 
-- 相对路径自动解析为 `workspace` 下的相对路径
-- 符号链接会被解析为实际路径后再进行区域分类
-- `..` 路径遍历会被正确处理，防止跳出授权区域
+- 相对路径自动解析为 Agent 工作目录下的路径
+- 绝对路径直接使用，不做区域限制
+- `..` 路径遍历通过 `Path.resolve()` 标准化
 
 ---
 
-## 动态授权
+## Token 认证
 
-支持运行时动态管理黄色区域：
+Sensenova-Claw 采用 Jupyter-lab 风格的 Token 认证：
 
-```python
-# 添加授权目录
-path_policy.grant(Path("/home/user/data"))
+- 首次启动生成随机 token，持久化到 `~/.sensenova-claw/token` 文件
+- 后续重启自动复用已有 token，无需重新登录
+- HTTP 请求通过 `Authorization: Bearer <token>` 或 URL 参数 `?token=<token>` 认证
+- WebSocket 连接通过 URL 参数 `?token=<token>` 认证
+- 健康检查、认证相关端点在白名单中免认证
 
-# 撤销授权
-path_policy.revoke(Path("/home/user/data"))
+---
+
+## Secret Store（API Key 安全存储）
+
+Sensenova-Claw 通过 Setup 页面保存 API Key 时，优先使用 **keyring** 安全存储，config.yml 中只写入引用（如 `secret:sensenova_claw/llm.providers.openai.api_key`），密钥本身不出现在配置文件中。
+
+如果 keyring 不可用，会自动降级为明文写入 config.yml。
+
+### 启用 keyring
+
+**Linux 服务器（无桌面环境，推荐）：**
+
+```bash
+pip install keyrings.alt
 ```
+
+安装后 secret 存储在 `~/.local/share/python_keyring/` 下的加密文件中。
+
+**Linux 桌面环境：**
+
+```bash
+# GNOME
+sudo apt install gnome-keyring libsecret-1-dev
+pip install secretstorage
+
+# KDE
+sudo apt install kwalletmanager
+```
+
+**验证 keyring 是否可用：**
+
+```bash
+python3 -c "
+import keyring
+keyring.set_password('test', 'key', 'value')
+print(keyring.get_password('test', 'key'))  # 输出 value 表示可用
+keyring.delete_password('test', 'key')
+"
+```
+
+安装后重启 Sensenova-Claw，新保存的 API Key 会自动使用 keyring 存储。
 
 ---
 
 ## 配置
 
-在 `config.yml` 中预配置授权路径：
+在 `config.yml` 中配置安全相关选项：
 
 ```yaml
-system:
-  granted_paths:
-    - /home/user/projects
-    - /tmp/workspace
+security:
+  auth_enabled: true  # 是否启用 Token 认证
 ```
 
 **注意事项**：
 
-- `workspace` 目录默认为项目根目录下的 `workspace/` 文件夹
-- PathPolicy 实例需要支持 JSON 序列化，以便在工具执行时传递上下文
 - 配置变更后需要重启服务才能生效

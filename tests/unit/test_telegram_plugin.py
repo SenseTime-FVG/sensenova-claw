@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 telegram = pytest.importorskip("telegram", reason="python-telegram-bot not installed")
 
-from agentos.adapters.channels.telegram.plugin import definition, register
-from agentos.adapters.plugins import PluginRegistry
-from agentos.adapters.plugins.base import PluginApi
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.plugins.telegram.plugin import definition, register
+from sensenova_claw.adapters.plugins import PluginRegistry
+from sensenova_claw.adapters.plugins.base import PluginApi
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 def _make_plugin_api(config_overrides: dict | None = None) -> PluginApi:
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     defaults = {
         "enabled": False,
@@ -80,6 +82,24 @@ class TestRegister:
         assert len(registry._pending_channels) == 1
         assert registry._pending_channels[0].get_channel_id() == "telegram"
         assert len(registry._pending_tools) == 1
+
+    @pytest.mark.asyncio
+    async def test_missing_dependency_reports_failed_state(self):
+        api = _make_plugin_api({"enabled": True})
+        registry = api._registry
+        original_import = __import__
+        with patch(
+            "builtins.__import__",
+            side_effect=lambda name, *args, **kwargs: (
+                (_ for _ in ()).throw(ModuleNotFoundError(name="telegram"))
+                if name == "sensenova_claw.adapters.plugins.telegram.channel"
+                else original_import(name, *args, **kwargs)
+            ),
+        ):
+            await register(api)
+        assert registry._pending_channels == []
+        assert registry._plugin_states["telegram"]["status"] == "failed"
+        assert registry._plugin_states["telegram"]["error"] == "未安装依赖: python-telegram-bot"
 
     @pytest.mark.asyncio
     async def test_channel_config_passthrough(self):

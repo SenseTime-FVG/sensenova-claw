@@ -77,7 +77,7 @@ def tmp_db(tmp_path):
 
 @pytest_asyncio.fixture
 async def test_repo(tmp_db):
-    from agentos.adapters.storage.repository import Repository
+    from sensenova_claw.adapters.storage.repository import Repository
     repo = Repository(db_path=str(tmp_db))
     await repo.init()
     yield repo
@@ -87,14 +87,13 @@ async def test_repo(tmp_db):
 async def test_app(tmp_path):
     """创建带有完整 app.state 的测试客户端（不启动 lifespan）"""
     from httpx import AsyncClient, ASGITransport
-    from agentos.app.gateway.main import app
-    from agentos.platform.config.config import Config
-    from agentos.capabilities.agents.registry import AgentRegistry
-    from agentos.capabilities.tools.registry import ToolRegistry
-    from agentos.capabilities.skills.registry import SkillRegistry
-    from agentos.capabilities.skills.market_service import SkillMarketService
-    from agentos.platform.security.path_policy import PathPolicy
-    from agentos.adapters.storage.repository import Repository
+    from sensenova_claw.app.gateway.main import app
+    from sensenova_claw.platform.config.config import Config
+    from sensenova_claw.capabilities.agents.registry import AgentRegistry
+    from sensenova_claw.capabilities.tools.registry import ToolRegistry
+    from sensenova_claw.capabilities.skills.registry import SkillRegistry
+    from sensenova_claw.capabilities.skills.market_service import SkillMarketService
+    from sensenova_claw.adapters.storage.repository import Repository
 
     # 使用临时目录避免污染真实环境
     workspace_dir = tmp_path / "workspace"
@@ -113,7 +112,7 @@ async def test_app(tmp_path):
     # 初始化 AgentRegistry（含 default Agent）
     agent_config_dir = tmp_path / "agents"
     agent_config_dir.mkdir()
-    agent_registry = AgentRegistry(config_dir=agent_config_dir)
+    agent_registry = AgentRegistry()
     agent_registry.load_from_config(cfg.data)
 
     # 初始化 ToolRegistry（自动注册 builtin 工具）
@@ -130,9 +129,6 @@ async def test_app(tmp_path):
         builtin_dir=builtin_skills_dir,
     )
     skill_registry.load_skills(cfg.data)
-
-    # PathPolicy
-    path_policy = PathPolicy(workspace=workspace_dir)
 
     # 真实 Services（只需 repo）
     @dataclass
@@ -155,7 +151,6 @@ async def test_app(tmp_path):
     app.state.skill_registry = skill_registry
     app.state.config = cfg
     app.state.market_service = market_service
-    app.state.path_policy = path_policy
 
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -166,6 +161,6 @@ async def test_app(tmp_path):
 
     # 清理 app.state，避免污染其他测试
     for attr in ("services", "agent_registry", "tool_registry", "skill_registry",
-                 "config", "market_service", "path_policy"):
+                 "config", "market_service"):
         if hasattr(app.state, attr):
             delattr(app.state, attr)

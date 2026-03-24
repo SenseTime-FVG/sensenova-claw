@@ -9,11 +9,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.interfaces.http.skills import router, invoke_router
-from agentos.capabilities.skills.registry import Skill, SkillRegistry
-from agentos.platform.config.config import Config
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.interfaces.http.skills import router, invoke_router
+from sensenova_claw.capabilities.skills.registry import Skill, SkillRegistry
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 def _create_test_skill(skill_dir: Path, name: str = "test-skill",

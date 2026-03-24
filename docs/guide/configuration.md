@@ -1,17 +1,17 @@
 # 配置指南
 
-AgentOS 通过 `config.yml` 配置文件进行全局配置，支持环境变量覆盖。本文档详细说明所有配置项及其用法。
+Sensenova-Claw 通过 `config.yml` 配置文件进行全局配置，支持环境变量和系统密钥环引用。本文档详细说明所有配置项及其用法。
 
 ## 配置加载优先级
 
-AgentOS 配置加载遵循以下优先级（从高到低）：
+Sensenova-Claw 配置加载遵循以下优先级（从高到低）：
 
 ```
-环境变量 > config.yml > 默认值
+环境变量覆盖值 > config.yml 中声明的来源（明文 / ${ENV} / ${secret:...}） > 默认值
 ```
 
-- **环境变量**: 最高优先级，适合在 CI/CD 或容器环境中覆盖敏感配置
-- **config.yml**: 项目根目录下的配置文件，适合本地开发
+- **环境变量覆盖值**: 最高优先级，适合在 CI/CD 或容器环境中覆盖敏感配置
+- **config.yml**: 项目根目录下的配置文件，适合本地开发；敏感字段推荐写成 `${secret:...}` 引用
 - **默认值**: 代码中预设的默认值，确保无配置时也能正常启动（使用 mock provider）
 
 ## 配置文件位置
@@ -19,13 +19,13 @@ AgentOS 配置加载遵循以下优先级（从高到低）：
 配置文件位于项目根目录：
 
 ```
-agentos/
+sensenova_claw/
 ├── config.yml          ← 配置文件（不入库，需手动创建）
 ├── config.yml.example  ← 配置示例（入库）
 └── ...
 ```
 
-> **安全提示**: `config.yml` 包含 API 密钥等敏感信息，已在 `.gitignore` 中排除，请勿提交到版本库。
+> **安全提示**: 新增或更新敏感字段时，推荐使用系统 keyring 存储，`config.yml` 仅保留 `${secret:...}` 引用；不要将明文密钥提交到版本库。
 
 ## 完整配置结构
 
@@ -37,7 +37,7 @@ system:
   workspace_dir: workspace
 
   # SQLite 数据库路径
-  database_path: var/data/agentos.db
+  database_path: var/data/sensenova-claw.db
 
   # 日志级别: DEBUG / INFO / WARNING / ERROR
   log_level: DEBUG
@@ -51,7 +51,7 @@ system:
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `workspace_dir` | string | `workspace` | 工作区目录路径 |
-| `database_path` | string | `var/data/agentos.db` | SQLite 数据库文件路径 |
+| `database_path` | string | `var/data/sensenova-claw.db` | SQLite 数据库文件路径 |
 | `log_level` | string | `DEBUG` | 日志输出级别 |
 | `granted_paths` | list | `[]` | 授权访问的文件系统路径列表 |
 
@@ -159,6 +159,13 @@ tools:
     search_depth: basic
     topic: general
 
+  research_union:
+    # research-union 技能在判断主链不足时使用的阈值
+    min_sources: 3
+    min_topic_coverage: 0.45
+    min_valid_evidence: 6
+    union_timeout: 90
+
   fetch_url:
     enabled: true
     # 请求超时（秒）
@@ -193,9 +200,24 @@ tools:
 | `tavily_search` | `timeout` | int | `15` | 搜索请求超时时间（秒） |
 | `tavily_search` | `max_results` | int | `5` | 最大搜索结果数 |
 | `tavily_search` | `search_depth/topic/time_range` | string | `basic/general/""` | Tavily 搜索深度、主题、时间范围 |
+| `research_union` | `min_sources` | int | `3` | 最少来源数（不足时触发 union 补充） |
+| `research_union` | `min_topic_coverage` | float | `0.45` | 主题覆盖率阈值 |
+| `research_union` | `min_valid_evidence` | int | `6` | 最少有效证据条数（title+link） |
+| `research_union` | `union_timeout` | int | `90` | union 补充阶段超时（秒） |
 | `fetch_url` | `enabled` | bool | `true` | 是否启用网页抓取 |
 | `fetch_url` | `timeout` | int | `30` | 请求超时时间（秒） |
 | `file_operations` | `enabled` | bool | `true` | 是否启用文件读写 |
+
+#### 搜索工具 API Key 获取方式
+
+Sensenova-Claw 的 Tools 页面会直接展示以下步骤，用户不需要只依赖外部文档链接：
+
+| 工具 | 获取步骤 |
+|------|----------|
+| `serper_search` | 打开 `https://serper.dev/` 注册并登录，进入 `Dashboard`，在 `API Key` 区域复制 key。 |
+| `brave_search` | 打开 `https://api-dashboard.search.brave.com/app/documentation/web-search/get-started` 登录控制台，在 `Subscriptions` 订阅 `Web Search` plan，再复制 `X-Subscription-Token`。 |
+| `baidu_search` | 打开百度千帆快速开始文档并进入 `控制台-安全认证-API Key`，创建 API Key，勾选千帆 / AppBuilder / AI 搜索权限后复制 key；请求时按 `Bearer <api_key>` 使用。 |
+| `tavily_search` | 登录 `https://tavily.com/`，进入 `Dashboard / API Keys` 区域复制 key；请求时按 `Authorization: Bearer <api_key>` 使用。 |
 
 ### tools.permission 段 — 工具权限配置
 
@@ -288,7 +310,7 @@ export LOG_LEVEL=DEBUG
 
 ## 多 Agent 配置
 
-AgentOS 支持配置多个 Agent，每个 Agent 拥有独立的模型、提示词和工具配置。
+Sensenova-Claw 支持配置多个 Agent，每个 Agent 拥有独立的模型、提示词和工具配置。
 
 ### 在 config.yml 中配置
 
@@ -354,7 +376,7 @@ Agent JSON 配置示例 (`workspace/agents/researcher.json`)：
 
 ```yaml
 # ============================
-# AgentOS 配置文件
+# Sensenova-Claw 配置文件
 # ============================
 
 # --- LLM API 密钥 ---
@@ -365,7 +387,7 @@ SERPER_API_KEY: your-serper-api-key
 # --- 系统配置 ---
 system:
   workspace_dir: workspace
-  database_path: var/data/agentos.db
+  database_path: var/data/sensenova-claw.db
   log_level: DEBUG
   granted_paths:
     - /home/user/projects
@@ -421,15 +443,46 @@ memory:
 
 ## 配置变量引用
 
-在 `config.yml` 中可以使用 `${VAR_NAME}` 语法引用其他配置项或环境变量：
+在 `config.yml` 中可以使用两种引用语法：
 
 ```yaml
-SERPER_API_KEY: your-key-here
-
 tools:
   serper_search:
-    api_key: ${SERPER_API_KEY}   # 引用顶层配置的值
+    api_key: ${SERPER_API_KEY}   # 从环境变量读取
+
+llm:
+  providers:
+    openai:
+      api_key: ${secret:sensenova_claw/llm.providers.openai.api_key}  # 从系统 keyring 读取
 ```
+
+说明：
+
+- `${VAR_NAME}`：从环境变量读取
+- `${secret:sensenova_claw/<dotted_path>}`：从系统 keyring 读取
+- 第一版敏感字段默认覆盖 `llm.providers.*.api_key`、`tools.*.api_key`、`tools.email.password`、`plugins.feishu.app_secret`、`plugins.wecom.secret`
+- 如果 keyring backend 不可用，secret 写入会失败，不会自动回退到明文
+
+## 明文迁移到 keyring
+
+如果你已有历史明文配置，可以显式触发迁移：
+
+```bash
+sensenova-claw migrate-secrets
+```
+
+也可以通过 HTTP API 触发：
+
+```http
+POST /api/config/migrate-secrets
+```
+
+迁移行为：
+
+- 只迁移已登记的敏感路径
+- 已经是 `${secret:...}` 的值会跳过
+- `${ENV}` 环境变量引用会跳过
+- 迁移成功后，`config.yml` 中的明文会改写成 `${secret:sensenova_claw/<dotted_path>}`
 
 ## 下一步
 

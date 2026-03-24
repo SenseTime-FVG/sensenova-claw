@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
-from agentos.adapters.channels.wecom.plugin import definition, register
-from agentos.adapters.plugins import PluginRegistry
-from agentos.adapters.plugins.base import PluginApi
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.plugins import PluginRegistry, _iter_builtin_plugin_modules
+from sensenova_claw.adapters.plugins.wecom.plugin import definition, register
+from sensenova_claw.adapters.plugins.base import PluginApi
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 def _make_plugin_api(config_overrides: dict | None = None) -> PluginApi:
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     defaults = {
         "enabled": False,
@@ -69,6 +71,23 @@ class TestRegister:
         assert registry._pending_channels[0].get_channel_id() == "wecom"
         assert len(registry._pending_tools) == 1
 
+    async def test_missing_dependency_reports_failed_state(self):
+        api = _make_plugin_api({"enabled": True})
+        registry = api._registry
+        original_import = __import__
+        with patch(
+            "builtins.__import__",
+            side_effect=lambda name, *args, **kwargs: (
+                (_ for _ in ()).throw(ModuleNotFoundError(name="pyee"))
+                if name == "sensenova_claw.adapters.plugins.wecom.channel"
+                else original_import(name, *args, **kwargs)
+            ),
+        ):
+            await register(api)
+        assert registry._pending_channels == []
+        assert registry._plugin_states["wecom"]["status"] == "failed"
+        assert registry._plugin_states["wecom"]["error"] == "未安装依赖: pyee"
+
     async def test_channel_config_passthrough(self):
         api = _make_plugin_api({
             "enabled": True,
@@ -86,12 +105,13 @@ class TestRegister:
 
 @pytest.mark.asyncio
 async def test_plugin_registry_loads_channel_plugins():
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     global_config.set("plugins.feishu.enabled", False)
     global_config.set("plugins.wecom.enabled", False)
     global_config.set("plugins.telegram.enabled", False)
     global_config.set("plugins.whatsapp.enabled", False)
+    global_config.set("plugins.discord.enabled", False)
 
     registry = PluginRegistry()
     await registry.load_plugins(config=global_config.data)
@@ -100,3 +120,10 @@ async def test_plugin_registry_loads_channel_plugins():
     assert "wecom" in registry._plugins
     assert "telegram" in registry._plugins
     assert "whatsapp" in registry._plugins
+    assert "discord" in registry._plugins
+
+
+def test_builtin_plugin_module_points_to_plugins_package():
+    modules = dict(_iter_builtin_plugin_modules())
+    assert modules["wecom"] == "sensenova_claw.adapters.plugins.wecom.plugin"
+    assert modules["discord"] == "sensenova_claw.adapters.plugins.discord.plugin"

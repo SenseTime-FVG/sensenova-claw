@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, USER_INPUT
-from agentos.adapters.channels.base import Channel
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED, USER_INPUT
+from sensenova_claw.adapters.channels.base import Channel
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 class MockChannel(Channel):
@@ -34,6 +34,28 @@ class MockChannel(Channel):
 
     async def send_event(self, event: EventEnvelope) -> None:
         self.received_events.append(event)
+
+
+class FailingChannel(Channel):
+    def __init__(self, channel_id: str, error: str = "start failed"):
+        self._channel_id = channel_id
+        self._error = error
+        self.started = False
+        self.stopped = False
+        self._sensenova_claw_status: dict[str, str] = {}
+
+    def get_channel_id(self) -> str:
+        return self._channel_id
+
+    async def start(self) -> None:
+        self.started = True
+        raise RuntimeError(self._error)
+
+    async def stop(self) -> None:
+        self.stopped = True
+
+    async def send_event(self, event: EventEnvelope) -> None:
+        del event
 
 
 class _RepoWithMeta:
@@ -221,3 +243,23 @@ async def test_gateway_dispatch_event_parent_loop_is_safe():
 
     assert len(channel.received_events) == 0
     assert "sess_a" not in gateway._session_bindings
+
+
+@pytest.mark.asyncio
+async def test_gateway_start_continues_when_one_channel_fails():
+    bus = PublicEventBus()
+    publisher = EventPublisher(bus=bus)
+    gateway = Gateway(publisher=publisher)
+
+    ok_channel = MockChannel("ok-channel")
+    failed_channel = FailingChannel("failed-channel", error="discord intents rejected")
+    gateway.register_channel(ok_channel)
+    gateway.register_channel(failed_channel)
+
+    await gateway.start()
+    await gateway.stop()
+
+    assert ok_channel.started is True
+    assert failed_channel.started is True
+    assert failed_channel._sensenova_claw_status["status"] == "failed"
+    assert failed_channel._sensenova_claw_status["error"] == "discord intents rejected"

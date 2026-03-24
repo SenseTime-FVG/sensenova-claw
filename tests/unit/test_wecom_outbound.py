@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.adapters.channels.wecom.channel import WecomChannel, WecomSessionMeta
-from agentos.adapters.channels.wecom.config import WecomConfig
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.plugins.wecom.channel import WecomChannel, WecomSessionMeta
+from sensenova_claw.adapters.plugins.wecom.config import WecomConfig
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED, ERROR_RAISED, TOOL_CALL_STARTED, USER_QUESTION_ASKED
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 class _SimplePluginApi:
@@ -72,6 +72,19 @@ async def test_send_agent_reply():
         )
     )
     assert client.sent_messages == [{"target": "chat-1", "text": "已完成"}]
+
+
+@pytest.mark.asyncio
+async def test_send_user_question_asked_reply():
+    channel, client = _make_channel()
+    await channel.send_event(
+        EventEnvelope(
+            type=USER_QUESTION_ASKED,
+            session_id="session-1",
+            payload={"question": "请补充更多上下文"},
+        )
+    )
+    assert client.sent_messages == [{"target": "chat-1", "text": "请补充更多上下文"}]
 
 
 @pytest.mark.asyncio

@@ -2,15 +2,15 @@
 
 import pytest
 
-from agentos.adapters.plugins.base import PluginDefinition, PluginApi
-from agentos.adapters.plugins import PluginRegistry
-from agentos.adapters.channels.base import Channel
-from agentos.capabilities.tools.base import Tool
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.platform.config.config import Config
+from sensenova_claw.adapters.plugins.base import PluginDefinition, PluginApi
+from sensenova_claw.adapters.plugins import PluginRegistry
+from sensenova_claw.adapters.channels.base import Channel
+from sensenova_claw.capabilities.tools.base import Tool
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.platform.config.config import Config
 
 
 # ---------- 轻量真实 Channel / Tool ----------
@@ -161,7 +161,7 @@ class TestPluginApi:
         cfg = Config(config_path=config_yml)
 
         # 临时替换全局 config 对象
-        import agentos.platform.config.config as config_module
+        import sensenova_claw.platform.config.config as config_module
         original = config_module.config
         config_module.config = cfg
         try:
@@ -178,7 +178,7 @@ class TestPluginApi:
         config_yml.write_text("", encoding="utf-8")
         cfg = Config(config_path=config_yml)
 
-        import agentos.platform.config.config as config_module
+        import sensenova_claw.platform.config.config as config_module
         original = config_module.config
         config_module.config = cfg
         try:

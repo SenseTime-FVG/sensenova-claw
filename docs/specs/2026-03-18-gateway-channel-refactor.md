@@ -76,7 +76,7 @@ class Gateway:
 |---------|----------|------|
 | WebSocketChannel | Token（cookie/query param） | 连接时验证，复用现有 `verify_websocket()` |
 | FeishuChannel | 飞书签名（app_id/app_secret） | 现有逻辑不变 |
-| CLI（通过 WebSocket） | 自动读取 `~/.agentos/token` | 已实现，Channel 层验证 |
+| CLI（通过 WebSocket） | 自动读取 `~/.sensenova-claw/token` | 已实现，Channel 层验证 |
 
 ## Channel 多 client 管理
 
@@ -155,7 +155,7 @@ HTTP 认证中间件保留在 main.py（保护 REST API）。
 | `adapters/channels/websocket_channel.py` | 大改 | 新增 `handle_connection()`、`_handle_message()`、认证 |
 | `adapters/channels/base.py` | 小改 | Channel 基类增加 `gateway` 属性 |
 | `app/gateway/main.py` | 大改 | 删除 WS 消息处理和认证，HTTP 端点改为调 Gateway |
-| `adapters/channels/feishu/channel.py` | 小改 | 适配新 Gateway API 签名 |
+| `adapters/plugins/feishu/channel.py` | 小改 | 适配新 Gateway API 签名 |
 | `platform/security/middleware.py` | 不变 | WebSocketChannel 内部复用 |
 
 ## 不变的部分

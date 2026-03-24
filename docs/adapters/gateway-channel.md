@@ -1,6 +1,6 @@
 # Gateway 与 Channel
 
-> 路径：`agentos/interfaces/ws/`、`agentos/adapters/channels/`
+> 路径：`sensenova_claw/interfaces/ws/`、`sensenova_claw/adapters/channels/`
 
 Gateway 是用户接入的核心路由层，负责在各种 Channel（接入渠道）和 PublicEventBus 之间双向转发事件。
 
@@ -56,7 +56,7 @@ class Channel(ABC):
 
 ## WebSocketChannel
 
-> 路径：`agentos/adapters/channels/websocket/`
+> 路径：`sensenova_claw/adapters/channels/websocket/`
 
 WebSocketChannel 是 Web 前端的主要接入方式：
 
@@ -79,7 +79,7 @@ WebSocketChannel 是 Web 前端的主要接入方式：
 
 ## FeishuChannel
 
-> 路径：`agentos/adapters/channels/feishu/`
+> 路径：`sensenova_claw/adapters/plugins/feishu/`
 
 FeishuChannel 支持飞书/钉钉机器人集成：
 

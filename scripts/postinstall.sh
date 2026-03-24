@@ -52,8 +52,13 @@ uv sync
 
 echo ""
 echo -e "${GREEN}▶ 安装前端依赖...${NC}"
-cd "$ROOT_DIR/agentos/app/web"
+cd "$ROOT_DIR/sensenova_claw/app/web"
 npm install
+
+echo ""
+echo -e "${GREEN}▶ 安装 WhatsApp bridge 依赖...${NC}"
+cd "$ROOT_DIR"
+npm install --prefix sensenova_claw/adapters/plugins/whatsapp/bridge
 
 echo ""
 echo -e "${GREEN}✔ 所有依赖安装完成${NC}"

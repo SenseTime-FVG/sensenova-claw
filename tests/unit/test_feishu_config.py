@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from agentos.adapters.channels.feishu.config import FeishuConfig
+from sensenova_claw.adapters.plugins.feishu.config import FeishuConfig
 
 
 class TestFeishuConfigDefaults:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from agentos.adapters.llm.providers.gemini_provider import GeminiProvider, has_thought_signature
+from sensenova_claw.adapters.llm.providers.gemini_provider import GeminiProvider, has_thought_signature
 
 
 def _make_signed_assistant(tool_call_id: str = "call_123", direct_format: bool = False) -> dict:

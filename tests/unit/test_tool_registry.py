@@ -1,6 +1,8 @@
 """T04: ToolRegistry 注册/发现"""
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.capabilities.tools.base import Tool, ToolRiskLevel
+from unittest.mock import patch
+
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
 
 
 class MockTool(Tool):
@@ -22,6 +24,32 @@ class TestToolRegistry:
         assert r.get("read_file") is not None
         assert r.get("write_file") is not None
         assert r.get("ask_user") is not None
+
+    def test_email_tools_not_registered_by_default(self):
+        """email 工具默认不注册（tools.email.enabled=False）"""
+        r = ToolRegistry()
+        names = {t["name"] for t in r.as_llm_tools()}
+        email_tools = {"send_email", "list_emails", "read_email", "download_attachment", "mark_email", "search_emails"}
+        assert email_tools.isdisjoint(names)
+
+    def test_email_tools_registered_when_enabled(self):
+        """tools.email.enabled=True 时 email 工具应注册"""
+        from sensenova_claw.platform.config.config import config
+        original = config.data["tools"]["email"]["enabled"]
+        try:
+            config.data["tools"]["email"]["enabled"] = True
+            r = ToolRegistry()
+            names = {t["name"] for t in r.as_llm_tools()}
+            assert {
+                "send_email",
+                "list_emails",
+                "read_email",
+                "download_attachment",
+                "mark_email",
+                "search_emails",
+            }.issubset(names)
+        finally:
+            config.data["tools"]["email"]["enabled"] = original
 
     def test_register_custom(self):
         r = ToolRegistry()

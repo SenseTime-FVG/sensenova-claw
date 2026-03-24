@@ -1,45 +1,41 @@
-"""X02: 不同 Agent 的 PathPolicy 隔离"""
-import platform
+"""X02: 不同 Agent 的工作目录隔离"""
 import pytest
 from pathlib import Path
-from agentos.platform.security.path_policy import PathPolicy, PathVerdict
-from agentos.capabilities.agents.config import AgentConfig
-from agentos.capabilities.tools.builtin import ReadFileTool, WriteFileTool
+from sensenova_claw.capabilities.tools.builtin import ReadFileTool, WriteFileTool
 
 pytestmark = pytest.mark.asyncio
 
 
-class TestAgentPathPolicy:
-    async def test_different_workspaces(self, tmp_path):
-        """不同 Agent 可以有不同的 workspace"""
-        ws1 = tmp_path / "agent1_ws"
-        ws1.mkdir()
-        ws2 = tmp_path / "agent2_ws"
-        ws2.mkdir()
-        (ws1 / "a.txt").write_text("agent1 file", encoding="utf-8")
-        (ws2 / "b.txt").write_text("agent2 file", encoding="utf-8")
+class TestAgentWorkdirIsolation:
+    async def test_different_workdirs(self, tmp_path):
+        """不同 Agent 通过 _agent_workdir 实现文件隔离"""
+        wd1 = tmp_path / "agent1_wd"
+        wd1.mkdir()
+        wd2 = tmp_path / "agent2_wd"
+        wd2.mkdir()
+        (wd1 / "a.txt").write_text("agent1 file", encoding="utf-8")
+        (wd2 / "b.txt").write_text("agent2 file", encoding="utf-8")
 
-        p1 = PathPolicy(workspace=ws1)
-        p2 = PathPolicy(workspace=ws2)
-
-        # agent1 可以读自己的文件
-        r = await ReadFileTool().execute(file_path=str(ws1 / "a.txt"), _path_policy=p1)
+        r = await ReadFileTool().execute(file_path="a.txt", _agent_workdir=str(wd1))
         assert "agent1 file" in r.get("content", "")
 
-        # agent1 不能读 agent2 的文件（不同 workspace）
-        r = await ReadFileTool().execute(file_path=str(ws2 / "b.txt"), _path_policy=p1)
-        assert r.get("action") == "need_grant" or r.get("success") is False
+        r = await ReadFileTool().execute(file_path="b.txt", _agent_workdir=str(wd2))
+        assert "agent2 file" in r.get("content", "")
 
-    async def test_independent_grants(self, tmp_path):
-        """grant 在不同 PathPolicy 之间互不影响"""
-        ws = tmp_path / "ws"
-        ws.mkdir()
-        shared = tmp_path / "shared"
-        shared.mkdir()
+    async def test_write_isolation(self, tmp_path):
+        """不同 Agent 写入各自工作目录"""
+        wd1 = tmp_path / "agent1_wd"
+        wd1.mkdir()
+        wd2 = tmp_path / "agent2_wd"
+        wd2.mkdir()
 
-        p1 = PathPolicy(workspace=ws)
-        p2 = PathPolicy(workspace=ws)
-
-        p1.grant(str(shared))
-        assert p1.check_read(str(shared / "f.txt")) == PathVerdict.ALLOW
-        assert p2.check_read(str(shared / "f.txt")) == PathVerdict.NEED_GRANT
+        r1 = await WriteFileTool().execute(
+            file_path="out.txt", content="from agent1", _agent_workdir=str(wd1),
+        )
+        r2 = await WriteFileTool().execute(
+            file_path="out.txt", content="from agent2", _agent_workdir=str(wd2),
+        )
+        assert r1.get("success") is True
+        assert r2.get("success") is True
+        assert (wd1 / "out.txt").read_text(encoding="utf-8") == "from agent1"
+        assert (wd2 / "out.txt").read_text(encoding="utf-8") == "from agent2"

@@ -1,6 +1,6 @@
 # 快速开始
 
-本指南帮助你在本地环境快速搭建和运行 AgentOS。
+本指南帮助你在本地环境快速搭建和运行 Sensenova-Claw。
 
 ## 环境要求
 
@@ -19,7 +19,7 @@
 
 ```bash
 git clone <项目地址>
-cd agentos
+cd sensenova-claw
 ```
 
 ### 2. 安装后端依赖
@@ -99,6 +99,38 @@ tools:
 
 > 配置加载优先级：**环境变量 > config.yml > 默认值**
 
+### 获取搜索工具 API Key
+
+如果你不想让 Agent 自己再去读外部文档解释，可以直接按下面的步骤手动拿到搜索工具 token：
+
+#### Serper
+
+1. 打开 `https://serper.dev/`，点击 `Sign up` 或 `Get started` 完成注册并登录。
+2. 登录后进入 `Dashboard`，找到 `API Key` 区域。
+3. 复制页面展示的 API Key。
+4. 将该 key 填入 `SERPER_API_KEY` 或 `tools.serper_search.api_key`。
+
+#### Brave Search
+
+1. 打开 `https://api-dashboard.search.brave.com/app/documentation/web-search/get-started`，点击右上角 `Log in` 注册或登录。
+2. 进入 dashboard 后，在 `Subscriptions` 中订阅一个 `Web Search` plan。
+3. 打开订阅后的应用或凭据页，复制 `X-Subscription-Token`。
+4. 将该 token 填入 `BRAVE_SEARCH_API_KEY` 或 `tools.brave_search.api_key`。
+
+#### 百度千帆 / AppBuilder AI Search
+
+1. 打开 `https://cloud.baidu.com/doc/qianfan-docs/s/qm8qxemze`，按文档入口进入百度智能云控制台的 `安全认证 -> API Key` 页面。
+2. 点击 `创建 API Key`，并在 `添加权限` 中勾选千帆 / AppBuilder / AI 搜索相关能力。
+3. 创建完成后复制 API Key。
+4. 将该 key 填入 `BAIDU_APPBUILDER_API_KEY` 或 `tools.baidu_search.api_key`；请求时会按 `Bearer <api_key>` 方式使用。
+
+#### Tavily
+
+1. 打开 `https://tavily.com/` 并登录。
+2. 进入 `Dashboard` 或 `API Keys` 区域。
+3. 复制系统生成的 Tavily API Key。
+4. 将该 key 填入 `TAVILY_API_KEY` 或 `tools.tavily_search.api_key`；请求时会按 `Authorization: Bearer <api_key>` 使用。
+
 详细配置说明请参考 [配置指南](configuration.md)。
 
 ## 启动服务
@@ -120,7 +152,7 @@ npm run dev:server
 或者直接使用 uvicorn：
 
 ```bash
-python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port 8000
+python3 -m uvicorn sensenova_claw.app.gateway.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 单独启动前端
@@ -134,7 +166,7 @@ npm run dev:web
 TUI 客户端提供终端交互界面，需要后端已运行：
 
 ```bash
-python3 -m agentos.app.cli.cli_client --port 8000
+python3 -m sensenova-claw.app.cli.cli_client --port 8000
 ```
 
 ## 访问服务
@@ -155,7 +187,7 @@ python3 -m agentos.app.cli.cli_client --port 8000
 
 ### 2. 验证前端
 
-打开浏览器访问 http://localhost:3000 ，页面应显示 AgentOS 的对话界面。
+打开浏览器访问 http://localhost:3000 ，页面应显示 Sensenova-Claw 的对话界面。
 
 ### 3. 发送测试消息
 

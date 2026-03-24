@@ -10,20 +10,20 @@ import json
 
 import pytest
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
     MESSAGE_OUTBOUND_SENT,
     TOOL_CALL_STARTED,
 )
-from agentos.adapters.channels.base import Channel, OutboundCapable
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.adapters.channels.feishu.card import build_markdown_card
-from agentos.adapters.channels.feishu.text import chunk_text
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.capabilities.tools.message_tool import MessageTool
+from sensenova_claw.adapters.channels.base import Channel, OutboundCapable
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.adapters.plugins.feishu.card import build_markdown_card
+from sensenova_claw.adapters.plugins.feishu.text import chunk_text
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.capabilities.tools.message_tool import MessageTool
 
 
 # ---- card.py 测试 ----

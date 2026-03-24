@@ -31,10 +31,12 @@ pnpm-debug.log*
 .npm/
 
 # ========== 前端构建与测试产物 ==========
-agentos/app/web/.next/
-agentos/app/web/dist/
-agentos/app/web/test-results/
-agentos/app/web/playwright-report/
+sensenova_claw/app/web/.next/
+sensenova_claw/app/web/dist/
+sensenova_claw/app/web/test-results/
+sensenova_claw/app/web/playwright-report/
+*.tsbuildinfo
+test-results/
 
 # ========== 运行时目录 ==========
 .SenseAssistant/
@@ -45,6 +47,9 @@ workspace/memory/
 workspace/skills/
 workspace/*.json
 my_workspace/
+.sensenova-claw/workdir/
+.sensenova-claw/token
+.sensenova-claw/agents/*/sessions/
 
 # var/ 运行时数据（数据库等）默认忽略，但保留内置 skills
 var/
@@ -69,6 +74,7 @@ build/
 
 # ========== 本地密钥与环境变量 ==========
 config.yml
+config.yaml
 .env
 .env.*
 !.env.example
@@ -79,3 +85,8 @@ config.yml
 *.bak
 *.orig
 pytest_tmp/
+tmp_docs/
+updates/
+
+# ========== Lock 文件（仅保留 npm） ==========
+pnpm-lock.yaml

@@ -7,14 +7,17 @@
 
 from __future__ import annotations
 
+import sys
+from unittest.mock import patch
+
 import pytest
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.adapters.plugins import PluginRegistry
-from agentos.adapters.plugins.base import PluginApi
-from agentos.adapters.channels.feishu.plugin import definition, register
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.adapters.plugins import PluginRegistry, _iter_builtin_plugin_modules
+from sensenova_claw.adapters.plugins.base import PluginApi
+from sensenova_claw.adapters.plugins.feishu.plugin import definition, register
 
 
 # ---- 辅助：构造真实 PluginApi ----
@@ -25,7 +28,7 @@ def _make_plugin_api(config_overrides: dict | None = None) -> PluginApi:
 
     通过直接设置 config 中的 plugins.feishu 字段来控制测试配置。
     """
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     # 备份原始 feishu 配置
     defaults = {
@@ -75,6 +78,9 @@ class TestPluginDefinition:
     def test_description_not_empty(self):
         assert len(definition.description) > 0
 
+    def test_description_does_not_claim_removed_api_tool(self):
+        assert "API 调用" not in definition.description
+
 
 # ---- register() 测试 ----
 
@@ -121,6 +127,20 @@ class TestRegister:
         # MessageTool + DocTool + WikiTool + DriveTool + PermTool = 5
         assert len(registry._pending_tools) == 5
 
+    async def test_api_tool_config_is_kept_for_compat_but_not_registered(self):
+        api = _make_plugin_api({
+            "enabled": True,
+            "api_tool": {
+                "enabled": True,
+                "allowed_methods": ["GET", "POST"],
+                "allowed_path_prefixes": ["/open-apis/wiki/v2/spaces"],
+            },
+        })
+        registry = api._registry
+        await register(api)
+        names = [tool.name for tool in registry._pending_tools]
+        assert "feishu_api" not in names
+
     async def test_channel_config_passthrough(self):
         """Channel 应使用 FeishuConfig 中的配置值"""
         api = _make_plugin_api({
@@ -135,3 +155,24 @@ class TestRegister:
         assert channel._config.app_id == "my_app"
         assert channel._config.app_secret == "my_secret"
         assert channel._config.render_mode == "text"
+
+    async def test_missing_dependency_reports_failed_state(self):
+        api = _make_plugin_api({"enabled": True})
+        registry = api._registry
+        original_channel_module = sys.modules.pop("sensenova_claw.adapters.plugins.feishu.channel", None)
+        try:
+            with patch.dict(sys.modules, {"sensenova_claw.adapters.plugins.feishu.channel": None}):
+                await register(api)
+        finally:
+            if original_channel_module is not None:
+                sys.modules["sensenova_claw.adapters.plugins.feishu.channel"] = original_channel_module
+            else:
+                sys.modules.pop("sensenova_claw.adapters.plugins.feishu.channel", None)
+        assert registry._pending_channels == []
+        assert registry._plugin_states["feishu"]["status"] == "failed"
+        assert "依赖" in registry._plugin_states["feishu"]["error"]
+
+
+def test_builtin_plugin_module_points_to_plugins_package():
+    modules = dict(_iter_builtin_plugin_modules())
+    assert modules["feishu"] == "sensenova_claw.adapters.plugins.feishu.plugin"

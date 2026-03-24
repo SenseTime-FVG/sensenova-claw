@@ -1,9 +1,9 @@
 """B08: ContextBuilder"""
-from agentos.kernel.runtime.context_builder import ContextBuilder
-from agentos.capabilities.agents.config import AgentConfig
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.capabilities.skills.registry import SkillRegistry, Skill
-from agentos.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.capabilities.skills.registry import SkillRegistry, Skill
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
 from pathlib import Path
 
 
@@ -55,7 +55,7 @@ class TestContextBuilder:
         assert "ok" in msgs[1]["content"]
 
     def test_delegation_prompt_injected(self, tmp_path):
-        ar = AgentRegistry(config_dir=tmp_path / "a")
+        ar = AgentRegistry()
         ar.register(AgentConfig.create(id="main", name="Main"))
         ar.register(AgentConfig.create(id="helper", name="Helper", description="帮助工具"))
         agent = ar.get("main")

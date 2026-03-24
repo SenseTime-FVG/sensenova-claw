@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from agentos.app.cli.app import CLIApp
+from sensenova_claw.app.cli.app import CLIApp
 
 
 @pytest.mark.asyncio

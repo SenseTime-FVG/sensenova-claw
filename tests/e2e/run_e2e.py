@@ -33,17 +33,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import yaml
 
-from agentos.platform.config.config import config
-from agentos.platform.logging.setup import setup_logging
+from sensenova_claw.platform.config.config import config
+from sensenova_claw.platform.logging.setup import setup_logging
 
 # run_e2e.py -> tests/e2e/ -> tests/ -> 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-from agentos.adapters.storage.repository import Repository
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.persister import EventPersister
-from agentos.kernel.events.router import BusRouter
-from agentos.kernel.events.types import (
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.persister import EventPersister
+from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     AGENT_STEP_STARTED,
     ERROR_RAISED,
@@ -57,18 +57,18 @@ from agentos.kernel.events.types import (
     TOOL_CALL_STARTED,
     USER_INPUT,
 )
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.adapters.llm.factory import LLMFactory
-from agentos.kernel.runtime.agent_runtime import AgentRuntime
-from agentos.kernel.runtime.context_builder import ContextBuilder
-from agentos.kernel.runtime.llm_runtime import LLMRuntime
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.kernel.runtime.state import SessionStateStore
-from agentos.kernel.runtime.title_runtime import TitleRuntime
-from agentos.kernel.runtime.tool_runtime import ToolRuntime
-from agentos.capabilities.skills.registry import SkillRegistry
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.platform.config.workspace import ensure_workspace
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.adapters.llm.factory import LLMFactory
+from sensenova_claw.kernel.runtime.agent_runtime import AgentRuntime
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.kernel.runtime.llm_runtime import LLMRuntime
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.kernel.runtime.state import SessionStateStore
+from sensenova_claw.kernel.runtime.title_runtime import TitleRuntime
+from sensenova_claw.kernel.runtime.tool_runtime import ToolRuntime
+from sensenova_claw.capabilities.skills.registry import SkillRegistry
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.platform.config.workspace import ensure_workspace
 
 logger = logging.getLogger("e2e")
 
@@ -449,7 +449,7 @@ async def test_custom_query(svc: dict, query: str, timeout: float, verbose: bool
 # ── 主入口 ──────────────────────────────────────────────────
 
 async def main():
-    parser = argparse.ArgumentParser(description="AgentOS E2E 一键测试")
+    parser = argparse.ArgumentParser(description="Sensenova-Claw E2E 一键测试")
     parser.add_argument("--provider", default="gemini", help="LLM provider: mock / openai / anthropic / gemini")
     parser.add_argument("--model", default=None, help="模型名称（不指定则使用配置默认值）")
     parser.add_argument("--query", default=None, help="自定义测试查询（替代内置用例）")
@@ -459,12 +459,12 @@ async def main():
     args = parser.parse_args()
 
     import tempfile
-    tmp_dir = Path(args.tmp_dir) if args.tmp_dir else Path(tempfile.mkdtemp(prefix="agentos_e2e_"))
+    tmp_dir = Path(args.tmp_dir) if args.tmp_dir else Path(tempfile.mkdtemp(prefix="sensenova_claw_e2e_"))
 
     config_yml = PROJECT_ROOT / "config.yml"
 
     print("=" * 70)
-    print("  AgentOS E2E 一键测试")
+    print("  Sensenova-Claw E2E 一键测试")
     print("=" * 70)
     print(f"  Provider  : {args.provider}")
     print(f"  Model     : {args.model or '(配置默认值)'}")

@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch
 
-from agentos.capabilities.tools.email import (
+from sensenova_claw.capabilities.tools.email import (
     SendEmailTool,
     ListEmailsTool,
     ReadEmailTool,
@@ -11,8 +11,8 @@ from agentos.capabilities.tools.email import (
     MarkEmailTool,
     SearchEmailsTool,
 )
-from agentos.capabilities.tools.base import ToolRiskLevel
-from agentos.platform.config.config import config
+from sensenova_claw.capabilities.tools.base import ToolRiskLevel
+from sensenova_claw.platform.config.config import config
 
 
 @pytest.mark.asyncio

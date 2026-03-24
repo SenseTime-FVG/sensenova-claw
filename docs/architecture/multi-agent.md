@@ -2,7 +2,7 @@
 
 ## 概述
 
-为 AgentOS 增加 Multi-Agent 协作能力，支持一个 Agent 通过 `send_message` 向另一个 Agent 发送任务或追问，并同时支持：
+为 Sensenova-Claw 增加 Multi-Agent 协作能力，支持一个 Agent 通过 `send_message` 向另一个 Agent 发送任务或追问，并同时支持：
 
 - 新建子 session 执行独立任务
 - 复用既有子 session 继续对话
@@ -33,14 +33,14 @@
 
 | 组件 | 文件 | 当前职责 | 在本设计中的角色 |
 |------|------|------|------|
-| `SendMessageTool` | `agentos/capabilities/tools/send_message_tool.py` | Agent-to-Agent 消息发送入口 | 负责参数校验 + 发布请求事件 |
-| `AgentConfig.can_send_message_to` | `agentos/capabilities/agents/config.py` | 可发送目标白名单 | 用于限制 send_message 目标范围 |
-| `AgentConfig.max_send_depth` | `agentos/capabilities/agents/config.py` | 最大消息传递深度 | 用于限制新建子 session 深度 |
-| `AgentRegistry.get_sendable()` | `agentos/capabilities/agents/registry.py` | 获取可发送目标 | 供 prompt 注入和工具校验使用 |
-| `BusRouter` | `agentos/kernel/events/router.py` | Public/Private Bus 路由 + GC | 保持不变，不承载消息业务状态 |
-| `AgentRuntime` | `agentos/kernel/runtime/agent_runtime.py` | 创建/销毁 `AgentSessionWorker` | 增加轻量 helper，统一启动目标 Agent session |
-| `AgentSessionWorker` | `agentos/kernel/runtime/workers/agent_worker.py` | 处理 session 内事件链 | 增加异步回传事件消费分支 |
-| `Repository` | `agentos/adapters/storage/repository.py` | session/turn/message/event 持久化 | 新增 `agent_messages` 记录 |
+| `SendMessageTool` | `sensenova_claw/capabilities/tools/send_message_tool.py` | Agent-to-Agent 消息发送入口 | 负责参数校验 + 发布请求事件 |
+| `AgentConfig.can_send_message_to` | `sensenova_claw/capabilities/agents/config.py` | 可发送目标白名单 | 用于限制 send_message 目标范围 |
+| `AgentConfig.max_send_depth` | `sensenova_claw/capabilities/agents/config.py` | 最大消息传递深度 | 用于限制新建子 session 深度 |
+| `AgentRegistry.get_sendable()` | `sensenova_claw/capabilities/agents/registry.py` | 获取可发送目标 | 供 prompt 注入和工具校验使用 |
+| `BusRouter` | `sensenova_claw/kernel/events/router.py` | Public/Private Bus 路由 + GC | 保持不变，不承载消息业务状态 |
+| `AgentRuntime` | `sensenova_claw/kernel/runtime/agent_runtime.py` | 创建/销毁 `AgentSessionWorker` | 增加轻量 helper，统一启动目标 Agent session |
+| `AgentSessionWorker` | `sensenova_claw/kernel/runtime/workers/agent_worker.py` | 处理 session 内事件链 | 增加异步回传事件消费分支 |
+| `Repository` | `sensenova_claw/adapters/storage/repository.py` | session/turn/message/event 持久化 | 新增 `agent_messages` 记录 |
 
 ## 为什么不保留重型 MessageRuntime
 

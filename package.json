@@ -1,17 +1,17 @@
 {
-  "name": "agentos",
+  "name": "sensenova-claw",
   "private": true,
   "version": "0.5.0",
   "scripts": {
     "postinstall": "bash ./scripts/postinstall.sh",
-    "dev": "python3 -m agentos.app.main run",
-    "dev:server": "python3 -m agentos.app.main run --no-frontend",
-    "dev:web": "cd agentos/app/web && npm run dev",
-    "test": "python3 -m pytest tests/ -q",
-    "test:unit": "python3 -m pytest tests/unit/ -q",
-    "test:core": "python3 -m pytest tests/unit/test_agent_worker.py tests/unit/test_llm_worker.py tests/unit/test_openai_provider_message_normalization.py tests/e2e/test_agent_llm_core_flow.py -q",
-    "test:e2e": "python3 -m pytest tests/e2e/ -q",
-    "test:web:e2e": "cd agentos/app/web && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright test"
+    "dev": "uv run python3 -m sensenova_claw.app.main run",
+    "dev:server": "uv run python3 -m sensenova_claw.app.main run --no-frontend",
+    "dev:web": "cd sensenova_claw/app/web && npm run dev",
+    "test": "uv run python3 -m pytest tests/ -q",
+    "test:unit": "uv run python3 -m pytest tests/unit/ -q",
+    "test:core": "uv run python3 -m pytest tests/unit/test_agent_worker.py tests/unit/test_llm_worker.py tests/unit/test_openai_provider_message_normalization.py tests/e2e/test_agent_llm_core_flow.py -q",
+    "test:e2e": "uv run python3 -m pytest tests/e2e/ -q",
+    "test:web:e2e": "cd sensenova_claw/app/web && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2"

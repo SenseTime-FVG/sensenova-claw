@@ -1,7 +1,7 @@
 from pathlib import Path
 import tempfile
 import pytest
-from agentos.capabilities.skills.registry import SkillRegistry
+from sensenova_claw.capabilities.skills.registry import SkillRegistry
 
 
 def test_parse_skill():

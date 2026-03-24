@@ -20,18 +20,20 @@ from typing import Any
 
 import pytest
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     CRON_DELIVERY_REQUESTED,
     ERROR_RAISED,
     TOOL_CALL_STARTED,
+    USER_QUESTION_ANSWERED,
+    USER_QUESTION_ASKED,
 )
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.adapters.channels.feishu.config import FeishuConfig
-from agentos.adapters.channels.feishu.channel import FeishuChannel, FeishuSessionMeta
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.adapters.plugins.feishu.config import FeishuConfig
+from sensenova_claw.adapters.plugins.feishu.channel import FeishuChannel, FeishuSessionMeta
 
 
 # ---- 辅助：轻量 PluginApi 替代品（不使用 mock） ----
@@ -63,6 +65,39 @@ class _FakeMessage:
 class _FakeMention:
     """模拟飞书 SDK mention 对象"""
     key: str = "@_user_1"
+
+
+@dataclass
+class _FakeInboundMessage:
+    """模拟飞书 SDK 入站消息对象"""
+    chat_id: str = "chat_001"
+    chat_type: str = "p2p"
+    message_id: str = "msg_001"
+    message_type: str = "text"
+    content: str = '{"text": "hello"}'
+    mentions: list[Any] | None = None
+
+
+@dataclass
+class _FakeSenderId:
+    open_id: str = "sender_001"
+
+
+@dataclass
+class _FakeSender:
+    sender_id: _FakeSenderId = field(default_factory=_FakeSenderId)
+
+
+@dataclass
+class _FakeEventData:
+    """模拟飞书 SDK 回调 data.event 结构"""
+    message: _FakeInboundMessage = field(default_factory=_FakeInboundMessage)
+    sender: _FakeSender = field(default_factory=_FakeSender)
+
+
+@dataclass
+class _FakeCallbackData:
+    event: _FakeEventData = field(default_factory=_FakeEventData)
 
 
 # ---- 辅助：创建 Channel ----
@@ -109,6 +144,7 @@ class TestChannelBasics:
         assert AGENT_STEP_COMPLETED in flt
         assert ERROR_RAISED in flt
         assert CRON_DELIVERY_REQUESTED in flt
+        assert USER_QUESTION_ASKED in flt
         assert TOOL_CALL_STARTED not in flt
 
     def test_event_filter_with_tool_progress(self):
@@ -320,6 +356,137 @@ class TestOnMessageAsync:
         sid2 = collected[1].session_id
         assert sid1 == sid2  # 同一群聊复用 session
 
+    async def test_answers_pending_question_instead_of_publishing_user_input(self):
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus=bus)
+        gateway = Gateway(publisher=publisher)
+        plugin_api = _SimplePluginApi(gateway=gateway)
+        config = FeishuConfig(enabled=True, app_id="test", app_secret="test")
+        ch = FeishuChannel(config=config, plugin_api=plugin_api)
+
+        session_id = "feishu_pending_001"
+        ch._chat_sessions["dm:sender_001"] = session_id
+
+        question_event = EventEnvelope(
+            type=USER_QUESTION_ASKED,
+            session_id=session_id,
+            payload={"question_id": "q_001", "question": "请选择环境"},
+        )
+
+        async def noop_send_reply(session_id: str, text: str) -> None:
+            del session_id, text
+
+        ch._send_reply = noop_send_reply
+        await ch.send_event(question_event)
+
+        collected: list[EventEnvelope] = []
+
+        async def collector():
+            async for event in bus.subscribe():
+                collected.append(event)
+                if event.type == USER_QUESTION_ANSWERED:
+                    break
+
+        task = asyncio.create_task(collector())
+        await asyncio.sleep(0.05)
+
+        await ch._on_message_async("生产环境", "chat_001", "p2p", "msg_001", "sender_001")
+
+        await asyncio.wait_for(task, timeout=2)
+
+        assert len(collected) == 1
+        assert collected[0].type == USER_QUESTION_ANSWERED
+        assert collected[0].session_id == session_id
+        assert collected[0].payload["question_id"] == "q_001"
+        assert collected[0].payload["answer"] == "生产环境"
+        assert collected[0].payload["cancelled"] is False
+
+    async def test_clears_pending_question_after_answer_and_restores_user_input_flow(self):
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus=bus)
+        gateway = Gateway(publisher=publisher)
+        plugin_api = _SimplePluginApi(gateway=gateway)
+        config = FeishuConfig(enabled=True, app_id="test", app_secret="test")
+        ch = FeishuChannel(config=config, plugin_api=plugin_api)
+
+        session_id = "feishu_pending_002"
+        ch._chat_sessions["dm:sender_002"] = session_id
+
+        async def noop_send_reply(session_id: str, text: str) -> None:
+            del session_id, text
+
+        ch._send_reply = noop_send_reply
+        await ch.send_event(
+            EventEnvelope(
+                type=USER_QUESTION_ASKED,
+                session_id=session_id,
+                payload={"question_id": "q_002", "question": "补充说明"},
+            )
+        )
+
+        first_batch: list[EventEnvelope] = []
+
+        async def answer_collector():
+            async for event in bus.subscribe():
+                first_batch.append(event)
+                if event.type == USER_QUESTION_ANSWERED:
+                    break
+
+        first_task = asyncio.create_task(answer_collector())
+        await asyncio.sleep(0.05)
+        await ch._on_message_async("第一次回答", "chat_002", "p2p", "msg_a", "sender_002")
+        await asyncio.wait_for(first_task, timeout=2)
+
+        assert first_batch[-1].type == USER_QUESTION_ANSWERED
+
+        second_batch: list[EventEnvelope] = []
+
+        async def input_collector():
+            async for event in bus.subscribe():
+                second_batch.append(event)
+                if event.type == "user.input":
+                    break
+
+        second_task = asyncio.create_task(input_collector())
+        await asyncio.sleep(0.05)
+        await ch._on_message_async("新的普通消息", "chat_002", "p2p", "msg_b", "sender_002")
+        await asyncio.wait_for(second_task, timeout=2)
+
+        assert second_batch[-1].type == "user.input"
+        assert second_batch[-1].payload["content"] == "新的普通消息"
+
+
+class TestHandleMessageEvent:
+    def test_handle_message_event_schedules_without_waiting(self, monkeypatch):
+        """SDK 回调线程只应投递协程，不应同步等待异步处理结果"""
+        ch, _ = _make_channel()
+
+        class _FakeLoop:
+            def is_closed(self) -> bool:
+                return False
+
+        ch._loop = _FakeLoop()
+        calls = {"scheduled": 0, "result_called": 0}
+
+        class _FakeFuture:
+            def result(self, timeout=None):
+                del timeout
+                calls["result_called"] += 1
+                raise AssertionError("should not wait in SDK callback thread")
+
+        def fake_run_coroutine_threadsafe(coro, loop):
+            assert loop is ch._loop
+            calls["scheduled"] += 1
+            coro.close()
+            return _FakeFuture()
+
+        monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
+
+        ch._handle_message_event(_FakeCallbackData())
+
+        assert calls["scheduled"] == 1
+        assert calls["result_called"] == 0
+
 
 # ---- _build_content 测试 ----
 
@@ -430,6 +597,25 @@ class TestSendEvent:
         await ch.send_event(event)
         assert len(calls) == 1
         assert "boom" in calls[0][1]
+
+    async def test_user_question_asked(self):
+        """USER_QUESTION_ASKED 事件应发送提问内容"""
+        ch, _ = _make_channel()
+        calls: list[tuple[str, str]] = []
+
+        async def tracking_send_reply(session_id: str, text: str) -> None:
+            calls.append((session_id, text))
+
+        ch._send_reply = tracking_send_reply
+
+        event = EventEnvelope(
+            type=USER_QUESTION_ASKED,
+            session_id="s1",
+            payload={"question": "请补充更多上下文"},
+        )
+        await ch.send_event(event)
+        assert len(calls) == 1
+        assert calls[0] == ("s1", "请补充更多上下文")
 
     async def test_tool_call_started(self):
         """TOOL_CALL_STARTED 事件应发送工具进度"""

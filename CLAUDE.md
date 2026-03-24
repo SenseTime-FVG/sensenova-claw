@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-AgentOS 是基于事件驱动架构的 AI Agent 平台，支持 Web、CLI、TUI 多种接入方式。
+Sensenova-Claw 是基于事件驱动架构的 AI Agent 平台，支持 Web、CLI、TUI 多种接入方式。
 
 **技术栈**:
 - 后端: FastAPI + Python 3.12 + asyncio + SQLite
@@ -17,23 +17,23 @@ AgentOS 是基于事件驱动架构的 AI Agent 平台，支持 Web、CLI、TUI 
 
 ```bash
 # 一键启动后端 + 前端 dashboard（推荐）
-agentos run
-# 或: npm run dev  /  python3 -m agentos.app.main run
+sensenova-claw run
+# 或: npm run dev  /  python3 -m sensenova_claw.app.main run
 
 # 仅启动后端
-agentos run --no-frontend
+sensenova-claw run --no-frontend
 # 或: npm run dev:server
 
 # 单独启动前端
 npm run dev:web
 
 # 启动 CLI 客户端（需后端已运行）
-agentos cli
-# 或: python3 -m agentos.app.main cli --port 8000
+sensenova-claw cli
+# 或: python3 -m sensenova_claw.app.main cli --port 8000
 
 # 自定义端口
-agentos run --port 9000 --frontend-port 3001
-agentos cli --port 9000
+sensenova-claw run --port 9000 --frontend-port 3001
+sensenova-claw cli --port 9000
 ```
 
 ### 测试
@@ -104,6 +104,13 @@ user.input → agent.step_started → llm.call_requested → llm.call_completed
 - **ToolRuntime**: 工具执行，监听 `tool.call_requested`，发布 `tool.call_completed`
 - **TitleRuntime**: 自动生成会话标题
 
+### 配置管理
+
+- **ConfigManager** (`platform/config/config_manager.py`): 统一配置写入入口，负责持久化 YAML、刷新内存、发布 `config.updated` 事件
+- **ConfigFileWatcher**: 监听 config.yml 外部变更，通过 watchdog 实现
+- 配置变更通过 EventBus 通知下游模块（LLMFactory、AgentRegistry、MemoryManager）自动刷新
+- Gateway 将 `config.*` 事件广播给所有 WebSocket 客户端
+
 ### 状态管理
 
 - **SessionStateStore**: 内存状态管理（Turn、Message、工具调用状态）
@@ -111,9 +118,12 @@ user.input → agent.step_started → llm.call_requested → llm.call_completed
 
 ### 工具系统
 
-启动时注册 10 个工具（9 个在 `_register_builtin()` + 1 个在 Gateway 启动时注册）：
+启动时注册核心工具（在 `_register_builtin()` 中），加上运行时条件注册的工具：
+
+**核心工具（始终注册）：**
 - `bash_command`: 执行 shell 命令
 - `serper_search`: 网络搜索（需 SERPER_API_KEY）
+- `image_search`: 图片搜索（需 SERPER_API_KEY）
 - `brave_search`: 网络搜索（需 BRAVE_SEARCH_API_KEY）
 - `baidu_search`: 网络搜索（需 BAIDU_APPBUILDER_API_KEY）
 - `tavily_search`: 网络搜索（需 TAVILY_API_KEY）
@@ -121,9 +131,13 @@ user.input → agent.step_started → llm.call_requested → llm.call_completed
 - `read_file`: 读取文件
 - `write_file`: 写入文件
 - `create_agent`: 动态创建新 Agent 配置
-- `send_message`: 向其他 Agent 发送消息（Gateway 启动时注册）
+- `ask_user`: 向用户提问（需确认/输入时使用）
 
-邮件工具（`send_email`、`list_emails` 等 6 个）定义在 `email.py` 中但未默认注册，需配置后手动启用。
+**条件注册的工具：**
+- `send_message`: 向其他 Agent 发送消息（`delegation.enabled=true` 时注册）
+- `cron_tool`: 定时任务管理（`cron.enabled=true` 时注册）
+- `memory_search`: 记忆搜索（`memory.enabled=true` 且 `memory.search.enabled=true` 时注册）
+- 邮件工具（6 个）: `send_email`、`list_emails`、`read_email`、`download_attachment`、`mark_email`、`search_emails`（`tools.email.enabled=true` 时注册）
 
 工具注册在 `ToolRegistry`，搜索工具在未配置对应 API key 时不暴露给 LLM。
 
@@ -163,16 +177,17 @@ QQ 邮箱:
 
 ### Skills 系统
 
-Skills 是声明式任务编排机制（`agentos/capabilities/skills/`），16 个内置 skills 包括：
-- 文档处理: `pdf_to_markdown`, `docx_to_markdown`, `xlsx_to_markdown`
-- 前端开发: `design_frontend`, `test_frontend`
-- Skill 管理: `create_skill`
+Skills 是声明式任务编排机制（`sensenova_claw/capabilities/skills/`），23 个内置 skills 包括：
+- PPT 制作流水线: `ppt-superpower`, `ppt-research-pack`, `ppt-storyboard`, `ppt-page-plan` 等 13 个
+- 飞书集成: `feishu-doc`, `feishu-drive`, `feishu-perm`, `feishu-wiki`
+- 搜索增强: `research-union`, `union-search-plus`
+- 系统运维: `system-admin-skill`
 
 Skills 通过 YAML 配置定义，支持多步骤编排和条件分支。
 
 ## 配置文件
 
-根目录 `config.yml`（不入库）：
+主配置文件 `~/.sensenova-claw/config.yml`（不入库）：
 
 ```yaml
 llm:
@@ -180,12 +195,16 @@ llm:
     openai:
       api_key: ${OPENAI_API_KEY}
       base_url: ${OPENAI_BASE_URL}
-  default_model: gpt_4o_mini    # 引用 llm.models 中的 key
+  models:
+    gpt-4o-mini:
+      provider: openai
+      model_id: gpt-4o-mini
+  default_model: gpt-4o-mini    # 引用 llm.models 中的 key
 
 agent:
-  model: gpt_4o_mini            # 引用 llm.models 中的 key
   temperature: 0.2
   system_prompt: "你是一个有工具能力的AI助手，请在必要时调用工具。"
+  # 注意: agent.model 已废弃，使用 llm.default_model 代替
 
 tools:
   serper_search:
@@ -196,9 +215,27 @@ tools:
     api_key: ${BRAVE_API_KEY}
   tavily_search:
     api_key: ${TAVILY_API_KEY}
+  email:
+    enabled: false              # 启用后注册邮件工具
 ```
 
-配置加载优先级: 环境变量 > config.yml > 默认值
+### 配置加载
+
+有两种加载方式（见 `sensenova_claw/platform/config/config.py`）：
+
+**1. 传统方式 `Config()`（gateway 实际使用）：**
+- 读取 `~/.sensenova-claw/config.yml`（`DEFAULT_CONFIG_PATH`）
+- 与 `DEFAULT_CONFIG` 深度合并
+- 解析 `${ENV_VAR}` 环境变量
+
+**2. 新方式 `Config(project_root=...)`：**
+- 从 `project_root` 向上遍历至文件系统根
+- 沿途收集所有 `config.yml`（遗留格式，从远到近覆盖）
+- 沿途收集所有 `.sensenova-claw/config.yaml`（从远到近覆盖）
+- 遗留 `config.yml` 中的顶层 key（如 `OPENAI_API_KEY`）会映射到新结构
+- 解析 `${ENV_VAR}` 环境变量
+
+配置合并优先级（从低到高）: `DEFAULT_CONFIG` < 配置文件 < 环境变量
 
 ## 开发规范
 
@@ -218,7 +255,6 @@ tools:
 
 ### 文档规范
 
-- `docs_raw/`: 用户原始文档，**不要修改**
 - `docs/`: 模型生成文档，可修改
 - 伪代码使用 Python 格式
 - 注释和文档使用中文
@@ -233,7 +269,7 @@ tools:
 ## 关键文件路径
 
 ```
-agentos/
+sensenova_claw/
   kernel/
     events/            # 事件系统（bus.py, envelope.py, types.py）
     runtime/           # Runtime 模块（agent_runtime.py, llm_runtime.py, tool_runtime.py）
@@ -266,7 +302,6 @@ tests/                 # 测试（unit/, integration/, e2e/, cross_feature/）
 workspace/             # 运行时工作区（skills, workflows）
 var/                   # 运行时数据（数据库等）
 docs/                  # 技术文档
-docs_raw/              # 原始文档（不修改）
 scripts/               # 开发脚本
 ```
 
@@ -278,28 +313,36 @@ scripts/               # 开发脚本
 
 ## 版本信息
 
-当前版本: v0.5
+当前版本: v1.2
+
+v1.2 新增:
+- ConfigManager 统一配置管理与事件驱动联动
+- 配置变更文件监听（watchdog）
+- 上下文压缩（Turn 级 + 合并压缩）
+- Secret 迁移工具（明文 → keyring）
+- LLM 页面单项编辑功能
+- Setup 流程优化（完成后跳转 system-admin）
+- 必配清单检查 API
+
+v1.0 新增:
+- 多 Agent 架构（AgentRegistry、Agent-to-Agent 消息）
+- 飞书 Channel 插件
+- Token 认证
+- 记忆系统（v0.6）
+- Cron 定时任务 + Heartbeat 心跳巡检（v0.8）
+- 插件系统（v0.9）
 
 v0.5 新增:
-- 代码架构重组（backend/app/ → agentos/ 六层架构）
+- 代码架构重组（backend/app/ → sensenova_claw/ 六层架构）
 - 移除 Workflow 功能模块
-- 完整测试覆盖（734 tests）
-
-v0.4 新增:
-- Skills 系统（16 个内置 skills）
-- Skills 配置管理
 
 v0.2 新增:
 - Gateway 架构
 - CLI/TUI 客户端
 - 自动标题生成
-- 工具结果截断
-- 消息归一化
 
 暂不支持:
 - 流式响应
-- Token 管理
-- 用户认证
 - 沙箱执行
 
 # 其他
@@ -339,7 +382,7 @@ v0.2 新增:
 
 失败/风险经验：
 - 当前后端在第二次 `chat.completions` 请求中，会把上一轮 assistant 的 `tool_calls` 以 `{id,name,arguments}` 回传，但缺少 `tool_calls[*].type=\"function\"`，导致 OpenAI 兼容网关返回 `400 invalid_value`。  
-- v0.5 重构后，后端已从项目根目录启动，自动读取根目录 `config.yml`。
+- v0.5 重构后，后端模块级 `Config()` 读取 `~/.sensenova-claw/config.yml`（非项目根目录）。
 
 ### 2026-03-05 Bug修复补充
 

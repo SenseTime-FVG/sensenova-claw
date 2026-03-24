@@ -1,8 +1,8 @@
 # 插件系统
 
-> 路径：`agentos/adapters/plugins/`
+> 路径：`sensenova_claw/adapters/plugins/`
 
-插件系统允许在不修改核心代码的情况下扩展 AgentOS 的功能。
+插件系统允许在不修改核心代码的情况下扩展 Sensenova-Claw 的功能。
 
 ---
 
@@ -36,6 +36,14 @@ class PluginRegistry:
 
 ## 当前内置插件
 
+当前内置消息渠道插件包括：
+
+- `feishu`
+- `telegram`
+- `wecom`
+- `whatsapp`
+- `discord`
+
 ### FeishuChannel 插件
 
 飞书机器人接入插件，提供以下功能：
@@ -45,6 +53,15 @@ class PluginRegistry:
 - 支持 `OutboundCapable` 协议，实现主动推送消息
 - 处理 `cron.delivery_requested` 事件，向飞书用户/群组广播通知
 
+### DiscordChannel 插件
+
+Discord Bot 接入插件，提供以下功能：
+
+- 接收 Discord 私聊、群聊和线程文本消息
+- 支持群聊 `mention` 触发与线程级会话路由
+- 支持 `ask_user` 问答回传和通用 `MessageTool` 主动出站
+- 为 slash command、线程绑定增强等后续特性预留扩展接口
+
 ---
 
 ## 开发自定义插件
@@ -52,7 +69,7 @@ class PluginRegistry:
 ### 1. 实现 Plugin 接口
 
 ```python
-from agentos.adapters.plugins import Plugin
+from sensenova_claw.adapters.plugins import Plugin
 
 class MyPlugin(Plugin):
     name = "my_plugin"
@@ -88,10 +105,10 @@ class MyPlugin(Plugin):
 
 ### 2. 放置插件文件
 
-将插件代码放置在 `agentos/adapters/plugins/` 目录下：
+将插件代码放置在 `sensenova_claw/adapters/plugins/` 目录下：
 
 ```
-agentos/adapters/plugins/
+sensenova_claw/adapters/plugins/
   __init__.py
   feishu/              # 飞书插件
     __init__.py
@@ -112,6 +129,24 @@ plugins:
     enabled: true
     app_id: cli_xxx
     app_secret: xxx
+  telegram:
+    enabled: true
+    bot_token: "123:abc"
+    mode: polling
+    dm_policy: open
+    group_policy: allowlist
+    group_chat_allowlist: ["-1001234567890"]
+    group_allowlist: ["123456789"]
+    require_mention: true
+  discord:
+    enabled: true
+    bot_token: "discord-bot-token"
+    dm_policy: open
+    group_policy: allowlist
+    group_allowlist: ["123456789012345678"]
+    channel_allowlist: ["234567890123456789", "345678901234567890"]
+    require_mention: true
+    reply_in_thread: true
   my_plugin:
     enabled: true
     # 插件自定义配置...

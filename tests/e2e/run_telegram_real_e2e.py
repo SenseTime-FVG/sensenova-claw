@@ -14,25 +14,25 @@ import os
 from contextlib import suppress
 from pathlib import Path
 
-from agentos.adapters.channels.telegram.channel import TelegramChannel
-from agentos.adapters.channels.telegram.config import TelegramConfig
-from agentos.adapters.llm.factory import LLMFactory
-from agentos.adapters.storage.repository import Repository
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.persister import EventPersister
-from agentos.kernel.events.router import BusRouter
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED
-from agentos.kernel.runtime.agent_runtime import AgentRuntime
-from agentos.kernel.runtime.context_builder import ContextBuilder
-from agentos.kernel.runtime.llm_runtime import LLMRuntime
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.kernel.runtime.state import SessionStateStore
-from agentos.kernel.runtime.tool_runtime import ToolRuntime
-from agentos.platform.config.config import config
-from agentos.platform.logging.setup import setup_logging
+from sensenova_claw.adapters.plugins.telegram.channel import TelegramChannel
+from sensenova_claw.adapters.plugins.telegram.config import TelegramConfig
+from sensenova_claw.adapters.llm.factory import LLMFactory
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.persister import EventPersister
+from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED
+from sensenova_claw.kernel.runtime.agent_runtime import AgentRuntime
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.kernel.runtime.llm_runtime import LLMRuntime
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.kernel.runtime.state import SessionStateStore
+from sensenova_claw.kernel.runtime.tool_runtime import ToolRuntime
+from sensenova_claw.platform.config.config import config
+from sensenova_claw.platform.logging.setup import setup_logging
 
 
 class _SimplePluginApi:
@@ -50,12 +50,12 @@ async def main() -> None:
         raise SystemExit("缺少环境变量 TELEGRAM_BOT_TOKEN")
 
     original_config = copy.deepcopy(config.data)
-    tmp_root = Path("/tmp/agentos_telegram_real_e2e")
+    tmp_root = Path("/tmp/sensenova_claw_telegram_real_e2e")
     tmp_root.mkdir(parents=True, exist_ok=True)
 
-    config.data["system"]["database_path"] = str(tmp_root / "agentos.db")
+    config.data["system"]["database_path"] = str(tmp_root / "sensenova-claw.db")
     config.data["system"]["workspace_dir"] = str(tmp_root / "workspace")
-    config.data["system"]["agentos_home"] = str(tmp_root / ".agentos")
+    config.data["system"]["sensenova_claw_home"] = str(tmp_root / ".sensenova-claw")
     config.data["system"]["log_level"] = "DEBUG"
     config.data["agent"]["provider"] = "mock"
     config.data["agent"]["default_model"] = "mock-agent-v1"
@@ -106,7 +106,7 @@ async def main() -> None:
     if test_chat_id:
         await telegram_channel.send_outbound(
             target=test_chat_id,
-            text="AgentOS Telegram 真实回归已启动，请直接回复这条消息进行测试。",
+            text="Sensenova-Claw Telegram 真实回归已启动，请直接回复这条消息进行测试。",
         )
 
     print("等待 Telegram 私聊文本消息。请现在给 bot 发送一条消息。")
@@ -138,7 +138,7 @@ async def main() -> None:
         await persister.stop()
         config.data = original_config
 
-    log_file = tmp_root / ".agentos" / "logs" / "system.log"
+    log_file = tmp_root / ".sensenova-claw" / "logs" / "system.log"
     print(f"日志文件: {log_file}")
     if log_file.exists():
         print("已写入 DEBUG 日志，可检查其中的 `LLM call input`。")
