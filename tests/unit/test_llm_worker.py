@@ -370,7 +370,7 @@ class TestLLMWorkerError:
             assert "qwen:qwen3.5-plus" in notices[0].payload["body"]
             assert "mock:mock-agent-v1" in notices[1].payload["body"]
             fallback = [e for e in collected if e.type == LLM_CALL_RESULT][0]
-            assert "mock" in fallback.payload["response"]["content"].lower()
+            assert "当前没有可用的 LLM" in fallback.payload["response"]["content"]
             assert fallback.payload["finish_reason"] == "stop"
         finally:
             config.data = original
@@ -497,6 +497,57 @@ class TestLLMWorkerError:
         finally:
             config.data = original
 
+    async def test_default_model_failure_falls_back_to_first_available_llm_before_mock(
+        self, private_bus, public_bus
+    ):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "gemini-pro"
+            config.data["llm"]["models"] = {
+                "mock": {
+                    "provider": "mock",
+                    "model_id": "mock-agent-v1",
+                },
+                "gemini-pro": {
+                    "provider": "gemini",
+                    "model_id": "gemini-2.5-pro",
+                },
+                "gpt-5.4": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.4",
+                },
+            }
+            config.data["llm"]["providers"]["openai"]["api_key"] = "sk-test-openai"
+
+            factory = LLMFactory()
+            factory._providers["qwen"] = _ErrorProvider()
+            factory._providers["gemini"] = _ErrorProvider()
+            openai = _SuccessProvider("third hop success")
+            factory._providers["openai"] = openai
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 7)
+
+            event = _make_llm_event("qwen", "qwen3.5-plus", [{"role": "user", "content": "test"}])
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            types = [e.type for e in collected]
+            assert ERROR_RAISED not in types
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 4
+            assert "qwen:qwen3.5-plus" in notices[0].payload["body"]
+            assert "gemini:gemini-2.5-pro" in notices[1].payload["body"]
+            assert "gemini:gemini-2.5-pro" in notices[2].payload["body"]
+            assert "openai:gpt-5.4" in notices[3].payload["body"]
+            result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert result.payload["response"]["content"] == "third hop success"
+            assert openai.calls[0]["model"] == "gpt-5.4"
+        finally:
+            config.data = original
+
     async def test_default_model_failure_falls_back_to_mock_with_notification(self, private_bus, public_bus):
         original = deepcopy(config.data)
         try:
@@ -528,7 +579,7 @@ class TestLLMWorkerError:
             assert "gemini:gemini-2.5-pro" in notices[2].payload["body"]
             assert "mock:mock-agent-v1" in notices[3].payload["body"]
             result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
-            assert "mock" in result.payload["response"]["content"].lower()
+            assert "当前没有可用的 LLM" in result.payload["response"]["content"]
             assert result.payload["finish_reason"] == "stop"
         finally:
             config.data = original
