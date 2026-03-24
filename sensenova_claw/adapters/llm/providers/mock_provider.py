@@ -44,7 +44,10 @@ class MockProvider(LLMProvider):
             }
 
         return {
-            "content": f"这是 mock 回复：{content}",
+            "content": (
+                "当前没有可用的 LLM，请先前往「配置」页面添加至少一个可用的大模型，"
+                "然后联系运维工程师完成其余配置。"
+            ),
             "tool_calls": [],
             "finish_reason": "stop",
             "usage": {"prompt_tokens": 8, "completion_tokens": 12, "total_tokens": 20},
