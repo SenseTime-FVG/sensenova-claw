@@ -387,6 +387,36 @@ python的运行先conda activate base, 再uv run python xxx.py
 - `sensenova_claw/app/web/e2e/ask-user.spec.ts` 当前夹具陈旧，至少有三类问题会干扰业务回归：鉴权会落到登录页、mock WebSocket 会影响 Next dev HMR、旧断言仍假设 `/chat` 使用 `ask-user-dialog` 弹窗而不是通知卡片。
 - 对 `/chat` 做 Playwright 回归时，若直接全局替换 `window.WebSocket`，必须只拦截业务 `localhost:8000/ws`，并保留 Next dev/HMR 所需的 `addEventListener/removeEventListener`；否则页面会先 client-side exception，根本到不了业务断言。
 
+### 2026-03-24 WhatsApp sidecar 入口路径兼容补充
+
+成功经验：
+- 当 WhatsApp 状态接口显示 `WhatsApp sidecar command timed out: start` 时，先看 `~/.sensenova-claw/logs/system.log` 里的 sidecar `stderr`，可以快速区分“协议启动慢”和“Node 入口文件根本不存在”；这次真实根因是 `MODULE_NOT_FOUND`。
+- `plugins.whatsapp.bridge.entry` 的历史配置可能混入仓库目录名 `sensenova-claw/...`，而真实 Python 包路径是 `sensenova_claw/...`；在 `WhatsAppConfig._normalize_bridge_entry()` 里兼容这类连字符路径，比只依赖用户手动改配置更稳。
+- 用一个最小单测锁定 `bridge.entry` 的归一化行为最有效：先让 `sensenova-claw/.../index.mjs` 明确失败，再做最小修复转绿，能避免把问题误判成 sidecar 超时参数不足。
+
+失败/风险经验：
+- 当前 `SidecarBridgeClient.start()` 在 sidecar 进程启动即崩溃时，对外仍只会表现为 `start` 超时；若后续还要提升可观测性，可以考虑把“子进程已退出 + 最近 stderr”直接折叠进异常信息，避免用户只看到泛化 timeout。
+
+### 2026-03-24 WhatsApp sidecar 语法错误补充
+
+成功经验：
+- 当 `start` 超时在修正入口路径后仍存在，必须继续看 sidecar `stderr`，这次根因是 Node 在加载 `runtime.mjs` 时直接抛了 `SyntaxError: Invalid left-hand side in assignment`，并非 Baileys 启动卡住。
+- JavaScript 内部私有挂载字段如果想保留“项目名前缀”，不要写成 `sock._sensenova-clawXxx` 这种带 `-` 的点属性；应统一改成字符串常量 + `sock[KEY]` 访问，既合法又便于复用。
+- `node --test sensenova_claw/adapters/plugins/whatsapp/bridge/tests/runtime.test.mjs` 很适合做 sidecar 第一层红绿验证；模块级语法错误会在这里秒暴露，比等 Python 侧 30 秒超时高效得多。
+
+失败/风险经验：
+- Python 侧当前仍把“sidecar 进程启动后立即语法崩溃”包装成 `TimeoutError`，如果只看 `channel.py` 堆栈而不追 `stderr`，很容易误判成超时参数需要调大。
+
+### 2026-03-24 WhatsApp 登录页瞬时错误态补充
+
+成功经验：
+- WhatsApp 扫码后的 `515 restart required after pairing` 属于预期中的瞬时重连，不应在登录页当成真正失败态展示；前端应把 `connecting/restarting/reconnecting/refreshing_qr` 这类状态视为过渡态。
+- 登录页渲染错误卡时，除了 `lastError` 外，还要结合 `authorized/state/lastQrDataUrl` 一起判断；仅凭 `lastError` 很容易把“历史错误”误显示成“当前失败”。
+- 给 Playwright 加一个 `state=restarting + lastError` 的最小用例很有价值，即使本机浏览器受沙箱限制暂时跑不起来，也能把预期行为固化在测试文件里，方便后续在可运行环境回归。
+
+失败/风险经验：
+- 当前 macOS 受限环境下 Playwright Chromium 仍会因 `bootstrap_check_in ... Permission denied (1100)` 无法启动，前端浏览器级断言不能在本机作为是否修复成功的唯一依据。
+
 ### 2026-03-19 WhatsApp Self Chat 补充
 
 成功经验：
@@ -1096,3 +1126,12 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 旧的 `sensenova_claw/app/web/e2e/ask-user.spec.ts` 仍按已废弃的弹窗交互建模，和当前通知卡片实现已漂移；后续若要维护整套 ask_user 前端回归，应该先统一到现有通知交互模型再扩展断言。
+
+### 2026-03-24 WhatsApp 授权页错误信息补充
+
+成功经验：
+- `/api/gateway/whatsapp/status` 已经返回了 `lastError/lastStatusCode/debugMessage/authDir`，如果授权页只展示 `state`，用户会把“可定位的启动失败”误看成泛化 `error`；前端应直接把这些字段展示出来。
+- 这类问题的最小修法通常不在 sidecar 或 channel，本质是“后端已有证据但前端没透出”；先核对接口 payload，再决定是否真的要改运行时。
+
+失败/风险经验：
+- 当前仓库的 Playwright 默认 `webServer` 仍依赖根目录 `npm run dev`，而这条链路会受 `uv` 缓存权限和 `uv` 自身 panic 影响；前端单用例失败时，必须先区分是页面断言失败还是测试基础设施没起来。
