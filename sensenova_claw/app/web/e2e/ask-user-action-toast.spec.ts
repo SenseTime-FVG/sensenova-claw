@@ -103,7 +103,7 @@ function installAskUserMockApp() {
     constructor(url: string | URL, protocols?: string | string[]) {
       const resolvedUrl = String(url);
       if (!resolvedUrl.includes('localhost:8000/ws')) {
-        return new NativeWebSocket(url, protocols);
+        return new NativeWebSocket(url, protocols) as unknown as MockWebSocket;
       }
 
       (window as any).__mockWs = this;
@@ -180,4 +180,50 @@ test('ask_user 长选项在通知提示框内换行，不应横向溢出', async
   expect(toastBox).not.toBeNull();
   expect(buttonBox).not.toBeNull();
   expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(toastBox!.x + toastBox!.width + 1);
+});
+
+test('ask_user 无选项时应在通知提示框显示输入框并提交回答', async ({ page }) => {
+  await page.goto('/chat?token=e2e-sensenova-claw-token');
+
+  await page.evaluate(() => {
+    const sent: string[] = [];
+    (window as any).__mockWsSent = sent;
+    (window as any).__mockWs.send = (data: string) => {
+      sent.push(data);
+    };
+
+    (window as any).__mockWs.emit({
+      type: 'user_question_asked',
+      session_id: 'sess_no_options',
+      payload: {
+        question_id: 'q_no_options_1',
+        question: '请提供您的 MinerU API Token（可在 https://mineru.net/apiManage/token 获取）：',
+        timeout: 300,
+      },
+      timestamp: Date.now() / 1000,
+    });
+  });
+
+  const toast = page.getByTestId('action-toast').filter({
+    hasText: '请提供您的 MinerU API Token（可在 https://mineru.net/apiManage/token 获取）：',
+  });
+
+  await expect(toast).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId('action-toast-input')).toBeVisible();
+  await expect(page.getByTestId('action-toast-submit')).toBeVisible();
+  await expect(page.getByTestId('action-toast-button')).toHaveCount(0);
+
+  await page.getByTestId('action-toast-input').fill('mineru-token-123');
+  await page.getByTestId('action-toast-submit').click();
+
+  const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+  const parsed = sent.map((item) => JSON.parse(item));
+  expect(
+    parsed.some(
+      (msg) => msg.type === 'user_question_answered'
+        && msg.payload?.question_id === 'q_no_options_1'
+        && msg.payload?.answer === 'mineru-token-123'
+        && msg.session_id === 'sess_no_options'
+    )
+  ).toBeTruthy();
 });

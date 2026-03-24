@@ -585,6 +585,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           sessionId: sourceSessionId,
           interactionId: questionId,
           actions: questionOptions,
+          allowsInput: !questionOptions || questionOptions.length === 0,
+          inputPlaceholder: '请输入回复',
         });
         break;
       }
