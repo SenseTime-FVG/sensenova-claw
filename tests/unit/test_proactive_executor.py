@@ -112,16 +112,19 @@ async def test_execute_job_success_path():
     agent_runtime = MagicMock()
 
     async def fake_spawn(agent_id, session_id, user_input, meta):
-        # 向所有订阅者推送完成事件
-        event = EventEnvelope(
-            type=AGENT_STEP_COMPLETED,
-            session_id=session_id,
-            agent_id=agent_id,
-            source="agent",
-            payload={"result": {"content": "任务完成"}},
-        )
-        for q in list(subscribers):
-            await q.put(event)
+        # 延迟推送，确保 _wait_for_completion 已订阅
+        async def _push():
+            await asyncio.sleep(0.1)
+            event = EventEnvelope(
+                type=AGENT_STEP_COMPLETED,
+                session_id=session_id,
+                agent_id=agent_id,
+                source="agent",
+                payload={"result": {"content": "任务完成"}},
+            )
+            for q in list(subscribers):
+                await q.put(event)
+        asyncio.create_task(_push())
 
     agent_runtime.spawn_agent_session = AsyncMock(side_effect=fake_spawn)
 
