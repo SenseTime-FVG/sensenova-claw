@@ -1,12 +1,7 @@
 """测试 delegation session 的轮次限制。"""
 from __future__ import annotations
 
-import pytest
-
 from sensenova_claw.kernel.runtime.workers.agent_worker import AgentSessionWorker
-
-
-pytestmark = pytest.mark.asyncio
 
 
 class TestDelegationSessionLimits:
