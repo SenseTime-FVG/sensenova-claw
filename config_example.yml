@@ -270,10 +270,10 @@ plugins:
     bot_token: "${DISCORD_BOT_TOKEN}"
     dm_policy: "open"  # open | allowlist | disabled
     group_policy: "allowlist"  # open | allowlist | disabled
-    allowlist: []
-    group_allowlist: []
-    channel_allowlist: []
-    require_mention: true
+    allowlist: [ ]  # 私聊allow_list
+    group_allowlist: [ ]  # 可以在群聊触发的allow_list
+    channel_allowlist: [ ]  # 允许的频道id
+    require_mention: true  # 群里即使用户和频道都满足，还必须 @bot 才会响应
     show_tool_progress: false
     reply_in_thread: true
   whatsapp:
