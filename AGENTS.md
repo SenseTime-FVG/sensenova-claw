@@ -554,6 +554,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 如果在 `AGENTS.md` 里继续硬编码 `tools`、`can_delegate_to` 之类清单，文案很容易和真实运行时配置漂移，后续维护成本会越来越高。
 - 强执行型 prompt 如果不显式加入”无重要变化时保持简洁””不要为了显得主动而主动”等约束，很容易把主动推送写成高频、低信息量的噪音输出。
 
+### 2026-03-24 Uvicorn 关闭噪音补充
+
+成功经验：
+- 当堆栈同时出现 `uvicorn.server.capture_signals -> signal.raise_signal(...) -> asyncio.runners._on_sigint -> KeyboardInterrupt`，并伴随 `starlette`/`uvicorn.lifespan.on.receive_queue.get()` 的 `CancelledError` 时，优先判断为”收到 SIGINT/SIGTERM 后的关闭链路”，不应先怀疑业务代码抛异常。
+- 判断是否是业务层 shutdown 真失败，最直接的方法是看堆栈里是否落到项目自己的 `lifespan finally` 清理代码；如果只有框架内部 `receive()`/`capture_signals()`，通常只是退出时的噪音日志。
+- 根目录 `npm run dev` 实际会走 `agentos.app.main` 的父进程监管逻辑；当前端退出、父进程收到 `Ctrl+C`，或 IDE 停止按钮终止父进程时，父进程会反向 `terminate()` 后端，后端打印这类信号关闭堆栈是符合预期的。
+
+失败/风险经验：
+- `uvicorn --reload` 会让”父进程/重载进程/工作进程”的信号传播更绕；如果只盯着后端最后那条 `CancelledError`，很容易误判为服务内部 bug，而忽略真正先退出的是前端、父进程或外层进程管理器。
+
 ### 2026-03-20 飞书 Wiki token 兼容修复补充
 
 成功经验：
