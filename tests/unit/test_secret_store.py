@@ -11,6 +11,7 @@ from sensenova_claw.platform.secrets.store import (
     InMemorySecretStore,
     KeyringSecretStore,
     SecretStoreError,
+    describe_secret_store_status,
 )
 
 
@@ -101,3 +102,39 @@ def test_fallback_secret_store_deletes_file_when_keyring_delete_fails(tmp_path):
     store.delete("sensenova_claw/tools.brave_search.api_key")
 
     assert fallback.get("sensenova_claw/tools.brave_search.api_key") is None
+
+
+def test_describe_secret_store_status_reports_keyring_available(tmp_path):
+    class WorkingBackend:
+        @staticmethod
+        def get_password(service_name: str, username: str):
+            return None
+
+    store = FallbackSecretStore(
+        primary=KeyringSecretStore(service_name="sensenova_claw", backend=WorkingBackend()),
+        fallback=FileSecretStore(secret_file=tmp_path / "data" / "secret" / "secret.yml"),
+    )
+
+    available, message = describe_secret_store_status(store)
+
+    assert available is True
+    assert "keyring available" in message
+
+
+def test_describe_secret_store_status_reports_file_fallback_when_keyring_unavailable(tmp_path):
+    class BrokenBackend:
+        @staticmethod
+        def get_password(service_name: str, username: str):
+            raise RuntimeError("boom")
+
+    secret_file = tmp_path / "data" / "secret" / "secret.yml"
+    store = FallbackSecretStore(
+        primary=KeyringSecretStore(service_name="sensenova_claw", backend=BrokenBackend()),
+        fallback=FileSecretStore(secret_file=secret_file),
+    )
+
+    available, message = describe_secret_store_status(store)
+
+    assert available is False
+    assert "fallback file" in message
+    assert str(secret_file) in message

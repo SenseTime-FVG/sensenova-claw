@@ -169,3 +169,35 @@ def build_default_secret_store() -> FallbackSecretStore:
         primary=KeyringSecretStore(),
         fallback=FileSecretStore(),
     )
+
+
+def describe_secret_store_status(store: Any) -> tuple[bool, str]:
+    """返回当前 secret store 的 keyring 可用性与启动提示文案。"""
+    primary = getattr(store, "_primary", None)
+    fallback = getattr(store, "_fallback", None)
+
+    if primary is not None and fallback is not None:
+        keyring_available = _probe_secret_store(primary)
+        fallback_path = getattr(fallback, "_secret_file", default_secret_file_path())
+        if keyring_available:
+            return True, "Secret store ready: keyring available"
+        return False, f"Secret store ready: keyring unavailable, fallback file={fallback_path}"
+
+    available = _probe_secret_store(store)
+    if available:
+        return True, "Secret store ready"
+    return False, "Secret store unavailable"
+
+
+def _probe_secret_store(store: Any) -> bool:
+    """探测 store 是否可实际完成一次读取，而不只是不报 import 错。"""
+    is_available = getattr(store, "is_available", lambda: False)
+    try:
+        if not is_available():
+            return False
+        get = getattr(store, "get", None)
+        if callable(get):
+            get("__sensenova_claw_probe__")
+        return True
+    except Exception:
+        return False
