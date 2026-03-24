@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 from sensenova_claw.platform.secrets.refs import is_secret_ref, parse_secret_ref
-from sensenova_claw.platform.secrets.store import KeyringSecretStore, SecretStoreError
+from sensenova_claw.platform.secrets.store import SecretStoreError, build_default_secret_store
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +316,7 @@ class Config:
         user_config_dir: Path | None = None,
         secret_store: Any | None = None,
     ):
-        self._secret_store = secret_store or KeyringSecretStore()
+        self._secret_store = secret_store or build_default_secret_store()
         # 新方式：通过 project_root 自动发现配置
         if project_root is not None:
             self._project_root = Path(project_root).resolve()

@@ -1,6 +1,8 @@
 import { ensureAuthDir, resetAuthDir } from "./auth.mjs";
 
 const DEFAULT_BAILEYS_VERSION = [2, 3000, 1];
+const SELF_JID_KEY = "_sensenova_clawSelfJid";
+const SELF_LID_KEY = "_sensenova_clawSelfLid";
 const DEFAULT_BAILEYS_VERSION_FETCH_TIMEOUT_MS = 3000;
 
 function createSilentLogger() {
@@ -79,8 +81,8 @@ async function resolveOutboundTarget(sock, target) {
     return target;
   }
   const resolved = await sock?.signalRepository?.lidMapping?.getPNForLID?.(target);
-  const selfLid = sock?._sensenova-clawSelfLid ?? sock?.user?.lid ?? null;
-  const selfJid = sock?._sensenova-clawSelfJid ?? sock?.user?.id ?? null;
+  const selfLid = sock?.[SELF_LID_KEY] ?? sock?.user?.lid ?? null;
+  const selfJid = sock?.[SELF_JID_KEY] ?? sock?.user?.id ?? null;
   if (!resolved && normalizeJidUser(target) === normalizeJidUser(selfLid) && selfJid) {
     return selfJid;
   }
@@ -318,8 +320,8 @@ export class WhatsAppRuntime {
       markOnlineOnConnect: false,
       browser: ["openclaw", "cli", "sensenova-claw"],
     });
-    this._sock._sensenova-clawSelfJid = state?.creds?.me?.id ?? null;
-    this._sock._sensenova-clawSelfLid = state?.creds?.me?.lid ?? null;
+    this._sock[SELF_JID_KEY] = state?.creds?.me?.id ?? null;
+    this._sock[SELF_LID_KEY] = state?.creds?.me?.lid ?? null;
     this._emitDebug("socket created");
 
     this._status.state = "connecting";

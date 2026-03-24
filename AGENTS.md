@@ -377,6 +377,46 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - WeCom 之前没有显式 `event_filter()`，默认 `None` 看起来“像是全订阅”，但如果 `send_event()` 不处理 `USER_QUESTION_ASKED`，实际效果仍然是静默丢弃；不能只看订阅层，不看分发层。
 
+### 2026-03-24 Workbench ask_user 输入修复补充
+
+成功经验：
+- 工作台 `/chat` 的 `ask_user` 不只是“输入框被禁用”问题，还要检查主输入框提交路径是否会把自由文本映射成 `user_question_answered`；只解锁输入框但仍发送普通 `user_input`，后端 `ask_user` 仍会一直挂起。
+- `ChatSessionContext` 已经暴露了 `activeInteraction/sendQuestionAnswer`，在聊天页直接复用这条能力，比重新造一套 `ask_user` 提交协议更稳，改动也更小。
+
+失败/风险经验：
+- `sensenova_claw/app/web/e2e/ask-user.spec.ts` 当前夹具陈旧，至少有三类问题会干扰业务回归：鉴权会落到登录页、mock WebSocket 会影响 Next dev HMR、旧断言仍假设 `/chat` 使用 `ask-user-dialog` 弹窗而不是通知卡片。
+- 对 `/chat` 做 Playwright 回归时，若直接全局替换 `window.WebSocket`，必须只拦截业务 `localhost:8000/ws`，并保留 Next dev/HMR 所需的 `addEventListener/removeEventListener`；否则页面会先 client-side exception，根本到不了业务断言。
+
+### 2026-03-24 WhatsApp sidecar 入口路径兼容补充
+
+成功经验：
+- 当 WhatsApp 状态接口显示 `WhatsApp sidecar command timed out: start` 时，先看 `~/.sensenova-claw/logs/system.log` 里的 sidecar `stderr`，可以快速区分“协议启动慢”和“Node 入口文件根本不存在”；这次真实根因是 `MODULE_NOT_FOUND`。
+- `plugins.whatsapp.bridge.entry` 的历史配置可能混入仓库目录名 `sensenova-claw/...`，而真实 Python 包路径是 `sensenova_claw/...`；在 `WhatsAppConfig._normalize_bridge_entry()` 里兼容这类连字符路径，比只依赖用户手动改配置更稳。
+- 用一个最小单测锁定 `bridge.entry` 的归一化行为最有效：先让 `sensenova-claw/.../index.mjs` 明确失败，再做最小修复转绿，能避免把问题误判成 sidecar 超时参数不足。
+
+失败/风险经验：
+- 当前 `SidecarBridgeClient.start()` 在 sidecar 进程启动即崩溃时，对外仍只会表现为 `start` 超时；若后续还要提升可观测性，可以考虑把“子进程已退出 + 最近 stderr”直接折叠进异常信息，避免用户只看到泛化 timeout。
+
+### 2026-03-24 WhatsApp sidecar 语法错误补充
+
+成功经验：
+- 当 `start` 超时在修正入口路径后仍存在，必须继续看 sidecar `stderr`，这次根因是 Node 在加载 `runtime.mjs` 时直接抛了 `SyntaxError: Invalid left-hand side in assignment`，并非 Baileys 启动卡住。
+- JavaScript 内部私有挂载字段如果想保留“项目名前缀”，不要写成 `sock._sensenova-clawXxx` 这种带 `-` 的点属性；应统一改成字符串常量 + `sock[KEY]` 访问，既合法又便于复用。
+- `node --test sensenova_claw/adapters/plugins/whatsapp/bridge/tests/runtime.test.mjs` 很适合做 sidecar 第一层红绿验证；模块级语法错误会在这里秒暴露，比等 Python 侧 30 秒超时高效得多。
+
+失败/风险经验：
+- Python 侧当前仍把“sidecar 进程启动后立即语法崩溃”包装成 `TimeoutError`，如果只看 `channel.py` 堆栈而不追 `stderr`，很容易误判成超时参数需要调大。
+
+### 2026-03-24 WhatsApp 登录页瞬时错误态补充
+
+成功经验：
+- WhatsApp 扫码后的 `515 restart required after pairing` 属于预期中的瞬时重连，不应在登录页当成真正失败态展示；前端应把 `connecting/restarting/reconnecting/refreshing_qr` 这类状态视为过渡态。
+- 登录页渲染错误卡时，除了 `lastError` 外，还要结合 `authorized/state/lastQrDataUrl` 一起判断；仅凭 `lastError` 很容易把“历史错误”误显示成“当前失败”。
+- 给 Playwright 加一个 `state=restarting + lastError` 的最小用例很有价值，即使本机浏览器受沙箱限制暂时跑不起来，也能把预期行为固化在测试文件里，方便后续在可运行环境回归。
+
+失败/风险经验：
+- 当前 macOS 受限环境下 Playwright Chromium 仍会因 `bootstrap_check_in ... Permission denied (1100)` 无法启动，前端浏览器级断言不能在本机作为是否修复成功的唯一依据。
+
 ### 2026-03-19 WhatsApp Self Chat 补充
 
 成功经验：
@@ -664,6 +704,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅依赖前端不回传某些字段不够稳；一旦用户浏览器缓存了旧前端，或历史配置里已存在异常 secret ref，后端仍会再次踩到删除异常。对 secret 清空链路，后端必须保证幂等。
+
+### 2026-03-24 Secret 文件回退补充
+
+成功经验：
+- 把“keyring 主存储”和“本地 `secret.yml` 回退存储”拆成 `FallbackSecretStore(primary, fallback)` 最稳，`Config`、`ConfigManager`、迁移与 reveal API 都不需要改调用协议。
+- 回退文件用单个 YAML 扁平映射 `{ref: value}` 最省事，直接复用现有 secret ref（如 `sensenova_claw/llm.providers.openai.api_key`）作为 key，避免路径编码和目录散落问题。
+- `get()` 不能只在 keyring 抛错时回退；当历史写入曾回退到文件、而当前 keyring 恢复但查不到值时，也需要在 primary 返回空值时继续查 fallback，才能真正读回旧 secret。
+
+失败/风险经验：
+- 文档里“keyring 不可用时降级为明文写 config.yml”的旧口径容易过时；现在行为改成落到 `~/.sensenova-claw/data/secret/secret.yml` 后，配置与安全文档必须一起更新，否则会误导排查。
 
 ### 2026-03-21 LLM 编辑态补充
 
@@ -1055,3 +1105,33 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 根目录 Playwright 配置会同时拉起前后端，一旦 8000/3000 端口有残留进程，失败现象会混入大量非业务噪音；在这种情况下不能直接把浏览器断言失败等同于页面逻辑失败。
 - 当前 `npx tsc --noEmit` 仍会先撞到仓库既有类型问题（如 `app/settings/page.tsx`、`components/chat/MessageList.tsx`、`e2e/miniapp-workspace.spec.ts`），不能把这类全局红灯误判成这次 `setup` 修复引入的新错误。
+
+### 2026-03-24 Secret Skill 接入补充
+
+成功经验：
+- 给内置 skill 新增能力时，先补一个“从 `.sensenova-claw/skills` 加载该 skill”的最小单测最有效；可以快速证明失败原因是 skill 缺失，而不是 `SkillRegistry` 扫描路径不对。
+- 当前后端 secret 读取与写入不是同一个接口：读取走 `GET /api/config/secret?path=...`，写入应走 `PUT /api/config/sections`，由 `ConfigManager` 自动写入 keyring / fallback secret store 并将 `config.yml` 改写为 `${secret:...}`。
+- 适合作为通用桥接 skill 的敏感路径范围，应严格对齐 `platform/secrets/registry.py` 里的注册模式，尤其是 `tools.*.api_key` 与 `llm.providers.*.api_key`，这样像 Brave Search 这类 skill 才能稳定复用。
+- 如果希望 skill 自身保留“它依赖哪个 secret 标识”的可追踪信息，最轻量的约定是在目标 skill 目录下维护 `secret.yml`，只写映射不写明文，例如 `OPENAI_API_KEY: secret:openai-whisper-api:OPENAI_API_KEY`；读取时优先查这个文件，写入成功后同步创建或更新它。
+
+失败/风险经验：
+- 如果把 secret skill 设计成“任意 path 都可读写”的通用管理器，很容易和后端 `is_secret_path()` 的约束冲突，最终在运行时直接返回 400；文档必须明确只支持已注册敏感路径。
+
+### 2026-03-24 ask_user 提示框溢出补充
+
+成功经验：
+- 先确认当前真实渲染链路很关键；`chat` 页 ask_user 已不再走 `QuestionDialog`，而是通过 `NotificationToast` 的 action toast 展示选项，修 UI 前必须先对准现网组件。
+- 长选项按钮的稳定修法是组合处理：外层按钮容器加 `flex-wrap`，按钮本身加 `max-w-full`、`whitespace-normal`、`break-all` 和 `text-left`，这样长 URL 与中英文混排都能在卡片内换行。
+- 这类布局回归用 Playwright 几何断言最有效：直接比较按钮右边界和 toast 右边界，能避免“文本可见但其实已经溢出”的假通过。
+
+失败/风险经验：
+- 旧的 `sensenova_claw/app/web/e2e/ask-user.spec.ts` 仍按已废弃的弹窗交互建模，和当前通知卡片实现已漂移；后续若要维护整套 ask_user 前端回归，应该先统一到现有通知交互模型再扩展断言。
+
+### 2026-03-24 WhatsApp 授权页错误信息补充
+
+成功经验：
+- `/api/gateway/whatsapp/status` 已经返回了 `lastError/lastStatusCode/debugMessage/authDir`，如果授权页只展示 `state`，用户会把“可定位的启动失败”误看成泛化 `error`；前端应直接把这些字段展示出来。
+- 这类问题的最小修法通常不在 sidecar 或 channel，本质是“后端已有证据但前端没透出”；先核对接口 payload，再决定是否真的要改运行时。
+
+失败/风险经验：
+- 当前仓库的 Playwright 默认 `webServer` 仍依赖根目录 `npm run dev`，而这条链路会受 `uv` 缓存权限和 `uv` 自身 panic 影响；前端单用例失败时，必须先区分是页面断言失败还是测试基础设施没起来。
