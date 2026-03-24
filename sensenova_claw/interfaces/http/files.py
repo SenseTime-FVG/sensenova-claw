@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import mimetypes
 import os
@@ -13,6 +14,7 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -400,3 +402,69 @@ async def delete_upload(request: Request, filename: str):
         raise HTTPException(403, "路径非法")
     target.unlink()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# 文件存在性检查
+# ---------------------------------------------------------------------------
+
+def _resolve_agent_workdir(request: Request, agent_id: str) -> Path:
+    """获取指定 agent 的 workdir 绝对路径"""
+    home = getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw")
+    return Path(home) / "workdir" / agent_id
+
+
+def _sha256_file(filepath: Path) -> str:
+    """计算文件的 SHA-256 哈希"""
+    h = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class FileCheckRequest(BaseModel):
+    name: str
+    size: int
+    hash: str | None = None
+    agent_id: str = "default"
+
+
+class FileCheckResponse(BaseModel):
+    exists: bool
+    path: str = ""
+    need_hash: bool = False
+
+
+@router.post("/files/check")
+async def check_file(request: Request, body: FileCheckRequest) -> FileCheckResponse:
+    """检查文件是否已存在于 agent workdir 中。
+
+    比对策略：先比文件名+大小，匹配后再比 SHA-256 哈希。
+    """
+    workdir = _resolve_agent_workdir(request, body.agent_id)
+    # 防止路径穿越
+    parts = [p for p in body.name.replace("\\", "/").split("/") if p and p != ".."]
+    if not parts:
+        return FileCheckResponse(exists=False)
+    target = workdir / Path(*parts)
+
+    if not target.exists() or not target.is_file():
+        return FileCheckResponse(exists=False)
+
+    try:
+        file_size = target.stat().st_size
+    except OSError:
+        return FileCheckResponse(exists=False)
+
+    if file_size != body.size:
+        return FileCheckResponse(exists=False)
+
+    # name + size 匹配，需要 hash 精确比对
+    if not body.hash:
+        return FileCheckResponse(exists=False, need_hash=True)
+
+    file_hash = _sha256_file(target)
+    if file_hash == body.hash:
+        return FileCheckResponse(exists=True, path=str(target.resolve()))
+    return FileCheckResponse(exists=False)
