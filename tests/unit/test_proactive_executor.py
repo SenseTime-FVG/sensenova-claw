@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from agentos.kernel.proactive.models import (
+from sensenova_claw.kernel.proactive.models import (
     ProactiveJob, TimeTrigger, ProactiveTask,
     DeliveryConfig, SafetyConfig, JobState,
 )
@@ -27,11 +27,13 @@ def _make_job(**kwargs):
 @pytest.mark.asyncio
 async def test_execute_job_skips_if_already_running():
     """验证并发锁：同一 job 不会重复执行。"""
-    from agentos.kernel.proactive.executor import ProactiveExecutor
+    from sensenova_claw.kernel.proactive.executor import ProactiveExecutor
 
     bus = MagicMock()
     bus.publish = AsyncMock()
     bus._subscribers = set()
+    bus.subscribe_queue = MagicMock(return_value=asyncio.Queue())
+    bus.unsubscribe_queue = MagicMock()
     repo = MagicMock()
     repo.create_proactive_run = AsyncMock()
     repo.update_proactive_run = AsyncMock()
@@ -55,11 +57,13 @@ async def test_execute_job_skips_if_already_running():
 @pytest.mark.asyncio
 async def test_execute_job_handles_timeout():
     """验证 _wait_for_completion 超时时走失败路径。"""
-    from agentos.kernel.proactive.executor import ProactiveExecutor
+    from sensenova_claw.kernel.proactive.executor import ProactiveExecutor
 
     bus = MagicMock()
     bus.publish = AsyncMock()
     bus._subscribers = set()
+    bus.subscribe_queue = MagicMock(return_value=asyncio.Queue())
+    bus.unsubscribe_queue = MagicMock()
     repo = MagicMock()
     repo.create_proactive_run = AsyncMock()
     repo.update_proactive_run = AsyncMock()
@@ -83,7 +87,7 @@ async def test_execute_job_handles_timeout():
 @pytest.mark.asyncio
 async def test_lock_cleanup_on_remove():
     """验证 job 删除时清理 lock。"""
-    from agentos.kernel.proactive.executor import ProactiveExecutor
+    from sensenova_claw.kernel.proactive.executor import ProactiveExecutor
 
     executor = ProactiveExecutor.__new__(ProactiveExecutor)
     executor._job_locks = {"pj-1": asyncio.Lock()}
@@ -97,14 +101,22 @@ async def test_lock_cleanup_on_remove():
 @pytest.mark.asyncio
 async def test_execute_job_success_path():
     """验证成功路径：状态更新正确，consecutive_errors 清零。"""
-    from agentos.kernel.proactive.executor import ProactiveExecutor
-    from agentos.kernel.events.envelope import EventEnvelope
-    from agentos.kernel.events.types import AGENT_STEP_COMPLETED
+    from sensenova_claw.kernel.proactive.executor import ProactiveExecutor
+    from sensenova_claw.kernel.events.envelope import EventEnvelope
+    from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED
 
     bus = MagicMock()
     bus.publish = AsyncMock()
     subscribers: set = set()
     bus._subscribers = subscribers
+    def _subscribe_queue():
+        queue = asyncio.Queue()
+        subscribers.add(queue)
+        return queue
+    def _unsubscribe_queue(queue):
+        subscribers.discard(queue)
+    bus.subscribe_queue = MagicMock(side_effect=_subscribe_queue)
+    bus.unsubscribe_queue = MagicMock(side_effect=_unsubscribe_queue)
     repo = MagicMock()
     repo.create_proactive_run = AsyncMock()
     repo.update_proactive_run = AsyncMock()
@@ -146,11 +158,13 @@ async def test_execute_job_success_path():
 @pytest.mark.asyncio
 async def test_handle_failure_auto_disables_after_threshold():
     """验证连续失败超过阈值后自动禁用 job。"""
-    from agentos.kernel.proactive.executor import ProactiveExecutor
+    from sensenova_claw.kernel.proactive.executor import ProactiveExecutor
 
     bus = MagicMock()
     bus.publish = AsyncMock()
     bus._subscribers = set()
+    bus.subscribe_queue = MagicMock(return_value=asyncio.Queue())
+    bus.unsubscribe_queue = MagicMock()
     repo = MagicMock()
     repo.create_proactive_run = AsyncMock()
     repo.update_proactive_run = AsyncMock()
@@ -175,7 +189,7 @@ async def test_handle_failure_auto_disables_after_threshold():
 @pytest.mark.asyncio
 async def test_build_prompt_with_memory():
     """验证 _build_prompt 在 use_memory=True 时拼接记忆上下文。"""
-    from agentos.kernel.proactive.executor import ProactiveExecutor
+    from sensenova_claw.kernel.proactive.executor import ProactiveExecutor
 
     memory_manager = MagicMock()
     memory_manager.get_context = MagicMock(return_value="历史记忆内容")
@@ -193,7 +207,7 @@ async def test_build_prompt_with_memory():
 @pytest.mark.asyncio
 async def test_cleanup_job_removes_running_entry():
     """验证 cleanup_job 同时清理 _running_jobs。"""
-    from agentos.kernel.proactive.executor import ProactiveExecutor
+    from sensenova_claw.kernel.proactive.executor import ProactiveExecutor
 
     executor = ProactiveExecutor.__new__(ProactiveExecutor)
     executor._job_locks = {"pj-2": asyncio.Lock()}

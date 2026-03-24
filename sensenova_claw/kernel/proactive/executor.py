@@ -55,16 +55,11 @@ class ProactiveExecutor:
         # 当前正在执行的 job id 集合
         self._running_jobs: set[str] = set()
 
-    # ---------- 公开 API ----------
-
-    async def execute_job(self, job: ProactiveJob) -> None:
-        """执行单个 proactive job，带并发锁保护。"""
-        # 快速检查：已在运行则跳过（无需等锁）
+    async def execute_job(self, job: ProactiveJob) -> tuple[str, str | None]:
+        """执行 job，返回 (session_id, result_text)。若跳过或失败返回 ("", None)。"""
         if job.id in self._running_jobs:
             logger.debug("Proactive job %s 已在运行，跳过", job.id)
-            return
-
-        # 获取或创建该 job 的锁
+            return ("", None)
         if job.id not in self._job_locks:
             self._job_locks[job.id] = asyncio.Lock()
         lock = self._job_locks[job.id]
@@ -72,23 +67,21 @@ class ProactiveExecutor:
         # 尝试获取锁（非阻塞）
         if not lock.locked():
             async with lock:
-                await self._do_execute(job)
+                return await self._do_execute(job)
         else:
             logger.debug("Proactive job %s 锁已被占用，跳过", job.id)
+            return ("", None)
 
     def cleanup_job(self, job_id: str) -> None:
         """删除 job 时清理对应的锁资源。"""
         self._job_locks.pop(job_id, None)
         self._running_jobs.discard(job_id)
 
-    # ---------- 内部执行 ----------
-
-    async def _do_execute(self, job: ProactiveJob) -> None:
-        """实际执行逻辑，在锁保护下运行。"""
+    async def _do_execute(self, job: ProactiveJob) -> tuple[str, str | None]:
         session_id = f"proactive_{job.id}_{uuid.uuid4().hex[:8]}"
         run_id = f"pr_{uuid.uuid4().hex[:12]}"
         start_ms = int(time.time() * 1000)
-
+        result_text: str | None = None
         self._running_jobs.add(job.id)
         job.state.last_triggered_at_ms = start_ms
         job.state.last_status = "running"
@@ -133,9 +126,7 @@ class ProactiveExecutor:
                     f"执行超时（{timeout_ms}ms）", end_ms,
                     status="timeout",
                 )
-                return
-
-            # 成功路径
+                return (session_id, None)
             end_ms = int(time.time() * 1000)
             job.state.last_completed_at_ms = end_ms
             job.state.last_status = "ok"
@@ -144,30 +135,25 @@ class ProactiveExecutor:
             job.state.next_trigger_at_ms = compute_next_fire_ms(job, end_ms)
 
             await self._repo.update_proactive_run(run_id, {
-                "status": "ok",
-                "completed_at_ms": end_ms,
-                "result_summary": result_text[:500] if result_text else "",
+                "status": "ok", "completed_at_ms": end_ms,
+                "result_summary": result_text or "",
             })
 
             await self._bus.publish(EventEnvelope(
-                type=PROACTIVE_JOB_COMPLETED,
-                session_id=session_id,
-                agent_id=job.agent_id,
-                source="proactive",
-                payload={
-                    "job_id": job.id,
-                    "run_id": run_id,
-                    "result": result_text[:500] if result_text else "",
-                },
+                type=PROACTIVE_JOB_COMPLETED, session_id=session_id,
+                agent_id=job.agent_id, source="proactive",
+                payload={"job_id": job.id, "run_id": run_id,
+                         "result": result_text or ""},
             ))
 
         except Exception as exc:
             end_ms = int(time.time() * 1000)
             await self._handle_failure(job, run_id, session_id, str(exc)[:500], end_ms)
-
+            return (session_id, None)
         finally:
             self._running_jobs.discard(job.id)
             await self._persist_job_state(job)
+        return (session_id, result_text)
 
     async def _handle_failure(
         self,
@@ -252,9 +238,7 @@ class ProactiveExecutor:
         """
         timeout_s = timeout_ms / 1000.0
         heartbeat_timeout_s = timeout_s / 3.0
-
-        queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
-        self._bus._subscribers.add(queue)
+        queue = self._bus.subscribe_queue()
         try:
             deadline = time.monotonic() + timeout_s
             last_event_time = time.monotonic()
@@ -286,7 +270,7 @@ class ProactiveExecutor:
                 if event.type == AGENT_STEP_COMPLETED and event.session_id == session_id:
                     return event.payload.get("result", {}).get("content", "")
         finally:
-            self._bus._subscribers.discard(queue)
+            self._bus.unsubscribe_queue(queue)
 
     async def _persist_job_state(self, job: ProactiveJob) -> None:
         """将 job 的运行时状态持久化到 DB。"""

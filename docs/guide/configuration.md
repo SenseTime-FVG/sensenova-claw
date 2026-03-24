@@ -236,6 +236,9 @@ tools:
 
     # 权限确认超时时间（秒），超时默认拒绝
     confirmation_timeout: 30
+
+    # 超时后的行为策略：reject（拒绝）| approve（批准）| block（无限等待）
+    timeout_action: reject
 ```
 
 | 配置项 | 类型 | 默认值 | 说明 |
@@ -243,6 +246,7 @@ tools:
 | `enabled` | bool | `true` | 是否启用工具执行前的权限确认 |
 | `auto_approve_levels` | list | `["safe"]` | 自动批准的安全等级 |
 | `confirmation_timeout` | int | `30` | 用户确认超时时间（秒） |
+| `timeout_action` | string | `"reject"` | 超时策略：`reject` 自动拒绝、`approve` 自动批准、`block` 无限等待 |
 
 ### cron 段 — 定时任务配置
 
@@ -423,8 +427,7 @@ tools:
     auto_approve_levels:
       - safe
     confirmation_timeout: 30
-
-# --- 定时任务 ---
+    timeout_action: reject
 cron:
   enabled: false
 

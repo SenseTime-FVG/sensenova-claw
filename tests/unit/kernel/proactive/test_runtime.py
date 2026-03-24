@@ -43,7 +43,8 @@ def _make_runtime(**overrides) -> ProactiveRuntime:
     bus._subscribers = set()
     bus.publish = AsyncMock()
     bus.subscribe = MagicMock()
-
+    bus.subscribe_queue = MagicMock(return_value=asyncio.Queue())
+    bus.unsubscribe_queue = MagicMock()
     repo = MagicMock()
     repo.create_proactive_job = AsyncMock()
     repo.get_proactive_job = AsyncMock(return_value=None)
@@ -86,7 +87,8 @@ def _make_runtime_with_jobs(jobs_list):
     bus._subscribers = set()
     bus.publish = AsyncMock()
     bus.subscribe = MagicMock()
-
+    bus.subscribe_queue = MagicMock(return_value=asyncio.Queue())
+    bus.unsubscribe_queue = MagicMock()
     repo = MagicMock()
     repo.create_proactive_job = AsyncMock()
     repo.get_proactive_job = AsyncMock(return_value=None)
@@ -211,10 +213,7 @@ class TestEvaluateAndExecute:
         rt = _make_runtime()
         job = _make_job(trigger=TimeTrigger(every="30m"))
         rt._jobs[job.id] = job
-
-        # mock executor.execute_job 避免实际执行
-        rt._executor.execute_job = AsyncMock()
-
+        rt._executor.execute_job = AsyncMock(return_value=("session-1", "result"))
         result = await rt._evaluate_and_execute(job)
         assert result is True
         # 应发布 PROACTIVE_JOB_TRIGGERED
@@ -349,3 +348,39 @@ class TestBuildPrompt:
         prompt = rt._executor._build_prompt(job)
         assert "检查系统状态" in prompt
         assert "上次检查时间: 10:00" in prompt
+
+
+class TestRunAndDeliver:
+    @pytest.mark.asyncio
+    async def test_delivery_called_on_success(self):
+        rt = _make_runtime()
+        job = _make_job()
+        rt._jobs[job.id] = job
+        rt._executor.execute_job = AsyncMock(return_value=("session-1", "执行结果"))
+        job.state.last_status = "ok"
+        rt._delivery.deliver = AsyncMock()
+        await rt._run_and_deliver(job)
+        rt._delivery.deliver.assert_called_once_with(job, "session-1", "执行结果")
+
+    @pytest.mark.asyncio
+    async def test_delivery_skipped_on_failure(self):
+        rt = _make_runtime()
+        job = _make_job()
+        rt._jobs[job.id] = job
+        rt._executor.execute_job = AsyncMock(return_value=("session-1", None))
+        job.state.last_status = "error"
+        rt._delivery.deliver = AsyncMock()
+        await rt._run_and_deliver(job)
+        rt._delivery.deliver.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delivery_skipped_when_no_result(self):
+        rt = _make_runtime()
+        job = _make_job()
+        rt._jobs[job.id] = job
+        rt._executor.execute_job = AsyncMock(return_value=("session-1", ""))
+        job.state.last_status = "ok"
+        rt._delivery.deliver = AsyncMock()
+        await rt._run_and_deliver(job)
+        # 空字符串 result 是 falsy，不应调用 delivery
+        rt._delivery.deliver.assert_not_called()

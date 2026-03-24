@@ -169,13 +169,9 @@ class ProactiveRuntime:
         return True
 
     async def _run_and_deliver(self, job: ProactiveJob) -> None:
-        """执行 job 并投递结果（在 task 中运行）。"""
-        await self._executor.execute_job(job)
-        # 投递结果（executor 完成后，检查状态）
-        if self._delivery and job.state.last_status == "ok":
-            # 结果已在 executor 中持久化，从最近的 run 获取
-            # 简化：delivery 在 executor 外部不再重复调用
-            pass
+        session_id, result = await self._executor.execute_job(job)
+        if self._delivery and job.state.last_status == "ok" and result:
+            await self._delivery.deliver(job, session_id, result)
 
     # ---------- Job 加载 ----------
 

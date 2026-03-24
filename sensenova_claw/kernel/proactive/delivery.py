@@ -2,7 +2,6 @@
 from __future__ import annotations
 import asyncio
 import logging
-
 from sensenova_claw.adapters.llm.factory import LLMFactory
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import PROACTIVE_RESULT

@@ -212,11 +212,48 @@ agents:
     tools: [bash_command, read_file, write_file, send_message, send_email, list_emails, read_email, download_attachment, mark_email, search_emails, ask_user]
     skills: []
 
+  proactive-agent:
+    name: Proactive Agent
+    description: 自主执行定时任务和信息推送的 agent
+    temperature: 0.2
+    tools: [send_message, fetch_url, read_file, serper_search, memory_search, list_proactive_jobs, create_proactive_job, manage_proactive_job]
+    skills: []
+    max_send_depth: 2
+    enabled: true
+
+# ════════════════════════════════════════════════════
+# Proactive Agent 配置
+# ════════════════════════════════════════════════════
+proactive:
+  enabled: false
+  max_concurrent_runs: 3
+  jobs:
+    # 示例：每日新闻简报
+    - name: "每日新闻简报"
+      enabled: true
+      agent_id: proactive-agent
+      trigger:
+        kind: time
+        cron: "0 8 * * *"            # 每天早上 8 点
+      task:
+        prompt: "搜索并汇总今日重要新闻，输出不超过 10 条的新闻摘要，每条包含标题、来源和一句话概要。"
+        use_memory: false
+      delivery:
+        channels: ["web"]
+      safety:
+        max_llm_calls: 10
+        max_duration_ms: 120000
 
 # ════════════════════════════════════════════════════
 # 工具配置
 # ════════════════════════════════════════════════════
 tools:
+  permission:
+    enabled: false
+    auto_approve_levels: ["low"]       # 自动批准的风险等级
+    confirmation_timeout: 60           # 确认超时（秒）
+    timeout_action: reject             # 超时策略：reject（拒绝）| approve（批准）| block（无限等待）
+
   serper_search:
     enabled: true
     api_key: ${SERPER_API_KEY}

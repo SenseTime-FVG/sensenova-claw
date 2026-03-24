@@ -1053,3 +1053,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前仓库把 `.next/` 产物纳入版本管理，调试前端路由时很容易产生大量噪音改动；完成后需要显式回退 `.next/`，只保留真实源码变更。
+
+### 2026-03-24 Proactive Agent Prompt 收敛补充
+
+成功经验：
+- 对这类“runtime 自动触发 + 用户直聊”双入口 agent，`SYSTEM_PROMPT.md` 最适合承载硬规则、判断顺序和执行协议，`AGENTS.md` 更适合承载角色边界、默认协作策略和风格偏好；两者分层清楚后，提示词更稳也更容易维护。
+- Prompt 文案应尽量贴真实运行时能力来写，例如 proactive 当前稳定支持的是 `time/event` 触发，以及 `list/create/enable/disable/delete` 管理动作；把不存在的“条件触发”“字段级 update”写进 prompt，只会让模型产生幻觉。
+- 对这类 prompt-only 改动，跑 `./.venv/bin/python -m pytest tests/unit/test_agent_registry.py` 作为最小回归很高效，能快速确认 `SYSTEM_PROMPT.md` 的加载链路未被破坏。
+
+失败/风险经验：
+- 当前 `proactive` 任务虽然支持 `system_prompt_override` 元数据注入，但是否在完整消息构建链路中被最终消费，仍需后续单独核查；不能仅凭字段存在就默认该能力已稳定可用。
