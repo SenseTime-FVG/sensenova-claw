@@ -126,6 +126,7 @@ export function ActionToastPanel({
         return (
           <div
             key={toast.id}
+            data-testid="action-toast"
             className={cn(
               'pointer-events-auto rounded-2xl border-2 shadow-[0_20px_60px_rgba(15,23,42,0.2)] backdrop-blur-xl animate-in slide-in-from-top-4 fade-in duration-300',
               'bg-background/98',
@@ -163,14 +164,15 @@ export function ActionToastPanel({
                   {toast.body}
                 </p>
                 {/* 操作按钮 */}
-                <div className="mt-3 flex gap-2">
+                <div className="mt-3 flex flex-wrap gap-2">
                   {toast.actions.map((action) => (
                     <button
                       key={action.value}
+                      data-testid="action-toast-button"
                       type="button"
                       onClick={() => onAction(toast.id, toast.cardId, action.value)}
                       className={cn(
-                        'rounded-lg border px-4 py-1.5 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]',
+                        'max-w-full rounded-lg border px-4 py-1.5 text-left text-xs font-semibold leading-relaxed whitespace-normal break-all transition-all hover:scale-[1.02] active:scale-[0.98]',
                         action.value === 'approve' || action.value === 'accept'
                           ? 'border-emerald-300 bg-emerald-500 text-white shadow-sm shadow-emerald-200 hover:bg-emerald-600'
                           : action.value === 'deny' || action.value === 'reject'

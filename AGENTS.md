@@ -377,6 +377,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - WeCom 之前没有显式 `event_filter()`，默认 `None` 看起来“像是全订阅”，但如果 `send_event()` 不处理 `USER_QUESTION_ASKED`，实际效果仍然是静默丢弃；不能只看订阅层，不看分发层。
 
+### 2026-03-24 Workbench ask_user 输入修复补充
+
+成功经验：
+- 工作台 `/chat` 的 `ask_user` 不只是“输入框被禁用”问题，还要检查主输入框提交路径是否会把自由文本映射成 `user_question_answered`；只解锁输入框但仍发送普通 `user_input`，后端 `ask_user` 仍会一直挂起。
+- `ChatSessionContext` 已经暴露了 `activeInteraction/sendQuestionAnswer`，在聊天页直接复用这条能力，比重新造一套 `ask_user` 提交协议更稳，改动也更小。
+
+失败/风险经验：
+- `sensenova_claw/app/web/e2e/ask-user.spec.ts` 当前夹具陈旧，至少有三类问题会干扰业务回归：鉴权会落到登录页、mock WebSocket 会影响 Next dev HMR、旧断言仍假设 `/chat` 使用 `ask-user-dialog` 弹窗而不是通知卡片。
+- 对 `/chat` 做 Playwright 回归时，若直接全局替换 `window.WebSocket`，必须只拦截业务 `localhost:8000/ws`，并保留 Next dev/HMR 所需的 `addEventListener/removeEventListener`；否则页面会先 client-side exception，根本到不了业务断言。
+
 ### 2026-03-19 WhatsApp Self Chat 补充
 
 成功经验：
@@ -1064,3 +1074,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 如果把 secret skill 设计成“任意 path 都可读写”的通用管理器，很容易和后端 `is_secret_path()` 的约束冲突，最终在运行时直接返回 400；文档必须明确只支持已注册敏感路径。
+
+### 2026-03-24 ask_user 提示框溢出补充
+
+成功经验：
+- 先确认当前真实渲染链路很关键；`chat` 页 ask_user 已不再走 `QuestionDialog`，而是通过 `NotificationToast` 的 action toast 展示选项，修 UI 前必须先对准现网组件。
+- 长选项按钮的稳定修法是组合处理：外层按钮容器加 `flex-wrap`，按钮本身加 `max-w-full`、`whitespace-normal`、`break-all` 和 `text-left`，这样长 URL 与中英文混排都能在卡片内换行。
+- 这类布局回归用 Playwright 几何断言最有效：直接比较按钮右边界和 toast 右边界，能避免“文本可见但其实已经溢出”的假通过。
+
+失败/风险经验：
+- 旧的 `sensenova_claw/app/web/e2e/ask-user.spec.ts` 仍按已废弃的弹窗交互建模，和当前通知卡片实现已漂移；后续若要维护整套 ask_user 前端回归，应该先统一到现有通知交互模型再扩展断言。
