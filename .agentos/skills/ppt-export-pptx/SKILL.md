@@ -21,13 +21,13 @@ node .agentos/skills/ppt-export-pptx/html_to_pptx.mjs --deck-dir <deck_dir路径
 ```
 
 可选参数：
-- `--output <文件名>`：输出文件名，默认 `deck.pptx`，写入 deck_dir 下
+- `--output <文件名>`：输出文件名，默认与 deck_dir 目录名一致（如 `AI_产品发布会_20260318_154500.pptx`），写入 deck_dir 下
 
 ## 输出
 
 - 成功时 stdout 输出 JSON：`{ success, output, pages, converted, failed, fileSize }`
 - 失败时退出码为 1，错误信息输出到 stderr
-- 生成的 PPTX 文件位于 `<deck_dir>/deck.pptx`
+- 生成的 PPTX 文件位于 `<deck_dir>/<目录名>.pptx`
 
 ## 转换说明
 

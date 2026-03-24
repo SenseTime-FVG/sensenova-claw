@@ -134,8 +134,8 @@ const BROWSER_EXTRACT_FN = () => {
 
     function walk(node) {
       if (node.nodeType === 3) {
-        // 纯文本节点
-        const text = node.textContent;
+        // 纯文本节点：折叠空白（与浏览器行为一致），跳过纯空白节点
+        const text = node.textContent.replace(/\s+/g, ' ').trim();
         if (text) {
           // 获取父元素的样式作为该文本节点的样式
           const parent = node.parentElement || el;
@@ -152,11 +152,15 @@ const BROWSER_EXTRACT_FN = () => {
         }
       } else if (node.nodeType === 1) {
         const cs = window.getComputedStyle(node);
+        const display = cs.getPropertyValue('display');
         // 跳过 display:none 的元素
-        if (cs.getPropertyValue('display') === 'none') return;
+        if (display === 'none') return;
 
         const text = node.innerText || '';
         if (!text) return;
+
+        // 块级元素（display: block/flex/grid 等）后需要换行
+        const isBlock = ['block', 'flex', 'grid', 'table', 'list-item'].includes(display);
 
         runs.push({
           text,
@@ -166,6 +170,7 @@ const BROWSER_EXTRACT_FN = () => {
           color: cs.getPropertyValue('color'),
           fontFamily: cs.getPropertyValue('font-family'),
           underline: cs.getPropertyValue('text-decoration').includes('underline'),
+          isBlock,
         });
       }
     }
@@ -283,6 +288,10 @@ const BROWSER_EXTRACT_FN = () => {
   const bgEl = document.getElementById('bg');
   const bg = bgEl ? extractNode(bgEl, wrapperRect) : null;
 
+  // 提取页头 (#header)
+  const headerEl = document.getElementById('header');
+  const header = headerEl ? extractNode(headerEl, wrapperRect) : null;
+
   // 提取内容区 (#ct)
   const ctEl = document.getElementById('ct');
   const ct = ctEl ? extractNode(ctEl, wrapperRect) : null;
@@ -291,7 +300,10 @@ const BROWSER_EXTRACT_FN = () => {
   const footerEl = document.getElementById('footer');
   const footer = footerEl ? extractNode(footerEl, wrapperRect) : null;
 
-  return { bg, ct, footer };
+  // 提取 body 背景色（用于 opacity < 1 的 #bg 底色填充）
+  const bodyBgColor = window.getComputedStyle(document.body).getPropertyValue('background-color');
+
+  return { bg, header, ct, footer, bodyBgColor };
 };
 
 // ---------------------------------------------------------------------------

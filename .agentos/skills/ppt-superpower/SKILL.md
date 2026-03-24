@@ -54,6 +54,7 @@ deck_dir/
   image_search_results.json
   image_selection.json
   review.md
+  <目录名>.pptx          ← ppt-export-pptx 最终输出
   pages/
     page_01.html
   images/
@@ -70,6 +71,10 @@ deck_dir/
 - 如果存在图片槽位缺口，再进入 `ppt-asset-plan`，并保留搜图候选、筛选记录、下载结果。
 - 页面结果交给 `ppt-page-html`，并按 `pages/page_XX.html` 逐页落盘。
 - 最终结果必须经过 `ppt-review`。
+- review 通过后，最后一步调用 `ppt-export-pptx` 将 HTML 导出为 PPTX 文件。
+  - 执行：`node .agentos/skills/ppt-export-pptx/html_to_pptx.mjs --deck-dir <deck_dir>`
+  - 输出文件名与 `deck_dir` 目录名一致，如 `<deck_dir>/AI_产品发布会_20260318_154500.pptx`
+  - 首次使用前需执行 `cd .agentos/skills/ppt-export-pptx && npm install`
 
 ## 路径选择
 
@@ -84,6 +89,7 @@ deck_dir/
 3. `ppt-storyboard`
 4. `ppt-page-html`
 5. `ppt-review`
+6. `ppt-export-pptx`
 
 ### guided
 

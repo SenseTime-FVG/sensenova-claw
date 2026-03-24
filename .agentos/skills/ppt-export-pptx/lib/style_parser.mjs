@@ -334,6 +334,23 @@ export function parseFontFamily(cssValue) {
 }
 
 // ---------------------------------------------------------------------------
+// extractCssAlpha — 提取 CSS 颜色的 alpha 通道
+// ---------------------------------------------------------------------------
+/**
+ * 从 CSS 颜色值中提取 alpha 通道值。
+ * rgba() → alpha 值；transparent → 0；其它 → 1。
+ * @param {string} cssColor
+ * @returns {number}
+ */
+export function extractCssAlpha(cssColor) {
+  if (!cssColor) return 1;
+  const m = cssColor.match(/rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)/);
+  if (m) return parseFloat(m[1]);
+  if (cssColor.trim().toLowerCase() === 'transparent') return 0;
+  return 1;
+}
+
+// ---------------------------------------------------------------------------
 // parseBorder — 解析 CSS border shorthand
 // ---------------------------------------------------------------------------
 /**
