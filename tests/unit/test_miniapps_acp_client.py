@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
 from sensenova_claw.capabilities.miniapps.acp_client import ACPClient
@@ -54,3 +56,11 @@ async def test_prompt_uses_request_timeout(monkeypatch) -> None:
     assert captured == [
         ("session/prompt", 240, "sess_42"),
     ]
+
+
+def test_resolve_command_prefers_path_lookup(monkeypatch) -> None:
+    client = ACPClient("npx")
+
+    monkeypatch.setattr(shutil, "which", lambda command, path=None: "C:/Program Files/nodejs/npx.cmd")
+
+    assert client._resolve_command() == "C:/Program Files/nodejs/npx.cmd"

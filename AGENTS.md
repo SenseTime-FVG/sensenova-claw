@@ -1145,3 +1145,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 现有 `MockProvider` 的兜底文案并不包含字符串 `mock`，而是“当前没有可用的 LLM...”；如果测试把“回退到 mock”硬编码成断言回复里必须出现 `mock`，会把文案实现细节误当成行为契约。
+### 2026-03-24 ACP Wizard 多平台补充
+
+成功经验：
+- ACP 多 agent 支持最适合收敛成一个后端 catalog/service：把 `agent 预设`、`平台支持`、`依赖探测`、`安装 recipe`、`推荐 command/args/env` 放在同一份 `ACPWizardService` 中，前端只消费结构化结果即可，避免在 UI 里硬编码平台分支。
+- Windows 支持不能只做 `platform == windows`；还要同时处理命令名归一化与真实可执行路径。像 `codex.cmd` / `python.exe` 的配置比对需要去掉扩展名，而安装步骤执行时又必须优先使用实际探测到的二进制路径，否则会出现“向导显示已检测，点击安装却起不来”的假成功。
+- `powershell` 相关 recipe 最容易踩坑：探测层应允许 `pwsh` 与 `powershell` 统一归到同一个 installer，执行层再把命令首项替换为实际探测到的路径，这样 Windows PowerShell 和 PowerShell 7 都能覆盖。
+- 前端 ACP 设置页做向导时，最稳的交互闭环是“三步走”：`检测 -> 一键安装缺失项 -> 回填推荐配置再统一保存`；把“安装”和“保存 config.yml”拆开后，用户更容易理解当前状态，也便于 Playwright 断言。
+- 这类 ACP 预设不要靠记忆猜命令；先对照 ACP 官方 agents 列表和各 CLI 官方文档确认真实入口，再写成预设，能显著减少 `args`/adapter 命名漂移。
+
+失败/风险经验：
+- 当前环境执行 `uv run ...` 会把 `uv.lock` 重写成本机镜像源 URL，即使业务代码没变也会产生超大噪音 diff；完成测试后要记得把 `uv.lock` 恢复回仓库版本，再做最终状态检查。
