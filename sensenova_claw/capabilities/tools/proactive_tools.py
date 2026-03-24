@@ -13,7 +13,6 @@ from typing import Any
 
 from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
 from sensenova_claw.kernel.proactive.models import (
-    ConditionTrigger,
     DeliveryConfig,
     EventTrigger,
     ProactiveJob,
@@ -23,26 +22,19 @@ from sensenova_claw.kernel.proactive.models import (
 )
 
 
-def _parse_trigger(trigger_dict: dict) -> TimeTrigger | EventTrigger | ConditionTrigger:
+def _parse_trigger(trigger_dict: dict) -> TimeTrigger | EventTrigger:
     """将 dict 解析为对应的 Trigger 对象"""
     kind = trigger_dict.get("kind", "time")
     if kind == "time":
         return TimeTrigger(
             cron=trigger_dict.get("cron"),
             every=trigger_dict.get("every"),
-            condition=trigger_dict.get("condition"),
         )
     elif kind == "event":
         return EventTrigger(
             event_type=trigger_dict.get("event_type", ""),
             filter=trigger_dict.get("filter"),
             debounce_ms=trigger_dict.get("debounce_ms", 5000),
-            condition=trigger_dict.get("condition"),
-        )
-    elif kind == "condition":
-        return ConditionTrigger(
-            check_interval=trigger_dict.get("check_interval", "5m"),
-            condition=trigger_dict.get("condition", ""),
         )
     raise ValueError(f"未知 trigger kind: {kind!r}")
 
@@ -51,7 +43,7 @@ class CreateProactiveJobTool(Tool):
     """从对话中创建主动任务"""
 
     name = "create_proactive_job"
-    description = "创建一个主动任务（ProactiveJob），支持定时、事件、条件三种触发方式"
+    description = "创建一个主动任务（ProactiveJob），支持定时、事件两种触发方式"
     risk_level = ToolRiskLevel.HIGH
     parameters = {
         "type": "object",
@@ -59,7 +51,7 @@ class CreateProactiveJobTool(Tool):
             "name": {"type": "string", "description": "任务名称"},
             "trigger": {
                 "type": "object",
-                "description": "触发配置，包含 kind(time/event/condition) 及对应字段",
+                "description": "触发配置，包含 kind(time/event) 及对应字段",
             },
             "task": {
                 "type": "object",

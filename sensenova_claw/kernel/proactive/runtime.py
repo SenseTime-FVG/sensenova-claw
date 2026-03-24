@@ -1,7 +1,7 @@
 """ProactiveRuntime — 主动任务运行时
 
 管理 proactive job 的加载、触发、执行和生命周期。
-支持三种触发方式：定时(time)、事件(event)、条件(condition)。
+支持两种触发方式：定时(time)、事件(event)。
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from sensenova_claw.kernel.events.bus import PublicEventBus
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
-    PROACTIVE_CONDITION_EVALUATED,
     PROACTIVE_JOB_COMPLETED,
     PROACTIVE_JOB_FAILED,
     PROACTIVE_JOB_SKIPPED,
@@ -32,7 +31,6 @@ from sensenova_claw.kernel.events.types import (
 )
 from sensenova_claw.kernel.proactive.delivery import ProactiveDelivery
 from sensenova_claw.kernel.proactive.models import (
-    ConditionTrigger,
     DeliveryConfig,
     EventTrigger,
     JobState,
@@ -45,10 +43,8 @@ from sensenova_claw.kernel.proactive.models import (
     parse_duration_ms,
 )
 from sensenova_claw.kernel.proactive.triggers import (
-    build_condition_prompt,
     compute_next_fire_ms,
     is_event_match,
-    parse_condition_response,
     should_debounce,
 )
 
@@ -226,19 +222,12 @@ class ProactiveRuntime:
             trigger = TimeTrigger(
                 cron=trigger_cfg.get("cron"),
                 every=trigger_cfg.get("every"),
-                condition=trigger_cfg.get("condition"),
             )
         elif trigger_kind == "event":
             trigger = EventTrigger(
                 event_type=trigger_cfg.get("event_type", ""),
                 filter=trigger_cfg.get("filter"),
                 debounce_ms=trigger_cfg.get("debounce_ms", 5000),
-                condition=trigger_cfg.get("condition"),
-            )
-        elif trigger_kind == "condition":
-            trigger = ConditionTrigger(
-                check_interval=trigger_cfg.get("check_interval", "5m"),
-                condition=trigger_cfg.get("condition", ""),
             )
         else:
             raise ValueError(f"未知 trigger kind: {trigger_kind}")
@@ -323,13 +312,13 @@ class ProactiveRuntime:
         return min_delay
 
     async def _on_timer(self) -> None:
-        """定时器回调：扫描到期的 time/condition jobs 并触发。"""
+        """定时器回调：扫描到期的 time jobs 并触发。"""
         try:
             now_ms = int(time.time() * 1000)
             for job in list(self._jobs.values()):
                 if not job.enabled or job.id in self._running_jobs:
                     continue
-                if not isinstance(job.trigger, (TimeTrigger, ConditionTrigger)):
+                if not isinstance(job.trigger, TimeTrigger):
                     continue
                 next_ms = job.state.next_trigger_at_ms
                 if next_ms is not None and next_ms <= now_ms:
@@ -373,7 +362,7 @@ class ProactiveRuntime:
     # ---------- 评估与执行 ----------
 
     async def _evaluate_and_execute(self, job: ProactiveJob) -> bool:
-        """评估条件并决定是否执行 job。返回是否启动了执行。"""
+        """决定是否执行 job。返回是否启动了执行。"""
         if not job.enabled or job.id in self._running_jobs:
             return False
 
@@ -386,54 +375,8 @@ class ProactiveRuntime:
             payload={"job_id": job.id, "job_name": job.name},
         ))
 
-        # 获取条件文本
-        condition = self._get_condition(job)
-
-        if condition:
-            met = await self._evaluate_condition(condition)
-            await self._bus.publish(EventEnvelope(
-                type=PROACTIVE_CONDITION_EVALUATED,
-                session_id="system",
-                agent_id=job.agent_id,
-                source="proactive",
-                payload={"job_id": job.id, "condition": condition, "met": met},
-            ))
-            if not met:
-                now_ms = int(time.time() * 1000)
-                job.state.next_trigger_at_ms = compute_next_fire_ms(job, now_ms)
-                await self._bus.publish(EventEnvelope(
-                    type=PROACTIVE_JOB_SKIPPED,
-                    session_id="system",
-                    agent_id=job.agent_id,
-                    source="proactive",
-                    payload={"job_id": job.id, "reason": "condition_not_met"},
-                ))
-                return False
-
         asyncio.create_task(self._execute_job(job))
         return True
-
-    def _get_condition(self, job: ProactiveJob) -> str | None:
-        """从 trigger 中提取条件文本。"""
-        trigger = job.trigger
-        if isinstance(trigger, ConditionTrigger):
-            return trigger.condition
-        if isinstance(trigger, (TimeTrigger, EventTrigger)):
-            return trigger.condition
-        return None
-
-    async def _evaluate_condition(self, condition: str) -> bool:
-        """通过 LLM 评估条件。LLM 不可用时降级为 True。"""
-        try:
-            from sensenova_claw.adapters.llm.factory import create_llm_provider
-            prompt = build_condition_prompt(condition)
-            provider = create_llm_provider()
-            response = await provider.chat([{"role": "user", "content": prompt}])
-            result_text = response.get("content", "")
-            return parse_condition_response(result_text)
-        except Exception:
-            logger.warning("条件评估 LLM 调用失败，降级为 True: %s", condition)
-            return True
 
     async def _execute_job(self, job: ProactiveJob) -> None:
         """执行单个 proactive job：创建隔离 session，等待完成，投递结果。"""
