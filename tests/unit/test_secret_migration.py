@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import yaml
 
-from agentos.platform.config.config import Config
-from agentos.platform.secrets.migration import migrate_plaintext_secrets
-from agentos.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.secrets.migration import migrate_plaintext_secrets
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
 
 
 def test_migrate_plaintext_secrets_moves_plain_values_to_secret_store(tmp_path):
@@ -28,13 +28,13 @@ def test_migrate_plaintext_secrets_moves_plain_values_to_secret_store(tmp_path):
 
     written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert written["llm"]["providers"]["openai"]["api_key"] == (
-        "${secret:agentos/llm.providers.openai.api_key}"
+        "${secret:sensenova_claw/llm.providers.openai.api_key}"
     )
     assert written["tools"]["serper_search"]["api_key"] == (
-        "${secret:agentos/tools.serper_search.api_key}"
+        "${secret:sensenova_claw/tools.serper_search.api_key}"
     )
-    assert store.get("agentos/llm.providers.openai.api_key") == "sk-openai-123"
-    assert store.get("agentos/tools.serper_search.api_key") == "sk-serper-456"
+    assert store.get("sensenova_claw/llm.providers.openai.api_key") == "sk-openai-123"
+    assert store.get("sensenova_claw/tools.serper_search.api_key") == "sk-serper-456"
     assert report["migrated"] == 2
     assert "llm.providers.openai.api_key" in report["migrated_paths"]
 
@@ -48,7 +48,7 @@ def test_migrate_plaintext_secrets_skips_env_and_existing_secret_refs(tmp_path):
         "      api_key: ${OPENAI_API_KEY}\n"
         "tools:\n"
         "  tavily_search:\n"
-        "    api_key: ${secret:agentos/tools.tavily_search.api_key}\n",
+        "    api_key: ${secret:sensenova_claw/tools.tavily_search.api_key}\n",
         encoding="utf-8",
     )
     store = InMemorySecretStore()
@@ -59,6 +59,6 @@ def test_migrate_plaintext_secrets_skips_env_and_existing_secret_refs(tmp_path):
     written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert written["llm"]["providers"]["openai"]["api_key"] == "${OPENAI_API_KEY}"
     assert written["tools"]["tavily_search"]["api_key"] == (
-        "${secret:agentos/tools.tavily_search.api_key}"
+        "${secret:sensenova_claw/tools.tavily_search.api_key}"
     )
     assert report["migrated"] == 0

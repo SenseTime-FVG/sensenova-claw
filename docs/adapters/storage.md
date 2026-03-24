@@ -1,6 +1,6 @@
 # 存储层
 
-> 路径：`agentos/adapters/storage/`
+> 路径：`sensenova_claw/adapters/storage/`
 
 存储层基于 SQLite 实现数据持久化，为上层提供 Repository 接口。
 
@@ -9,7 +9,7 @@
 ## 概览
 
 - 使用 `sqlite3`（非 `aiosqlite`，因为在当前环境下更稳定）
-- 数据库路径：`var/data/agentos.db`
+- 数据库路径：`var/data/sensenova-claw.db`
 - 通过 Repository 模式封装数据访问逻辑
 
 ---

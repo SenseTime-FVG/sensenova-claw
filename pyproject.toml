@@ -1,7 +1,7 @@
 [project]
-name = "agentos"
+name = "sensenova-claw"
 version = "0.5.0"
-description = "AgentOS - 基于事件驱动架构的 AI Agent 平台"
+description = "Sensenova-Claw - 基于事件驱动架构的 AI Agent 平台"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0",
@@ -38,7 +38,7 @@ wecom = [
 ]
 
 [project.scripts]
-agentos = "agentos.app.main:main"
+sensenova-claw = "sensenova_claw.app.main:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

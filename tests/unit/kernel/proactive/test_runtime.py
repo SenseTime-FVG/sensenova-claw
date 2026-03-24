@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentos.kernel.proactive.models import (
+from sensenova_claw.kernel.proactive.models import (
     ConditionTrigger,
     DeliveryConfig,
     EventTrigger,
@@ -19,7 +19,7 @@ from agentos.kernel.proactive.models import (
     SafetyConfig,
     TimeTrigger,
 )
-from agentos.kernel.proactive.runtime import ProactiveRuntime
+from sensenova_claw.kernel.proactive.runtime import ProactiveRuntime
 
 
 def _make_job(trigger=None, **kwargs) -> ProactiveJob:
@@ -68,7 +68,7 @@ def _make_runtime(**overrides) -> ProactiveRuntime:
     }
     defaults.update(overrides)
 
-    with patch("agentos.kernel.proactive.runtime.config") as mock_config:
+    with patch("sensenova_claw.kernel.proactive.runtime.config") as mock_config:
         mock_config.get = lambda path, default=None: {
             "proactive.enabled": True,
             "proactive.max_concurrent_runs": 3,
@@ -109,7 +109,7 @@ def _make_runtime_with_jobs(jobs_list):
         "proactive.jobs": jobs_list,
     }
 
-    with patch("agentos.kernel.proactive.runtime.config") as mock_config:
+    with patch("sensenova_claw.kernel.proactive.runtime.config") as mock_config:
         mock_config.get = lambda path, default=None: config_data.get(path, default)
         rt = ProactiveRuntime(
             bus=bus, repo=repo,
@@ -118,7 +118,7 @@ def _make_runtime_with_jobs(jobs_list):
         )
     # 让 _load_jobs_from_config 也能读到 jobs
     rt._config_get = lambda path, default=None: config_data.get(path, default)
-    with patch("agentos.kernel.proactive.runtime.config") as mock_config:
+    with patch("sensenova_claw.kernel.proactive.runtime.config") as mock_config:
         mock_config.get = lambda path, default=None: config_data.get(path, default)
         jobs = rt._load_jobs_from_config()
     return rt, jobs

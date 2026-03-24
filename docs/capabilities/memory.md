@@ -28,7 +28,7 @@ MemorySearchTool（搜索工具）
 
 ## MemoryManager
 
-核心管理器，位于 `agentos/capabilities/memory/manager.py`：
+核心管理器，位于 `sensenova_claw/capabilities/memory/manager.py`：
 
 ```python
 class MemoryManager:
@@ -127,7 +127,7 @@ async def search(query, max_results=5):
 
 ## MemoryIndex
 
-基于 SQLite 的索引引擎，位于 `agentos/capabilities/memory/index.py`：
+基于 SQLite 的索引引擎，位于 `sensenova_claw/capabilities/memory/index.py`：
 
 ### 数据库 Schema
 
@@ -191,7 +191,7 @@ class MemorySearchResult:
 
 ## Chunker
 
-智能分块器，位于 `agentos/capabilities/memory/chunker.py`：
+智能分块器，位于 `sensenova_claw/capabilities/memory/chunker.py`：
 
 ```python
 class Chunker:
@@ -228,7 +228,7 @@ class MemoryChunk:
 
 ## EmbeddingService
 
-嵌入服务封装，位于 `agentos/capabilities/memory/embedding.py`：
+嵌入服务封装，位于 `sensenova_claw/capabilities/memory/embedding.py`：
 
 ```python
 class EmbeddingService:
@@ -259,7 +259,7 @@ class EmbeddingService:
 
 ## MemorySearchTool
 
-注册为 `memory_search` 工具供 Agent 在对话中调用，位于 `agentos/capabilities/memory/tools.py`：
+注册为 `memory_search` 工具供 Agent 在对话中调用，位于 `sensenova_claw/capabilities/memory/tools.py`：
 
 ```python
 class MemorySearchTool(Tool):
@@ -347,7 +347,7 @@ workspace/
        ├── 2026-03-14.md     # 日常笔记（按日期组织）
        ├── 2026-03-13.md
        └── projects/
-            └── agentos.md   # 项目相关记忆
+            └── sensenova-claw.md   # 项目相关记忆
 
 var/
   └── memory.db              # SQLite 索引数据库（memory_chunks 表 + FTS5 虚拟表）

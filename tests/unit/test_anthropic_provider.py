@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
-from agentos.adapters.llm.base import LLMProvider
-from agentos.platform.config.config import Config
+from sensenova_claw.adapters.llm.base import LLMProvider
+from sensenova_claw.platform.config.config import Config
 
 # 项目根目录，用于加载 config.yml
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -48,11 +48,11 @@ def provider(real_config: Config) -> Any:
         pytest.skip("未配置 Anthropic API key，跳过真实 API 测试")
 
     # 临时替换全局 config，让 AnthropicProvider.__init__ 能读取到真实配置
-    import agentos.adapters.llm.providers.anthropic_provider as mod
+    import sensenova_claw.adapters.llm.providers.anthropic_provider as mod
     original_config = mod.config
     mod.config = real_config
     try:
-        from agentos.adapters.llm.providers.anthropic_provider import AnthropicProvider
+        from sensenova_claw.adapters.llm.providers.anthropic_provider import AnthropicProvider
         p = AnthropicProvider()
     finally:
         mod.config = original_config

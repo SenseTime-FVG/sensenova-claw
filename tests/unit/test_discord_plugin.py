@@ -6,16 +6,16 @@ from unittest.mock import patch
 
 import pytest
 
-from agentos.adapters.plugins import PluginRegistry, _iter_builtin_plugin_modules
-from agentos.adapters.plugins.base import PluginApi
-from agentos.adapters.plugins.discord.plugin import definition, register
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.plugins import PluginRegistry, _iter_builtin_plugin_modules
+from sensenova_claw.adapters.plugins.base import PluginApi
+from sensenova_claw.adapters.plugins.discord.plugin import definition, register
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 def _make_plugin_api(config_overrides: dict | None = None) -> PluginApi:
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     defaults = {
         "enabled": False,
@@ -68,7 +68,7 @@ class TestRegister:
     async def test_enabled_but_missing_dependency_skips_plugin(self):
         api = _make_plugin_api({"enabled": True})
         registry = api._registry
-        with patch("agentos.adapters.plugins.discord.plugin.importlib.util.find_spec", return_value=None):
+        with patch("sensenova_claw.adapters.plugins.discord.plugin.importlib.util.find_spec", return_value=None):
             await register(api)
         assert registry._pending_channels == []
         assert registry._pending_tools == []
@@ -77,7 +77,7 @@ class TestRegister:
     async def test_enabled_registers_channel_and_message_tool(self):
         api = _make_plugin_api({"enabled": True})
         registry = api._registry
-        with patch("agentos.adapters.plugins.discord.plugin.importlib.util.find_spec", return_value=object()):
+        with patch("sensenova_claw.adapters.plugins.discord.plugin.importlib.util.find_spec", return_value=object()):
             await register(api)
         assert len(registry._pending_channels) == 1
         assert registry._pending_channels[0].get_channel_id() == "discord"
@@ -94,7 +94,7 @@ class TestRegister:
             }
         )
         registry = api._registry
-        with patch("agentos.adapters.plugins.discord.plugin.importlib.util.find_spec", return_value=object()):
+        with patch("sensenova_claw.adapters.plugins.discord.plugin.importlib.util.find_spec", return_value=object()):
             await register(api)
         channel = registry._pending_channels[0]
         assert channel._config.group_policy == "open"
@@ -104,7 +104,7 @@ class TestRegister:
 
 @pytest.mark.asyncio
 async def test_plugin_registry_loads_discord_plugin():
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     global_config.set("plugins.feishu.enabled", False)
     global_config.set("plugins.wecom.enabled", False)
@@ -120,4 +120,4 @@ async def test_plugin_registry_loads_discord_plugin():
 
 def test_builtin_plugin_module_points_to_plugins_package():
     modules = dict(_iter_builtin_plugin_modules())
-    assert modules["discord"] == "agentos.adapters.plugins.discord.plugin"
+    assert modules["discord"] == "sensenova_claw.adapters.plugins.discord.plugin"

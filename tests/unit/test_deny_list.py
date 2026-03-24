@@ -1,7 +1,7 @@
 """P04: deny_list 系统目录"""
 import platform
 from pathlib import Path
-from agentos.platform.security.deny_list import is_system_path
+from sensenova_claw.platform.security.deny_list import is_system_path
 
 
 class TestDenyList:

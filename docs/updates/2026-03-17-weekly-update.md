@@ -1,9 +1,9 @@
 ## 1. 代码架构重组 (v0.5)
 
-将项目从 `backend/app/` 双层结构重组为 `agentos/` 六层架构：
+将项目从 `backend/app/` 双层结构重组为 `sensenova_claw/` 六层架构：
 
 ```
-agentos/
+sensenova_claw/
 ├── kernel/          # 事件系统、Runtime、调度
 ├── capabilities/    # Agent、工具、Skills、记忆
 ├── adapters/        # LLM 提供商、Channel、存储

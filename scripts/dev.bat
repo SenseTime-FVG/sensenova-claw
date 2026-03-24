@@ -48,22 +48,22 @@ cd /d "%ROOT_DIR%"
 
 where uv >nul 2>&1
 if %errorlevel% equ 0 (
-    start "AgentOS Backend" cmd /k "cd /d "%ROOT_DIR%" && uv run uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%"
+    start "Sensenova-Claw Backend" cmd /k "cd /d "%ROOT_DIR%" && uv run uvicorn sensenova_claw.app.gateway.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%"
 ) else (
-    start "AgentOS Backend" cmd /k "cd /d "%ROOT_DIR%" && python -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%"
+    start "Sensenova-Claw Backend" cmd /k "cd /d "%ROOT_DIR%" && python -m uvicorn sensenova_claw.app.gateway.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%"
 )
 
 timeout /t 3 /nobreak >nul
 
 echo Starting frontend...
-cd /d "%ROOT_DIR%\agentos\app\web"
-start "AgentOS Frontend" cmd /k "cd /d "%ROOT_DIR%\agentos\app\web" && npm run dev"
+cd /d "%ROOT_DIR%\sensenova_claw\app\web"
+start "Sensenova-Claw Frontend" cmd /k "cd /d "%ROOT_DIR%\sensenova_claw\app\web" && npm run dev"
 
 timeout /t 3 /nobreak >nul
 
 echo.
 echo ========================================
-echo   AgentOS Dev Environment Started
+echo   Sensenova-Claw Dev Environment Started
 echo ========================================
 echo   Backend : http://localhost:%BACKEND_PORT%
 echo   Frontend: http://localhost:%FRONTEND_PORT%

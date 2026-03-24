@@ -10,10 +10,10 @@ from unittest.mock import AsyncMock  # 仅用于 ClawHub/Anthropic（唯一例�
 
 import pytest
 
-from agentos.capabilities.skills.market_service import SkillMarketService
-from agentos.capabilities.skills.models import SearchResult, SkillSearchItem, SkillDetail, UpdateInfo
-from agentos.capabilities.skills.registry import SkillRegistry
-from agentos.adapters.skill_sources.base import MarketAdapter
+from sensenova_claw.capabilities.skills.market_service import SkillMarketService
+from sensenova_claw.capabilities.skills.models import SearchResult, SkillSearchItem, SkillDetail, UpdateInfo
+from sensenova_claw.capabilities.skills.registry import SkillRegistry
+from sensenova_claw.adapters.skill_sources.base import MarketAdapter
 
 
 # ---------- 内存 MarketAdapter（真实子类，非 mock） ----------

@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from agentos.kernel.events.bus import PrivateEventBus, PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.kernel.events.bus import PrivateEventBus, PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     ERROR_RAISED,
     TOOL_CALL_COMPLETED,
     TOOL_CALL_REQUESTED,
@@ -22,20 +22,20 @@ from agentos.kernel.events.types import (
     TOOL_CONFIRMATION_REQUESTED,
     TOOL_CONFIRMATION_RESPONSE,
 )
-from agentos.kernel.runtime.workers.tool_worker import ToolSessionWorker
-from agentos.kernel.runtime.tool_runtime import ToolRuntime
-from agentos.kernel.events.router import BusRouter
-from agentos.capabilities.tools.base import Tool, ToolRiskLevel
-from agentos.capabilities.tools.builtin import (
+from sensenova_claw.kernel.runtime.workers.tool_worker import ToolSessionWorker
+from sensenova_claw.kernel.runtime.tool_runtime import ToolRuntime
+from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
+from sensenova_claw.capabilities.tools.builtin import (
     BashCommandTool,
     FetchUrlTool,
     ReadFileTool,
     SerperSearchTool,
     WriteFileTool,
 )
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.capabilities.agents.registry import AgentRegistry
-from agentos.platform.config.config import Config
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.platform.config.config import Config
 
 
 # ---------- 工具风险等级 ----------
@@ -217,7 +217,7 @@ class TestResultTruncation:
         """短结果不截断"""
         worker, cfg = _make_worker(tmp_path=tmp_path)
 
-        import agentos.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
         original_config = tw.config
         try:
             tw.config = cfg
@@ -234,7 +234,7 @@ class TestResultTruncation:
             "tools.result_truncation.save_dir": "workspace",
         })
 
-        import agentos.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
         original_config = tw.config
         try:
             tw.config = cfg
@@ -259,7 +259,7 @@ class TestPermissionManagement:
         })
         tool = BashCommandTool()  # HIGH risk
 
-        import agentos.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
         original_config = tw.config
         try:
             tw.config = cfg
@@ -275,7 +275,7 @@ class TestPermissionManagement:
         })
         tool = BashCommandTool()  # HIGH risk
 
-        import agentos.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
         original_config = tw.config
         try:
             tw.config = cfg
@@ -291,7 +291,7 @@ class TestPermissionManagement:
         })
         tool = ReadFileTool()  # LOW risk
 
-        import agentos.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
         original_config = tw.config
         try:
             tw.config = cfg
@@ -307,7 +307,7 @@ class TestPermissionManagement:
         })
         tool = WriteFileTool()  # MEDIUM risk
 
-        import agentos.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
         original_config = tw.config
         try:
             tw.config = cfg
@@ -323,7 +323,7 @@ class TestPermissionManagement:
         })
         tool = WriteFileTool()  # MEDIUM risk
 
-        import agentos.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
         original_config = tw.config
         try:
             tw.config = cfg
@@ -415,7 +415,7 @@ class TestContextInjectionIsolation:
 
         worker.bus.publish = capture_publish
 
-        import agentos.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
         original_config = tw.config
         try:
             tw.config = cfg
@@ -456,7 +456,7 @@ class TestContextInjectionIsolation:
 
         worker.bus.publish = capture_publish
 
-        import agentos.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
         original_config = tw.config
         try:
             tw.config = cfg
@@ -506,7 +506,7 @@ class TestContextInjectionIsolation:
 
         worker.bus.publish = capture_publish
 
-        import agentos.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
         original_config = tw.config
         try:
             tw.config = cfg

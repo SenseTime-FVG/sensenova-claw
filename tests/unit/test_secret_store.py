@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.platform.secrets.store import InMemorySecretStore, KeyringSecretStore, SecretStoreError
+from sensenova_claw.platform.secrets.store import InMemorySecretStore, KeyringSecretStore, SecretStoreError
 
 
 def test_inmemory_secret_store_round_trip():
     store = InMemorySecretStore()
 
-    store.set("agentos/tools.serper_search.api_key", "secret-1")
+    store.set("sensenova_claw/tools.serper_search.api_key", "secret-1")
 
-    assert store.get("agentos/tools.serper_search.api_key") == "secret-1"
+    assert store.get("sensenova_claw/tools.serper_search.api_key") == "secret-1"
 
 
 def test_inmemory_secret_store_delete():
     store = InMemorySecretStore()
-    ref = "agentos/llm.providers.openai.api_key"
+    ref = "sensenova_claw/llm.providers.openai.api_key"
     store.set(ref, "secret-2")
 
     store.delete(ref)
@@ -31,7 +31,7 @@ def test_keyring_secret_store_wraps_backend_errors():
         def get_password(service_name: str, username: str):
             raise RuntimeError("boom")
 
-    store = KeyringSecretStore(service_name="agentos", backend=BrokenBackend())
+    store = KeyringSecretStore(service_name="sensenova_claw", backend=BrokenBackend())
 
     with pytest.raises(SecretStoreError, match="读取 secret 失败"):
-        store.get("agentos/tools.serper_search.api_key")
+        store.get("sensenova_claw/tools.serper_search.api_key")

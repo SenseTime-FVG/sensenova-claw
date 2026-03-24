@@ -4,7 +4,7 @@
 
 **Goal:** 将现有 PPT skills 重构为新的 `ppt-*` superpower 体系，默认支持快速路径，同时提供稳定的中间工件和按需下钻能力。
 
-**Architecture:** 本次改动只触及 `.agentos/skills`、`docs/ppt-skills` 与测试文件，不修改 AgentOS 运行时代码。新体系以 `ppt-superpower` 为唯一入口，围绕 `task-pack.json`、`style-spec.json`、`storyboard.json` 等工件组织，并通过契约测试验证新 skill 集合、固定 schema 和旧 skill 的移除。
+**Architecture:** 本次改动只触及 `.sensenova-claw/skills`、`docs/ppt-skills` 与测试文件，不修改 Sensenova-Claw 运行时代码。新体系以 `ppt-superpower` 为唯一入口，围绕 `task-pack.json`、`style-spec.json`、`storyboard.json` 等工件组织，并通过契约测试验证新 skill 集合、固定 schema 和旧 skill 的移除。
 
 **Tech Stack:** Markdown skills、Python `unittest`、SkillRegistry
 
@@ -56,32 +56,32 @@ Expected: PASS
 ### Task 3: 全量替换 PPT skills
 
 **Files:**
-- Delete: `.agentos/skills/pptx/SKILL.md`
-- Delete: `.agentos/skills/pptx/SKILL.md.en`
-- Delete: `.agentos/skills/pptx/design.md`
-- Delete: `.agentos/skills/ppt-outline-gen/SKILL.md`
-- Delete: `.agentos/skills/ppt-outline-gen/SKILL.md.en`
-- Delete: `.agentos/skills/ppt-style-extract/SKILL.md`
-- Delete: `.agentos/skills/ppt-style-extract/SKILL.md.en`
-- Delete: `.agentos/skills/ppt-image-selection/SKILL.md`
-- Delete: `.agentos/skills/ppt-html-gen/SKILL.md`
-- Delete: `.agentos/skills/ppt-html-gen/SKILL.md.en`
-- Create: `.agentos/skills/ppt-superpower/SKILL.md`
-- Create: `.agentos/skills/ppt-source-analysis/SKILL.md`
-- Create: `.agentos/skills/ppt-task-pack/SKILL.md`
-- Create: `.agentos/skills/ppt-research-pack/SKILL.md`
-- Create: `.agentos/skills/ppt-template-pack/SKILL.md`
-- Create: `.agentos/skills/ppt-style-spec/SKILL.md`
-- Create: `.agentos/skills/ppt-storyboard/SKILL.md`
-- Create: `.agentos/skills/ppt-asset-plan/SKILL.md`
-- Create: `.agentos/skills/ppt-page-html/SKILL.md`
-- Create: `.agentos/skills/ppt-speaker-notes/SKILL.md`
-- Create: `.agentos/skills/ppt-review/SKILL.md`
-- Create: `.agentos/skills/ppt-page-plan/SKILL.md`
-- Create: `.agentos/skills/ppt-page-assets/SKILL.md`
-- Create: `.agentos/skills/ppt-page-polish/SKILL.md`
-- Create: `.agentos/skills/ppt-style-refine/SKILL.md`
-- Create: `.agentos/skills/ppt-story-refine/SKILL.md`
+- Delete: `.sensenova-claw/skills/pptx/SKILL.md`
+- Delete: `.sensenova-claw/skills/pptx/SKILL.md.en`
+- Delete: `.sensenova-claw/skills/pptx/design.md`
+- Delete: `.sensenova-claw/skills/ppt-outline-gen/SKILL.md`
+- Delete: `.sensenova-claw/skills/ppt-outline-gen/SKILL.md.en`
+- Delete: `.sensenova-claw/skills/ppt-style-extract/SKILL.md`
+- Delete: `.sensenova-claw/skills/ppt-style-extract/SKILL.md.en`
+- Delete: `.sensenova-claw/skills/ppt-image-selection/SKILL.md`
+- Delete: `.sensenova-claw/skills/ppt-html-gen/SKILL.md`
+- Delete: `.sensenova-claw/skills/ppt-html-gen/SKILL.md.en`
+- Create: `.sensenova-claw/skills/ppt-superpower/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-source-analysis/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-task-pack/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-research-pack/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-template-pack/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-style-spec/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-storyboard/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-asset-plan/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-page-html/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-speaker-notes/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-review/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-page-plan/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-page-assets/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-page-polish/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-style-refine/SKILL.md`
+- Create: `.sensenova-claw/skills/ppt-story-refine/SKILL.md`
 - Test: `tests/unit/test_ppt_skill_suite.py`
 
 - [x] **Step 1: 先删除旧 PPT skill 文件**

@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.interfaces.http import config_api
-from agentos.interfaces.http.config_api import router
-from agentos.platform.config.config import Config
-from agentos.platform.config.config_manager import ConfigManager
-from agentos.platform.secrets.store import InMemorySecretStore
-from agentos.kernel.events.bus import PublicEventBus
+from sensenova_claw.interfaces.http import config_api
+from sensenova_claw.interfaces.http.config_api import router
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.config.config_manager import ConfigManager
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.kernel.events.bus import PublicEventBus
 
 
 @pytest.fixture
@@ -113,9 +113,9 @@ def test_update_sections_multiple(client, app):
     assert resp.status_code == 200
     raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
     assert raw["llm"]["providers"]["anthropic"]["api_key"] == (
-        "${secret:agentos/llm.providers.anthropic.api_key}"
+        "${secret:sensenova_claw/llm.providers.anthropic.api_key}"
     )
-    assert app.state.secret_store.get("agentos/llm.providers.anthropic.api_key") == "sk-yyy"
+    assert app.state.secret_store.get("sensenova_claw/llm.providers.anthropic.api_key") == "sk-yyy"
     assert raw["plugins"]["search"]["enabled"] is True
     assert raw["miniapps"]["default_builder"] == "acp"
     assert raw["miniapps"]["acp"]["enabled"] is True

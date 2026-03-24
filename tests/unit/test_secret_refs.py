@@ -2,11 +2,11 @@
 
 import pytest
 
-from agentos.platform.secrets.refs import build_secret_ref, is_secret_ref, parse_secret_ref
+from sensenova_claw.platform.secrets.refs import build_secret_ref, is_secret_ref, parse_secret_ref
 
 
 def test_is_secret_ref_true_for_valid_placeholder():
-    assert is_secret_ref("${secret:agentos/tools.serper_search.api_key}") is True
+    assert is_secret_ref("${secret:sensenova_claw/tools.serper_search.api_key}") is True
 
 
 def test_is_secret_ref_false_for_env_placeholder():
@@ -14,8 +14,8 @@ def test_is_secret_ref_false_for_env_placeholder():
 
 
 def test_parse_secret_ref_returns_inner_ref():
-    assert parse_secret_ref("${secret:agentos/llm.providers.openai.api_key}") == (
-        "agentos/llm.providers.openai.api_key"
+    assert parse_secret_ref("${secret:sensenova_claw/llm.providers.openai.api_key}") == (
+        "sensenova_claw/llm.providers.openai.api_key"
     )
 
 
@@ -25,6 +25,6 @@ def test_parse_secret_ref_rejects_invalid_value():
 
 
 def test_build_secret_ref_wraps_ref():
-    assert build_secret_ref("agentos/plugins.feishu.app_secret") == (
-        "${secret:agentos/plugins.feishu.app_secret}"
+    assert build_secret_ref("sensenova_claw/plugins.feishu.app_secret") == (
+        "${secret:sensenova_claw/plugins.feishu.app_secret}"
     )

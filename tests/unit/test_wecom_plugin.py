@@ -6,16 +6,16 @@ from unittest.mock import patch
 
 import pytest
 
-from agentos.adapters.plugins import PluginRegistry, _iter_builtin_plugin_modules
-from agentos.adapters.plugins.wecom.plugin import definition, register
-from agentos.adapters.plugins.base import PluginApi
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.plugins import PluginRegistry, _iter_builtin_plugin_modules
+from sensenova_claw.adapters.plugins.wecom.plugin import definition, register
+from sensenova_claw.adapters.plugins.base import PluginApi
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 def _make_plugin_api(config_overrides: dict | None = None) -> PluginApi:
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     defaults = {
         "enabled": False,
@@ -79,7 +79,7 @@ class TestRegister:
             "builtins.__import__",
             side_effect=lambda name, *args, **kwargs: (
                 (_ for _ in ()).throw(ModuleNotFoundError(name="pyee"))
-                if name == "agentos.adapters.plugins.wecom.channel"
+                if name == "sensenova_claw.adapters.plugins.wecom.channel"
                 else original_import(name, *args, **kwargs)
             ),
         ):
@@ -105,7 +105,7 @@ class TestRegister:
 
 @pytest.mark.asyncio
 async def test_plugin_registry_loads_channel_plugins():
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     global_config.set("plugins.feishu.enabled", False)
     global_config.set("plugins.wecom.enabled", False)
@@ -125,5 +125,5 @@ async def test_plugin_registry_loads_channel_plugins():
 
 def test_builtin_plugin_module_points_to_plugins_package():
     modules = dict(_iter_builtin_plugin_modules())
-    assert modules["wecom"] == "agentos.adapters.plugins.wecom.plugin"
-    assert modules["discord"] == "agentos.adapters.plugins.discord.plugin"
+    assert modules["wecom"] == "sensenova_claw.adapters.plugins.wecom.plugin"
+    assert modules["discord"] == "sensenova_claw.adapters.plugins.discord.plugin"

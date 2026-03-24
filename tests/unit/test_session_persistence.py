@@ -10,7 +10,7 @@ import time
 import pytest
 import pytest_asyncio
 
-from agentos.adapters.storage.repository import Repository
+from sensenova_claw.adapters.storage.repository import Repository
 
 
 @pytest_asyncio.fixture
@@ -169,7 +169,7 @@ async def test_cap_sessions(repo):
 @pytest.mark.asyncio
 async def test_load_session_history_from_state_store(repo):
     """测试 SessionStateStore.load_session_history 从 DB 加载"""
-    from agentos.kernel.runtime.state import SessionStateStore
+    from sensenova_claw.kernel.runtime.state import SessionStateStore
 
     session_id = "sess_history"
     turn_id = "turn_history"

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 
-from agentos.adapters.skill_sources.anthropic_market import AnthropicAdapter
+from sensenova_claw.adapters.skill_sources.anthropic_market import AnthropicAdapter
 
 
 def _make_response(status_code=200, json_data=None, content=b"", headers=None):
@@ -71,7 +71,7 @@ class TestAnthropicSearch:
             "total": 42,
         }
         client = _mock_client(_make_response(json_data=mock_json))
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             result = await AnthropicAdapter().search("test", page=2, page_size=5)
 
         assert result.source == "anthropic"
@@ -85,7 +85,7 @@ class TestAnthropicSearch:
 
     async def test_search_空结果(self):
         client = _mock_client(_make_response(json_data={"plugins": [], "total": 0}))
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             result = await AnthropicAdapter().search("nothing")
         assert result.total == 0
         assert result.items == []
@@ -100,7 +100,7 @@ class TestAnthropicBrowse:
             "total": 50,
         }
         client = _mock_client(_make_response(json_data=mock_json))
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             result = await AnthropicAdapter().browse(page=1, page_size=10)
         assert result.source == "anthropic"
         assert result.total == 50
@@ -123,7 +123,7 @@ class TestAnthropicBrowse:
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             result = await adapter.browse()
         assert result.source == "anthropic"
 
@@ -139,7 +139,7 @@ class TestAnthropicGetDetail:
             "files": ["main.py", "SKILL.md"],
         }
         client = _mock_client(_make_response(json_data=mock_json))
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             detail = await AnthropicAdapter().get_detail("my-plugin")
 
         assert detail.id == "my-plugin"
@@ -158,7 +158,7 @@ class TestAnthropicDownload:
             "my-plugin/code.py": "pass",
         })
         client = _mock_client(_make_response(content=zip_bytes))
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             result = await AnthropicAdapter().download("my-plugin", tmp_path)
 
         assert result == tmp_path / "my-plugin"
@@ -171,7 +171,7 @@ class TestAnthropicDownload:
             "top-dir/config.yml": "x: 1",
         })
         client = _mock_client(_make_response(content=zip_bytes))
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             result = await AnthropicAdapter().download("some-plugin", tmp_path)
 
         assert result == tmp_path / "top-dir"
@@ -183,7 +183,7 @@ class TestAnthropicDownload:
             "run.py": "pass",
         })
         client = _mock_client(_make_response(content=zip_bytes))
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             result = await AnthropicAdapter().download("flat-plugin", tmp_path)
 
         assert result == tmp_path / "flat-plugin"
@@ -196,7 +196,7 @@ class TestAnthropicDownload:
         zip_bytes = buf.getvalue()
 
         client = _mock_client(_make_response(content=zip_bytes))
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             with pytest.raises(ValueError, match="Zip Slip"):
                 await AnthropicAdapter().download("evil", tmp_path)
 
@@ -204,14 +204,14 @@ class TestAnthropicDownload:
 class TestAnthropicCheckUpdate:
     async def test_有新版本(self):
         client = _mock_client(_make_response(json_data={"version": "2.0"}))
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             info = await AnthropicAdapter().check_update("p1", "1.0")
         assert info is not None
         assert info.latest_version == "2.0"
 
     async def test_已是最新(self):
         client = _mock_client(_make_response(json_data={"version": "1.0"}))
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             info = await AnthropicAdapter().check_update("p1", "1.0")
         assert info is None
 
@@ -220,6 +220,6 @@ class TestAnthropicCheckUpdate:
         client.get = AsyncMock(side_effect=httpx.HTTPError("fail"))
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
-        with patch("agentos.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
+        with patch("sensenova_claw.adapters.skill_sources.anthropic_market.httpx.AsyncClient", return_value=client):
             info = await AnthropicAdapter().check_update("p1", "1.0")
         assert info is None

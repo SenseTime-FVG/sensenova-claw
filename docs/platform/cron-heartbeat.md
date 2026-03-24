@@ -1,6 +1,6 @@
 # 定时任务与心跳
 
-> 路径：`agentos/kernel/scheduler/`、`agentos/kernel/heartbeat/`
+> 路径：`sensenova_claw/kernel/scheduler/`、`sensenova_claw/kernel/heartbeat/`
 
 CronRuntime 和 HeartbeatRuntime 共同提供定时任务调度和周期性健康检查能力。
 

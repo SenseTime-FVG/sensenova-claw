@@ -5,7 +5,7 @@
 `custom_pages` 现已升级为可运行的 mini-app workspace：
 
 - 创建入口仍然是前端 `/create-feature`
-- 存储仍然是 `{AGENTOS_HOME}/custom_pages.json`
+- 存储仍然是 `{SENSENOVA_CLAW_HOME}/custom_pages.json`
 - 每个页面现在可以拥有：
   - 独立工作区目录
   - 专属 Agent 或复用现有 Agent
@@ -18,29 +18,29 @@
 
 ```python
 class MiniAppWorkspace:
-    agentos_home: str
-    custom_pages_json: str  # {agentos_home}/custom_pages.json
-    runs_json: str          # {agentos_home}/custom_pages_runs/{slug}.json
+    sensenova_claw_home: str
+    custom_pages_json: str  # {sensenova_claw_home}/custom_pages.json
+    runs_json: str          # {sensenova_claw_home}/custom_pages_runs/{slug}.json
 
     # 页面工作区目录
-    workspace_root: str     # {agentos_home}/workdir/{agent_id}/miniapps/{slug}
+    workspace_root: str     # {sensenova_claw_home}/workdir/{agent_id}/miniapps/{slug}
     app_dir: str            # {workspace_root}/app
     manifest: str           # {workspace_root}/miniapp.json
     interaction_log: str    # {workspace_root}/interaction_log.jsonl
 
     # 页面入口
-    entry_file_path: str    # 相对于 {agentos_home}/workdir 的路径
-    bridge_script_path: str # 相对于 {agentos_home}/workdir 的路径
+    entry_file_path: str    # 相对于 {sensenova_claw_home}/workdir 的路径
+    bridge_script_path: str # 相对于 {sensenova_claw_home}/workdir 的路径
 ```
 
 ## 页面内交互桥接
 
-内置页面和接入后的复用页面都可以通过 `window.AgentOSMiniApp.emit(action, payload)` 把事件回传给宿主页面。
+内置页面和接入后的复用页面都可以通过 `window.Sensenova-ClawMiniApp.emit(action, payload)` 把事件回传给宿主页面。
 
 这里的 mini-app 是通用 workspace 能力，不预设某个垂直业务。页面壳体、组件和大部分前端逻辑可以长期复用；只有用户真正需要变化的内容、配置或下一步任务，才由 Agent 决定是否更新。
 
 ```javascript
-window.AgentOSMiniApp.configureActionRouting({
+window.Sensenova-ClawMiniApp.configureActionRouting({
   defaultTarget: "agent",
   routes: {
     task_card_selected: "local",
@@ -49,7 +49,7 @@ window.AgentOSMiniApp.configureActionRouting({
   }
 })
 
-window.AgentOSMiniApp.emit("workspace_result_submitted", {
+window.Sensenova-ClawMiniApp.emit("workspace_result_submitted", {
   completed_cards: 3,
   summary: "用户完成了本轮任务并请求下一步建议"
 })
@@ -177,10 +177,10 @@ miniapps:
 ```yaml
 miniapps:
   acp:
-    command: "/home/haodong/agentos/.venv/bin/python"
+    command: "/home/haodong/sensenova_claw/.venv/bin/python"
     args:
       - "-m"
-      - "agentos.capabilities.miniapps.codex_acp_bridge"
+      - "sensenova-claw.capabilities.miniapps.codex_acp_bridge"
 ```
 
 ## 专属 Agent

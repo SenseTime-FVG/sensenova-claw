@@ -76,7 +76,7 @@ class Gateway:
 |---------|----------|------|
 | WebSocketChannel | Token（cookie/query param） | 连接时验证，复用现有 `verify_websocket()` |
 | FeishuChannel | 飞书签名（app_id/app_secret） | 现有逻辑不变 |
-| CLI（通过 WebSocket） | 自动读取 `~/.agentos/token` | 已实现，Channel 层验证 |
+| CLI（通过 WebSocket） | 自动读取 `~/.sensenova-claw/token` | 已实现，Channel 层验证 |
 
 ## Channel 多 client 管理
 

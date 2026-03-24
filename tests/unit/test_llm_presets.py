@@ -3,14 +3,14 @@ LLM 预设配置模块单元测试
 """
 
 import pytest
-from agentos.platform.config.llm_presets import (
+from sensenova_claw.platform.config.llm_presets import (
     LLM_PROVIDER_CATEGORIES,
     get_all_providers,
     get_provider,
     check_llm_configured,
 )
-from agentos.platform.secrets.refs import build_secret_ref
-from agentos.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.platform.secrets.refs import build_secret_ref
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
 
 
 class TestLLMProviderCategories:
@@ -218,7 +218,7 @@ class TestCheckLLMConfigured:
     def test_secret_ref_with_empty_secret(self):
         """secret 引用解析后为空，应视为未配置"""
         store = InMemorySecretStore()
-        ref = "agentos/llm.providers.openai.api_key"
+        ref = "sensenova_claw/llm.providers.openai.api_key"
         config = {
             "llm": {
                 "providers": {
@@ -235,7 +235,7 @@ class TestCheckLLMConfigured:
     def test_secret_ref_with_real_secret(self):
         """secret 引用解析后有真实值，应视为已配置"""
         store = InMemorySecretStore()
-        ref = "agentos/llm.providers.openai.api_key"
+        ref = "sensenova_claw/llm.providers.openai.api_key"
         store.set(ref, "sk-real-from-secret-store")
         config = {
             "llm": {

@@ -8,22 +8,22 @@ from pathlib import Path
 
 import pytest
 
-from agentos.platform.config.config import config
-from agentos.platform.logging.setup import setup_logging
-from agentos.adapters.storage.repository import Repository
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.persister import EventPersister
-from agentos.kernel.events.router import BusRouter
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, USER_INPUT
-from agentos.adapters.llm.factory import LLMFactory
-from agentos.kernel.runtime.agent_runtime import AgentRuntime
-from agentos.kernel.runtime.context_builder import ContextBuilder
-from agentos.kernel.runtime.llm_runtime import LLMRuntime
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.kernel.runtime.state import SessionStateStore
-from agentos.kernel.runtime.tool_runtime import ToolRuntime
-from agentos.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.platform.config.config import config
+from sensenova_claw.platform.logging.setup import setup_logging
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.persister import EventPersister
+from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED, USER_INPUT
+from sensenova_claw.adapters.llm.factory import LLMFactory
+from sensenova_claw.kernel.runtime.agent_runtime import AgentRuntime
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.kernel.runtime.llm_runtime import LLMRuntime
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.kernel.runtime.state import SessionStateStore
+from sensenova_claw.kernel.runtime.tool_runtime import ToolRuntime
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
 from tests.conftest import load_gemini_config, skip_if_gemini_unavailable
 
 
@@ -50,7 +50,7 @@ def _apply_provider_config(provider_name: str) -> None:
 async def test_backend_e2e_event_flow(tmp_path: Path, provider_name: str):
     skip_if_gemini_unavailable(provider_name)
 
-    db_path = tmp_path / "agentos.db"
+    db_path = tmp_path / "sensenova-claw.db"
     workspace = tmp_path / "workspace"
 
     # 保存原始配置，防止污染其他测试

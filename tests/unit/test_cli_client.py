@@ -14,7 +14,7 @@ import pytest
 import pytest_asyncio
 import uvicorn
 
-from agentos.app.cli.app import CLIApp
+from sensenova_claw.app.cli.app import CLIApp
 
 
 def _find_free_port() -> int:
@@ -32,30 +32,30 @@ async def ws_server(tmp_path):
     from pathlib import Path
     from dataclasses import dataclass as dc
 
-    from agentos.app.gateway.main import app
-    from agentos.platform.config.config import Config
-    from agentos.capabilities.agents.registry import AgentRegistry
-    from agentos.capabilities.tools.registry import ToolRegistry
-    from agentos.capabilities.skills.registry import SkillRegistry
-    from agentos.capabilities.skills.market_service import SkillMarketService
-    from agentos.adapters.storage.repository import Repository
-    from agentos.kernel.events.bus import PublicEventBus
-    from agentos.kernel.events.persister import EventPersister
-    from agentos.kernel.events.router import BusRouter
-    from agentos.kernel.runtime.publisher import EventPublisher
-    from agentos.kernel.runtime.agent_runtime import AgentRuntime
-    from agentos.kernel.runtime.llm_runtime import LLMRuntime
-    from agentos.kernel.runtime.tool_runtime import ToolRuntime
-    from agentos.kernel.runtime.title_runtime import TitleRuntime
-    from agentos.kernel.runtime.context_builder import ContextBuilder
-    from agentos.kernel.runtime.state import SessionStateStore
-    from agentos.kernel.runtime.session_maintenance import SessionMaintenance
-    from agentos.adapters.llm.factory import LLMFactory
-    from agentos.adapters.channels.websocket_channel import WebSocketChannel
-    from agentos.interfaces.ws.gateway import Gateway
-    from agentos.kernel.heartbeat.runtime import HeartbeatRuntime
-    from agentos.kernel.scheduler.runtime import CronRuntime
-    from agentos.platform.config.workspace import ensure_workspace
+    from sensenova_claw.app.gateway.main import app
+    from sensenova_claw.platform.config.config import Config
+    from sensenova_claw.capabilities.agents.registry import AgentRegistry
+    from sensenova_claw.capabilities.tools.registry import ToolRegistry
+    from sensenova_claw.capabilities.skills.registry import SkillRegistry
+    from sensenova_claw.capabilities.skills.market_service import SkillMarketService
+    from sensenova_claw.adapters.storage.repository import Repository
+    from sensenova_claw.kernel.events.bus import PublicEventBus
+    from sensenova_claw.kernel.events.persister import EventPersister
+    from sensenova_claw.kernel.events.router import BusRouter
+    from sensenova_claw.kernel.runtime.publisher import EventPublisher
+    from sensenova_claw.kernel.runtime.agent_runtime import AgentRuntime
+    from sensenova_claw.kernel.runtime.llm_runtime import LLMRuntime
+    from sensenova_claw.kernel.runtime.tool_runtime import ToolRuntime
+    from sensenova_claw.kernel.runtime.title_runtime import TitleRuntime
+    from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+    from sensenova_claw.kernel.runtime.state import SessionStateStore
+    from sensenova_claw.kernel.runtime.session_maintenance import SessionMaintenance
+    from sensenova_claw.adapters.llm.factory import LLMFactory
+    from sensenova_claw.adapters.channels.websocket_channel import WebSocketChannel
+    from sensenova_claw.interfaces.ws.gateway import Gateway
+    from sensenova_claw.kernel.heartbeat.runtime import HeartbeatRuntime
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.platform.config.workspace import ensure_workspace
 
     workspace_dir = tmp_path / "workspace"
     workspace_dir.mkdir()
@@ -66,7 +66,7 @@ async def ws_server(tmp_path):
     cfg.set("system.workspace_dir", str(workspace_dir))
 
     # 确保全局 config 也关闭 auth（中间件使用全局 config）
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
     global_config.set("security.auth_enabled", False)
 
     await ensure_workspace(str(workspace_dir))
@@ -129,7 +129,7 @@ async def ws_server(tmp_path):
     )
     title_runtime = TitleRuntime(bus=bus, repo=repo)
 
-    from agentos.platform.security.auth import TokenAuthService
+    from sensenova_claw.platform.security.auth import TokenAuthService
     auth_service = TokenAuthService()
 
     gw = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
@@ -220,7 +220,7 @@ class TestArgParsing:
 
     def _parse(self, args: list[str]) -> argparse.Namespace:
         """复用 cli_client 中的 argparse 定义"""
-        parser = argparse.ArgumentParser(description="AgentOS CLI")
+        parser = argparse.ArgumentParser(description="Sensenova-Claw CLI")
         parser.add_argument("--host", default="localhost")
         parser.add_argument("--port", type=int, default=8000)
         parser.add_argument("--agent", default=None, help="Agent ID")
@@ -283,7 +283,7 @@ class TestMainFunction:
 
     async def test_main_default(self, ws_server):
         """main() 用 execute 模式默认参数运行"""
-        from agentos.app.cli.cli_client import main
+        from sensenova_claw.app.cli.cli_client import main
 
         host, port = ws_server["host"], ws_server["port"]
         # 通过修改 sys.argv 模拟命令行参数

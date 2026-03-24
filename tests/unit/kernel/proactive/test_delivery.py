@@ -1,8 +1,8 @@
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from agentos.kernel.proactive.delivery import ProactiveDelivery
-from agentos.kernel.proactive.models import DeliveryConfig, ProactiveJob, TimeTrigger, ProactiveTask, SafetyConfig, JobState
+from sensenova_claw.kernel.proactive.delivery import ProactiveDelivery
+from sensenova_claw.kernel.proactive.models import DeliveryConfig, ProactiveJob, TimeTrigger, ProactiveTask, SafetyConfig, JobState
 
 
 def _make_job(channels):

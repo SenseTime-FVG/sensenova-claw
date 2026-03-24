@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from agentos.adapters.llm.factory import LLMFactory
-from agentos.capabilities.memory.config import MemoryConfig
-from agentos.capabilities.memory.manager import MemoryManager
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED
-from agentos.platform.config.config import config
+from sensenova_claw.adapters.llm.factory import LLMFactory
+from sensenova_claw.capabilities.memory.config import MemoryConfig
+from sensenova_claw.capabilities.memory.manager import MemoryManager
+from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED
+from sensenova_claw.platform.config.config import config
 from tests.e2e.run_e2e import run_single_turn, setup_services, teardown_services
 
 
@@ -18,7 +18,7 @@ from tests.e2e.run_e2e import run_single_turn, setup_services, teardown_services
 async def test_completed_turn_appends_summary_to_memory_file(tmp_path: Path) -> None:
     """完整 turn 结束后，应异步写入摘要记忆文件。"""
     original_config = copy.deepcopy(config.data)
-    config.data["system"]["agentos_home"] = str(tmp_path / ".agentos")
+    config.data["system"]["sensenova_claw_home"] = str(tmp_path / ".sensenova-claw")
     svc = await setup_services(tmp_path, provider="mock", model=None)
 
     try:

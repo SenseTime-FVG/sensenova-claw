@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-AgentOS 是基于事件驱动架构的 AI Agent 平台，支持 Web、CLI、TUI 多种接入方式。
+Sensenova-Claw 是基于事件驱动架构的 AI Agent 平台，支持 Web、CLI、TUI 多种接入方式。
 
 **技术栈**:
 - 后端: FastAPI + Python 3.12 + asyncio + SQLite
@@ -17,23 +17,23 @@ AgentOS 是基于事件驱动架构的 AI Agent 平台，支持 Web、CLI、TUI 
 
 ```bash
 # 一键启动后端 + 前端 dashboard（推荐）
-agentos run
-# 或: npm run dev  /  python3 -m agentos.app.main run
+sensenova-claw run
+# 或: npm run dev  /  python3 -m sensenova_claw.app.main run
 
 # 仅启动后端
-agentos run --no-frontend
+sensenova-claw run --no-frontend
 # 或: npm run dev:server
 
 # 单独启动前端
 npm run dev:web
 
 # 启动 CLI 客户端（需后端已运行）
-agentos cli
-# 或: python3 -m agentos.app.main cli --port 8000
+sensenova-claw cli
+# 或: python3 -m sensenova_claw.app.main cli --port 8000
 
 # 自定义端口
-agentos run --port 9000 --frontend-port 3001
-agentos cli --port 9000
+sensenova-claw run --port 9000 --frontend-port 3001
+sensenova-claw cli --port 9000
 ```
 
 ### 测试
@@ -177,7 +177,7 @@ QQ 邮箱:
 
 ### Skills 系统
 
-Skills 是声明式任务编排机制（`agentos/capabilities/skills/`），23 个内置 skills 包括：
+Skills 是声明式任务编排机制（`sensenova_claw/capabilities/skills/`），23 个内置 skills 包括：
 - PPT 制作流水线: `ppt-superpower`, `ppt-research-pack`, `ppt-storyboard`, `ppt-page-plan` 等 13 个
 - 飞书集成: `feishu-doc`, `feishu-drive`, `feishu-perm`, `feishu-wiki`
 - 搜索增强: `research-union`, `union-search-plus`
@@ -187,7 +187,7 @@ Skills 通过 YAML 配置定义，支持多步骤编排和条件分支。
 
 ## 配置文件
 
-主配置文件 `~/.agentos/config.yml`（不入库）：
+主配置文件 `~/.sensenova-claw/config.yml`（不入库）：
 
 ```yaml
 llm:
@@ -221,17 +221,17 @@ tools:
 
 ### 配置加载
 
-有两种加载方式（见 `agentos/platform/config/config.py`）：
+有两种加载方式（见 `sensenova_claw/platform/config/config.py`）：
 
 **1. 传统方式 `Config()`（gateway 实际使用）：**
-- 读取 `~/.agentos/config.yml`（`DEFAULT_CONFIG_PATH`）
+- 读取 `~/.sensenova-claw/config.yml`（`DEFAULT_CONFIG_PATH`）
 - 与 `DEFAULT_CONFIG` 深度合并
 - 解析 `${ENV_VAR}` 环境变量
 
 **2. 新方式 `Config(project_root=...)`：**
 - 从 `project_root` 向上遍历至文件系统根
 - 沿途收集所有 `config.yml`（遗留格式，从远到近覆盖）
-- 沿途收集所有 `.agentos/config.yaml`（从远到近覆盖）
+- 沿途收集所有 `.sensenova-claw/config.yaml`（从远到近覆盖）
 - 遗留 `config.yml` 中的顶层 key（如 `OPENAI_API_KEY`）会映射到新结构
 - 解析 `${ENV_VAR}` 环境变量
 
@@ -255,7 +255,6 @@ tools:
 
 ### 文档规范
 
-- `docs_raw/`: 用户原始文档，**不要修改**
 - `docs/`: 模型生成文档，可修改
 - 伪代码使用 Python 格式
 - 注释和文档使用中文
@@ -270,7 +269,7 @@ tools:
 ## 关键文件路径
 
 ```
-agentos/
+sensenova_claw/
   kernel/
     events/            # 事件系统（bus.py, envelope.py, types.py）
     runtime/           # Runtime 模块（agent_runtime.py, llm_runtime.py, tool_runtime.py）
@@ -303,7 +302,6 @@ tests/                 # 测试（unit/, integration/, e2e/, cross_feature/）
 workspace/             # 运行时工作区（skills, workflows）
 var/                   # 运行时数据（数据库等）
 docs/                  # 技术文档
-docs_raw/              # 原始文档（不修改）
 scripts/               # 开发脚本
 ```
 
@@ -335,7 +333,7 @@ v1.0 新增:
 - 插件系统（v0.9）
 
 v0.5 新增:
-- 代码架构重组（backend/app/ → agentos/ 六层架构）
+- 代码架构重组（backend/app/ → sensenova_claw/ 六层架构）
 - 移除 Workflow 功能模块
 
 v0.2 新增:
@@ -384,7 +382,7 @@ v0.2 新增:
 
 失败/风险经验：
 - 当前后端在第二次 `chat.completions` 请求中，会把上一轮 assistant 的 `tool_calls` 以 `{id,name,arguments}` 回传，但缺少 `tool_calls[*].type=\"function\"`，导致 OpenAI 兼容网关返回 `400 invalid_value`。  
-- v0.5 重构后，后端模块级 `Config()` 读取 `~/.agentos/config.yml`（非项目根目录）。
+- v0.5 重构后，后端模块级 `Config()` 读取 `~/.sensenova-claw/config.yml`（非项目根目录）。
 
 ### 2026-03-05 Bug修复补充
 

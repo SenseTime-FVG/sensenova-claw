@@ -1,6 +1,6 @@
 # 数据库 Schema
 
-AgentOS 使用 SQLite 作为持久化存储，数据库文件位于 `var/data/agentos.db`。
+Sensenova-Claw 使用 SQLite 作为持久化存储，数据库文件位于 `var/data/sensenova-claw.db`。
 
 ## 核心表结构
 

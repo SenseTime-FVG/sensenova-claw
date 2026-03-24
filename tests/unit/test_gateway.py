@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import AGENT_STEP_COMPLETED, USER_INPUT
-from agentos.adapters.channels.base import Channel
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED, USER_INPUT
+from sensenova_claw.adapters.channels.base import Channel
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 class MockChannel(Channel):
@@ -42,7 +42,7 @@ class FailingChannel(Channel):
         self._error = error
         self.started = False
         self.stopped = False
-        self._agentos_status: dict[str, str] = {}
+        self._sensenova_claw_status: dict[str, str] = {}
 
     def get_channel_id(self) -> str:
         return self._channel_id
@@ -261,5 +261,5 @@ async def test_gateway_start_continues_when_one_channel_fails():
 
     assert ok_channel.started is True
     assert failed_channel.started is True
-    assert failed_channel._agentos_status["status"] == "failed"
-    assert failed_channel._agentos_status["error"] == "discord intents rejected"
+    assert failed_channel._sensenova_claw_status["status"] == "failed"
+    assert failed_channel._sensenova_claw_status["error"] == "discord intents rejected"

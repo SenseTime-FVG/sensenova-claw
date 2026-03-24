@@ -1,7 +1,7 @@
 """X02: 不同 Agent 的工作目录隔离"""
 import pytest
 from pathlib import Path
-from agentos.capabilities.tools.builtin import ReadFileTool, WriteFileTool
+from sensenova_claw.capabilities.tools.builtin import ReadFileTool, WriteFileTool
 
 pytestmark = pytest.mark.asyncio
 

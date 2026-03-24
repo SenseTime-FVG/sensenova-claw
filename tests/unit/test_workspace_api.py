@@ -5,8 +5,8 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.interfaces.http.workspace import router
-from agentos.platform.config.config import Config
+from sensenova_claw.interfaces.http.workspace import router
+from sensenova_claw.platform.config.config import Config
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def app(tmp_path):
     cfg.set("system.workspace_dir", str(ws_dir))
 
     app.state.config = cfg
-    app.state.agentos_home = str(ws_dir)
+    app.state.sensenova_claw_home = str(ws_dir)
     return app
 
 
@@ -62,7 +62,7 @@ def test_list_workspace_files(client):
 
 def test_list_workspace_files_dir_not_exists(client, app):
     """workspace 目录不存在时返回空列表"""
-    app.state.agentos_home = "/nonexistent/path"
+    app.state.sensenova_claw_home = "/nonexistent/path"
     resp = client.get("/api/workspace/files")
     assert resp.status_code == 200
     assert resp.json() == []

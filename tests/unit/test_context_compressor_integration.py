@@ -3,7 +3,7 @@
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from agentos.kernel.runtime.context_compressor import ContextCompressor, TokenCounter
+from sensenova_claw.kernel.runtime.context_compressor import ContextCompressor, TokenCounter
 
 
 def _make_config(max_tokens=500):
@@ -38,7 +38,7 @@ class TestEndToEndCompression:
             config=_make_config(max_tokens=200),
             llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test_integration",
+            sensenova_claw_home="/tmp/test_integration",
         )
 
         history = []
@@ -64,7 +64,7 @@ class TestEndToEndCompression:
             config=_make_config(max_tokens=200),
             llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test_integration2",
+            sensenova_claw_home="/tmp/test_integration2",
         )
 
         history = [
@@ -95,7 +95,7 @@ class TestEndToEndCompression:
             config=_make_config(max_tokens=100),
             llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test_failure",
+            sensenova_claw_home="/tmp/test_failure",
         )
 
         history = [
@@ -118,7 +118,7 @@ class TestEndToEndCompression:
             config=_make_config(max_tokens=100),
             llm_factory=factory,
             provider_name="mock", model="mock-v1",
-            agentos_home="/tmp/test_concurrent",
+            sensenova_claw_home="/tmp/test_concurrent",
         )
 
         history = [

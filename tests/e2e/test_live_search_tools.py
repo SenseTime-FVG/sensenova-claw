@@ -4,12 +4,12 @@ import copy
 
 import pytest
 
-from agentos.capabilities.tools.builtin import (
+from sensenova_claw.capabilities.tools.builtin import (
     BaiduSearchTool,
     BraveSearchTool,
     TavilySearchTool,
 )
-from agentos.platform.config.config import config
+from sensenova_claw.platform.config.config import config
 
 
 @pytest.fixture(autouse=True)

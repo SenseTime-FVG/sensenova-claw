@@ -10,13 +10,13 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from agentos.adapters.storage.repository import Repository
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import CRON_DELIVERY_REQUESTED
-from agentos.adapters.channels.base import Channel
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import CRON_DELIVERY_REQUESTED
+from sensenova_claw.adapters.channels.base import Channel
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 @pytest_asyncio.fixture
@@ -95,8 +95,8 @@ async def test_deliver_to_channel_not_found():
 @pytest.mark.asyncio
 async def test_cron_runtime_deliver_text_broadcasts(repo):
     """CronRuntime._deliver_text 广播到所有注册的 channels"""
-    from agentos.kernel.scheduler.models import CronJob, SystemEventPayload
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.models import CronJob, SystemEventPayload
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
@@ -130,8 +130,8 @@ async def test_cron_runtime_deliver_text_broadcasts(repo):
 @pytest.mark.asyncio
 async def test_cron_runtime_deliver_text_respects_delivery_channel(repo):
     """CronRuntime._deliver_text 如果配置了 delivery.channel_id 则只投递到该 channel"""
-    from agentos.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
@@ -161,8 +161,8 @@ async def test_cron_runtime_deliver_text_respects_delivery_channel(repo):
 @pytest.mark.asyncio
 async def test_cron_runtime_deliver_text_skips_on_none_mode(repo):
     """delivery.mode='none' 时不投递"""
-    from agentos.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
@@ -188,7 +188,7 @@ async def test_cron_runtime_deliver_text_skips_on_none_mode(repo):
 @pytest.mark.asyncio
 async def test_resolve_delivery_for_session_websocket(repo):
     """resolve_delivery_for_session 正确解析 WebSocket session 的 channel"""
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
@@ -211,7 +211,7 @@ async def test_resolve_delivery_for_session_websocket(repo):
 async def test_resolve_delivery_for_session_feishu_with_meta(repo):
     """resolve_delivery_for_session 从飞书 session_meta 取出 chat_id"""
     import threading
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
@@ -238,7 +238,7 @@ async def test_resolve_delivery_for_session_feishu_with_meta(repo):
 @pytest.mark.asyncio
 async def test_resolve_delivery_for_session_unknown(repo):
     """未绑定的 session 返回 None"""
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
@@ -253,8 +253,8 @@ async def test_resolve_delivery_for_session_unknown(repo):
 @pytest.mark.asyncio
 async def test_cron_tool_add_auto_populates_delivery(repo):
     """CronTool._add 自动从 session_id 填充 delivery"""
-    from agentos.kernel.scheduler.runtime import CronRuntime
-    from agentos.kernel.scheduler.tool import CronTool
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.tool import CronTool
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
@@ -327,8 +327,8 @@ class SpyNotificationService:
 @pytest.mark.asyncio
 async def test_deliver_text_uses_outbound_when_to_is_set(repo):
     """当 delivery.to 有值时，优先走 send_outbound 而非 deliver_to_channel"""
-    from agentos.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
@@ -360,8 +360,8 @@ async def test_deliver_text_uses_outbound_when_to_is_set(repo):
 @pytest.mark.asyncio
 async def test_deliver_text_falls_back_to_event_when_no_to(repo):
     """当 delivery.to 为空时，走 deliver_to_channel 事件路径"""
-    from agentos.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
@@ -391,8 +391,8 @@ async def test_deliver_text_falls_back_to_event_when_no_to(repo):
 @pytest.mark.asyncio
 async def test_deliver_text_routes_websocket_session_to_session_notification(repo):
     """WebSocket 会话提醒应转成会话内通知，而不是直接走 Channel 事件。"""
-    from agentos.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)
@@ -431,8 +431,8 @@ async def test_deliver_text_routes_websocket_session_to_session_notification(rep
 @pytest.mark.asyncio
 async def test_send_delivery_notifications_filters_supported_channels(repo):
     """Cron 文本通知只向 browser/native 渠道发送。"""
-    from agentos.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     notification_service = SpyNotificationService()
@@ -466,8 +466,8 @@ async def test_send_delivery_notifications_filters_supported_channels(repo):
 @pytest.mark.asyncio
 async def test_notify_job_failure_does_not_append_to_chat_when_only_browser_delivery(repo):
     """仅配置 browser/native 时，失败通知不应额外写回聊天会话。"""
-    from agentos.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
-    from agentos.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.models import CronDelivery, CronJob, SystemEventPayload
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
 
     bus = PublicEventBus()
     notification_service = SpyNotificationService()
@@ -507,8 +507,8 @@ async def test_notify_job_failure_does_not_append_to_chat_when_only_browser_deli
 @pytest.mark.asyncio
 async def test_cron_tool_add_with_notification_channels_keeps_session_scope(repo):
     """仅开启浏览器/原生通知时，仍保留当前 session 作为通知路由范围。"""
-    from agentos.kernel.scheduler.runtime import CronRuntime
-    from agentos.kernel.scheduler.tool import CronTool
+    from sensenova_claw.kernel.scheduler.runtime import CronRuntime
+    from sensenova_claw.kernel.scheduler.tool import CronTool
 
     bus = PublicEventBus()
     publisher = EventPublisher(bus=bus)

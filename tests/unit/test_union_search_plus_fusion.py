@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 SCRIPT_DIR = (
     Path(__file__).resolve().parents[2]
-    / ".agentos"
+    / ".sensenova-claw"
     / "skills"
     / "union-search-plus"
     / "scripts"
@@ -92,8 +92,8 @@ def test_union_search_plus_adapts_vendor_envelope(monkeypatch) -> None:
                 "serper": {
                     "items": [
                         {
-                            "title": "AgentOS",
-                            "link": "https://example.com/agentos",
+                            "title": "Sensenova-Claw",
+                            "link": "https://example.com/sensenova_claw",
                             "snippet": "event driven",
                         }
                     ]
@@ -101,8 +101,8 @@ def test_union_search_plus_adapts_vendor_envelope(monkeypatch) -> None:
                 "wikipedia": {
                     "items": [
                         {
-                            "title": "AgentOS",
-                            "link": "https://example.com/agentos?utm_source=wiki",
+                            "title": "Sensenova-Claw",
+                            "link": "https://example.com/sensenova_claw?utm_source=wiki",
                             "snippet": "duplicate",
                         }
                     ]
@@ -117,7 +117,7 @@ def test_union_search_plus_adapts_vendor_envelope(monkeypatch) -> None:
     monkeypatch.setattr(mod.subprocess, "run", _fake_run)
 
     result = mod.run_union_search(
-        query="agentos",
+        query="sensenova_claw",
         group="preferred",
         limit=5,
         timeout=60,
