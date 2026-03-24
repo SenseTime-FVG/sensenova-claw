@@ -1,5 +1,6 @@
 """文件存在性检查 API 单元测试"""
 import hashlib
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -251,3 +252,63 @@ class TestDirCheck:
         data = resp.json()
         assert data["exists"] is True
         assert data["path"] == str(mydir.resolve())
+
+
+class TestUploadToWorkdir:
+    """POST /api/files/upload 上传到 workdir 测试"""
+
+    def test_upload_single_file(self, client, tmp_path):
+        """单文件上传到 workdir/{agent_id}/"""
+        workdir = tmp_path / "workdir" / "default"
+        workdir.mkdir(parents=True)
+        resp = client.post(
+            "/api/files/upload",
+            data={"agent_id": "default"},
+            files=[("files", ("test.txt", BytesIO(b"hello"), "text/plain"))],
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["uploaded"]) == 1
+        uploaded_path = Path(data["uploaded"][0]["path"])
+        assert uploaded_path.parent == workdir
+        assert uploaded_path.read_bytes() == b"hello"
+
+    def test_upload_numeric_suffix_on_conflict(self, client, tmp_path):
+        """同名文件使用数字递增后缀: test_1.txt, test_2.txt"""
+        workdir = tmp_path / "workdir" / "default"
+        workdir.mkdir(parents=True)
+        (workdir / "test.txt").write_text("existing")
+
+        resp = client.post(
+            "/api/files/upload",
+            data={"agent_id": "default"},
+            files=[("files", ("test.txt", BytesIO(b"new content"), "text/plain"))],
+        )
+        data = resp.json()
+        assert data["uploaded"][0]["name"] == "test_1.txt"
+
+        # 再上传一次，应变为 test_2.txt
+        resp2 = client.post(
+            "/api/files/upload",
+            data={"agent_id": "default"},
+            files=[("files", ("test.txt", BytesIO(b"another"), "text/plain"))],
+        )
+        data2 = resp2.json()
+        assert data2["uploaded"][0]["name"] == "test_2.txt"
+
+    def test_upload_folder_preserves_structure(self, client, tmp_path):
+        """文件夹上传保留目录结构"""
+        workdir = tmp_path / "workdir" / "default"
+        workdir.mkdir(parents=True)
+        resp = client.post(
+            "/api/files/upload",
+            data={"agent_id": "default"},
+            files=[
+                ("files", ("mydir/a.txt", BytesIO(b"aaa"), "text/plain")),
+                ("files", ("mydir/sub/b.txt", BytesIO(b"bbb"), "text/plain")),
+            ],
+        )
+        data = resp.json()
+        assert len(data["uploaded"]) == 2
+        assert (workdir / "mydir" / "a.txt").exists()
+        assert (workdir / "mydir" / "sub" / "b.txt").exists()

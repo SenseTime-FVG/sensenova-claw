@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File as FastAPIFile
+from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -136,18 +136,36 @@ def _uploads_dir(request: Request) -> Path:
     return uploads
 
 
+def _next_available_path(target: Path) -> Path:
+    """数字递增查找可用文件名: file.txt -> file_1.txt -> file_2.txt"""
+    if not target.exists():
+        return target
+    stem = target.stem
+    suffix = target.suffix
+    parent = target.parent
+    counter = 1
+    while True:
+        candidate = parent / f"{stem}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
 @router.post("/files/upload")
 async def upload_files(
     request: Request,
     files: list[UploadFile] = FastAPIFile(...),
+    agent_id: str = Form("default"),
 ):
     """接收文件上传，支持单文件、多文件和文件夹（webkitdirectory）。
 
+    文件保存到 workdir/{agent_id}/ 目录，同名文件使用数字递增后缀。
     文件夹上传时 filename 包含相对路径（如 ``mydir/sub/file.txt``），
-    服务端会在 uploads 目录下保留对应的目录结构。
+    服务端会在 workdir 目录下保留对应的目录结构。
     """
-    logger.info("收到上传请求: %d 个文件", len(files))
-    uploads = _uploads_dir(request)
+    logger.info("收到上传请求: %d 个文件, agent_id=%s", len(files), agent_id)
+    workdir = _resolve_agent_workdir(request, agent_id)
+    workdir.mkdir(parents=True, exist_ok=True)
     results = []
 
     for file in files:
@@ -163,16 +181,13 @@ async def upload_files(
             continue
 
         # 构建目标路径（保留目录结构）
-        target = uploads / Path(*parts)
+        target = workdir / Path(*parts)
 
         # 确保父目录存在
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        # 同名文件加时间戳后缀
-        if target.exists():
-            stem = target.stem
-            suffix = target.suffix
-            target = target.parent / f"{stem}_{int(time.time() * 1000)}{suffix}"
+        # 同名文件使用数字递增后缀
+        target = _next_available_path(target)
 
         try:
             content = await file.read()
