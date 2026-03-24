@@ -1043,3 +1043,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前仓库把 `.next/` 产物纳入版本管理，调试前端路由时很容易产生大量噪音改动；完成后需要显式回退 `.next/`，只保留真实源码变更。
+
+### 2026-03-24 setup 跳过按钮补充
+
+成功经验：
+- `setup` 页的“跳过，稍后配置”如果只做 `router.push('/')`，会被后续守卫重新拦回；最小可行修法是在前端会话里显式写 `llm_setup_skipped`，并让 `ProtectedRoute` 在当前浏览器会话内跳过 LLM 强制配置检查。
+- 登录态刚建立时，`verifyToken()` 与 `AuthProvider` 初始化可能并发，后者会把前者刚设成 `true` 的状态覆盖回 `false`；用 `auth_just_verified` + `verifiedInSessionRef` 兜住这个短暂窗口，能避免“刚验证完 token 就又被打回 /login”。
+- Playwright 回归前必须先确认 `reuseExistingServer` 复用的是当前仓库的 dev 进程；这次 3000 端口一度连到另一个仓库 `agentos-dev/.../app/web`，导致浏览器现象与源码完全对不上。最稳的做法是先查端口占用，再跑正式用例。
+- 当 `playwright test` 本身被 webServer 复用/残留进程干扰时，先用一次性的 Playwright 脚本直接驱动页面、打印 URL 与 `sessionStorage`，可以快速区分“代码没生效”和“测试基础设施跑偏”。
+
+失败/风险经验：
+- 根目录 Playwright 配置会同时拉起前后端，一旦 8000/3000 端口有残留进程，失败现象会混入大量非业务噪音；在这种情况下不能直接把浏览器断言失败等同于页面逻辑失败。
+- 当前 `npx tsc --noEmit` 仍会先撞到仓库既有类型问题（如 `app/settings/page.tsx`、`components/chat/MessageList.tsx`、`e2e/miniapp-workspace.spec.ts`），不能把这类全局红灯误判成这次 `setup` 修复引入的新错误。

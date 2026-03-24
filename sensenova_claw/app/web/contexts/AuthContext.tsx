@@ -1,9 +1,10 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const COOKIE_NAME = 'sensenova_claw_token';
+const AUTH_JUST_VERIFIED_KEY = 'auth_just_verified';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -33,6 +34,7 @@ function deleteCookie(name: string) {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const verifiedInSessionRef = useRef(false);
 
   /** 调用后端验证 token 并设置 cookie。
    *  网络错误时 throw，token 无效时返回 false。 */
@@ -56,15 +58,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data.authenticated) {
       // 同时在前端设置 cookie（确保跨端口场景可用）
       setCookie(COOKIE_NAME, token);
+      sessionStorage.setItem(AUTH_JUST_VERIFIED_KEY, '1');
+      verifiedInSessionRef.current = true;
       setIsAuthenticated(true);
       return true;
     }
+    verifiedInSessionRef.current = false;
     return false;
   }, []);
 
   /** 登出 */
   const logout = useCallback(() => {
     deleteCookie(COOKIE_NAME);
+    verifiedInSessionRef.current = false;
     setIsAuthenticated(false);
     // 调用后端清除 cookie
     fetch(`${API_BASE}/api/auth/logout`, {
@@ -131,6 +137,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // 3. 未认证
+      if (verifiedInSessionRef.current) {
+        setIsAuthenticated(true);
+        setIsLoading(false);
+        return;
+      }
       setIsAuthenticated(false);
       setIsLoading(false);
     };
