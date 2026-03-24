@@ -78,7 +78,7 @@ if event.type in HEARTBEAT_TYPES:
 ```python
 async def _heartbeat_timeout_watch(self, record_id: str, timeout: float):
     """循环检查无活动时间，超过 timeout 才触发超时"""
-    interval = min(max(timeout / 3, 1), 30)
+    interval = min(max(timeout / 3, 0.05), 30)
     while True:
         await asyncio.sleep(interval)
         record = await self._repo.get_message_record(record_id)
