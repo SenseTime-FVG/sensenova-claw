@@ -160,6 +160,10 @@ agents:
     temperature: 0.6
     tools: []
     skills: []
+    # can_send_message_to: null    # null = 禁止向任何 Agent 发消息
+    # can_send_message_to: []      # [] = 可以向所有 Agent 发消息（默认）
+    # can_send_message_to:         # 仅限指定 Agent
+    #   - system-admin
 
   system-admin:
     name: 系统运维管理员
