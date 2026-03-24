@@ -7,20 +7,20 @@ from unittest.mock import patch
 
 import pytest
 
-from agentos.adapters.plugins.whatsapp.plugin import definition, register
-from agentos.adapters.plugins import PluginRegistry
-from agentos.adapters.plugins.base import PluginApi
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.plugins.whatsapp.plugin import definition, register
+from sensenova_claw.adapters.plugins import PluginRegistry
+from sensenova_claw.adapters.plugins.base import PluginApi
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 def _make_plugin_api(config_overrides: dict | None = None) -> PluginApi:
-    from agentos.platform.config.config import config as global_config
+    from sensenova_claw.platform.config.config import config as global_config
 
     defaults = {
         "enabled": False,
-        "auth_dir": "/tmp/agentos-whatsapp-auth",
+        "auth_dir": "/tmp/sensenova_claw-whatsapp-auth",
         "dm_policy": "open",
         "group_policy": "open",
         "allowlist": [],
@@ -87,7 +87,7 @@ class TestRegister:
             "builtins.__import__",
             side_effect=lambda name, *args, **kwargs: (
                 (_ for _ in ()).throw(ModuleNotFoundError(name="pyee"))
-                if name == "agentos.adapters.plugins.whatsapp.channel"
+                if name == "sensenova_claw.adapters.plugins.whatsapp.channel"
                 else original_import(name, *args, **kwargs)
             ),
         ):

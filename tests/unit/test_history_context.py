@@ -11,9 +11,9 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
-from agentos.adapters.storage.repository import Repository
-from agentos.kernel.runtime.context_builder import ContextBuilder
-from agentos.kernel.runtime.state import SessionStateStore, TurnState
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.kernel.runtime.state import SessionStateStore, TurnState
 
 
 @pytest_asyncio.fixture

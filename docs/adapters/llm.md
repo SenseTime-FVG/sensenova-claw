@@ -1,6 +1,6 @@
 # LLM 适配器
 
-> 路径：`agentos/adapters/llm/`
+> 路径：`sensenova_claw/adapters/llm/`
 
 LLM 适配器层负责屏蔽不同大模型提供商的 API 差异，为上层 `LLMRuntime` 提供统一的调用接口。
 

@@ -16,24 +16,24 @@
 
 | Action | File | Responsibility |
 |--------|------|----------------|
-| Create | `agentos/platform/config/config_manager.py` | Unified config write entry: persist YAML, refresh memory, publish events |
-| Create | `agentos/platform/config/config_file_watcher.py` | Watch config.yml for external changes, debounce, bridge to asyncio |
+| Create | `sensenova_claw/platform/config/config_manager.py` | Unified config write entry: persist YAML, refresh memory, publish events |
+| Create | `sensenova_claw/platform/config/config_file_watcher.py` | Watch config.yml for external changes, debounce, bridge to asyncio |
 | Create | `tests/unit/test_config_manager.py` | Unit tests for ConfigManager |
 | Create | `tests/unit/test_config_file_watcher.py` | Unit tests for file watcher |
 | Create | `tests/unit/test_config_event_subscribers.py` | Tests for module subscription handlers |
-| Modify | `agentos/kernel/events/types.py` | Add CONFIG_UPDATED, SYSTEM_SESSION_ID |
-| Modify | `agentos/kernel/events/router.py:122` | Skip `config.*` in route loop |
-| Modify | `agentos/interfaces/ws/gateway.py:183-186` | Broadcast `config.*` to all channels |
-| Modify | `agentos/adapters/llm/factory.py` | Add `start_config_listener()` |
-| Modify | `agentos/capabilities/agents/registry.py` | Add `start_config_listener()` |
-| Modify | `agentos/capabilities/memory/manager.py` | Add `start_config_listener()` |
-| Modify | `agentos/interfaces/http/config_api.py` | Use ConfigManager instead of config_store |
-| Modify | `agentos/interfaces/http/notification_api.py` | Use ConfigManager instead of config_store |
-| Modify | `agentos/interfaces/http/tools.py` | Use ConfigManager instead of config_store |
-| Modify | `agentos/app/gateway/main.py` | Init ConfigManager, start listeners, shutdown watcher |
+| Modify | `sensenova_claw/kernel/events/types.py` | Add CONFIG_UPDATED, SYSTEM_SESSION_ID |
+| Modify | `sensenova_claw/kernel/events/router.py:122` | Skip `config.*` in route loop |
+| Modify | `sensenova_claw/interfaces/ws/gateway.py:183-186` | Broadcast `config.*` to all channels |
+| Modify | `sensenova_claw/adapters/llm/factory.py` | Add `start_config_listener()` |
+| Modify | `sensenova_claw/capabilities/agents/registry.py` | Add `start_config_listener()` |
+| Modify | `sensenova_claw/capabilities/memory/manager.py` | Add `start_config_listener()` |
+| Modify | `sensenova_claw/interfaces/http/config_api.py` | Use ConfigManager instead of config_store |
+| Modify | `sensenova_claw/interfaces/http/notification_api.py` | Use ConfigManager instead of config_store |
+| Modify | `sensenova_claw/interfaces/http/tools.py` | Use ConfigManager instead of config_store |
+| Modify | `sensenova_claw/app/gateway/main.py` | Init ConfigManager, start listeners, shutdown watcher |
 | Modify | `tests/unit/test_config_api.py` | Update to use ConfigManager |
 | Modify | `tests/unit/test_config_store_secrets.py` | Migrate to test ConfigManager |
-| Delete | `agentos/interfaces/http/config_store.py` | Logic merged into ConfigManager |
+| Delete | `sensenova_claw/interfaces/http/config_store.py` | Logic merged into ConfigManager |
 | Modify | `pyproject.toml` | Add `watchdog>=4.0.0` dependency |
 
 ---
@@ -41,7 +41,7 @@
 ## Task 1: Add event type constants
 
 **Files:**
-- Modify: `agentos/kernel/events/types.py:59-60`
+- Modify: `sensenova_claw/kernel/events/types.py:59-60`
 
 - [ ] **Step 1: Write the test**
 
@@ -49,7 +49,7 @@
 # tests/unit/test_config_event_subscribers.py
 """config.updated 事件常量和订阅者测试"""
 import pytest
-from agentos.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
+from sensenova_claw.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
 
 
 def test_config_updated_constant():
@@ -67,7 +67,7 @@ Expected: FAIL with `ImportError: cannot import name 'CONFIG_UPDATED'`
 
 - [ ] **Step 3: Add constants to types.py**
 
-Add at the end of `agentos/kernel/events/types.py`:
+Add at the end of `sensenova_claw/kernel/events/types.py`:
 
 ```python
 # 配置变更事件
@@ -85,7 +85,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agentos/kernel/events/types.py tests/unit/test_config_event_subscribers.py
+git add sensenova_claw/kernel/events/types.py tests/unit/test_config_event_subscribers.py
 git commit -m "feat: add CONFIG_UPDATED and SYSTEM_SESSION_ID event constants"
 ```
 
@@ -94,7 +94,7 @@ git commit -m "feat: add CONFIG_UPDATED and SYSTEM_SESSION_ID event constants"
 ## Task 2: BusRouter skip config.* events
 
 **Files:**
-- Modify: `agentos/kernel/events/router.py:121-123`
+- Modify: `sensenova_claw/kernel/events/router.py:121-123`
 
 - [ ] **Step 1: Write the test**
 
@@ -102,9 +102,9 @@ Append to `tests/unit/test_config_event_subscribers.py`:
 
 ```python
 import asyncio
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.router import BusRouter
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.router import BusRouter
 
 
 @pytest.mark.asyncio
@@ -158,7 +158,7 @@ Expected: FAIL — `config.updated` 事件会被路由到私有总线（session_
 
 - [ ] **Step 3: Add config.* skip to BusRouter**
 
-In `agentos/kernel/events/router.py`, modify `_route_loop` method. Change line 122 from:
+In `sensenova_claw/kernel/events/router.py`, modify `_route_loop` method. Change line 122 from:
 
 ```python
             # system.* 事件不路由到私有总线
@@ -182,7 +182,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agentos/kernel/events/router.py tests/unit/test_config_event_subscribers.py
+git add sensenova_claw/kernel/events/router.py tests/unit/test_config_event_subscribers.py
 git commit -m "feat: BusRouter skips config.* events from private bus routing"
 ```
 
@@ -191,7 +191,7 @@ git commit -m "feat: BusRouter skips config.* events from private bus routing"
 ## Task 3: ConfigManager core implementation
 
 **Files:**
-- Create: `agentos/platform/config/config_manager.py`
+- Create: `sensenova_claw/platform/config/config_manager.py`
 - Create: `tests/unit/test_config_manager.py`
 
 This is the largest task. It merges `config_store.py` logic into ConfigManager and adds event publishing.
@@ -206,11 +206,11 @@ import pytest
 import yaml
 from pathlib import Path
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
-from agentos.platform.config.config import Config
-from agentos.platform.config.config_manager import ConfigManager
-from agentos.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.config.config_manager import ConfigManager
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
 
 
 @pytest.fixture
@@ -301,7 +301,7 @@ async def test_update_handles_secrets(setup):
     # YAML 中应为 secret ref
     assert written["llm"]["providers"]["openai"]["api_key"].startswith("${secret:")
     # secret store 中应有真实值
-    assert secret_store.get("agentos/llm.providers.openai.api_key") == "sk-new"
+    assert secret_store.get("sensenova_claw/llm.providers.openai.api_key") == "sk-new"
 
 
 @pytest.mark.asyncio
@@ -400,11 +400,11 @@ async def test_update_empty_data_no_event(setup):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python3 -m pytest tests/unit/test_config_manager.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agentos.platform.config.config_manager'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'sensenova-claw.platform.config.config_manager'`
 
 - [ ] **Step 3: Implement ConfigManager**
 
-Create `agentos/platform/config/config_manager.py`:
+Create `sensenova_claw/platform/config/config_manager.py`:
 
 ```python
 """ConfigManager — 配置管理器：统一入口，负责持久化、内存同步、事件通知。
@@ -422,12 +422,12 @@ from typing import Any
 
 import yaml
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
-from agentos.platform.config.config import Config
-from agentos.platform.secrets.refs import build_secret_ref, is_secret_ref
-from agentos.platform.secrets.registry import is_secret_path
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.secrets.refs import build_secret_ref, is_secret_ref
+from sensenova_claw.platform.secrets.registry import is_secret_path
 
 logger = logging.getLogger(__name__)
 
@@ -475,7 +475,7 @@ class ConfigManager:
             for path, value in flat_updates.items():
                 if is_secret_path(path) and self._secret_store is not None:
                     if value:
-                        ref = f"agentos/{path}"
+                        ref = f"sensenova_claw/{path}"
                         try:
                             self._secret_store.set(ref, value)
                             _set_nested(raw_config, path, build_secret_ref(ref))
@@ -483,7 +483,7 @@ class ConfigManager:
                             logger.warning("secret store 不可用，%s 将明文写入 config.yml", path)
                             _set_nested(raw_config, path, value)
                     else:
-                        ref = f"agentos/{path}"
+                        ref = f"sensenova_claw/{path}"
                         existing_raw = _get_nested(raw_config, path)
                         if isinstance(existing_raw, str) and is_secret_ref(existing_raw):
                             try:
@@ -538,7 +538,7 @@ class ConfigManager:
             logger.warning("无法获取配置文件路径，跳过文件监听")
             return
         try:
-            from agentos.platform.config.config_file_watcher import ConfigFileWatcher
+            from sensenova_claw.platform.config.config_file_watcher import ConfigFileWatcher
             loop = asyncio.get_event_loop()
             self._watcher = ConfigFileWatcher(
                 config_path=config_path,
@@ -710,7 +710,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agentos/platform/config/config_manager.py tests/unit/test_config_manager.py
+git add sensenova_claw/platform/config/config_manager.py tests/unit/test_config_manager.py
 git commit -m "feat: implement ConfigManager with persist, refresh, and event publishing"
 ```
 
@@ -719,7 +719,7 @@ git commit -m "feat: implement ConfigManager with persist, refresh, and event pu
 ## Task 4: ConfigFileWatcher implementation
 
 **Files:**
-- Create: `agentos/platform/config/config_file_watcher.py`
+- Create: `sensenova_claw/platform/config/config_file_watcher.py`
 - Create: `tests/unit/test_config_file_watcher.py`
 - Modify: `pyproject.toml` — add `watchdog>=4.0.0`
 
@@ -746,7 +746,7 @@ def config_file(tmp_path):
 @pytest.mark.asyncio
 async def test_watcher_detects_external_change(config_file):
     """外部修改应触发回调"""
-    from agentos.platform.config.config_file_watcher import ConfigFileWatcher
+    from sensenova_claw.platform.config.config_file_watcher import ConfigFileWatcher
 
     callback = AsyncMock()
     loop = asyncio.get_event_loop()
@@ -774,7 +774,7 @@ async def test_watcher_detects_external_change(config_file):
 @pytest.mark.asyncio
 async def test_watcher_skips_self_write(config_file):
     """ConfigManager 自写应被跳过（hash 一致）"""
-    from agentos.platform.config.config_file_watcher import ConfigFileWatcher
+    from sensenova_claw.platform.config.config_file_watcher import ConfigFileWatcher
 
     content = yaml.dump({"llm": {"default_model": "gpt-4o"}})
     content_hash = hashlib.md5(content.encode()).hexdigest()
@@ -804,7 +804,7 @@ async def test_watcher_skips_self_write(config_file):
 @pytest.mark.asyncio
 async def test_watcher_handles_invalid_yaml(config_file):
     """无效 YAML 不应触发回调或崩溃"""
-    from agentos.platform.config.config_file_watcher import ConfigFileWatcher
+    from sensenova_claw.platform.config.config_file_watcher import ConfigFileWatcher
 
     callback = AsyncMock()
     loop = asyncio.get_event_loop()
@@ -837,7 +837,7 @@ Expected: FAIL with `ModuleNotFoundError`
 
 - [ ] **Step 4: Implement ConfigFileWatcher**
 
-Create `agentos/platform/config/config_file_watcher.py`:
+Create `sensenova_claw/platform/config/config_file_watcher.py`:
 
 ```python
 """ConfigFileWatcher — 监听 config.yml 文件变化，外部编辑也触发联动。"""
@@ -1013,7 +1013,7 @@ Expected: PASS (watcher tests may need timing adjustments)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agentos/platform/config/config_file_watcher.py tests/unit/test_config_file_watcher.py pyproject.toml uv.lock
+git add sensenova_claw/platform/config/config_file_watcher.py tests/unit/test_config_file_watcher.py pyproject.toml uv.lock
 git commit -m "feat: implement ConfigFileWatcher with debounce and hash-based self-write detection"
 ```
 
@@ -1022,9 +1022,9 @@ git commit -m "feat: implement ConfigFileWatcher with debounce and hash-based se
 ## Task 5: Module subscribers (LLMFactory, AgentRegistry, MemoryManager)
 
 **Files:**
-- Modify: `agentos/adapters/llm/factory.py`
-- Modify: `agentos/capabilities/agents/registry.py`
-- Modify: `agentos/capabilities/memory/manager.py`
+- Modify: `sensenova_claw/adapters/llm/factory.py`
+- Modify: `sensenova_claw/capabilities/agents/registry.py`
+- Modify: `sensenova_claw/capabilities/memory/manager.py`
 - Append: `tests/unit/test_config_event_subscribers.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -1032,9 +1032,9 @@ git commit -m "feat: implement ConfigFileWatcher with debounce and hash-based se
 Append to `tests/unit/test_config_event_subscribers.py`:
 
 ```python
-from agentos.adapters.llm.factory import LLMFactory
-from agentos.capabilities.agents.registry import AgentRegistry
-from agentos.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
+from sensenova_claw.adapters.llm.factory import LLMFactory
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
 
 
 @pytest.mark.asyncio
@@ -1091,10 +1091,10 @@ async def test_llm_factory_ignores_non_llm_events():
 async def test_agent_registry_reloads_on_config_event(tmp_path):
     """AgentRegistry 收到 agents section 变更后应重载"""
     bus = PublicEventBus()
-    registry = AgentRegistry(agentos_home=tmp_path)
+    registry = AgentRegistry(sensenova_claw_home=tmp_path)
 
     # 初始 config 带一个 agent
-    from agentos.platform.config.config import Config
+    from sensenova_claw.platform.config.config import Config
     config_path = tmp_path / "config.yml"
     import yaml
     config_path.write_text(yaml.dump({
@@ -1134,13 +1134,13 @@ async def test_agent_registry_reloads_on_config_event(tmp_path):
 @pytest.mark.asyncio
 async def test_memory_manager_reloads_on_config_event(tmp_path):
     """MemoryManager 收到 memory section 变更后应重建 MemoryConfig"""
-    from agentos.capabilities.memory.config import MemoryConfig
+    from sensenova_claw.capabilities.memory.config import MemoryConfig
 
     bus = PublicEventBus()
     mem_config = MemoryConfig.from_dict({"memory": {"enabled": False}})
     db_path = tmp_path / "mem.db"
 
-    from agentos.capabilities.memory.manager import MemoryManager
+    from sensenova_claw.capabilities.memory.manager import MemoryManager
     manager = MemoryManager(
         workspace_dir=str(tmp_path),
         config=mem_config,
@@ -1175,12 +1175,12 @@ Expected: FAIL with `AttributeError: 'LLMFactory' object has no attribute 'start
 
 - [ ] **Step 3: Add start_config_listener to LLMFactory**
 
-In `agentos/adapters/llm/factory.py`, add after `get_provider()`:
+In `sensenova_claw/adapters/llm/factory.py`, add after `get_provider()`:
 
 ```python
     async def start_config_listener(self, bus: PublicEventBus) -> None:
         """订阅 config.updated 事件，llm section 变更时重建 provider 表"""
-        from agentos.kernel.events.types import CONFIG_UPDATED
+        from sensenova_claw.kernel.events.types import CONFIG_UPDATED
         async for event in bus.subscribe():
             if event.type == CONFIG_UPDATED and event.payload.get("section") == "llm":
                 self._providers = {"mock": MockProvider()}
@@ -1193,19 +1193,19 @@ Also add imports at the top:
 
 ```python
 import logging
-from agentos.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.bus import PublicEventBus
 
 logger = logging.getLogger(__name__)
 ```
 
 - [ ] **Step 4: Add start_config_listener to AgentRegistry**
 
-In `agentos/capabilities/agents/registry.py`, add after the `update()` method:
+In `sensenova_claw/capabilities/agents/registry.py`, add after the `update()` method:
 
 ```python
     async def start_config_listener(self, bus: PublicEventBus, config: Config) -> None:
         """订阅 config.updated 事件，agents section 变更时重载"""
-        from agentos.kernel.events.types import CONFIG_UPDATED
+        from sensenova_claw.kernel.events.types import CONFIG_UPDATED
         async for event in bus.subscribe():
             if event.type == CONFIG_UPDATED and event.payload.get("section") == "agents":
                 self._agents.clear()
@@ -1216,18 +1216,18 @@ In `agentos/capabilities/agents/registry.py`, add after the `update()` method:
 Also add import:
 
 ```python
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.platform.config.config import Config
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.platform.config.config import Config
 ```
 
 - [ ] **Step 5: Add start_config_listener to MemoryManager**
 
-In `agentos/capabilities/memory/manager.py`, add method:
+In `sensenova_claw/capabilities/memory/manager.py`, add method:
 
 ```python
     async def start_config_listener(self, bus: PublicEventBus, config_data_getter) -> None:
         """订阅 config.updated 事件，memory section 变更时重建 MemoryConfig"""
-        from agentos.kernel.events.types import CONFIG_UPDATED
+        from sensenova_claw.kernel.events.types import CONFIG_UPDATED
         async for event in bus.subscribe():
             if event.type == CONFIG_UPDATED and event.payload.get("section") == "memory":
                 new_config = MemoryConfig.from_dict(config_data_getter())
@@ -1238,7 +1238,7 @@ In `agentos/capabilities/memory/manager.py`, add method:
 Also add import:
 
 ```python
-from agentos.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.bus import PublicEventBus
 ```
 
 - [ ] **Step 6: Run tests to verify they pass**
@@ -1249,7 +1249,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agentos/adapters/llm/factory.py agentos/capabilities/agents/registry.py agentos/capabilities/memory/manager.py tests/unit/test_config_event_subscribers.py
+git add sensenova_claw/adapters/llm/factory.py sensenova_claw/capabilities/agents/registry.py sensenova_claw/capabilities/memory/manager.py tests/unit/test_config_event_subscribers.py
 git commit -m "feat: add config.updated event listeners to LLMFactory, AgentRegistry, MemoryManager"
 ```
 
@@ -1258,7 +1258,7 @@ git commit -m "feat: add config.updated event listeners to LLMFactory, AgentRegi
 ## Task 6: Gateway broadcast config.* events
 
 **Files:**
-- Modify: `agentos/interfaces/ws/gateway.py:183-186`
+- Modify: `sensenova_claw/interfaces/ws/gateway.py:183-186`
 
 - [ ] **Step 1: Write the test**
 
@@ -1269,8 +1269,8 @@ Append to `tests/unit/test_config_event_subscribers.py`:
 async def test_gateway_broadcasts_config_events():
     """Gateway 应将 config.* 事件广播给所有 Channel"""
     from unittest.mock import AsyncMock, MagicMock
-    from agentos.interfaces.ws.gateway import Gateway
-    from agentos.kernel.events.bus import PublicEventBus
+    from sensenova_claw.interfaces.ws.gateway import Gateway
+    from sensenova_claw.kernel.events.bus import PublicEventBus
 
     bus = PublicEventBus()
     publisher = MagicMock()
@@ -1318,7 +1318,7 @@ Expected: FAIL — Gateway 当前只调 `_dispatch_event`，不会广播
 
 - [ ] **Step 3: Modify Gateway._loop**
 
-In `agentos/interfaces/ws/gateway.py`, rename and modify the `_loop` method (lines 183-186).
+In `sensenova_claw/interfaces/ws/gateway.py`, rename and modify the `_loop` method (lines 183-186).
 
 Also update the call site in `start()` (line 170): change `self._loop()` to `self._event_loop()`.
 
@@ -1356,7 +1356,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agentos/interfaces/ws/gateway.py tests/unit/test_config_event_subscribers.py
+git add sensenova_claw/interfaces/ws/gateway.py tests/unit/test_config_event_subscribers.py
 git commit -m "feat: Gateway broadcasts config.* events to all WebSocket channels"
 ```
 
@@ -1365,7 +1365,7 @@ git commit -m "feat: Gateway broadcasts config.* events to all WebSocket channel
 ## Task 7: Migrate config_api.py to use ConfigManager
 
 **Files:**
-- Modify: `agentos/interfaces/http/config_api.py`
+- Modify: `sensenova_claw/interfaces/http/config_api.py`
 - Modify: `tests/unit/test_config_api.py`
 
 - [ ] **Step 1: Update config_api.py**
@@ -1374,7 +1374,7 @@ Replace imports and remove `EDITABLE_SECTIONS`, `SectionsUpdateBody`, `_flatten_
 
 Key changes to `config_api.py`:
 
-1. Remove: `from agentos.interfaces.http.config_store import load_raw_config, persist_path_updates`
+1. Remove: `from sensenova_claw.interfaces.http.config_store import load_raw_config, persist_path_updates`
 2. Remove: `EDITABLE_SECTIONS`, `SectionsUpdateBody`, `_flatten_updates`, `_sanitize_section`, `_mask_secret`, `_detect_secret_source`
 3. Update `get_config_sections()`:
 
@@ -1414,8 +1414,8 @@ Keep `ListModelsBody`, `TestLLMBody`, and all `list_models`/`test_llm` endpoints
 Update the `app` fixture to create a ConfigManager and attach it to `app.state.config_manager`:
 
 ```python
-from agentos.platform.config.config_manager import ConfigManager
-from agentos.kernel.events.bus import PublicEventBus
+from sensenova_claw.platform.config.config_manager import ConfigManager
+from sensenova_claw.kernel.events.bus import PublicEventBus
 
 @pytest.fixture
 def app(tmp_path):
@@ -1453,7 +1453,7 @@ Expected: PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agentos/interfaces/http/config_api.py tests/unit/test_config_api.py
+git add sensenova_claw/interfaces/http/config_api.py tests/unit/test_config_api.py
 git commit -m "refactor: config_api.py uses ConfigManager instead of config_store"
 ```
 
@@ -1462,17 +1462,17 @@ git commit -m "refactor: config_api.py uses ConfigManager instead of config_stor
 ## Task 8: Migrate notification_api.py and tools.py
 
 **Files:**
-- Modify: `agentos/interfaces/http/notification_api.py`
-- Modify: `agentos/interfaces/http/tools.py`
+- Modify: `sensenova_claw/interfaces/http/notification_api.py`
+- Modify: `sensenova_claw/interfaces/http/tools.py`
 
 - [ ] **Step 1: Update notification_api.py**
 
 Replace the import and update endpoint. The current code constructs flat dotted paths (`{"notification.enabled": True}`), need to convert to nested dict form for `config_manager.update("notification", {...})`.
 
-In `agentos/interfaces/http/notification_api.py`, change:
+In `sensenova_claw/interfaces/http/notification_api.py`, change:
 
 ```python
-from agentos.interfaces.http.config_store import persist_path_updates
+from sensenova_claw.interfaces.http.config_store import persist_path_updates
 ```
 To:
 ```python
@@ -1501,11 +1501,11 @@ async def update_notification_config(body: NotificationConfigBody, request: Requ
 
 - [ ] **Step 2: Update tools.py**
 
-In `agentos/interfaces/http/tools.py`:
+In `sensenova_claw/interfaces/http/tools.py`:
 
 1. Replace import (line 16):
 ```python
-# 旧：from agentos.interfaces.http.config_store import load_raw_config, persist_path_updates
+# 旧：from sensenova_claw.interfaces.http.config_store import load_raw_config, persist_path_updates
 # 新：（移除，改用 ConfigManager）
 ```
 
@@ -1569,7 +1569,7 @@ Expected: PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agentos/interfaces/http/notification_api.py agentos/interfaces/http/tools.py
+git add sensenova_claw/interfaces/http/notification_api.py sensenova_claw/interfaces/http/tools.py
 git commit -m "refactor: notification_api and tools.py use ConfigManager"
 ```
 
@@ -1578,7 +1578,7 @@ git commit -m "refactor: notification_api and tools.py use ConfigManager"
 ## Task 9: Delete config_store.py and update test
 
 **Files:**
-- Delete: `agentos/interfaces/http/config_store.py`
+- Delete: `sensenova_claw/interfaces/http/config_store.py`
 - Modify: `tests/unit/test_config_store_secrets.py` → migrate to use ConfigManager
 
 - [ ] **Step 1: Migrate test_config_store_secrets.py**
@@ -1593,10 +1593,10 @@ import asyncio
 import pytest
 import yaml
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.platform.config.config import Config
-from agentos.platform.config.config_manager import ConfigManager
-from agentos.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.config.config_manager import ConfigManager
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
 
 
 @pytest.mark.asyncio
@@ -1612,9 +1612,9 @@ async def test_update_writes_secret_ref_for_sensitive_path(tmp_path):
 
     written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert written["tools"]["serper_search"]["api_key"] == (
-        "${secret:agentos/tools.serper_search.api_key}"
+        "${secret:sensenova_claw/tools.serper_search.api_key}"
     )
-    assert store.get("agentos/tools.serper_search.api_key") == "sk-secret-123"
+    assert store.get("sensenova_claw/tools.serper_search.api_key") == "sk-secret-123"
 
 
 @pytest.mark.asyncio
@@ -1636,11 +1636,11 @@ async def test_update_writes_plain_value_for_non_secret_path(tmp_path):
 async def test_update_deletes_secret_when_value_is_empty(tmp_path):
     config_path = tmp_path / "config.yml"
     config_path.write_text(
-        "tools:\n  serper_search:\n    api_key: ${secret:agentos/tools.serper_search.api_key}\n",
+        "tools:\n  serper_search:\n    api_key: ${secret:sensenova_claw/tools.serper_search.api_key}\n",
         encoding="utf-8",
     )
     store = InMemorySecretStore()
-    store.set("agentos/tools.serper_search.api_key", "sk-old")
+    store.set("sensenova_claw/tools.serper_search.api_key", "sk-old")
     cfg = Config(config_path=config_path, secret_store=store)
     bus = PublicEventBus()
     manager = ConfigManager(config=cfg, event_bus=bus, secret_store=store)
@@ -1649,18 +1649,18 @@ async def test_update_deletes_secret_when_value_is_empty(tmp_path):
 
     written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert written["tools"]["serper_search"]["api_key"] == ""
-    assert store.get("agentos/tools.serper_search.api_key") is None
+    assert store.get("sensenova_claw/tools.serper_search.api_key") is None
 ```
 
 - [ ] **Step 2: Verify no imports of config_store remain**
 
-Run: `grep -r "config_store" agentos/ tests/`
+Run: `grep -r "config_store" sensenova_claw/ tests/`
 Expected: No results (all migrated)
 
 - [ ] **Step 3: Delete config_store.py**
 
 ```bash
-rm agentos/interfaces/http/config_store.py
+rm sensenova_claw/interfaces/http/config_store.py
 rm tests/unit/test_config_store_secrets.py
 ```
 
@@ -1681,14 +1681,14 @@ git commit -m "refactor: delete config_store.py, migrate secret tests to ConfigM
 ## Task 10: Gateway lifespan integration
 
 **Files:**
-- Modify: `agentos/app/gateway/main.py`
+- Modify: `sensenova_claw/app/gateway/main.py`
 
 - [ ] **Step 1: Add ConfigManager initialization to lifespan**
 
-In `agentos/app/gateway/main.py`, after line 101 (`bus = PublicEventBus()`), add:
+In `sensenova_claw/app/gateway/main.py`, after line 101 (`bus = PublicEventBus()`), add:
 
 ```python
-    from agentos.platform.config.config_manager import ConfigManager
+    from sensenova_claw.platform.config.config_manager import ConfigManager
     config_manager = ConfigManager(config=config, event_bus=bus, secret_store=secret_store)
     config_manager.start_file_watcher()
 ```
@@ -1717,7 +1717,7 @@ In the `finally` block, add before other shutdowns:
 
 - [ ] **Step 2: Run backend startup smoke test**
 
-Run: `python3 -c "from agentos.app.gateway.main import app; print('import ok')"`
+Run: `python3 -c "from sensenova_claw.app.gateway.main import app; print('import ok')"`
 Expected: `import ok` (no import errors)
 
 - [ ] **Step 3: Run all unit tests**
@@ -1728,7 +1728,7 @@ Expected: PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agentos/app/gateway/main.py
+git add sensenova_claw/app/gateway/main.py
 git commit -m "feat: integrate ConfigManager into Gateway lifespan with file watcher and listeners"
 ```
 
@@ -1743,12 +1743,12 @@ Expected: All PASS
 
 - [ ] **Step 2: Verify config_store.py is deleted**
 
-Run: `test -f agentos/interfaces/http/config_store.py && echo "STILL EXISTS" || echo "DELETED"`
+Run: `test -f sensenova_claw/interfaces/http/config_store.py && echo "STILL EXISTS" || echo "DELETED"`
 Expected: `DELETED`
 
 - [ ] **Step 3: Verify no broken imports**
 
-Run: `python3 -c "from agentos.platform.config.config_manager import ConfigManager; from agentos.platform.config.config_file_watcher import ConfigFileWatcher; print('all imports ok')"`
+Run: `python3 -c "from sensenova_claw.platform.config.config_manager import ConfigManager; from sensenova_claw.platform.config.config_file_watcher import ConfigFileWatcher; print('all imports ok')"`
 Expected: `all imports ok`
 
 - [ ] **Step 4: Final commit**

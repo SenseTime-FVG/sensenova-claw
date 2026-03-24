@@ -1,5 +1,5 @@
 """A01: AgentConfig to_dict/from_dict"""
-from agentos.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.agents.config import AgentConfig
 
 
 class TestAgentConfig:

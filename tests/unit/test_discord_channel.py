@@ -6,20 +6,20 @@ import asyncio
 
 import pytest
 
-from agentos.adapters.plugins.discord.channel import DiscordChannel
-from agentos.adapters.plugins.discord.config import DiscordConfig
-from agentos.adapters.plugins.discord.models import DiscordInboundMessage
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.adapters.plugins.discord.channel import DiscordChannel
+from sensenova_claw.adapters.plugins.discord.config import DiscordConfig
+from sensenova_claw.adapters.plugins.discord.models import DiscordInboundMessage
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     TOOL_CALL_STARTED,
     USER_INPUT,
     USER_QUESTION_ANSWERED,
     USER_QUESTION_ASKED,
 )
-from agentos.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
 
 
 class _SimplePluginApi:

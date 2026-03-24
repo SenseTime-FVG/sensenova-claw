@@ -5,11 +5,11 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.interfaces.http.config_api import router
-from agentos.platform.config.config import Config
-from agentos.platform.config.llm_presets import LLM_PROVIDER_CATEGORIES
-from agentos.platform.secrets.refs import build_secret_ref
-from agentos.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.interfaces.http.config_api import router
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.config.llm_presets import LLM_PROVIDER_CATEGORIES
+from sensenova_claw.platform.secrets.refs import build_secret_ref
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
 
 
 def make_app(tmp_path, config_data: dict, secret_store: InMemorySecretStore | None = None) -> FastAPI:
@@ -20,9 +20,7 @@ def make_app(tmp_path, config_data: dict, secret_store: InMemorySecretStore | No
     config_path = tmp_path / "config.yml"
     config_path.write_text(yaml.dump(config_data), encoding="utf-8")
 
-    cfg = Config(config_path=config_path)
-    if secret_store is not None:
-        cfg._secret_store = secret_store
+    cfg = Config(config_path=config_path, secret_store=secret_store)
     app.state.config = cfg
     return app
 
@@ -78,7 +76,7 @@ def test_llm_status_not_configured_placeholder(tmp_path):
 def test_llm_status_secret_ref_counts_as_configured_when_secret_exists(tmp_path):
     """API key 为 secret 引用且能读到真实值时 configured=True"""
     secret_store = InMemorySecretStore()
-    ref = "agentos/llm.providers.openai.api_key"
+    ref = "sensenova_claw/llm.providers.openai.api_key"
     secret_store.set(ref, "sk-from-secret-store")
     app = make_app(tmp_path, {
         "llm": {

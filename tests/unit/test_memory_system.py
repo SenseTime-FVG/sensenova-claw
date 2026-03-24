@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from agentos.capabilities.memory.chunker import Chunker, MemoryChunk
-from agentos.capabilities.memory.config import MemoryConfig
-from agentos.capabilities.memory.index import MemoryIndex, MemorySearchResult
-from agentos.capabilities.memory.tools import MemorySearchTool
+from sensenova_claw.capabilities.memory.chunker import Chunker, MemoryChunk
+from sensenova_claw.capabilities.memory.config import MemoryConfig
+from sensenova_claw.capabilities.memory.index import MemoryIndex, MemorySearchResult
+from sensenova_claw.capabilities.memory.tools import MemorySearchTool
 
 
 # ===== Chunker 测试 =====
@@ -280,7 +280,7 @@ class TestMemoryManager:
 
     @pytest.fixture
     def manager(self, workspace, tmp_path):
-        from agentos.capabilities.memory.manager import MemoryManager
+        from sensenova_claw.capabilities.memory.manager import MemoryManager
 
         cfg = MemoryConfig(enabled=True, bootstrap_max_chars=200)
         db_path = tmp_path / "test_memory.db"
@@ -445,7 +445,7 @@ class TestMemoryManager:
     async def test_summarize_turn_writes_to_daily_file(self, workspace, tmp_path):
         """summarize_turn 应写入 agents/{agent_id}/memory/YYYY-MM-DD.md"""
         from datetime import datetime
-        from agentos.capabilities.memory.manager import MemoryManager
+        from sensenova_claw.capabilities.memory.manager import MemoryManager
 
         class _FakeProvider:
             async def call(self, **kwargs):
@@ -480,7 +480,7 @@ class TestMemoryManager:
     async def test_summarize_turn_default_agent_id(self, workspace, tmp_path):
         """未指定 agent_id 时应使用 default"""
         from datetime import datetime
-        from agentos.capabilities.memory.manager import MemoryManager
+        from sensenova_claw.capabilities.memory.manager import MemoryManager
 
         class _FakeProvider:
             async def call(self, **kwargs):
@@ -517,7 +517,7 @@ class TestMemorySearchTool:
 
     @pytest.fixture
     def tool(self, tmp_path):
-        from agentos.capabilities.memory.manager import MemoryManager
+        from sensenova_claw.capabilities.memory.manager import MemoryManager
 
         ws = tmp_path / "workspace"
         ws.mkdir()

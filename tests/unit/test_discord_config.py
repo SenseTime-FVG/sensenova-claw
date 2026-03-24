@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from agentos.adapters.plugins.discord.config import DiscordConfig
+from sensenova_claw.adapters.plugins.discord.config import DiscordConfig
 
 
 class TestDiscordConfigDefaults:

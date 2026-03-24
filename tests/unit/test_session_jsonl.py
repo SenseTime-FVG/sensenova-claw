@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from agentos.adapters.storage.session_jsonl import SessionJsonlWriter
+from sensenova_claw.adapters.storage.session_jsonl import SessionJsonlWriter
 
 
 class TestSessionJsonlWriter:

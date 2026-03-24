@@ -7,12 +7,12 @@ from copy import deepcopy
 import pytest
 import pytest_asyncio
 
-from agentos.adapters.llm.base import LLMProvider
-from agentos.adapters.llm.factory import LLMFactory
-from agentos.adapters.llm.providers.mock_provider import MockProvider
-from agentos.kernel.events.bus import PublicEventBus, PrivateEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.adapters.llm.base import LLMProvider
+from sensenova_claw.adapters.llm.factory import LLMFactory
+from sensenova_claw.adapters.llm.providers.mock_provider import MockProvider
+from sensenova_claw.kernel.events.bus import PublicEventBus, PrivateEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     ERROR_RAISED,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
@@ -20,8 +20,8 @@ from agentos.kernel.events.types import (
     LLM_CALL_STARTED,
     NOTIFICATION_SESSION,
 )
-from agentos.kernel.runtime.workers.llm_worker import LLMSessionWorker
-from agentos.platform.config.config import config
+from sensenova_claw.kernel.runtime.workers.llm_worker import LLMSessionWorker
+from sensenova_claw.platform.config.config import config
 from tests.conftest import load_gemini_config, skip_if_gemini_unavailable
 
 

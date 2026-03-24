@@ -1,6 +1,6 @@
 """Secret 路径注册表单测。"""
 
-from agentos.platform.secrets.registry import is_secret_path
+from sensenova_claw.platform.secrets.registry import is_secret_path
 
 
 def test_is_secret_path_matches_llm_provider_api_key():

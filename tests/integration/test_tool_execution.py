@@ -1,6 +1,6 @@
 """T06: 工具执行 + 结果截断"""
 import pytest
-from agentos.capabilities.tools.builtin import ReadFileTool, WriteFileTool, BashCommandTool
+from sensenova_claw.capabilities.tools.builtin import ReadFileTool, WriteFileTool, BashCommandTool
 
 pytestmark = pytest.mark.asyncio
 

@@ -1,11 +1,11 @@
 import time
 import pytest
-from agentos.kernel.proactive.models import (
+from sensenova_claw.kernel.proactive.models import (
     TimeTrigger, EventTrigger, ConditionTrigger, ProactiveJob,
     ProactiveTask, DeliveryConfig, SafetyConfig, JobState,
     parse_duration_ms,
 )
-from agentos.kernel.proactive.triggers import (
+from sensenova_claw.kernel.proactive.triggers import (
     compute_next_fire_ms,
     is_event_match,
     should_debounce,

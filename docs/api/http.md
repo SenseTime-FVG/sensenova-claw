@@ -1,6 +1,6 @@
 # HTTP REST API
 
-AgentOS 后端基于 FastAPI 构建，提供以下 REST API 端点。默认监听地址为 `http://localhost:8000`。
+Sensenova-Claw 后端基于 FastAPI 构建，提供以下 REST API 端点。默认监听地址为 `http://localhost:8000`。
 
 ---
 

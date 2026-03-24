@@ -1,6 +1,6 @@
 """Gateway Channel 集成测试"""
 import pytest
-from agentos.adapters.channels.websocket_channel import WebSocketChannel
+from sensenova_claw.adapters.channels.websocket_channel import WebSocketChannel
 
 
 class TestGatewayChannel:

@@ -36,7 +36,7 @@ HTTP API / 内部模块 / 文件监听
 
 ### 1. ConfigManager 核心
 
-**位置**: `agentos/platform/config/config_manager.py`
+**位置**: `sensenova_claw/platform/config/config_manager.py`
 
 ```python
 class ConfigManager:
@@ -142,7 +142,7 @@ async def update_sections(body: dict, request: Request):
 
 ### 2. 事件定义
 
-**新增事件类型** (`agentos/kernel/events/types.py`):
+**新增事件类型** (`sensenova_claw/kernel/events/types.py`):
 
 ```python
 # 配置变更事件
@@ -226,7 +226,7 @@ async def _event_loop(self) -> None:
 
 ### 4. 文件监听
 
-**位置**: `agentos/platform/config/config_file_watcher.py`
+**位置**: `sensenova_claw/platform/config/config_file_watcher.py`
 
 ```python
 class ConfigFileWatcher:
@@ -348,16 +348,16 @@ class MemoryManager:
 
 **Config 单例一致性**:
 
-当前 `LLMFactory` 通过模块级 `from agentos.platform.config.config import config` 导入全局单例。Gateway lifespan 中也使用此单例初始化 ConfigManager。两者引用的是同一个 `Config` 实例，因此 `ConfigManager._reload_memory()` 刷新 `cfg.data` 后，`LLMFactory` 中的 `_has_api_key()` 自然能读到最新值。
+当前 `LLMFactory` 通过模块级 `from sensenova_claw.platform.config.config import config` 导入全局单例。Gateway lifespan 中也使用此单例初始化 ConfigManager。两者引用的是同一个 `Config` 实例，因此 `ConfigManager._reload_memory()` 刷新 `cfg.data` 后，`LLMFactory` 中的 `_has_api_key()` 自然能读到最新值。
 
-**实现时须确保**: Gateway lifespan 使用 `from agentos.platform.config.config import config` 获取的同一单例传给 ConfigManager，不要另建新实例。
+**实现时须确保**: Gateway lifespan 使用 `from sensenova_claw.platform.config.config import config` 获取的同一单例传给 ConfigManager，不要另建新实例。
 
 ### 6. 生命周期集成
 
 **Gateway lifespan** (`gateway/main.py`):
 
 ```python
-from agentos.platform.config.config import config  # 全局单例
+from sensenova_claw.platform.config.config import config  # 全局单例
 
 # 初始化
 secret_store = KeyringSecretStore()
@@ -398,17 +398,17 @@ async def update_sections(body: dict, request: Request):
 
 | 操作 | 文件 |
 |---|---|
-| **新建** | `agentos/platform/config/config_manager.py` |
-| **新建** | `agentos/platform/config/config_file_watcher.py` |
-| **修改** | `agentos/kernel/events/types.py` — 新增 `CONFIG_UPDATED`、`SYSTEM_SESSION_ID` |
-| **修改** | `agentos/kernel/events/router.py` — `_route_loop` 跳过 `config.*` 前缀 |
-| **修改** | `agentos/interfaces/ws/gateway.py` — 广播 `config.*` 事件给所有 Channel |
-| **修改** | `agentos/interfaces/http/config_api.py` — 改用 ConfigManager，移除 `EDITABLE_SECTIONS` 限制 |
-| **修改** | `agentos/adapters/llm/factory.py` — 新增 `start_config_listener()` |
-| **修改** | `agentos/capabilities/agents/registry.py` — 新增 `start_config_listener()` |
-| **修改** | `agentos/capabilities/memory/manager.py` — 新增 `start_config_listener()` |
-| **修改** | `agentos/app/gateway/main.py` — 初始化 ConfigManager + 启动订阅任务 |
-| **删除** | `agentos/interfaces/http/config_store.py` |
+| **新建** | `sensenova_claw/platform/config/config_manager.py` |
+| **新建** | `sensenova_claw/platform/config/config_file_watcher.py` |
+| **修改** | `sensenova_claw/kernel/events/types.py` — 新增 `CONFIG_UPDATED`、`SYSTEM_SESSION_ID` |
+| **修改** | `sensenova_claw/kernel/events/router.py` — `_route_loop` 跳过 `config.*` 前缀 |
+| **修改** | `sensenova_claw/interfaces/ws/gateway.py` — 广播 `config.*` 事件给所有 Channel |
+| **修改** | `sensenova_claw/interfaces/http/config_api.py` — 改用 ConfigManager，移除 `EDITABLE_SECTIONS` 限制 |
+| **修改** | `sensenova_claw/adapters/llm/factory.py` — 新增 `start_config_listener()` |
+| **修改** | `sensenova_claw/capabilities/agents/registry.py` — 新增 `start_config_listener()` |
+| **修改** | `sensenova_claw/capabilities/memory/manager.py` — 新增 `start_config_listener()` |
+| **修改** | `sensenova_claw/app/gateway/main.py` — 初始化 ConfigManager + 启动订阅任务 |
+| **删除** | `sensenova_claw/interfaces/http/config_store.py` |
 | **修改** | `pyproject.toml` — 添加 `watchdog` 依赖 |
 
 ## 测试策略

@@ -9,9 +9,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.capabilities.agents.registry import AgentRegistry
-from agentos.interfaces.http.custom_pages import router
-from agentos.platform.config.config import Config
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.interfaces.http.custom_pages import router
+from sensenova_claw.platform.config.config import Config
 
 
 class DummyGateway:
@@ -58,13 +58,13 @@ def app(tmp_path: Path) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
 
-    agentos_home = tmp_path / "agentos_home"
-    agentos_home.mkdir()
+    sensenova_claw_home = tmp_path / "sensenova_claw_home"
+    sensenova_claw_home.mkdir()
 
     cfg = Config(config_path=tmp_path / "config.yml")
-    cfg.set("system.agentos_home", str(agentos_home))
+    cfg.set("system.sensenova_claw_home", str(sensenova_claw_home))
 
-    agent_registry = AgentRegistry(agentos_home=agentos_home)
+    agent_registry = AgentRegistry(sensenova_claw_home=sensenova_claw_home)
     agent_registry.load_from_config(cfg.data)
 
     gateway = DummyGateway()
@@ -73,7 +73,7 @@ def app(tmp_path: Path) -> FastAPI:
     class Services:
         gateway: DummyGateway
 
-    app.state.agentos_home = str(agentos_home)
+    app.state.sensenova_claw_home = str(sensenova_claw_home)
     app.state.config = cfg
     app.state.agent_registry = agent_registry
     app.state.services = Services(gateway=gateway)
@@ -116,7 +116,7 @@ def test_create_miniapp_page_creates_workspace_and_agent(app: FastAPI, client: T
     assert agent is not None
     assert agent.workdir.endswith(f"/workdir/{data['app_dir']}")
 
-    home = Path(app.state.agentos_home)
+    home = Path(app.state.sensenova_claw_home)
     index_path = home / "workdir" / data["entry_file_path"]
     bridge_path = home / "workdir" / data["bridge_script_path"]
     prompt_path = home / "agents" / data["agent_id"] / "SYSTEM_PROMPT.md"
@@ -125,7 +125,7 @@ def test_create_miniapp_page_creates_workspace_and_agent(app: FastAPI, client: T
     assert bridge_path.exists()
     assert prompt_path.exists()
     assert "Workspace App" in index_path.read_text(encoding="utf-8")
-    assert "window.AgentOSMiniApp" in bridge_path.read_text(encoding="utf-8")
+    assert "window.SensenovaClawMiniApp" in bridge_path.read_text(encoding="utf-8")
 
 
 def test_reuse_project_preserves_license(app: FastAPI, client: TestClient, tmp_path: Path) -> None:
@@ -148,7 +148,7 @@ def test_reuse_project_preserves_license(app: FastAPI, client: TestClient, tmp_p
             "workspace_mode": "reuse",
             "source_project_path": str(source_project),
             "builder_type": "builtin",
-            "generation_prompt": "复用这个项目并接入 AgentOS",
+            "generation_prompt": "复用这个项目并接入 Sensenova-Claw",
         },
     )
     assert resp.status_code == 200
@@ -157,7 +157,7 @@ def test_reuse_project_preserves_license(app: FastAPI, client: TestClient, tmp_p
     assert data["agent_id"] == "default"
     assert data["preserved_license_files"]
 
-    home = Path(app.state.agentos_home)
+    home = Path(app.state.sensenova_claw_home)
     entry = home / "workdir" / data["entry_file_path"]
     attributions = home / "workdir" / data["app_dir"] / "ATTRIBUTIONS.md"
     copied_license = home / "workdir" / data["preserved_license_files"][0]
@@ -165,7 +165,7 @@ def test_reuse_project_preserves_license(app: FastAPI, client: TestClient, tmp_p
     assert entry.exists()
     assert attributions.exists()
     assert copied_license.exists()
-    assert "agentos-bridge.js" in entry.read_text(encoding="utf-8")
+    assert "sensenova_claw-bridge.js" in entry.read_text(encoding="utf-8")
     assert "MIT License" in copied_license.read_text(encoding="utf-8")
 
 
@@ -250,7 +250,7 @@ def test_actions_endpoint_server_target_logs_without_agent_session(app: FastAPI,
     assert gateway.created_sessions == []
     assert gateway.user_inputs == []
 
-    home = Path(app.state.agentos_home)
+    home = Path(app.state.sensenova_claw_home)
     log_path = home / "workdir" / page["workspace_root"] / "interaction_log.jsonl"
     assert log_path.exists()
     lines = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]

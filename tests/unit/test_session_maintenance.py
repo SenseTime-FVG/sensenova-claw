@@ -6,9 +6,9 @@ import time
 import pytest
 import pytest_asyncio
 
-from agentos.adapters.storage.repository import Repository
-from agentos.kernel.runtime.session_maintenance import SessionMaintenance
-from agentos.platform.config.config import Config
+from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.kernel.runtime.session_maintenance import SessionMaintenance
+from sensenova_claw.platform.config.config import Config
 
 
 @pytest_asyncio.fixture

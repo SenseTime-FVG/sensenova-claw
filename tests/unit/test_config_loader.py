@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from agentos.platform.config.config import Config
+from sensenova_claw.platform.config.config import Config
 
 
 @pytest.fixture()
 def isolated_tmp():
     """创建 /tmp 下的隔离临时目录"""
-    d = Path(tempfile.mkdtemp(prefix="agentos_test_"))
+    d = Path(tempfile.mkdtemp(prefix="sensenova_claw_test_"))
     yield d
     shutil.rmtree(d, ignore_errors=True)
 
@@ -27,8 +27,8 @@ def test_load_parent_project_and_legacy_config(isolated_tmp: Path) -> None:
     backend_dir = root / "backend"
     backend_dir.mkdir(parents=True)
 
-    (root / ".agentos").mkdir(parents=True)
-    (root / ".agentos" / "config.yaml").write_text(
+    (root / ".sensenova-claw").mkdir(parents=True)
+    (root / ".sensenova-claw" / "config.yaml").write_text(
         "agent:\n  model: gpt-5.4\n",
         encoding="utf-8",
     )
@@ -53,14 +53,14 @@ def test_nearer_project_config_overrides_parent(isolated_tmp: Path) -> None:
     backend_dir = root / "backend"
     backend_dir.mkdir(parents=True)
 
-    (root / ".agentos").mkdir(parents=True)
-    (root / ".agentos" / "config.yaml").write_text(
+    (root / ".sensenova-claw").mkdir(parents=True)
+    (root / ".sensenova-claw" / "config.yaml").write_text(
         "agent:\n  model: gpt-5.4\n",
         encoding="utf-8",
     )
 
-    (backend_dir / ".agentos").mkdir(parents=True)
-    (backend_dir / ".agentos" / "config.yaml").write_text(
+    (backend_dir / ".sensenova-claw").mkdir(parents=True)
+    (backend_dir / ".sensenova-claw" / "config.yaml").write_text(
         "agent:\n  model: mock\n",
         encoding="utf-8",
     )
@@ -91,8 +91,8 @@ def test_legacy_openai_key_does_not_override_explicit_model(isolated_tmp: Path) 
     backend_dir = root / "backend"
     backend_dir.mkdir(parents=True)
 
-    (root / ".agentos").mkdir(parents=True)
-    (root / ".agentos" / "config.yaml").write_text(
+    (root / ".sensenova-claw").mkdir(parents=True)
+    (root / ".sensenova-claw" / "config.yaml").write_text(
         "llm:\n  default_model: mock\nagent:\n  model: mock\n",
         encoding="utf-8",
     )

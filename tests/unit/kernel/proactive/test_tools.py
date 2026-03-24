@@ -1,8 +1,8 @@
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from agentos.capabilities.tools.base import ToolRiskLevel
-from agentos.capabilities.tools.proactive_tools import (
+from sensenova_claw.capabilities.tools.base import ToolRiskLevel
+from sensenova_claw.capabilities.tools.proactive_tools import (
     CreateProactiveJobTool,
     ListProactiveJobsTool,
     ManageProactiveJobTool,

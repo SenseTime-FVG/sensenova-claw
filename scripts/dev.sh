@@ -24,9 +24,9 @@ check_port() {
 start_backend() {
   cd "$ROOT_DIR"
   if command -v uv >/dev/null 2>&1; then
-    uv run uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
+    uv run uvicorn sensenova_claw.app.gateway.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
   else
-    python3 -m uvicorn agentos.app.gateway.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
+    python3 -m uvicorn sensenova_claw.app.gateway.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" &
   fi
   BACKEND_PID=$!
   sleep 2
@@ -37,7 +37,7 @@ start_backend() {
 }
 
 start_frontend() {
-  cd "$ROOT_DIR/agentos/app/web"
+  cd "$ROOT_DIR/sensenova_claw/app/web"
   npm run dev &
   FRONTEND_PID=$!
   sleep 2

@@ -1,7 +1,7 @@
-# AgentOS 一键安装脚本（Windows PowerShell）
+# Sensenova-Claw 一键安装脚本（Windows PowerShell）
 #
 # 用法:
-#   irm https://raw.githubusercontent.com/SenseTime-FVG/agentos/dev/install/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
 #
 # 或本地执行:
 #   powershell -ExecutionPolicy Bypass -File install\install.ps1
@@ -11,10 +11,10 @@ $ErrorActionPreference = "Stop"
 
 # ── 配置 ──
 
-$AGENTOS_HOME = if ($env:AGENTOS_HOME) { $env:AGENTOS_HOME } else { "$env:USERPROFILE\.agentos" }
-$APP_DIR = "$AGENTOS_HOME\app"
-$REPO_URL = if ($env:AGENTOS_REPO_URL) { $env:AGENTOS_REPO_URL } else { "https://github.com/SenseTime-FVG/agentos.git" }
-$REPO_REF = if ($env:AGENTOS_REPO_REF) { $env:AGENTOS_REPO_REF } elseif ($env:AGENTOS_REPO_BRANCH) { $env:AGENTOS_REPO_BRANCH } else { "dev" }
+$SENSENOVA_CLAW_HOME = if ($env:SENSENOVA_CLAW_HOME) { $env:SENSENOVA_CLAW_HOME } else { "$env:USERPROFILE\.sensenova-claw" }
+$APP_DIR = "$SENSENOVA_CLAW_HOME\app"
+$REPO_URL = if ($env:SENSENOVA_CLAW_REPO_URL) { $env:SENSENOVA_CLAW_REPO_URL } else { "https://github.com/SenseTime-FVG/sensenova-claw.git" }
+$REPO_REF = if ($env:SENSENOVA_CLAW_REPO_REF) { $env:SENSENOVA_CLAW_REPO_REF } elseif ($env:SENSENOVA_CLAW_REPO_BRANCH) { $env:SENSENOVA_CLAW_REPO_BRANCH } else { "dev" }
 $REQUIRED_PYTHON = "3.12"
 $REQUIRED_NODE = 18
 
@@ -197,7 +197,7 @@ function Install-Node {
 
 function Setup-Repo {
     if (Test-Path "$APP_DIR\.git") {
-        Info "更新 AgentOS ($REPO_REF)..."
+        Info "更新 Sensenova-Claw ($REPO_REF)..."
         Push-Location $APP_DIR
         try {
             git fetch origin $REPO_REF --quiet 2>$null
@@ -216,13 +216,13 @@ function Setup-Repo {
             Warn "git 更新 $REPO_REF 失败，跳过更新"
         }
         Pop-Location
-        Log "AgentOS 已更新"
+        Log "Sensenova-Claw 已更新"
     } else {
-        Info "克隆 AgentOS 仓库 ($REPO_REF)..."
+        Info "克隆 Sensenova-Claw 仓库 ($REPO_REF)..."
         $parent = Split-Path $APP_DIR -Parent
         New-Item -ItemType Directory -Force -Path $parent | Out-Null
         git clone --branch $REPO_REF --depth 1 $REPO_URL $APP_DIR
-        Log "AgentOS 克隆完成"
+        Log "Sensenova-Claw 克隆完成"
     }
 }
 
@@ -236,23 +236,23 @@ function Install-Deps {
     Log "项目依赖安装完成"
 }
 
-# ── 步骤 5b: 构建 AGENTOS_HOME 目录结构 ──
+# ── 步骤 5b: 构建 SENSENOVA_CLAW_HOME 目录结构 ──
 
 function Setup-HomeDir {
-    Info "初始化 AGENTOS_HOME 目录结构..."
+    Info "初始化 SENSENOVA_CLAW_HOME 目录结构..."
 
     # 创建核心子目录
     foreach ($subdir in @("agents\default", "data", "skills", "workdir\default", "db")) {
-        New-Item -ItemType Directory -Force -Path "$AGENTOS_HOME\$subdir" | Out-Null
+        New-Item -ItemType Directory -Force -Path "$SENSENOVA_CLAW_HOME\$subdir" | Out-Null
     }
 
-    $builtinDir = "$APP_DIR\.agentos"
+    $builtinDir = "$APP_DIR\.sensenova-claw"
 
     # 复制预置 agents（不覆盖已有文件）
     $builtinAgents = "$builtinDir\agents"
     if (Test-Path $builtinAgents) {
         Get-ChildItem $builtinAgents -Directory | ForEach-Object {
-            $targetDir = "$AGENTOS_HOME\agents\$($_.Name)"
+            $targetDir = "$SENSENOVA_CLAW_HOME\agents\$($_.Name)"
             New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
             Get-ChildItem $_.FullName -File | ForEach-Object {
                 $targetFile = "$targetDir\$($_.Name)"
@@ -268,7 +268,7 @@ function Setup-HomeDir {
     $builtinSkills = "$builtinDir\skills"
     if (Test-Path $builtinSkills) {
         Get-ChildItem $builtinSkills -Directory | ForEach-Object {
-            $targetDir = "$AGENTOS_HOME\skills\$($_.Name)"
+            $targetDir = "$SENSENOVA_CLAW_HOME\skills\$($_.Name)"
             if (-not (Test-Path $targetDir)) {
                 Copy-Item $_.FullName $targetDir -Recurse
             }
@@ -276,7 +276,7 @@ function Setup-HomeDir {
         Log "预置 Skills 已复制"
     }
 
-    Log "AGENTOS_HOME 初始化完成: $AGENTOS_HOME"
+    Log "SENSENOVA_CLAW_HOME 初始化完成: $SENSENOVA_CLAW_HOME"
 }
 
 # ── 步骤 6: 初始化配置文件 ──
@@ -303,11 +303,11 @@ function Setup-Config {
 # ── 步骤 7: 注册全局命令 ──
 
 function Register-Command {
-    Info "注册 agentos 命令..."
+    Info "注册 sensenova-claw 命令..."
     Push-Location $APP_DIR
 
     try {
-        uv tool install --editable --from . --force agentos 2>$null
+        uv tool install --editable --from . --force sensenova-claw 2>$null
     } catch {
         Warn "uv tool install 失败，尝试 pip install..."
         try {
@@ -322,10 +322,10 @@ function Register-Command {
     # 刷新 PATH
     $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
 
-    if (Command-Exists agentos) {
-        Log "agentos 命令已注册"
+    if (Command-Exists sensenova-claw) {
+        Log "sensenova-claw 命令已注册"
     } else {
-        Warn "agentos 命令未在 PATH 中找到，你可能需要重新打开终端"
+        Warn "sensenova-claw 命令未在 PATH 中找到，你可能需要重新打开终端"
     }
 }
 
@@ -334,11 +334,11 @@ function Register-Command {
 function Print-Success {
     Write-Host ""
     Write-Host "======================================================" -ForegroundColor Green
-    Write-Host "  AgentOS 安装完成!" -ForegroundColor Green
+    Write-Host "  Sensenova-Claw 安装完成!" -ForegroundColor Green
     Write-Host "======================================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  安装目录: $APP_DIR"
-    Write-Host "  数据目录: $AGENTOS_HOME"
+    Write-Host "  数据目录: $SENSENOVA_CLAW_HOME"
     Write-Host "  安装来源: $REPO_URL@$REPO_REF"
     Write-Host ""
     if ($IS_CN) {
@@ -348,15 +348,15 @@ function Print-Success {
     Write-Host "  下一步:" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "    1. 启动服务:"
-    Write-Host "       agentos run" -ForegroundColor White
+    Write-Host "       sensenova-claw run" -ForegroundColor White
     Write-Host ""
     Write-Host "    2. 打开 Web 界面进行 LLM 等配置:"
     Write-Host "       http://localhost:3000" -ForegroundColor White
     Write-Host ""
     Write-Host "    或使用 CLI 客户端（需先启动服务）:"
-    Write-Host "       agentos cli" -ForegroundColor White
+    Write-Host "       sensenova-claw cli" -ForegroundColor White
     Write-Host ""
-    Write-Host "  文档: https://github.com/SenseTime-FVG/agentos"
+    Write-Host "  文档: https://github.com/SenseTime-FVG/sensenova-claw"
     Write-Host ""
 }
 
@@ -365,14 +365,14 @@ function Print-Success {
 function Main {
     Write-Host ""
     Write-Host "===============================================" -ForegroundColor Cyan
-    Write-Host "         AgentOS 一键安装脚本 (Windows)        " -ForegroundColor Cyan
+    Write-Host "         Sensenova-Claw 一键安装脚本 (Windows)        " -ForegroundColor Cyan
     Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host ""
 
     # 选择安装路径
-    $script:AGENTOS_HOME = Prompt-Input "安装路径" $AGENTOS_HOME
-    $script:APP_DIR = "$AGENTOS_HOME\app"
-    Log "安装到: $AGENTOS_HOME"
+    $script:SENSENOVA_CLAW_HOME = Prompt-Input "安装路径" $SENSENOVA_CLAW_HOME
+    $script:APP_DIR = "$SENSENOVA_CLAW_HOME\app"
+    Log "安装到: $SENSENOVA_CLAW_HOME"
     Write-Host ""
 
     Detect-Region

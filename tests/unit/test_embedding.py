@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from agentos.capabilities.memory.config import MemoryConfig, SearchConfig
-from agentos.platform.config.config import Config
+from sensenova_claw.capabilities.memory.config import MemoryConfig, SearchConfig
+from sensenova_claw.platform.config.config import Config
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -37,11 +37,11 @@ def _is_openai_key_valid(cfg: Config) -> bool:
 
 def _make_service(cfg: Config, model: str = "text-embedding-3-small"):
     """使用真实配置创建 EmbeddingService 实例"""
-    import agentos.capabilities.memory.embedding as mod
+    import sensenova_claw.capabilities.memory.embedding as mod
     original_config = mod.config
     mod.config = cfg
     try:
-        from agentos.capabilities.memory.embedding import EmbeddingService
+        from sensenova_claw.capabilities.memory.embedding import EmbeddingService
         mem_config = MemoryConfig(search=SearchConfig(embedding_model=model))
         svc = EmbeddingService(mem_config)
     finally:
@@ -106,11 +106,11 @@ class TestEmbeddingServiceInit:
             }
         }
 
-        import agentos.capabilities.memory.embedding as mod
+        import sensenova_claw.capabilities.memory.embedding as mod
         original_config = mod.config
         mod.config = empty_cfg
         try:
-            from agentos.capabilities.memory.embedding import EmbeddingService
+            from sensenova_claw.capabilities.memory.embedding import EmbeddingService
             svc = EmbeddingService(MemoryConfig())
         finally:
             mod.config = original_config
@@ -136,11 +136,11 @@ class TestEmbed:
             }
         }
 
-        import agentos.capabilities.memory.embedding as mod
+        import sensenova_claw.capabilities.memory.embedding as mod
         original_config = mod.config
         mod.config = empty_cfg
         try:
-            from agentos.capabilities.memory.embedding import EmbeddingService
+            from sensenova_claw.capabilities.memory.embedding import EmbeddingService
             svc = EmbeddingService(MemoryConfig())
         finally:
             mod.config = original_config

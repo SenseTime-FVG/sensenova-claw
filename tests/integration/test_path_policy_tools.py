@@ -2,7 +2,7 @@
 import platform
 import pytest
 from pathlib import Path
-from agentos.capabilities.tools.builtin import BashCommandTool, ReadFileTool, WriteFileTool
+from sensenova_claw.capabilities.tools.builtin import BashCommandTool, ReadFileTool, WriteFileTool
 
 pytestmark = pytest.mark.asyncio
 

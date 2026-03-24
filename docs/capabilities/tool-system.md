@@ -1,6 +1,6 @@
 # 工具系统
 
-工具系统是 AgentOS 的核心能力层之一，为 Agent 提供与外部世界交互的能力。工具系统采用注册表模式管理工具，通过事件驱动实现异步执行，并内置权限控制和结果截断机制。
+工具系统是 Sensenova-Claw 的核心能力层之一，为 Agent 提供与外部世界交互的能力。工具系统采用注册表模式管理工具，通过事件驱动实现异步执行，并内置权限控制和结果截断机制。
 
 ## 架构概览
 
@@ -20,7 +20,7 @@ ToolRuntime（工具运行时）
 
 ## Tool 基类
 
-所有工具必须继承 `Tool` 基类，位于 `agentos/capabilities/tools/base.py`：
+所有工具必须继承 `Tool` 基类，位于 `sensenova_claw/capabilities/tools/base.py`：
 
 ```python
 class ToolRiskLevel(Enum):
@@ -46,7 +46,7 @@ class Tool:
 
 ## ToolRegistry
 
-`ToolRegistry` 是工具的注册表，位于 `agentos/capabilities/tools/registry.py`：
+`ToolRegistry` 是工具的注册表，位于 `sensenova_claw/capabilities/tools/registry.py`：
 
 ```python
 class ToolRegistry:
@@ -86,7 +86,7 @@ class ToolRegistry:
 
 ## 工具执行流程（ToolSessionWorker）
 
-`ToolSessionWorker` 是每个会话的工具执行器，位于 `agentos/kernel/runtime/workers/tool_worker.py`。完整执行流程如下：
+`ToolSessionWorker` 是每个会话的工具执行器，位于 `sensenova_claw/kernel/runtime/workers/tool_worker.py`。完整执行流程如下：
 
 ### 1. 接收工具调用请求
 

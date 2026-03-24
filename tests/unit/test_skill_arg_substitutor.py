@@ -1,5 +1,5 @@
 """S02: ArgSubstitutor"""
-from agentos.capabilities.skills.arg_substitutor import substitute_arguments, parse_arguments
+from sensenova_claw.capabilities.skills.arg_substitutor import substitute_arguments, parse_arguments
 
 
 class TestArgSubstitutor:

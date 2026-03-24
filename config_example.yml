@@ -1,9 +1,9 @@
-# AgentOS 配置文件示例
+# Sensenova-Claw 配置文件示例
 # 复制此文件为 config.yml 并填入真实的 API Key
 
 system:
-  workspace_dir: ~/.agentos/workspace
-  database_path: ~/.agentos/db/agentos.db
+  workspace_dir: ~/.sensenova-claw/workspace
+  database_path: ~/.sensenova-claw/db/sensenova-claw.db
 
 security:
   auth_enabled: true
@@ -147,12 +147,12 @@ llm:
       max_tokens: 256000
       max_output_tokens: 16384
 
-  default_model: gemini-pro
+  default_model: null
 
 # ════════════════════════════════════════════════════
 # Agents 配置
 # ════════════════════════════════════════════════════
-# system_prompt 不在此文件配置，放在 .agentos/agents/<agent_id>/SYSTEM_PROMPT.md 中
+# system_prompt 不在此文件配置，放在 .sensenova-claw/agents/<agent_id>/SYSTEM_PROMPT.md 中
 agents:
   default:
     name: Default Agent
@@ -164,7 +164,7 @@ agents:
 
   system-admin:
     name: 系统运维管理员
-    description: 系统运维管理员，负责 AgentOS 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作
+    description: 系统运维管理员，负责 Sensenova-Claw 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作
     temperature: 0.2
     tools: [read_file, write_file, bash_command]
     skills: [system-admin-skill]
@@ -212,12 +212,6 @@ agents:
     tools: [bash_command, read_file, write_file, send_message, send_email, list_emails, read_email, download_attachment, mark_email, search_emails, ask_user]
     skills: []
 
-  philosopher:
-    name: 哲学家
-    description: 哲学思辨与深度思考，擅长多角度分析问题、引用中西方哲学经典
-    temperature: 0.7
-    tools: [serper_search, fetch_url, ask_user]
-    skills: []
 
 # ════════════════════════════════════════════════════
 # 工具配置
@@ -276,15 +270,15 @@ plugins:
     bot_token: "${DISCORD_BOT_TOKEN}"
     dm_policy: "open"  # open | allowlist | disabled
     group_policy: "allowlist"  # open | allowlist | disabled
-    allowlist: []
-    group_allowlist: []
-    channel_allowlist: []
-    require_mention: true
+    allowlist: [ ]  # 私聊allow_list
+    group_allowlist: [ ]  # 可以在群聊触发的allow_list
+    channel_allowlist: [ ]  # 允许的频道id
+    require_mention: true  # 群里即使用户和频道都满足，还必须 @bot 才会响应
     show_tool_progress: false
     reply_in_thread: true
   whatsapp:
     enabled: false
-    auth_dir: "~/.agentos/data/plugins/whatsapp/auth"
+    auth_dir: "~/.sensenova-claw/data/plugins/whatsapp/auth"
     typing_indicator: "none"  # composing | none  新用户建议使用none，过于频繁容易limited
     dm_policy: "open"
     group_policy: "open"
@@ -293,6 +287,6 @@ plugins:
     show_tool_progress: false
     bridge:
       command: "node"
-      entry: "agentos/adapters/plugins/whatsapp/bridge/src/index.mjs"
+      entry: "sensenova_claw/adapters/plugins/whatsapp/bridge/src/index.mjs"
       startup_timeout_seconds: 30
       send_timeout_seconds: 15

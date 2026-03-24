@@ -2,7 +2,7 @@
 
 ## 概述
 
-AgentOS 的事件总线由三个核心组件构成：**PublicEventBus**（全局广播）、**PrivateEventBus**（会话隔离）、**BusRouter**（路由桥梁）。它们共同实现了事件的广播、路由和会话隔离。
+Sensenova-Claw 的事件总线由三个核心组件构成：**PublicEventBus**（全局广播）、**PrivateEventBus**（会话隔离）、**BusRouter**（路由桥梁）。它们共同实现了事件的广播、路由和会话隔离。
 
 ---
 

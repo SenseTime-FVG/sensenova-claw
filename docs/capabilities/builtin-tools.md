@@ -1,6 +1,6 @@
 # 内置工具
 
-AgentOS 内置多种工具，覆盖命令执行、信息检索、文件操作、安全授权和多 Agent 协作场景。所有工具定义位于 `agentos/capabilities/tools/` 目录下。
+Sensenova-Claw 内置多种工具，覆盖命令执行、信息检索、文件操作、安全授权和多 Agent 协作场景。所有工具定义位于 `sensenova_claw/capabilities/tools/` 目录下。
 
 ## 工具总览
 
@@ -72,7 +72,7 @@ AgentOS 内置多种工具，覆盖命令执行、信息检索、文件操作、
 
 ```json
 {
-  "query": "AgentOS 架构",
+  "query": "Sensenova-Claw 架构",
   "items": [
     {
       "title": "搜索结果标题",

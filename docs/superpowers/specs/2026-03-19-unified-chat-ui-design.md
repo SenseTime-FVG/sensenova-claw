@@ -6,7 +6,7 @@
 
 ## 1. 概述
 
-将 AgentOS 前端的 5 个页面（主页、Chat、深度研究、PPT、自动化）统一为一致的对话交互风格，合并左侧导航栏为按任务分组的 session 列表，并实现支持拖拽的文件区。
+将 Sensenova-Claw 前端的 5 个页面（主页、Chat、深度研究、PPT、自动化）统一为一致的对话交互风格，合并左侧导航栏为按任务分组的 session 列表，并实现支持拖拽的文件区。
 
 ### 核心目标
 
@@ -30,7 +30,7 @@
 
 ```
 ┌─ DashboardLayout TopBar ─────────────────────────────────────┐
-│ [AO] AgentOS  [工作台][Chat][深度研究][PPT][自动化] [管理▾] [搜索][头像] │
+│ [AO] Sensenova-Claw  [工作台][Chat][深度研究][PPT][自动化] [管理▾] [搜索][头像] │
 ├──────────┬───────────────────────────────┬────────────────────┤
 │ LeftNav  │       ChatPanel              │   RightContext     │
 │ w-64     │       (所有页面统一)            │   (可折叠, w-80)  │
@@ -382,14 +382,14 @@ GET /api/files?path=<dir_path>
 
 ### 安全
 
-- 利用 `agentos/platform/security/` 路径策略
+- 利用 `sensenova_claw/platform/security/` 路径策略
 - `workspace/` 目录始终允许
 - 对 path 做 `os.path.realpath()` 防止路径遍历
 - 路径不存在 → 404，无权限 → 403，不是目录 → 400
 
 ### 实现位置
 
-新建 `agentos/interfaces/http/files.py` 作为独立路由模块（与现有 `workspace.py`、`agents.py` 等同级）。
+新建 `sensenova_claw/interfaces/http/files.py` 作为独立路由模块（与现有 `workspace.py`、`agents.py` 等同级）。
 
 注意：已有 `GET /api/workspace/files` 端点（在 `workspace.py` 中，仅列出 workspace 下的 `.md` 文件）。新 API 功能不同：
 - `/api/workspace/files` → 只列 workspace 下的 markdown 文件（保留不动）
@@ -399,7 +399,7 @@ GET /api/files?path=<dir_path>
 
 当前 `agent_worker._handle_user_input()` 只在首轮从 `load_workspace_files()` 加载 workspace 配置文件（AGENTS.md 等），不读取 event payload 中前端传来的用户文件路径。
 
-**改动**（`agentos/kernel/runtime/workers/agent_worker.py`）：
+**改动**（`sensenova_claw/kernel/runtime/workers/agent_worker.py`）：
 
 ```python
 async def _handle_user_input(self, event: EventEnvelope) -> None:
@@ -409,7 +409,7 @@ async def _handle_user_input(self, event: EventEnvelope) -> None:
     # 现有：首轮加载 workspace 配置文件
     context_files = None
     if self.rt.state_store.is_first_turn(self.session_id):
-        context_files = await load_workspace_files(agentos_home, agent_id=agent_id)
+        context_files = await load_workspace_files(sensenova_claw_home, agent_id=agent_id)
         self.rt.state_store.mark_first_turn_done(self.session_id)
 
     # 新增：读取前端拖入的用户文件
@@ -426,7 +426,7 @@ async def _handle_user_input(self, event: EventEnvelope) -> None:
 ```python
 async def _load_user_context_files(self, paths: list[str]) -> list[ContextFile]:
     """读取前端传来的文件路径，转为 ContextFile 对象"""
-    from agentos.platform.security.path_policy import PathPolicy
+    from sensenova_claw.platform.security.path_policy import PathPolicy
     files = []
     for path in paths:
         real_path = os.path.realpath(path)
@@ -459,8 +459,8 @@ async def _load_user_context_files(self, paths: list[str]) -> list[ContextFile]:
 | **修改页面** | `app/layout.tsx`（新增 ChatSessionProvider 包裹）, `/`, `/chat`, `/research`, `/ppt`, `/automation` → 薄页面 + ChatPanel |
 | **删除/替代** | `useWorkbenchSession.ts`（合并入 useChatSession）, `MainStage.tsx`（主页空状态迁移为 TaskTemplates，其余被 ChatPanel 替代）, `BottomInput.tsx`（被 ChatInput 替代）, chat/page.tsx 内联逻辑 |
 | **保留复用** | `QuestionDialog.tsx`（InteractionDialog，迁移到 ChatPanel 内使用）, `SlashCommandMenu.tsx` + `useSlashCommand`（迁移到 ChatInput 内使用） |
-| **后端新增** | `agentos/interfaces/http/files.py`：`GET /api/files` 文件列表 API |
-| **后端修改** | `agentos/kernel/runtime/workers/agent_worker.py`：读取 event payload 中的 `context_files` 路径并加载文件内容 |
+| **后端新增** | `sensenova_claw/interfaces/http/files.py`：`GET /api/files` 文件列表 API |
+| **后端修改** | `sensenova_claw/kernel/runtime/workers/agent_worker.py`：读取 event payload 中的 `context_files` 路径并加载文件内容 |
 | **依赖新增** | `react-dnd`, `react-dnd-html5-backend` |
 
 ## 10. 不改动的部分

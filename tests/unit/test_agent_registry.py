@@ -1,6 +1,6 @@
 """AgentRegistry CRUD + config 加载 + Agent 发现"""
-from agentos.capabilities.agents.config import AgentConfig
-from agentos.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
 
 
 class TestAgentRegistry:
@@ -135,7 +135,7 @@ class TestAgentRegistry:
         prompt_dir.mkdir(parents=True)
         (prompt_dir / "SYSTEM_PROMPT.md").write_text("你是测试助手。", encoding="utf-8")
 
-        r = AgentRegistry(agentos_home=tmp_path)
+        r = AgentRegistry(sensenova_claw_home=tmp_path)
         r.load_from_config({
             "agents": {"test-agent": {"name": "Test"}},
         })

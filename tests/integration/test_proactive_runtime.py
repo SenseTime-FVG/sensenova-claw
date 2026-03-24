@@ -3,8 +3,8 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from agentos.kernel.proactive.runtime import ProactiveRuntime
-from agentos.kernel.proactive.models import (
+from sensenova_claw.kernel.proactive.runtime import ProactiveRuntime
+from sensenova_claw.kernel.proactive.models import (
     ProactiveJob,
     TimeTrigger,
     EventTrigger,

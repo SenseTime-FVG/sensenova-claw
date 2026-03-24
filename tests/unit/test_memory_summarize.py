@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentos.capabilities.memory.config import MemoryConfig
-from agentos.capabilities.memory.manager import MemoryManager, _SUMMARIZE_SYSTEM_PROMPT
+from sensenova_claw.capabilities.memory.config import MemoryConfig
+from sensenova_claw.capabilities.memory.manager import MemoryManager, _SUMMARIZE_SYSTEM_PROMPT
 
 
 @pytest.fixture
@@ -81,7 +81,9 @@ class TestSummarizeTurn:
 
         await manager.summarize_turn(messages)
 
-        memory_path = workspace / "MEMORY.md"
+        from datetime import datetime
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        memory_path = workspace / "agents" / "default" / "memory" / f"{today_str}.md"
         assert memory_path.exists()
         content = memory_path.read_text(encoding="utf-8")
         assert "需求：实现登录功能" in content
@@ -96,7 +98,9 @@ class TestSummarizeTurn:
 
         await manager.summarize_turn(messages, agent_id="planner")
 
-        memory_path = workspace / "memory" / "planner.md"
+        from datetime import datetime
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        memory_path = workspace / "agents" / "planner" / "memory" / f"{today_str}.md"
         assert memory_path.exists()
         content = memory_path.read_text(encoding="utf-8")
         assert "需求：实现登录功能" in content
@@ -111,7 +115,10 @@ class TestSummarizeTurn:
         await manager.summarize_turn(messages)
         await manager.summarize_turn(messages)
 
-        content = (workspace / "MEMORY.md").read_text(encoding="utf-8")
+        from datetime import datetime
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        memory_path = workspace / "agents" / "default" / "memory" / f"{today_str}.md"
+        content = memory_path.read_text(encoding="utf-8")
         assert content.count("---") == 2
 
     @pytest.mark.asyncio

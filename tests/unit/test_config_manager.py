@@ -4,11 +4,11 @@ import pytest
 import yaml
 from pathlib import Path
 
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
-from agentos.platform.config.config_manager import ConfigManager
-from agentos.platform.config.config import Config
-from agentos.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
+from sensenova_claw.platform.config.config_manager import ConfigManager
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
 
 
 @pytest.fixture
@@ -80,7 +80,7 @@ async def test_update_handles_secrets(setup):
     await manager.update("llm", {"providers": {"openai": {"api_key": "sk-new"}}})
     written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert written["llm"]["providers"]["openai"]["api_key"].startswith("${secret:")
-    assert secret_store.get("agentos/llm.providers.openai.api_key") == "sk-new"
+    assert secret_store.get("sensenova_claw/llm.providers.openai.api_key") == "sk-new"
 
 
 @pytest.mark.asyncio

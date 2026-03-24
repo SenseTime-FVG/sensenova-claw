@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from agentos.adapters.plugins.whatsapp.config import WhatsAppBridgeConfig, WhatsAppConfig
+from sensenova_claw.adapters.plugins.whatsapp.config import WhatsAppBridgeConfig, WhatsAppConfig
 
 
 class TestWhatsAppConfigDefaults:
@@ -27,7 +27,7 @@ class TestWhatsAppConfigFromPluginApi:
     def _make_api(self, overrides: dict | None = None) -> MagicMock:
         defaults = {
             "enabled": True,
-            "auth_dir": "/tmp/agentos-whatsapp-auth",
+            "auth_dir": "/tmp/sensenova_claw-whatsapp-auth",
             "typing_indicator": "none",
             "dm_policy": "allowlist",
             "group_policy": "allowlist",
@@ -52,7 +52,7 @@ class TestWhatsAppConfigFromPluginApi:
         api = self._make_api()
         cfg = WhatsAppConfig.from_plugin_api(api)
         assert cfg.enabled is True
-        assert Path(cfg.auth_dir) == Path("/tmp/agentos-whatsapp-auth").resolve()
+        assert Path(cfg.auth_dir) == Path("/tmp/sensenova_claw-whatsapp-auth").resolve()
         assert cfg.typing_indicator == "none"
         assert cfg.dm_policy == "allowlist"
         assert cfg.group_policy == "allowlist"
@@ -79,7 +79,7 @@ class TestWhatsAppConfigFromPluginApi:
         assert cfg.bridge.command == "node"
 
     def test_from_plugin_api_resolves_relative_auth_dir_to_absolute(self):
-        api = self._make_api({"auth_dir": ".agentos/data/plugins/whatsapp/auth"})
+        api = self._make_api({"auth_dir": ".sensenova-claw/data/plugins/whatsapp/auth"})
         cfg = WhatsAppConfig.from_plugin_api(api)
         assert Path(cfg.auth_dir).is_absolute()
 
@@ -88,7 +88,7 @@ class TestWhatsAppConfigFromPluginApi:
             {
                 "bridge": {
                     "command": "node",
-                    "entry": "agentos/adapters/channels/whatsapp/bridge/src/index.mjs",
+                    "entry": "sensenova_claw/adapters/channels/whatsapp/bridge/src/index.mjs",
                     "startup_timeout_seconds": 30,
                     "send_timeout_seconds": 15,
                 }
@@ -96,5 +96,5 @@ class TestWhatsAppConfigFromPluginApi:
         )
         cfg = WhatsAppConfig.from_plugin_api(api)
         assert cfg.bridge.entry.endswith(
-            "agentos/adapters/plugins/whatsapp/bridge/src/index.mjs"
+            "sensenova_claw/adapters/plugins/whatsapp/bridge/src/index.mjs"
         )

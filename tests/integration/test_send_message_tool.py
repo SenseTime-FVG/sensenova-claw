@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from agentos.capabilities.agents.config import AgentConfig
-from agentos.capabilities.agents.registry import AgentRegistry
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.capabilities.tools.send_message_tool import SendMessageTool
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.router import BusRouter
-from agentos.kernel.events.types import (
+from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.capabilities.tools.send_message_tool import SendMessageTool
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.events.types import (
     AGENT_MESSAGE_COMPLETED,
     AGENT_STEP_COMPLETED,
     ERROR_RAISED,
@@ -22,10 +22,10 @@ from agentos.kernel.events.types import (
     USER_QUESTION_ASKED,
     USER_TURN_CANCEL_REQUESTED,
 )
-from agentos.kernel.runtime.agent_message_coordinator import AgentMessageCoordinator
-from agentos.kernel.runtime.agent_runtime import AgentRuntime
-from agentos.kernel.runtime.context_builder import ContextBuilder
-from agentos.kernel.runtime.state import SessionStateStore
+from sensenova_claw.kernel.runtime.agent_message_coordinator import AgentMessageCoordinator
+from sensenova_claw.kernel.runtime.agent_runtime import AgentRuntime
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from sensenova_claw.kernel.runtime.state import SessionStateStore
 
 pytestmark = pytest.mark.asyncio
 
@@ -33,7 +33,7 @@ pytestmark = pytest.mark.asyncio
 async def _build_runtime(repo, tmp_path):
     bus = PublicEventBus()
     bus_router = BusRouter(public_bus=bus, ttl_seconds=60, gc_interval=60)
-    registry = AgentRegistry(agentos_home=tmp_path / "agents")
+    registry = AgentRegistry(sensenova_claw_home=tmp_path / "agents")
     registry.register(AgentConfig.create(id="default", name="Default"))
     registry.register(AgentConfig.create(id="helper", name="Helper"))
     runtime = AgentRuntime(

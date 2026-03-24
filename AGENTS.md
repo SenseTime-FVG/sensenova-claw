@@ -159,8 +159,8 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 成功经验：
 - 新 channel 接入可直接复用 `wecom` 的测试结构：先补 `config/plugin/channel/e2e` 四层测试，再落生产代码，能快速把“模块不存在”推进到“完整链路通过”。
-- WhatsApp 这类外部 IM 渠道，最好把“AgentOS channel 逻辑”和“底层 runtime/协议 bridge”拆开；`channel.py` 只负责会话映射、策略和事件桥接，后续替换真实 runtime 不需要重写业务层。
-- 进程内 e2e 里若要验证 DEBUG 日志，必须显式把 `system.agentos_home` 指到测试临时目录；否则日志默认写到 `~/.agentos/logs`，在受限环境下容易触发权限问题。
+- WhatsApp 这类外部 IM 渠道，最好把“Sensenova-Claw channel 逻辑”和“底层 runtime/协议 bridge”拆开；`channel.py` 只负责会话映射、策略和事件桥接，后续替换真实 runtime 不需要重写业务层。
+- 进程内 e2e 里若要验证 DEBUG 日志，必须显式把 `system.sensenova_claw_home` 指到测试临时目录；否则日志默认写到 `~/.sensenova-claw/logs`，在受限环境下容易触发权限问题。
 
 失败/风险经验：
 - 当前仓库的 WhatsApp 接入只完成了核心 channel 层与 bridge 抽象，默认 `LocalBridgeStub` 还不具备真实 WhatsApp Web 收发能力；不能把“测试链路通过”误判为“生产可扫码可收发”。
@@ -213,7 +213,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-18 Feishu 插件发现补充
 
 成功经验：
-- 插件注册表若要发现 channel 插件，必须扫描实际落盘位置；当前仓库的内置 channel 插件都在 `agentos.adapters.channels.<name>.plugin`，只扫 `agentos.adapters.plugins` 会导致 Gateway 完全无感知。
+- 插件注册表若要发现 channel 插件，必须扫描实际落盘位置；当前仓库的内置 channel 插件都在 `sensenova-claw.adapters.channels.<name>.plugin`，只扫 `sensenova-claw.adapters.plugins` 会导致 Gateway 完全无感知。
 - 对“Web 端没显示某 channel”这类问题，先跑 `PluginRegistry.load_plugins()` 的最小单测最有效，能直接区分“前端展示问题”和“后端根本没注册”。
 - 插件发现修复后，顺手把 `feishu/wecom/telegram/whatsapp` 的发现断言集中到单测里，能防止后续新 channel 再被扫描逻辑漏掉。
 
@@ -230,7 +230,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅移植 SDK 源码不等于可运行，运行依赖如 `pyee`、`aiohttp`、`cryptography` 仍需同步补到 `pyproject.toml` 并安装，否则内部 `sdk/__init__.py` 一 import 就会失败。
-- 企微 e2e 若调用 `setup_logging()`，必须显式把 `system.agentos_home` 指向测试临时目录；否则日志会默认落到 `~/.agentos/logs`，在当前环境下容易直接因权限问题失败。
+- 企微 e2e 若调用 `setup_logging()`，必须显式把 `system.sensenova_claw_home` 指向测试临时目录；否则日志会默认落到 `~/.sensenova-claw/logs`，在当前环境下容易直接因权限问题失败。
 
 ### 2026-03-18 搜索工具扩展补充
 
@@ -264,7 +264,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境 `next build` 仅返回泛化的 “Build failed because of webpack errors”，无具体堆栈；前端编译问题排查应优先结合本地 IDE/CI 日志而非仅依赖该环境终端输出。
 - Playwright 仍受系统库缺失影响（`libnspr4.so`），即使越权执行测试命令也无法启动 Chromium，浏览器级 e2e 结果不能在本机作为通过依据。
-- `tests/e2e/test_gateway_integration.py` 在默认 `AGENTOS_HOME` 下会写到只读路径（`/home/languilin/.agentos/logs`）导致失败；需要显式设置可写 `AGENTOS_HOME` 后再跑。
+- `tests/e2e/test_gateway_integration.py` 在默认 `SENSENOVA_CLAW_HOME` 下会写到只读路径（`/home/languilin/.sensenova-claw/logs`）导致失败；需要显式设置可写 `SENSENOVA_CLAW_HOME` 后再跑。
 
 ### 2026-03-18 子会话继承 channel 绑定补充
 
@@ -291,8 +291,8 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-19 email-agent 工具接入补充
 
 成功经验：
-- Agent 侧 `tools` 白名单与全局 `ToolRegistry` 注册缺一不可；仅修改 `.agentos/agents/<id>/config.yml` 不会让未注册工具自动可用。
-- 对预置 Agent 配置做回归时，直接用仓库内真实 `.agentos/agents/<id>/config.yml` 构造 `AgentRegistry` 断言，比复制一份测试夹具更能防止配置漂移。
+- Agent 侧 `tools` 白名单与全局 `ToolRegistry` 注册缺一不可；仅修改 `.sensenova-claw/agents/<id>/config.yml` 不会让未注册工具自动可用。
+- 对预置 Agent 配置做回归时，直接用仓库内真实 `.sensenova-claw/agents/<id>/config.yml` 构造 `AgentRegistry` 断言，比复制一份测试夹具更能防止配置漂移。
 - 当前环境执行 pytest 应优先使用 `.venv/bin/python -m pytest`；系统 `python3` 缺少 `pytest`，直接调用会误判为测试无法运行。
 
 失败/风险经验：
@@ -301,14 +301,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：
-- `/chat` 页面使用的是独立 WebSocket 状态机，不走 `WebSocketContext`；排查”服务重启后首次访问卡住、刷新恢复”时必须直接看 `agentos/app/web/app/chat/page.tsx`。
+- `/chat` 页面使用的是独立 WebSocket 状态机，不走 `WebSocketContext`；排查”服务重启后首次访问卡住、刷新恢复”时必须直接看 `sensenova_claw/app/web/app/chat/page.tsx`。
 - 仅修自动重连不够，重连成功后还要补拉 session 列表，并对当前 session 发 `load_session` 重新绑定 WebSocket，否则历史会话后续回复仍可能收不到。
 - Playwright 回归测试里如果要模拟业务 WebSocket，必须只拦截 `localhost:8000/ws` 这一条连接并保留 Next dev 的 HMR WebSocket；否则页面会因为开发态连接被破坏而卡在认证/加载阶段。
 - 对根入口 `/?token=...`，真正可靠的统一方式不是只改 `app/page.tsx`，而是让 `AuthProvider` 在根路径检测到 token 后立刻跳到 `/chat?...`；否则 `AuthProvider` 可能先把根路径里的 token 清掉，导致页面组件读到的 query 已经不完整。
 
 失败/风险经验：
 - `switchSession` 只做 HTTP 拉历史不能恢复事件投递；后端真正的 session-to-websocket 绑定发生在 `create_session`/`load_session` 这类 WS 消息里，不补这一层前端看起来”打开了会话”，实际收不到后续事件。
-- 当前前端全量构建仍存在与本次改动无关的既有类型错误：`agentos/app/web/components/ThemeProvider.tsx` 依赖 `next-themes/dist/types`，`npm run build` 会在该文件失败，因此不能把这次任务表述为”整个前端构建通过”。
+- 当前前端全量构建仍存在与本次改动无关的既有类型错误：`sensenova_claw/app/web/components/ThemeProvider.tsx` 依赖 `next-themes/dist/types`，`npm run build` 会在该文件失败，因此不能把这次任务表述为”整个前端构建通过”。
 
 失败/风险经验：
 - `npm run test:backend:e2e` 依赖 `pytest` 可执行文件，当前环境不存在该命令；需要使用 `python3 -m pytest` 或改脚本兼容。  
@@ -316,13 +316,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-18 Cron/通知/API Key 面板补充
 
 成功经验：
-- 将 `config.yml` 持久化逻辑抽到 `agentos/interfaces/http/config_store.py` 后，`config_api`、`tools` API key 管理和 `notification_api` 都能复用同一套“保留未知顶层字段 + 热重载”的写回路径，避免多处手写 YAML 合并逻辑。
+- 将 `config.yml` 持久化逻辑抽到 `sensenova_claw/interfaces/http/config_store.py` 后，`config_api`、`tools` API key 管理和 `notification_api` 都能复用同一套“保留未知顶层字段 + 热重载”的写回路径，避免多处手写 YAML 合并逻辑。
 - 通知系统最稳的落点是事件总线：`NotificationService -> notification.push / notification.session -> WebSocketChannel -> 前端 NotificationProvider`，这样浏览器 toast、浏览器原生通知和会话内系统消息可以共享同一份 payload。
 - Cron UI 若直接复用 `CronRuntime` + `Repository.list_cron_runs()`，后端不需要新增第二套调度业务逻辑；前端只需要围绕 `/api/cron/jobs` 与 `/api/cron/jobs/{id}/runs` 做 CRUD 和历史面板即可。
 
 失败/风险经验：
 - 当前环境里 `python3 -m pytest` 仍不可用，验证新后端接口时要继续使用 `UV_CACHE_DIR=/tmp/uv_cache uv run python -m pytest ...`。
-- 当前前端类型检查仍会先卡在既有问题 `agentos/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为“本次改动失败”的依据。
+- 当前前端类型检查仍会先卡在既有问题 `sensenova_claw/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为“本次改动失败”的依据。
 
 ### 2026-03-19 WhatsApp 405 调试补充
 
@@ -338,7 +338,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-19 WhatsApp 入站消息补充
 
 成功经验：
-- 当用户反馈“已登录但不回复消息”时，先判断是“出站失败”还是“根本没入站”；日志里完全没有 `agentos.adapters.channels.whatsapp` 相关记录时，优先怀疑 sidecar 的 `messages.upsert` 抽取逻辑。
+- 当用户反馈“已登录但不回复消息”时，先判断是“出站失败”还是“根本没入站”；日志里完全没有 `sensenova-claw.adapters.channels.whatsapp` 相关记录时，优先怀疑 sidecar 的 `messages.upsert` 抽取逻辑。
 - 真实 WhatsApp 文本消息经常包在 `ephemeralMessage`、`viewOnceMessageV2`、`editedMessage` 这类 wrapper 里；只读最外层 `conversation/extendedTextMessage` 很容易导致消息被静默忽略。
 - 对这类协议层问题，给 Node sidecar 补一层 `node:test` 用例最有效：直接构造 `messages.upsert` 事件，断言是否发出了 `type=message`，比从 Python 侧反推更快。
 
@@ -348,9 +348,9 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-20 Gateway Channel 失败态补充
 
 成功经验：
-- `/api/gateway/channels` 适合做统一状态汇总层；优先读取 channel 自身、`_runtime`、`_client` 上的 `_agentos_status`，前端就不需要分别理解 `feishu/telegram/wecom` 的内部实现。
+- `/api/gateway/channels` 适合做统一状态汇总层；优先读取 channel 自身、`_runtime`、`_client` 上的 `_sensenova-claw_status`，前端就不需要分别理解 `feishu/telegram/wecom` 的内部实现。
 - `/gateway` 的失败态展示可以完全复用 WhatsApp 现有红色视觉 token，只需新增 `status === "failed"` 分支，避免再为每个 channel 做单独样式。
-- Playwright 若只验证前端页面渲染，最好绕开仓库默认 `webServer`，单独启动 `agentos/app/web` 的 `next dev` 并用最小配置执行；否则容易被后端 `uv` 启动链路干扰。
+- Playwright 若只验证前端页面渲染，最好绕开仓库默认 `webServer`，单独启动 `sensenova_claw/app/web` 的 `next dev` 并用最小配置执行；否则容易被后端 `uv` 启动链路干扰。
 
 失败/风险经验：
 - 当前环境下默认 Playwright 配置会经过根目录 `npm run dev`，而这条链路里的 `uv` 可能 panic；前端页面级回归不能假设默认配置一定可用。
@@ -435,7 +435,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 如果 runtime 里原本没有发送 typing/composing，仅增加 `typingIndicator` 配置不会有任何实际效果；要先确认当前 sidecar 的真实出站行为，再决定是”增加开关”还是”同时补行为 + 开关”。
 - 当前环境里 `python3 -m pytest` 仍不可用，验证新后端接口时要继续使用 `UV_CACHE_DIR=/tmp/uv_cache uv run python -m pytest ...`。
-- 当前前端类型检查仍会先卡在既有问题 `agentos/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为”本次改动失败”的依据。
+- 当前前端类型检查仍会先卡在既有问题 `sensenova_claw/app/web/components/ThemeProvider.tsx` 的 `next-themes/dist/types` 导入上；即使新页面本身通过，仓库级 `npx tsc --noEmit` / `npm run build` 也不能直接作为”本次改动失败”的依据。
 
 ### 2026-03-19 Chat Markdown 设计补充
 
@@ -473,7 +473,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 对”保留旧 skill + 新增选择型 skill”的需求，先把”是否改旧 skill””是否包含网页””结果是否统一落盘”三条边界问清，再写 spec，能明显减少后续实现分叉。
 - 使用官方 `mineru-open-api` CLI 的方案时，skill 文档最重要的不是安装说明，而是把”每次先 ask_user 选渠道、免费失败不自动切换、输出目录固定到 workspace”这几个行为约束写死。
 - 对这类远程 API CLI，资源要求说明应基于官方产品形态谨慎表述为”通常较轻量”，不要虚构 CPU/内存硬指标。
-- 若需求要求”CLI 未安装时由 skill 负责安装”，实现上不能把该 skill 用 `metadata.agentos.requires.bins` 做硬门控隐藏；否则 skill 在缺失 CLI 时不会被发现，也就无法触发安装流程。
+- 若需求要求”CLI 未安装时由 skill 负责安装”，实现上不能把该 skill 用 `metadata.sensenova-claw.requires.bins` 做硬门控隐藏；否则 skill 在缺失 CLI 时不会被发现，也就无法触发安装流程。
 
 失败/风险经验：
 - 当前会话环境没有可调用的 spec reviewer 子代理能力；设计文档阶段只能采用人工自检退化方案，并需要在产物里显式注明，避免误称已完成完整 reviewer loop。
@@ -486,12 +486,12 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前环境可以跑前端浏览器级 e2e，但需要同时满足两个条件：`localhost:3000` 上已有可复用前端服务，以及提前把 Playwright 浏览器安装到可写目录（如 `PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers`）。
 
 失败/风险经验：
-- 仓库级 `npx tsc --noEmit` 仍会先命中既有问题：`agentos/app/web/components/ThemeProvider.tsx` 无法解析 `next-themes/dist/types`；验证这类页面级改动时，不能把这个历史错误误记为本次回归失败。
+- 仓库级 `npx tsc --noEmit` 仍会先命中既有问题：`sensenova_claw/app/web/components/ThemeProvider.tsx` 无法解析 `next-themes/dist/types`；验证这类页面级改动时，不能把这个历史错误误记为本次回归失败。
 
 ### 2026-03-19 Sessions 删除补充
 
 成功经验：
-- session 删除如果要同时清理数据库和 `~/.agentos/agents/{agent_id}/sessions/{session_id}.jsonl`，最简洁的落点是新增独立 `sessions` HTTP router：先通过 `repo.get_session_meta()` 解析 `agent_id`，再调用 `gateway.delete_session()` 删库解绑，最后删 JSONL 文件。
+- session 删除如果要同时清理数据库和 `~/.sensenova-claw/agents/{agent_id}/sessions/{session_id}.jsonl`，最简洁的落点是新增独立 `sessions` HTTP router：先通过 `repo.get_session_meta()` 解析 `agent_id`，再调用 `gateway.delete_session()` 删库解绑，最后删 JSONL 文件。
 - `/sessions` 这种”整行可点击跳详情”的表格，删除按钮必须放在独立操作列里，并在 `onClick` 里显式 `stopPropagation()`；否则按钮会和行级跳转冲突。
 
 失败/风险经验：
@@ -509,13 +509,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-19 安装脚本与发布流补充
 
 成功经验：
-- `uv tool install --from .` 会把包复制进独立 tool 环境；当安装目录仓库更新或本地 hotfix 未重新注册命令时，`agentos` 可能继续跑旧版代码。改为 `uv tool install --editable --from . --force agentos` 后，CLI 会直接跟随安装目录源码。
-- 安装脚本支持 `AGENTOS_REPO_REF`（兼容旧 `AGENTOS_REPO_BRANCH`）后，发布验证、tag 回滚和灰度安装都更直接，不必修改脚本正文。
+- `uv tool install --from .` 会把包复制进独立 tool 环境；当安装目录仓库更新或本地 hotfix 未重新注册命令时，`sensenova-claw` 可能继续跑旧版代码。改为 `uv tool install --editable --from . --force sensenova-claw` 后，CLI 会直接跟随安装目录源码。
+- 安装脚本支持 `SENSENOVA_CLAW_REPO_REF`（兼容旧 `SENSENOVA_CLAW_REPO_BRANCH`）后，发布验证、tag 回滚和灰度安装都更直接，不必修改脚本正文。
 - 给安装脚本补”文本契约测试”很划算：直接断言 shell / PowerShell 脚本里存在 `--editable` 与 `REPO_REF` 覆盖逻辑，能防止回归。
 
 失败/风险经验：
-- 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `agentos` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
-- 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `AGENTOS_REPO_REF`。
+- 仅修运行时代码里的 `WEB_DIR` 解析不够；如果全局 `sensenova-claw` 仍是非 editable 安装，用户依然可能继续执行到旧 CLI。
+- 安装脚本默认仍拉取 `dev`；若某个修复只在特性分支、未合并到 `dev` 或未打 tag，外部一键安装仍拿不到修复，发布时必须同步合并或显式指定 `SENSENOVA_CLAW_REPO_REF`。
 
 ### 2026-03-20 办公 Team 覆盖评估补充
 
@@ -535,7 +535,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 成功经验：
 - 当前 sandbox 下，`git add` / `git commit` 会因 `.git/index.lock` 写入受限失败；直接按越权权限重跑对应 git 命令，是完成提交最稳的路径。
-- 当工作区混有 `.agentos/sess_*`、`.agentos/agent2agent_*`、`.agentos/data/*.db-journal` 这类运行产物时，优先用 `git add -u` 再显式添加新增目录，比 `git add -A` 更安全，能避免把临时文件误带进提交。
+- 当工作区混有 `.sensenova-claw/sess_*`、`.sensenova-claw/agent2agent_*`、`.sensenova-claw/data/*.db-journal` 这类运行产物时，优先用 `git add -u` 再显式添加新增目录，比 `git add -A` 更安全，能避免把临时文件误带进提交。
 - 提交前把验证拆成小粒度更高效：先用 `py_compile` 覆盖语法，再分别跑 `tests/unit/test_cron_models.py`、`tests/unit/test_gateway.py`、`tests/unit/test_cron_delivery.py`，证据更清晰。
 
 失败/风险经验：
@@ -601,7 +601,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 - Playwright 在 Next dev 下 mock 全局 `WebSocket` 时，替身必须补上 `addEventListener/removeEventListener`，并且只把业务 `/ws` 连接暴露成 `__mockWs`；否则很容易误打到 HMR socket，导致测试看起来“事件没生效”。
 
 失败/风险经验：
-- 当前 `/chat` 页面的 mock e2e 不能再只靠 `localStorage access_token`；实际鉴权链路依赖 `agentos_token` cookie 和 `/api/auth/status`、`/api/config/llm-status`，漏掉任一项都会让页面停在登录/配置检查流程，导致断言偏离真实问题。
+- 当前 `/chat` 页面的 mock e2e 不能再只靠 `localStorage access_token`；实际鉴权链路依赖 `sensenova_claw_token` cookie 和 `/api/auth/status`、`/api/config/llm-status`，漏掉任一项都会让页面停在登录/配置检查流程，导致断言偏离真实问题。
 
 ### 2026-03-21 Secret Store 接入补充
 
@@ -613,7 +613,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前环境下 `python3 -m pytest` 可用，但 `.venv/bin/python -m pytest` 不一定有 `pytest`；回归命令优先直接用系统 `python3 -m pytest` 更稳。
-- `npx tsc --noEmit -p agentos/app/web/tsconfig.json` 在本环境没有及时返回有效结果，前端静态类型回归不能在这次任务里作为通过依据；需要在本地完整 Node/Next 环境继续确认。
+- `npx tsc --noEmit -p sensenova_claw/app/web/tsconfig.json` 在本环境没有及时返回有效结果，前端静态类型回归不能在这次任务里作为通过依据；需要在本地完整 Node/Next 环境继续确认。
 - 虽然已接入 `python-keyring` 抽象并把默认 store 指向 `KeyringSecretStore`，但真实 keyring backend 可用性仍取决于宿主机环境；当前只完成了进程内/注入式测试，未做真实系统 keyring e2e。
 - 全局 `config = Config()` 这类模块级初始化一旦遇到用户本机已有 `${secret:...}` 配置，会在 import 时就触发 secret 解析；默认 store 不可用时必须先走 `is_available()` 兜底，否则测试导入阶段就会直接崩。
 
@@ -645,7 +645,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 前端 secret 输入框若需要“默认显示 `******` 但又保留未修改状态”，最稳的是把“展示值”和“真实 draft”分开：未 touch 且未 reveal 时显示 `******`，点击眼睛后再把真实值拉进本地状态，但继续保持 `api_key_touched=false`，这样保存时不会误把原 secret 全量回传。
 
 失败/风险经验：
-- 当前 `test_config_api.py` 在本机直接运行会受全局 `~/.agentos/config.yml` 影响；涉及 `config_api` 的 pytest 回归在本环境应显式用临时 `HOME` 隔离，避免导入阶段误读真实 secret 配置。
+- 当前 `test_config_api.py` 在本机直接运行会受全局 `~/.sensenova-claw/config.yml` 影响；涉及 `config_api` 的 pytest 回归在本环境应显式用临时 `HOME` 隔离，避免导入阶段误读真实 secret 配置。
 
 ### 2026-03-21 LLM 管理页 mock 回传补充
 
@@ -689,8 +689,8 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 成功经验：
 - 复用现有 `custom_pages` 入口比另起一套 `miniapps` 路由更稳：列表/导航无需重做，只要在后端把 page 元数据升级成“工作区 + builder + agent + runs”结构，前端 portal 和 `/features/[slug]` 就能平滑演进。
-- 专属 Agent 的工作目录最好直接落在 `AGENTOS_HOME/workdir/{agent_id}/miniapps/{slug}/app`；这样既能继续复用 `/api/files/workdir/...` 静态服务，又能让 Agent 通过默认 workdir 直接改页面文件，不需要额外路径映射。
-- 对页面内交互回传，最省心的协议是 iframe 里统一使用 `window.AgentOSMiniApp.emit(action, payload)`，外层页面通过 `postMessage -> /api/custom-pages/{slug}/interactions -> gateway.send_user_input` 转给 Agent；这条链路用进程内 mock provider e2e 很容易稳定锁住。
+- 专属 Agent 的工作目录最好直接落在 `SENSENOVA_CLAW_HOME/workdir/{agent_id}/miniapps/{slug}/app`；这样既能继续复用 `/api/files/workdir/...` 静态服务，又能让 Agent 通过默认 workdir 直接改页面文件，不需要额外路径映射。
+- 对页面内交互回传，最省心的协议是 iframe 里统一使用 `window.Sensenova-ClawMiniApp.emit(action, payload)`，外层页面通过 `postMessage -> /api/custom-pages/{slug}/interactions -> gateway.send_user_input` 转给 Agent；这条链路用进程内 mock provider e2e 很容易稳定锁住。
 - ACP 第一版不必一次做全，先实现 `initialize -> session/new -> session/prompt` 的最小 stdio JSON-RPC 客户端，再把通知原样落到 run logs，已经足够给 Claude Code / Codex 预留标准接入点。
 
 失败/风险经验：
@@ -760,19 +760,19 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 成功经验：
 - 把 ACP 正式入口迁到 `/acp` 时，最省心的做法是“新增 `/acp` 页面 + Next redirect 把 `/settings` 指过去”，这样新旧链接都能兼容，且不需要大规模搬运页面代码。
-- 当前本机 `codex` CLI 暴露的是 `exec` / `mcp-server` / `app-server`，不是 AgentOS builder 直接使用的 ACP 子集；要“自动用 Codex”，最务实的方案是加一个很薄的 `codex_acp_bridge`，把 `initialize/session/new/session/prompt` 转成一次 `codex exec`。
+- 当前本机 `codex` CLI 暴露的是 `exec` / `mcp-server` / `app-server`，不是 Sensenova-Claw builder 直接使用的 ACP 子集；要“自动用 Codex”，最务实的方案是加一个很薄的 `codex_acp_bridge`，把 `initialize/session/new/session/prompt` 转成一次 `codex exec`。
 - 对这类 bridge，优先把协议层和命令构造抽成纯函数最有效；单测只 mock runner，不依赖真实 Codex 登录态，也能稳定锁住 session 生命周期和最终返回格式。
 
 失败/风险经验：
-- 不能简单把 `miniapps.acp.command=codex` 当成可用配置写给用户；在当前安装版本下这会直接协议不匹配，必须明确区分 MCP/app-server 与 AgentOS 当前 ACP builder 的差异。
+- 不能简单把 `miniapps.acp.command=codex` 当成可用配置写给用户；在当前安装版本下这会直接协议不匹配，必须明确区分 MCP/app-server 与 Sensenova-Claw 当前 ACP builder 的差异。
 
 ### 2026-03-23 官方 codex-acp 适配器补充
 
 成功经验：
-- 用户给出 `zed-industries/codex-acp` 后，应优先切回官方适配器推荐，而不是继续把自定义 bridge 当主路径；AgentOS 当前 ACP client 本身已经能直接对接这个适配器。
+- 用户给出 `zed-industries/codex-acp` 后，应优先切回官方适配器推荐，而不是继续把自定义 bridge 当主路径；Sensenova-Claw 当前 ACP client 本身已经能直接对接这个适配器。
 - 当前 Linux x64 环境下，`npx @zed-industries/codex-acp` 单独执行会因为 optional binary 包缺失失败，但 `npx -y -p @zed-industries/codex-acp -p @zed-industries/codex-acp-linux-x64 codex-acp --help` 可以正常启动，适合作为无需预安装的通用配置。
-- 当 `~/.agentos/config.yml` 尚无 `miniapps` 段时，直接补入 `default_builder: acp` 和 `codex-acp` 启动参数风险较低，且能让新 workspace 默认走 Codex。
-- 用真实后端创建一条 `builder_type=acp` 的 mini-app 很有必要；只有这样才能确认官方 `codex-acp` 不只是能启动，而是真的会把页面文件写到 `~/.agentos/workdir/.../app/` 并让 run 状态最终变成 `completed`。
+- 当 `~/.sensenova-claw/config.yml` 尚无 `miniapps` 段时，直接补入 `default_builder: acp` 和 `codex-acp` 启动参数风险较低，且能让新 workspace 默认走 Codex。
+- 用真实后端创建一条 `builder_type=acp` 的 mini-app 很有必要；只有这样才能确认官方 `codex-acp` 不只是能启动，而是真的会把页面文件写到 `~/.sensenova-claw/workdir/.../app/` 并让 run 状态最终变成 `completed`。
 - 真实 ACP 生成是长任务，排查时不要只看首轮 API 返回的 `queued/running`；应同时检查 `custom_pages_runs/<slug>.json` 的日志流和工作区文件是否持续变化，避免把“仍在生成中”误判成“协议卡死”。
 
 失败/风险经验：
@@ -838,7 +838,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 给 sidecar runtime 增加“版本探测超时回退到内置版本”的兜底后，`start` 可以继续完成 socket 创建；这类修复最适合用 `node:test` 直接把 `fetchLatestBaileysVersion` mock 成永不返回，再断言 `runtime.start()` 仍会在短时间内返回并使用 fallback version。
 
 失败/风险经验：
-- 当前沙箱环境直接跑 `python3 -m agentos.app.main run --no-frontend` 仍可能被 `watchfiles` 权限拦住（`[Errno 1] Operation not permitted`）；这种失败不能用来判断 WhatsApp 启动逻辑是否仍有 bug，需优先看单测和用户本机真实启动日志。
+- 当前沙箱环境直接跑 `python3 -m sensenova_claw.app.main run --no-frontend` 仍可能被 `watchfiles` 权限拦住（`[Errno 1] Operation not permitted`）；这种失败不能用来判断 WhatsApp 启动逻辑是否仍有 bug，需优先看单测和用户本机真实启动日志。
 
 ### 2026-03-22 WhatsApp 自聊 protocolMessage 补充
 
@@ -883,7 +883,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-23 Agent 持久化修复补充
 
 成功经验：
-- Agent 重启丢失时，先核对启动期真实加载来源最关键；当前生效来源只有 `config.yml` 的 `agents` 段和 `AGENTOS_HOME/agents/<id>/SYSTEM_PROMPT.md`，没有任何 `config.json` 覆盖层读取逻辑，因此修复应直接写回这两处。
+- Agent 重启丢失时，先核对启动期真实加载来源最关键；当前生效来源只有 `config.yml` 的 `agents` 段和 `SENSENOVA_CLAW_HOME/agents/<id>/SYSTEM_PROMPT.md`，没有任何 `config.json` 覆盖层读取逻辑，因此修复应直接写回这两处。
 - 对 Agent CRUD，最稳的持久化方式是复用 `ConfigManager.replace("agents", ...)` 做整段写回，同时只修改目标 agent 的记录；这样既能保留其他未知 key，又能触发既有的配置内存刷新与 `CONFIG_UPDATED` 事件。
 - Python 3.14 下旧式 `asyncio.get_event_loop().run_until_complete(...)` 很容易在测试 fixture 中直接报错；测试夹具应改成 `asyncio.run(...)` 才能稳定把失败推进到业务断言。
 
@@ -928,7 +928,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 这类回归最适合用前端 Playwright 的假 WebSocket 用例固化，直接断言发出的 `create_session.agent_id` 和 `user_input.session_id`，比只看页面上显示的模型名称更可靠。
 
 失败/风险经验：
-- 当前环境跑 Playwright 时，仓库默认 `webServer` 会走 `uv run python3 -m agentos.app.main run`；如果 `uv` 命中缓存权限或 `system-configuration` panic，浏览器级 e2e 会在服务启动前失败，不能误判为页面交互逻辑有问题。
+- 当前环境跑 Playwright 时，仓库默认 `webServer` 会走 `uv run python3 -m sensenova_claw.app.main run`；如果 `uv` 命中缓存权限或 `system-configuration` panic，浏览器级 e2e 会在服务启动前失败，不能误判为页面交互逻辑有问题。
 
 ### 2026-03-23 LLM 回退链路补充
 
@@ -964,7 +964,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 成功经验：
 - Windows 下 `ToastNotificationManager.CreateToastNotifier(appId)` 不能只传任意字符串；若开始菜单里不存在同一 `AppUserModelID` 的快捷方式，PowerShell 即使返回成功，系统通知也可能完全不显示。
 - 对 PowerShell 通知脚本，改用 `-EncodedCommand` 比直接 `-Command` 稳定得多，能避免 XML、引号、`$` 和换行内容在通知正文里被二次解析。
-- 当前 Windows 环境里，新的通知脚本可真实执行并返回 `0`，同时成功创建 `AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\AgentOS Notifications.lnk`；通知单测可通过 `uv run --extra dev python -m pytest tests/unit/test_notification_service.py` 稳定回归。
+- 当前 Windows 环境里，新的通知脚本可真实执行并返回 `0`，同时成功创建 `AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Sensenova-Claw Notifications.lnk`；通知单测可通过 `uv run --extra dev python -m pytest tests/unit/test_notification_service.py` 稳定回归。
 
 失败/风险经验：
 - 当前自动化只能确认“脚本执行成功 + 快捷方式落盘 + 返回码正常”，无法直接断言用户桌面一定已经弹出可见通知；最终显示仍受 Windows 通知权限、专注助手和实际交互桌面会话影响。
@@ -997,7 +997,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 - Discord 的会话键最好直接按 `dm:<sender_id> / group:<channel_id> / thread:<thread_id>` 划分；这样与 Telegram topic、WhatsApp group 的思路一致，后续扩展线程绑定或 channel 级功能时不需要重做会话模型。
 
 失败/风险经验：
-- `openclaw/extensions/discord` 里的能力远超 AgentOS 现有 channel 抽象；如果不先明确“只迁移消息渠道闭环”，很容易把 provider runtime、原生命令和复杂 reply delivery 一并带进来，导致首版范围失控。
+- `openclaw/extensions/discord` 里的能力远超 Sensenova-Claw 现有 channel 抽象；如果不先明确“只迁移消息渠道闭环”，很容易把 provider runtime、原生命令和复杂 reply delivery 一并带进来，导致首版范围失控。
 
 ### 2026-03-23 Gateway 缺依赖插件展示补充
 
@@ -1027,9 +1027,31 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-23 dev 退出残留子进程补充
 
 成功经验：
-- `agentos run` 用 `uvicorn --reload` 启动时，真正的根因不是某个 channel 卡住，而是当前清理逻辑只 `terminate()` 了父进程，没有回收整个进程组；一旦 reload/watch 或某些 runtime 生成子进程，就会留下孤儿进程继续占端口。
+- `sensenova-claw run` 用 `uvicorn --reload` 启动时，真正的根因不是某个 channel 卡住，而是当前清理逻辑只 `terminate()` 了父进程，没有回收整个进程组；一旦 reload/watch 或某些 runtime 生成子进程，就会留下孤儿进程继续占端口。
 - 对这类“父进程 + watcher + worker”模型，最稳的修法是启动时给每个子进程单独建进程组，退出时按进程组发送 `SIGTERM`，超时再 `SIGKILL`；仅杀父 PID 不足以保证端口释放。
 - 用真实子进程测试比 mock 更可靠：让父脚本再 spawn 一个 `sleep` 子进程，然后断言清理函数能把父子一起杀掉，能稳定覆盖这类端口残留问题。
 
 失败/风险经验：
 - 仅修 Discord runtime 的异常提示不能解决 `Ctrl+C` 后端口残留；如果 `app/main.py` 仍然按单 PID 清理，换成别的 channel 或热重载路径仍会复现类似问题。
+
+### 2026-03-24 网站图标 500 排查补充
+
+成功经验：
+- Next.js App Router 下，`app/icon.png` 会直接生成 `/icon.png` metadata route；如果同时存在 `public/icon.png`，干净启动时首次访问 `/icon.png` 会稳定报 `A conflicting public file and page file was found for path /icon.png`。
+- 这类静态资源问题最有效的验证方式是起一个干净的独立 `next dev` 端口后直接 `curl /icon.png`；复用已有 dev 进程时，热更新状态可能会暂时掩盖冲突。
+- 对这类“资源路径冲突”回归，使用 `node --test` 做文件级断言成本最低，不依赖浏览器环境，也能稳定卡住 `app/icon.png` 与 `public/icon.png` 的重复落盘。
+
+失败/风险经验：
+- 当前仓库把 `.next/` 产物纳入版本管理，调试前端路由时很容易产生大量噪音改动；完成后需要显式回退 `.next/`，只保留真实源码变更。
+
+### 2026-03-24 setup 跳过按钮补充
+
+成功经验：
+- `setup` 页的“跳过，稍后配置”如果只做 `router.push('/')`，会被后续守卫重新拦回；最小可行修法是在前端会话里显式写 `llm_setup_skipped`，并让 `ProtectedRoute` 在当前浏览器会话内跳过 LLM 强制配置检查。
+- 登录态刚建立时，`verifyToken()` 与 `AuthProvider` 初始化可能并发，后者会把前者刚设成 `true` 的状态覆盖回 `false`；用 `auth_just_verified` + `verifiedInSessionRef` 兜住这个短暂窗口，能避免“刚验证完 token 就又被打回 /login”。
+- Playwright 回归前必须先确认 `reuseExistingServer` 复用的是当前仓库的 dev 进程；这次 3000 端口一度连到另一个仓库 `agentos-dev/.../app/web`，导致浏览器现象与源码完全对不上。最稳的做法是先查端口占用，再跑正式用例。
+- 当 `playwright test` 本身被 webServer 复用/残留进程干扰时，先用一次性的 Playwright 脚本直接驱动页面、打印 URL 与 `sessionStorage`，可以快速区分“代码没生效”和“测试基础设施跑偏”。
+
+失败/风险经验：
+- 根目录 Playwright 配置会同时拉起前后端，一旦 8000/3000 端口有残留进程，失败现象会混入大量非业务噪音；在这种情况下不能直接把浏览器断言失败等同于页面逻辑失败。
+- 当前 `npx tsc --noEmit` 仍会先撞到仓库既有类型问题（如 `app/settings/page.tsx`、`components/chat/MessageList.tsx`、`e2e/miniapp-workspace.spec.ts`），不能把这类全局红灯误判成这次 `setup` 修复引入的新错误。

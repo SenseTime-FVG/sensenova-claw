@@ -77,7 +77,7 @@ def tmp_db(tmp_path):
 
 @pytest_asyncio.fixture
 async def test_repo(tmp_db):
-    from agentos.adapters.storage.repository import Repository
+    from sensenova_claw.adapters.storage.repository import Repository
     repo = Repository(db_path=str(tmp_db))
     await repo.init()
     yield repo
@@ -87,13 +87,13 @@ async def test_repo(tmp_db):
 async def test_app(tmp_path):
     """创建带有完整 app.state 的测试客户端（不启动 lifespan）"""
     from httpx import AsyncClient, ASGITransport
-    from agentos.app.gateway.main import app
-    from agentos.platform.config.config import Config
-    from agentos.capabilities.agents.registry import AgentRegistry
-    from agentos.capabilities.tools.registry import ToolRegistry
-    from agentos.capabilities.skills.registry import SkillRegistry
-    from agentos.capabilities.skills.market_service import SkillMarketService
-    from agentos.adapters.storage.repository import Repository
+    from sensenova_claw.app.gateway.main import app
+    from sensenova_claw.platform.config.config import Config
+    from sensenova_claw.capabilities.agents.registry import AgentRegistry
+    from sensenova_claw.capabilities.tools.registry import ToolRegistry
+    from sensenova_claw.capabilities.skills.registry import SkillRegistry
+    from sensenova_claw.capabilities.skills.market_service import SkillMarketService
+    from sensenova_claw.adapters.storage.repository import Repository
 
     # 使用临时目录避免污染真实环境
     workspace_dir = tmp_path / "workspace"

@@ -6,12 +6,12 @@ from dataclasses import dataclass, field
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.adapters.plugins.whatsapp.models import WhatsAppRuntimeState
-from agentos.interfaces.http.gateway import router
-from agentos.interfaces.ws.gateway import Gateway
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.kernel.runtime.publisher import EventPublisher
-from agentos.adapters.storage.repository import Repository
+from sensenova_claw.adapters.plugins.whatsapp.models import WhatsAppRuntimeState
+from sensenova_claw.interfaces.http.gateway import router
+from sensenova_claw.interfaces.ws.gateway import Gateway
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.runtime.publisher import EventPublisher
+from sensenova_claw.adapters.storage.repository import Repository
 
 
 def _run(coro):
@@ -126,7 +126,7 @@ def test_list_channels_marks_telegram_failed_when_runtime_has_error(client, app)
     gw = app.state.services.gateway
 
     class _Runtime:
-        _agentos_status = {"status": "failed", "error": "polling failed"}
+        _sensenova_claw_status = {"status": "failed", "error": "polling failed"}
 
     class _Channel:
         _runtime = _Runtime()
@@ -144,7 +144,7 @@ def test_list_channels_normalizes_ready_to_connected(client, app):
     gw = app.state.services.gateway
 
     class _Runtime:
-        _agentos_status = {"status": "ready"}
+        _sensenova_claw_status = {"status": "ready"}
 
     class _Channel:
         _runtime = _Runtime()
@@ -162,7 +162,7 @@ def test_list_channels_omits_none_error_text_for_connected_channel(client, app):
     gw = app.state.services.gateway
 
     class _Runtime:
-        _agentos_status = {"status": "connected", "error": None}
+        _sensenova_claw_status = {"status": "connected", "error": None}
 
     class _Channel:
         _runtime = _Runtime()
@@ -181,7 +181,7 @@ def test_list_channels_marks_wecom_failed_when_client_has_error(client, app):
     gw = app.state.services.gateway
 
     class _Client:
-        _agentos_status = {"status": "failed", "error": "websocket closed"}
+        _sensenova_claw_status = {"status": "failed", "error": "websocket closed"}
 
     class _Channel:
         _client = _Client()
@@ -199,7 +199,7 @@ def test_list_channels_marks_feishu_failed_when_channel_has_error(client, app):
     gw = app.state.services.gateway
 
     class _Channel:
-        _agentos_status = {"status": "failed", "error": "websocket thread crashed"}
+        _sensenova_claw_status = {"status": "failed", "error": "websocket thread crashed"}
 
     gw._channels["feishu"] = _Channel()
 

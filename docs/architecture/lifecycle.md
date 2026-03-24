@@ -2,7 +2,7 @@
 
 ## 启动流程
 
-AgentOS 的启动入口位于 `app/gateway/main.py`，按照以下顺序初始化和启动各组件。
+Sensenova-Claw 的启动入口位于 `app/gateway/main.py`，按照以下顺序初始化和启动各组件。
 
 ### 第一阶段：初始化核心服务
 

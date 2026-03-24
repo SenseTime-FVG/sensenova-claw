@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.kernel.runtime.prompt_builder import (
+from sensenova_claw.kernel.runtime.prompt_builder import (
     ContextFile,
     RuntimeInfo,
     SystemPromptParams,
@@ -21,7 +21,7 @@ class TestBuildSystemPromptModes:
     def test_none_mode_returns_fallback(self):
         params = SystemPromptParams(prompt_mode="none")
         result = build_system_prompt(params)
-        assert result == "You are a personal assistant running inside AgentOS."
+        assert result == "You are a personal assistant running inside Sensenova-Claw."
 
     def test_full_mode_includes_identity(self):
         params = SystemPromptParams(
@@ -43,12 +43,12 @@ class TestIdentitySection:
     def test_default_identity_when_empty(self):
         params = SystemPromptParams(base_prompt="")
         result = build_system_prompt(params)
-        assert "AgentOS" in result
+        assert "Sensenova-Claw" in result
 
     def test_default_identity_when_whitespace(self):
         params = SystemPromptParams(base_prompt="   ")
         result = build_system_prompt(params)
-        assert "AgentOS" in result
+        assert "Sensenova-Claw" in result
 
 
 class TestToolingSection:

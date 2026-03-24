@@ -6,10 +6,10 @@ import uuid
 
 import pytest
 
-from agentos.kernel.events.bus import PrivateEventBus, PublicEventBus
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.router import BusRouter
-from agentos.kernel.events.types import (
+from sensenova_claw.kernel.events.bus import PrivateEventBus, PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.events.types import (
     AGENT_STEP_COMPLETED,
     AGENT_STEP_STARTED,
     LLM_CALL_REQUESTED,

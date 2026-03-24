@@ -1,12 +1,12 @@
 # 系统架构总览
 
-## AgentOS 简介
+## Sensenova-Claw 简介
 
-AgentOS 是一个基于**事件驱动架构**的 AI Agent 平台，支持 Web、CLI、TUI 多种接入方式。其核心设计理念是：**所有模块通过事件总线解耦通信**，事件封装为统一的 `EventEnvelope` 数据结构，模块之间不存在直接方法调用。
+Sensenova-Claw 是一个基于**事件驱动架构**的 AI Agent 平台，支持 Web、CLI、TUI 多种接入方式。其核心设计理念是：**所有模块通过事件总线解耦通信**，事件封装为统一的 `EventEnvelope` 数据结构，模块之间不存在直接方法调用。
 
 ## 整体架构
 
-AgentOS 的请求处理链路如下：
+Sensenova-Claw 的请求处理链路如下：
 
 ```
 用户请求
@@ -73,7 +73,7 @@ agent.step_completed
 
 ### asyncio 单进程
 
-AgentOS 基于 Python `asyncio` 实现并发，所有 Runtime 和 Worker 以协程方式运行在同一个事件循环中。这带来了以下好处：
+Sensenova-Claw 基于 Python `asyncio` 实现并发，所有 Runtime 和 Worker 以协程方式运行在同一个事件循环中。这带来了以下好处：
 
 - 无需处理多进程间通信和同步
 - 事件总线可以使用简单的 `asyncio.Queue` 实现

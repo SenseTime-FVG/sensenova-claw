@@ -4,8 +4,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from agentos.capabilities.tools.email import DownloadAttachmentTool
-from agentos.platform.config.config import config
+from sensenova_claw.capabilities.tools.email import DownloadAttachmentTool
+from sensenova_claw.platform.config.config import config
 
 
 @pytest.mark.asyncio

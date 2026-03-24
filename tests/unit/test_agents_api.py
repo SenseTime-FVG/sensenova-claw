@@ -9,15 +9,15 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentos.interfaces.http.agents import router
-from agentos.capabilities.agents.registry import AgentRegistry
-from agentos.capabilities.tools.registry import ToolRegistry
-from agentos.capabilities.skills.registry import SkillRegistry
-from agentos.platform.config.config import Config
-from agentos.platform.config.config_manager import ConfigManager
-from agentos.platform.secrets.store import InMemorySecretStore
-from agentos.kernel.events.bus import PublicEventBus
-from agentos.adapters.storage.repository import Repository
+from sensenova_claw.interfaces.http.agents import router
+from sensenova_claw.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.capabilities.tools.registry import ToolRegistry
+from sensenova_claw.capabilities.skills.registry import SkillRegistry
+from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.config.config_manager import ConfigManager
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.adapters.storage.repository import Repository
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def app(tmp_path):
     # 真实 AgentRegistry，加载 default agent
     agent_config_dir = tmp_path / "agents"
     agent_config_dir.mkdir()
-    agent_registry = AgentRegistry(agentos_home=tmp_path / ".agentos")
+    agent_registry = AgentRegistry(sensenova_claw_home=tmp_path / ".sensenova-claw")
     agent_registry.load_from_config(cfg.data)
 
     # 真实 ToolRegistry（自动注册 builtin 工具）
@@ -81,7 +81,7 @@ def app(tmp_path):
     app.state.config = cfg
     app.state.config_manager = config_manager
     app.state.services = services
-    app.state.agentos_home = str(tmp_path / ".agentos")
+    app.state.sensenova_claw_home = str(tmp_path / ".sensenova-claw")
 
     return app
 
@@ -170,11 +170,11 @@ def test_create_agent_persists_to_config_and_survives_reload(client, app):
     assert written["agents"]["persisted-agent"]["temperature"] == 0.4
     assert "system_prompt" not in written["agents"]["persisted-agent"]
 
-    prompt_file = Path(app.state.agentos_home) / "agents" / "persisted-agent" / "SYSTEM_PROMPT.md"
+    prompt_file = Path(app.state.sensenova_claw_home) / "agents" / "persisted-agent" / "SYSTEM_PROMPT.md"
     assert prompt_file.exists()
     assert prompt_file.read_text(encoding="utf-8") == "你是持久化测试助手"
 
-    reloaded = AgentRegistry(agentos_home=Path(app.state.agentos_home))
+    reloaded = AgentRegistry(sensenova_claw_home=Path(app.state.sensenova_claw_home))
     reloaded.load_from_config(app.state.config._load_config())
     persisted = reloaded.get("persisted-agent")
     assert persisted is not None
@@ -221,7 +221,7 @@ def test_update_agent_config_persists_to_config(client, app):
     assert written["agents"]["default"]["model"] == "claude-opus"
     assert written["agents"]["default"]["temperature"] == 0.6
 
-    prompt_file = Path(app.state.agentos_home) / "agents" / "default" / "SYSTEM_PROMPT.md"
+    prompt_file = Path(app.state.sensenova_claw_home) / "agents" / "default" / "SYSTEM_PROMPT.md"
     assert prompt_file.exists()
     assert prompt_file.read_text(encoding="utf-8") == "新的系统提示词"
 

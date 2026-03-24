@@ -8,10 +8,10 @@ from dataclasses import dataclass
 import pytest
 from fastapi import WebSocketDisconnect
 
-from agentos.app.gateway import main as gateway_main
-from agentos.adapters.channels.websocket_channel import WebSocketChannel
-from agentos.kernel.events.envelope import EventEnvelope
-from agentos.kernel.events.types import (
+from sensenova_claw.app.gateway import main as gateway_main
+from sensenova_claw.adapters.channels.websocket_channel import WebSocketChannel
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import (
     TOOL_CONFIRMATION_REQUESTED,
     USER_INPUT,
     USER_QUESTION_ANSWERED,
@@ -164,8 +164,8 @@ async def test_user_input_with_existing_session_auto_binds_websocket(ws_env):
 
 @pytest.mark.asyncio
 async def test_invalid_websocket_token_close_runtime_error_is_swallowed(ws_env, monkeypatch):
-    from agentos.platform.config.config import config
-    from agentos.platform.security import middleware
+    from sensenova_claw.platform.config.config import config
+    from sensenova_claw.platform.security import middleware
 
     ws_env.ws_channel._auth_service = object()
     ws = _FakeClosingErrorWebSocket(messages=[])

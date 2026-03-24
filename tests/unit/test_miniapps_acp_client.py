@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.capabilities.miniapps.acp_client import ACPClient
+from sensenova_claw.capabilities.miniapps.acp_client import ACPClient
 
 
 @pytest.mark.asyncio

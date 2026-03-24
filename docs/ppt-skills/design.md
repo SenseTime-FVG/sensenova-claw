@@ -2,7 +2,7 @@
 
 ## 1. 目标与约束
 
-本次迭代只重构 `.agentos/skills` 中的 PPT 技能体系，不修改 AgentOS 运行时代码。
+本次迭代只重构 `.sensenova-claw/skills` 中的 PPT 技能体系，不修改 Sensenova-Claw 运行时代码。
 
 目标如下：
 
@@ -838,11 +838,11 @@ class SpeakerNotePage:
 本轮实施范围：
 
 - 重写 `docs/ppt-skills/design.md`
-- 全量替换 `.agentos/skills` 下当前 PPT skills
+- 全量替换 `.sensenova-claw/skills` 下当前 PPT skills
 - 新增契约测试，验证新体系边界
 
 本轮不做：
 
-- AgentOS 运行时代码改造
+- Sensenova-Claw 运行时代码改造
 - 新的 `.pptx` 导出实现
 - 前端渲染逻辑改造

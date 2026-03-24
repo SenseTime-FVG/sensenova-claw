@@ -1,6 +1,6 @@
 """Heartbeat 协议单元测试"""
 
-from agentos.kernel.heartbeat.protocol import HEARTBEAT_TOKEN, StripResult, strip_heartbeat_token
+from sensenova_claw.kernel.heartbeat.protocol import HEARTBEAT_TOKEN, StripResult, strip_heartbeat_token
 
 
 class TestStripHeartbeatToken:

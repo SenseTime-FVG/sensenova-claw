@@ -1,6 +1,6 @@
 # Skills 系统
 
-Skills 是 AgentOS 的声明式任务编排机制。与工具（Tool）不同，Skills 不是直接可调用的函数，而是以 Markdown 文档形式定义的结构化指令，在构建系统提示时注入给 Agent 作为参考。
+Skills 是 Sensenova-Claw 的声明式任务编排机制。与工具（Tool）不同，Skills 不是直接可调用的函数，而是以 Markdown 文档形式定义的结构化指令，在构建系统提示时注入给 Agent 作为参考。
 
 ## 核心概念
 
@@ -11,7 +11,7 @@ Skills 是 AgentOS 的声明式任务编排机制。与工具（Tool）不同，
 
 ## Skill 数据结构
 
-Skill 类定义位于 `agentos/capabilities/skills/registry.py`：
+Skill 类定义位于 `sensenova_claw/capabilities/skills/registry.py`：
 
 ```python
 class Skill:
@@ -42,7 +42,7 @@ class Skill:
 name: pdf_to_markdown
 description: 将 PDF 文件转换为 Markdown 格式
 metadata:
-  agentos:
+  sensenova-claw:
     requires:
       bins: ["pdftotext"]    # 依赖的系统二进制文件
 ---
@@ -66,14 +66,14 @@ metadata:
 
 ## SkillRegistry
 
-SkillRegistry 位于 `agentos/capabilities/skills/registry.py`，管理所有 Skill 的生命周期：
+SkillRegistry 位于 `sensenova_claw/capabilities/skills/registry.py`，管理所有 Skill 的生命周期：
 
 ```python
 class SkillRegistry:
     def __init__(
         self,
         workspace_dir: Path | None,     # 工作区 skills 目录
-        user_dir: Path | None,          # 用户级目录（~/.agentos/skills）
+        user_dir: Path | None,          # 用户级目录（~/.sensenova-claw/skills）
         state_file: Path | None,        # skills_state.json 路径
         builtin_dir: Path | None,       # 内置 skills 目录
     )
@@ -101,7 +101,7 @@ class SkillRegistry:
 ```
 builtin_dir（内置 skills，最低优先级）
   ↓
-user_dir（用户级，~/.agentos/skills）
+user_dir（用户级，~/.sensenova-claw/skills）
   ↓
 workspace_dir（工作区 skills）
   ↓
@@ -114,11 +114,11 @@ Skill 是否加载取决于三层检查：
 
 1. **skills_state.json**（最高优先级）：如果文件中存在该 Skill 的 `enabled` 字段，以此为准
 2. **config.yml 配置**：检查 `skills.entries.{skill_name}.enabled`
-3. **二进制依赖检查**：检查 `metadata.agentos.requires.bins` 中列出的二进制文件是否在系统 PATH 中（通过 `shutil.which` 检查）
+3. **二进制依赖检查**：检查 `metadata.sensenova-claw.requires.bins` 中列出的二进制文件是否在系统 PATH 中（通过 `shutil.which` 检查）
 
 ## 内置 Skills
 
-AgentOS 包含以下内置 Skills，位于 `workspace/skills/` 目录：
+Sensenova-Claw 包含以下内置 Skills，位于 `workspace/skills/` 目录：
 
 ### 文档处理
 
@@ -226,7 +226,7 @@ skills:
 
 ## Skill 市场
 
-AgentOS 支持通过 Skill 市场安装和管理 Skills，相关数据模型位于 `agentos/capabilities/skills/models.py`：
+Sensenova-Claw 支持通过 Skill 市场安装和管理 Skills，相关数据模型位于 `sensenova_claw/capabilities/skills/models.py`：
 
 - **SkillSearchItem**：市场搜索结果项
 - **SkillDetail**：Skill 详情（含文件列表、预览）
