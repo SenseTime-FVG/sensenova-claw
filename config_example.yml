@@ -157,7 +157,6 @@ agents:
   default:
     name: Default Agent
     description: 默认 AI Agent
-    model: gemini-pro
     temperature: 0.6
     tools: []
     skills: []
