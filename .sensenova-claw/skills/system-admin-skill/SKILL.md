@@ -176,7 +176,7 @@ agents:
     tools: []                   # 允许使用的工具列表（空 = 全部）
     skills: []                  # 允许使用的 Skills 列表（空 = 全部）
     workdir: ""                 # 工作目录（空=自动解析为 workspace/workdir/{id}）
-    can_delegate_to: []         # 可委托的 Agent ID 列表（空 = 全部）
+    can_send_message_to: []     # Agent 间消息权限（见下方说明）
     max_delegation_depth: 3     # 最大委托深度
     max_pingpong_turns: 10      # 单个子会话最大往返轮数
     enabled: true
@@ -189,6 +189,31 @@ agents:
 ```
 
 **重要：`system_prompt` 不允许写在 `config.yml` 中，必须放在 `SYSTEM_PROMPT.md` 文件中，否则启动会报错。**
+
+### Agent 间消息权限（can_send_message_to）
+
+`can_send_message_to`（别名 `can_delegate_to`）控制该 Agent 是否可以通过 `send_message` 工具向其他 Agent 发送消息：
+
+| 值 | 含义 |
+|:---|:---|
+| `[]`（空列表，默认） | 可以向**所有**已启用 Agent 发消息 |
+| `["agent-a", "agent-b"]` | 仅可向指定 Agent 发消息 |
+| `null` | **禁止**向任何 Agent 发消息（`send_message` 工具不会暴露给该 Agent） |
+
+配置示例：
+
+```yaml
+agents:
+  default:
+    can_send_message_to: null       # 禁止 default agent 发消息
+  research-agent:
+    can_send_message_to:            # 仅允许向 default 发消息
+      - default
+  coordinator:
+    can_send_message_to: []         # 可以向所有 agent 发消息
+```
+
+**注意：** 当设为 `null` 时，该 Agent 的 system prompt 中也不会注入可用 Agent 列表信息。
 
 ### 创建新 Agent
 
@@ -205,7 +230,7 @@ bash_command: curl -s -X POST http://localhost:8000/api/agents \
     "system_prompt": "你是一个专业的 AI 助手",
     "tools": [],
     "skills": [],
-    "can_delegate_to": [],
+    "can_send_message_to": [],
     "max_delegation_depth": 3
   }'
 ```

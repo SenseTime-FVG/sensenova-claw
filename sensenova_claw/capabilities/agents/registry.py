@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.agents.config import AgentConfig, _parse_delegate_list
 
 if TYPE_CHECKING:
     from sensenova_claw.kernel.events.bus import PublicEventBus
@@ -60,6 +60,9 @@ class AgentRegistry:
         """获取某个 Agent 可以发送消息的目标 Agent 列表"""
         source = self._agents.get(from_agent_id)
         if not source:
+            return []
+        if source.can_send_message_to is None:
+            # None = 禁止向任何 Agent 发送消息
             return []
         if not source.can_send_message_to:
             # 空列表 = 可以向所有已启用 Agent 发送消息（含自身，支持自我委派）
@@ -128,9 +131,7 @@ class AgentRegistry:
             tools=list(agent_dict.get("tools", [])),
             skills=list(agent_dict.get("skills", [])),
             workdir=agent_dict.get("workdir", ""),
-            can_delegate_to=list(
-                agent_dict.get("can_send_message_to", agent_dict.get("can_delegate_to", []))
-            ),
+            can_delegate_to=_parse_delegate_list(agent_dict),
             max_delegation_depth=agent_dict.get(
                 "max_send_depth",
                 agent_dict.get("max_delegation_depth", 3),

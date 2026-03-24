@@ -114,16 +114,20 @@ class AgentSessionWorker(SessionWorker):
             tools = all_tools  # 空列表 = 全部工具
         else:
             allowed = set(self.agent_config.tools)
-            # 始终保留 send_message 工具
-            always_keep = {"send_message"}
-            tools = [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
+            # 保留 send_message 工具（除非 can_delegate_to 为 None 表示禁止委托）
+            if self.agent_config.can_delegate_to is not None:
+                allowed.add("send_message")
+            tools = [t for t in all_tools if t["name"] in allowed]
 
         # 仅对 proactive 会话应用安全限制
         if self._session_meta and self._session_meta.get("proactive_job_id"):
             allowed_tools = self._session_meta.get("allowed_tools")
             blocked_tools = self._session_meta.get("blocked_tools")
             if allowed_tools:
-                tools = [t for t in tools if t["name"] in allowed_tools or t["name"] == "send_message"]
+                keep = set(allowed_tools)
+                if self.agent_config and self.agent_config.can_delegate_to is not None:
+                    keep.add("send_message")
+                tools = [t for t in tools if t["name"] in keep]
             elif blocked_tools:
                 tools = [t for t in tools if t["name"] not in blocked_tools]
 
