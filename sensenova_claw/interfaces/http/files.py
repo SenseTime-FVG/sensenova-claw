@@ -410,6 +410,11 @@ async def delete_upload(request: Request, filename: str):
 # 文件存在性检查
 # ---------------------------------------------------------------------------
 
+def _sanitize_path_parts(raw_path: str) -> list[str]:
+    """将相对路径字符串拆分为安全的路径组件列表，过滤空段和 '..'"""
+    return [p for p in raw_path.replace("\\", "/").split("/") if p and p != ".."]
+
+
 def _resolve_agent_workdir(request: Request, agent_id: str) -> Path:
     """获取指定 agent 的 workdir 绝对路径"""
     # 防止路径穿越：仅允许字母、数字、-、_、.
@@ -449,7 +454,7 @@ async def check_file(request: Request, body: FileCheckRequest) -> FileCheckRespo
     """
     workdir = _resolve_agent_workdir(request, body.agent_id)
     # 防止路径穿越
-    parts = [p for p in body.name.replace("\\", "/").split("/") if p and p != ".."]
+    parts = _sanitize_path_parts(body.name)
     if not parts:
         return FileCheckResponse(exists=False)
     target = workdir / Path(*parts)
@@ -500,8 +505,11 @@ async def check_dir(request: Request, body: DirCheckRequest) -> DirCheckResponse
     全量匹配策略：所有文件的 name+size+hash 必须全部匹配才返回 exists=True。
     """
     workdir = _resolve_agent_workdir(request, body.agent_id)
+    # 空文件列表视为不匹配
+    if not body.files:
+        return DirCheckResponse(exists=False)
     # 防止路径穿越
-    folder_parts = [p for p in body.folder_name.replace("\\", "/").split("/") if p and p != ".."]
+    folder_parts = _sanitize_path_parts(body.folder_name)
     if not folder_parts:
         return DirCheckResponse(exists=False)
     folder = workdir / Path(*folder_parts)
@@ -512,7 +520,7 @@ async def check_dir(request: Request, body: DirCheckRequest) -> DirCheckResponse
     # 逐个检查文件
     all_size_match = True
     for file_item in body.files:
-        parts = [p for p in file_item.rel_path.split("/") if p and p != ".."]
+        parts = _sanitize_path_parts(file_item.rel_path)
         if not parts:
             return DirCheckResponse(exists=False)
         target = folder / Path(*parts)
@@ -537,7 +545,7 @@ async def check_dir(request: Request, body: DirCheckRequest) -> DirCheckResponse
 
     # 逐个比对 hash
     for file_item in body.files:
-        parts = [p for p in file_item.rel_path.split("/") if p and p != ".."]
+        parts = _sanitize_path_parts(file_item.rel_path)
         target = folder / Path(*parts)
         file_hash = await asyncio.to_thread(_sha256_file, target)
         if file_hash != file_item.hash:

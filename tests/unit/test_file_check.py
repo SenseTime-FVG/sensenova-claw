@@ -141,6 +141,18 @@ class TestDirCheck:
     def _hash(self, data: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
 
+    def test_dir_empty_file_list(self, client, tmp_path):
+        """空文件列表 → exists=False"""
+        workdir = tmp_path / "workdir" / "default" / "mydir"
+        workdir.mkdir(parents=True)
+        resp = client.post("/api/files/check-dir", json={
+            "folder_name": "mydir",
+            "files": [],
+            "agent_id": "default",
+        })
+        data = resp.json()
+        assert data["exists"] is False
+
     def test_dir_not_exists(self, client, tmp_path):
         """文件夹不存在 -> exists=False"""
         workdir = tmp_path / "workdir" / "default"
