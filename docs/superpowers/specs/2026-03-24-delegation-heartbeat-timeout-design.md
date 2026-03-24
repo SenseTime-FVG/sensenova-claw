@@ -21,7 +21,7 @@
 
 1. `agent_worker.py` 中新增 `_is_autonomous_session()` 方法，当 `session_meta` 包含 `proactive_job_id` 或 `message_trace_id`（delegation 标记）时返回 true
 2. 将 `_is_proactive_session()` 的调用点替换为 `_is_autonomous_session()`
-3. delegation session 的 `max_tool_calls` / `max_llm_calls` 从 delegation 配置中读取，coordinator 在 `spawn_agent_session` 时通过 `meta` 传入
+3. delegation session 的 `max_tool_calls` / `max_llm_calls` 由 coordinator 从 delegation 配置中读取，通过 `spawn_agent_session(meta=...)` 传入 session_meta。agent_worker 的 `_is_autonomous_session()` 从 `self._session_meta` 中读取这些值（与 proactive session 一致）
 
 配置新增：
 ```python
@@ -66,7 +66,7 @@ HEARTBEAT_TYPES = {
     "user.question_asked",
 }
 
-# 在 _event_loop 的事件分发中新增：
+# 在 _event_loop 的事件分发中新增（独立 if 块，非 elif，因为这些事件类型不与现有分支冲突）：
 if event.type in HEARTBEAT_TYPES:
     record_id = self._child_session_index.get(event.session_id)
     if record_id and record_id in self._last_heartbeat:
@@ -98,8 +98,14 @@ async def _heartbeat_timeout_watch(self, record_id: str, timeout: float):
 #### 生命周期管理
 
 - 创建 record 时：`_last_heartbeat[record_id] = time.time()`
-- 任务完成/取消时：删除 `_last_heartbeat[record_id]`，取消 watch task
-- retry 时：重置 `_last_heartbeat[record_id] = time.time()`，重启 watch task
+- 任务完成/取消时：在 `_cancel_record_tasks` 中删除 `_last_heartbeat.pop(record_id, None)`，取消 watch task
+- retry 时：在 `_retry_after_backoff` 中，设置 `record.status = "running"` 后，重置 `_last_heartbeat[record_id] = time.time()` 并调用 `_ensure_timeout_watch(record)` 重启 watch task
+
+```python
+# _retry_after_backoff 中新增（在 record.status = "running" 之后）：
+self._last_heartbeat[record.id] = time.time()
+self._ensure_timeout_watch(record)
+```
 
 ### 配置
 
@@ -107,7 +113,7 @@ async def _heartbeat_timeout_watch(self, record_id: str, timeout: float):
 
 ### send_message_tool
 
-无代码改动。`timeout_seconds` 参数保留，语义自然跟随 coordinator 变化。
+更新 `timeout_seconds` 参数描述，从"总超时秒数"改为"无活动超时秒数"，与新语义一致。无逻辑改动。
 
 ## 边界情况
 
@@ -142,6 +148,7 @@ async def _heartbeat_timeout_watch(self, record_id: str, timeout: float):
 - `agent_worker.py`：新增 `_is_autonomous_session()` 方法，替换轮次限制检查条件（约 10 行）
 - `agent_message_coordinator.py`：改 timeout watch 逻辑 + 在 `_event_loop` 中加心跳处理 + spawn 时传入轮次限制 meta（约 40-50 行）
 - `config.py`：delegation 配置新增 `max_tool_calls`、`max_llm_calls` 默认值（2 行）
+- `send_message_tool.py`：更新 `timeout_seconds` 参数描述（1 行）
 - `test_agent_message_coordinator.py`：新增 5 个测试用例
 - `test_send_message_tool.py`：修改 1 个、新增 1 个测试用例
 - `test_agent_worker.py`（如存在）：新增 2 个 delegation 轮次限制测试
