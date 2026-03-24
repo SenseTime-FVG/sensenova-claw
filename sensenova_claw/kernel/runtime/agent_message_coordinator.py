@@ -235,6 +235,12 @@ class AgentMessageCoordinator:
                     "parent_turn_id": parent_turn_id,
                     "parent_tool_call_id": parent_tool_call_id,
                     "message_trace_id": record.id,
+                    "max_tool_calls": int(
+                        event.payload.get("max_tool_calls", 0)
+                    ) or None,
+                    "max_llm_calls": int(
+                        event.payload.get("max_llm_calls", 0)
+                    ) or None,
                 }
                 turn_id = await self._agent_runtime.spawn_agent_session(
                     agent_id=target_id,
