@@ -1,12 +1,14 @@
 """通用文件列表 API - 浏览服务端文件系统目录 & 文件上传 & 文件下载"""
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import logging
 import mimetypes
 import os
 import platform
+import re
 import string
 import time
 from pathlib import Path
@@ -410,6 +412,9 @@ async def delete_upload(request: Request, filename: str):
 
 def _resolve_agent_workdir(request: Request, agent_id: str) -> Path:
     """获取指定 agent 的 workdir 绝对路径"""
+    # 防止路径穿越：仅允许字母、数字、-、_、.
+    if not re.match(r'^[a-zA-Z0-9_.\-]+$', agent_id):
+        agent_id = "default"
     home = getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw")
     return Path(home) / "workdir" / agent_id
 
@@ -418,7 +423,7 @@ def _sha256_file(filepath: Path) -> str:
     """计算文件的 SHA-256 哈希"""
     h = hashlib.sha256()
     with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
+        for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
 
@@ -464,7 +469,7 @@ async def check_file(request: Request, body: FileCheckRequest) -> FileCheckRespo
     if not body.hash:
         return FileCheckResponse(exists=False, need_hash=True)
 
-    file_hash = _sha256_file(target)
+    file_hash = await asyncio.to_thread(_sha256_file, target)
     if file_hash == body.hash:
         return FileCheckResponse(exists=True, path=str(target.resolve()))
     return FileCheckResponse(exists=False)

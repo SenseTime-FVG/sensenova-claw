@@ -101,6 +101,18 @@ class TestFileCheck:
         assert data["exists"] is False
         assert data["need_hash"] is False
 
+    def test_agent_id_traversal_blocked(self, client, tmp_path):
+        """agent_id 路径穿越 → 回退到 default"""
+        workdir = tmp_path / "workdir" / "default"
+        workdir.mkdir(parents=True)
+        resp = client.post("/api/files/check", json={
+            "name": "test.txt",
+            "size": 100,
+            "agent_id": "../../etc",
+        })
+        data = resp.json()
+        assert data["exists"] is False
+
     def test_path_traversal_blocked(self, client, tmp_path):
         """路径穿越尝试 -> exists=False"""
         workdir = tmp_path / "workdir" / "default"
