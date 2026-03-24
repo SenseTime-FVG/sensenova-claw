@@ -473,3 +473,74 @@ async def check_file(request: Request, body: FileCheckRequest) -> FileCheckRespo
     if file_hash == body.hash:
         return FileCheckResponse(exists=True, path=str(target.resolve()))
     return FileCheckResponse(exists=False)
+
+
+class DirFileItem(BaseModel):
+    rel_path: str
+    size: int
+    hash: str | None = None
+
+
+class DirCheckRequest(BaseModel):
+    folder_name: str
+    files: list[DirFileItem]
+    agent_id: str = "default"
+
+
+class DirCheckResponse(BaseModel):
+    exists: bool
+    path: str = ""
+    need_hash: bool = False
+
+
+@router.post("/files/check-dir")
+async def check_dir(request: Request, body: DirCheckRequest) -> DirCheckResponse:
+    """检查文件夹是否已完整存在于 agent workdir 中。
+
+    全量匹配策略：所有文件的 name+size+hash 必须全部匹配才返回 exists=True。
+    """
+    workdir = _resolve_agent_workdir(request, body.agent_id)
+    # 防止路径穿越
+    folder_parts = [p for p in body.folder_name.replace("\\", "/").split("/") if p and p != ".."]
+    if not folder_parts:
+        return DirCheckResponse(exists=False)
+    folder = workdir / Path(*folder_parts)
+
+    if not folder.exists() or not folder.is_dir():
+        return DirCheckResponse(exists=False)
+
+    # 逐个检查文件
+    all_size_match = True
+    for file_item in body.files:
+        parts = [p for p in file_item.rel_path.split("/") if p and p != ".."]
+        if not parts:
+            return DirCheckResponse(exists=False)
+        target = folder / Path(*parts)
+
+        if not target.exists() or not target.is_file():
+            return DirCheckResponse(exists=False)
+
+        try:
+            if target.stat().st_size != file_item.size:
+                all_size_match = False
+                break
+        except OSError:
+            return DirCheckResponse(exists=False)
+
+    if not all_size_match:
+        return DirCheckResponse(exists=False)
+
+    # name+size 全部匹配，检查是否需要 hash
+    has_all_hashes = all(f.hash for f in body.files)
+    if not has_all_hashes:
+        return DirCheckResponse(exists=False, need_hash=True)
+
+    # 逐个比对 hash
+    for file_item in body.files:
+        parts = [p for p in file_item.rel_path.split("/") if p and p != ".."]
+        target = folder / Path(*parts)
+        file_hash = await asyncio.to_thread(_sha256_file, target)
+        if file_hash != file_item.hash:
+            return DirCheckResponse(exists=False)
+
+    return DirCheckResponse(exists=True, path=str(folder.resolve()))
