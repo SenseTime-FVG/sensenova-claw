@@ -279,7 +279,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default": {
             "name": "Default Agent",
             "description": "默认 AI Agent",
-            "model": "mock",
             "temperature": 0.2,
             "tools": [],
             "skills": [],
