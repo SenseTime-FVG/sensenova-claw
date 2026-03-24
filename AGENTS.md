@@ -1157,6 +1157,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境执行 `uv run ...` 会把 `uv.lock` 重写成本机镜像源 URL，即使业务代码没变也会产生超大噪音 diff；完成测试后要记得把 `uv.lock` 恢复回仓库版本，再做最终状态检查。
 
+### 2026-03-24 Default Agent 默认模型补充
+
+成功经验：
+- 当 `default agent` 看起来“用户没配 model 却仍固定走 mock”时，优先检查 `DEFAULT_CONFIG` 与用户配置的深度合并结果，而不是只盯着 `~/.sensenova-claw/config.yml`；这次根因正是内置默认值里的 `agents.default.model: mock` 被保留下来了。
+- 对这类配置继承问题，最高价值的回归测试应直接覆盖“真实 `Config` 加载 + `AgentRegistry.load_from_config()`”链路；仅测 `AgentWorker` 下游现象，不足以锁住错误来源。
+- `default agent` 若希望继承全局 `llm.default_model`，最干净的实现不是在运行时特殊判断 `mock`，而是从默认配置源头移除 `agents.default.model`，让缺省值真正表现为“未设置”。
+
+失败/风险经验：
+- 如果只修用户配置或手工在本机 `config.yml` 里补 `agents.default.model`，表面上能恢复真实 LLM，但无法阻止其他新环境继续因同一默认值设计再次落回 mock。
 ### 2026-03-24 edit 工具移植补充
 
 成功经验：
