@@ -1257,3 +1257,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 进程内 e2e 若依赖“当前默认模型”为 mock，很容易被本机 `config.yml` 漂移污染；更稳的做法是显式注册一个 `model=\"mock\"` 的 default agent，而不是只改全局 `llm.default_model`。
+
+### 2026-03-25 Action Toast 自动消失补充
+
+成功经验：
+- `action-toast` 这类浮层和通知中心卡片是两套状态，需求若只是“界面上自动收口”，最稳的落点是 `NotificationProvider` 里只移除 `actionToasts`，不要顺手改 `cards/resolved/pending`，否则很容易把“未处理”误判成“已处理”。
+- Playwright 1.52 已支持 `page.clock.install()` 和 `page.clock.fastForward()`；对 60 秒/15 秒这类前端定时器需求，优先用 mock clock 写回归，能把慢测压到秒级且更稳定。
+- `pending` 状态的 toast 不应继续保留旧定时器；在用户点击动作时先清掉 timer，再切 `pending`，可以避免“已提交但浮层被旧 timer 误删”的竞态。
+
+失败/风险经验：
+- `sensenova_claw/app/web/e2e/tool-confirmation-resolution.spec.ts` 里的 session 弹窗用例当前在本机仍会失败，现象是 `/sessions/[id]` 路径下拿不到 `tool-confirmation-dialog`；这和本次 toast 自动消失改动无直接证据关联，提交前需明确区分“本次新增回归通过”与“仓库既有用例仍失败”。
