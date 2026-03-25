@@ -8,6 +8,10 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from sensenova_claw.capabilities.agents.preferences import (
+    load_preferences,
+    resolve_tool_enabled_from_prefs,
+)
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.bus import PrivateEventBus
 from sensenova_claw.kernel.events.envelope import EventEnvelope
@@ -100,6 +104,19 @@ class ToolSessionWorker(SessionWorker):
             return False
         auto_levels = config.get("tools.permission.auto_approve_levels", ["low"])
         return tool.risk_level.value not in auto_levels
+
+    def _tool_preferences_home(self) -> Path:
+        """解析工具偏好文件所在目录。"""
+        runtime_home = getattr(self.rt, "sensenova_claw_home", None)
+        if runtime_home:
+            return Path(runtime_home)
+        from sensenova_claw.platform.config.workspace import resolve_sensenova_claw_home
+        return resolve_sensenova_claw_home(config)
+
+    def _is_tool_enabled_for_agent(self, agent_id: str, tool_name: str) -> bool:
+        """按当前 agent 的有效偏好判断工具是否启用。"""
+        prefs = load_preferences(self._tool_preferences_home())
+        return resolve_tool_enabled_from_prefs(prefs, agent_id, tool_name, default=True)
 
     async def _publish_confirmation_resolved(
         self,
@@ -338,6 +355,7 @@ class ToolSessionWorker(SessionWorker):
         tool_call_id = event.payload.get("tool_call_id")
         tool_name = event.payload.get("tool_name")
         arguments = event.payload.get("arguments", {})
+        source_agent_id = str(event.payload.get("_source_agent_id") or event.agent_id or "").strip() or "default"
 
         if not tool_call_id:
             logger.error("Missing tool_call_id in event: %s", event)
@@ -396,6 +414,14 @@ class ToolSessionWorker(SessionWorker):
             )
             return
 
+        if not self._is_tool_enabled_for_agent(source_agent_id, str(tool_name)):
+            await self._publish_tool_result(
+                event,
+                result=f"工具已被当前 Agent 禁用: {tool_name}",
+                success=False,
+            )
+            return
+
         # 权限确认：高风险工具需要用户确认
         if self._needs_confirmation(tool):
             approved = await self._request_confirmation(event, tool)
@@ -428,7 +454,6 @@ class ToolSessionWorker(SessionWorker):
         agent_workdir = event.payload.get("_agent_workdir")
         if agent_workdir:
             exec_kwargs["_agent_workdir"] = agent_workdir
-        source_agent_id = str(event.payload.get("_source_agent_id") or event.agent_id or "").strip() or "default"
         exec_kwargs["_source_agent_id"] = source_agent_id
         if event.turn_id:
             exec_kwargs["_turn_id"] = event.turn_id

@@ -1237,3 +1237,23 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅靠前端 mock 成功响应的 Playwright 用例，可能掩盖真实后端“不支持新建”的语义缺口；如果问题涉及接口契约，必须至少补一层真实后端测试。
+
+### 2026-03-25 Agent 委托禁用语义补充
+
+成功经验：
+- 对“设置页取消所有勾选应禁用功能”这类需求，不能只改前端文案；这次必须把“前端提交 `null`、后端允许持久化 `None`、运行时隐藏 `send_message`、工具执行再次校验”四层一起收口，行为才真正一致。
+- FastAPI + Pydantic v2 下，如果接口需要区分“字段未传”和“显式传 null”，最稳的写法是 `body.model_dump(exclude_unset=True)` 后再判断字段是否出现在 payload 里。
+- `ContextBuilder` 里断言某个工具名是否出现在 system prompt 时，测试夹具最好清空其它内置工具；否则像 `create_agent` 这类工具描述里的文案会把字符串断言污染成假失败。
+
+失败/风险经验：
+- `send_message` 的授权判断不能只看 `get_sendable()` 返回值是否为空；当白名单被禁用或白名单里的 agent 已失效时，空结果若不结合原始配置解释，工具会错误放行。 
+
+### 2026-03-25 Agent 工具禁用运行时补充
+
+成功经验：
+- “工具被禁用后聊天里也不能调用”这类需求必须做双层防线：一层在 `ContextBuilder/AgentSessionWorker` 过滤掉传给 LLM 的工具列表，另一层在 `ToolSessionWorker` 执行前再次校验；只做前者会被模型的陈旧 tool_call 或 provider 异常输出绕过。
+- Agent 页面和 Tools 页面最好拆成两层语义：顶层 `tools` 继续做全局开关，`agent_tools.<agent_id>` 做按 agent 覆盖；最终生效规则应是“全局禁用优先，其次 agent 级禁用”，避免 agent 配置把全局关闭的工具重新打开。
+- 这类回归最稳的组合是：API 单测验证偏好写入与详情回显，worker 单测验证 LLM 可见工具过滤和执行前拦截，再补一个进程内聊天 e2e 验证首轮 `LLM_CALL_REQUESTED.tools` 已不含禁用工具且工具本体未执行。
+
+失败/风险经验：
+- 进程内 e2e 若依赖“当前默认模型”为 mock，很容易被本机 `config.yml` 漂移污染；更稳的做法是显式注册一个 `model=\"mock\"` 的 default agent，而不是只改全局 `llm.default_model`。
