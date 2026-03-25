@@ -245,11 +245,11 @@
 
 #### `ppt-task-pack`
 
-负责统一记录任务目标、页数、受众、语言、限制、交付物、输出目录、推荐路径和 `风格意图`，产出 `task-pack.json`。
+负责统一记录任务目标、页数、受众、语言、限制、交付物、输出目录、推荐路径、`research_required` 和 `风格意图`，产出 `task-pack.json`。
 
 #### `ppt-research-pack`
 
-负责内容研究和内容补充，产出 `research-pack.md` 或 `research-pack.json`。
+负责内容研究和内容补充。它必须先读取 `task-pack.json`，并且只在 `task-pack.json.research_required` 为真时才执行，产出 `research-pack.md` 或 `research-pack.json`。
 
 #### `ppt-template-pack`
 
@@ -322,8 +322,8 @@ review 不是口头总结，必须写回工件；并且必须写出 `review.md` 
 | --- | --- | --- | --- | --- | --- |
 | `ppt-superpower` | 总控入口 | 用户提出整套生成、继续已有 deck、局部修改、阶段确认时 | 用户 query、上传文件、已有 deck 工件 | `deck_dir`、mode、下一步 skill 选择 | 首条消息说明目标 / mode / `deck_dir` / 第一步；后续统一要求各阶段给 `开始反馈`、`完成反馈`、必要时给 `进行中反馈` 或 `阻塞反馈` |
 | `ppt-source-analysis` | 来源分析 | 有报告、网页、截图、模板、已有 deck 等上传来源时 | 原始文件、链接、截图 | `source-map.json` | 回显识别出的来源角色、限制和推荐 `下一步` |
-| `ppt-task-pack` | 任务收敛 | 新建 deck、重新明确页数、受众、语言、交付物时 | 用户目标、来源分析结果、输出要求 | `task-pack.json` | 回显主题、页数、mode、`deck_dir` 和关键假设 |
-| `ppt-research-pack` | 研究补充 | 内容缺口明显、主题涉及事实或需要补充外部资料时 | `task-pack.json`、来源材料、检索结果 | `research-pack.md` / `research-pack.json` | 回显核心结论、不确定性和 `下一步` |
+| `ppt-task-pack` | 任务收敛 | 新建 deck、重新明确页数、受众、语言、交付物时 | 用户目标、来源分析结果、输出要求 | `task-pack.json` | 回显主题、页数、mode、`deck_dir`、`research_required` 和关键假设 |
+| `ppt-research-pack` | 研究补充 | `task-pack.json.research_required` 为真，且 task-pack 仍有内容缺口时 | `task-pack.json`、来源材料、检索结果 | `research-pack.md` / `research-pack.json` | 回显核心结论、不确定性和 `下一步` |
 | `ppt-template-pack` | 模板拆解 | 用户提供模板 deck、参考版式或样页时 | 模板文件、参考页面、`task-pack.json` | `template-pack.json` | 回显识别出的布局规则、组件约束和可复用范围 |
 | `ppt-style-spec` | 设计控制面 | 默认必产；明确 deck 级设计语言时 | `task-pack.json`、模板约束、风格参考 | `style-spec.json` | 回显设计主题、风格关键词、主色 / 字体方向和 `下一步` |
 | `ppt-storyboard` | 叙事控制面 | 默认必产；确定分页结构与前端契约时 | `task-pack.json`、`style-spec.json`、`research-pack` | `storyboard.json` | 回显页数、章节结构、未解决项；`guided` 下提示用户先审阅 |
@@ -356,6 +356,7 @@ review 不是口头总结，必须写回工件；并且必须写出 `review.md` 
 - `style-spec` 提供统一设计语言
 - `storyboard` 提供统一叙事与前端契约
 - 三者共同固定 `deck_dir`、设计控制面和页面控制面，保证 deck 可继续演进
+- `task-pack.json` 还负责显式标记 `research_required`，作为是否进入 `ppt-research-pack` 的唯一门控输入
 
 ### 5.2 可选工件
 
@@ -392,6 +393,7 @@ class TaskPack:
     must_have_sections: list[str]
     constraints: list[str]
     known_gaps: list[str]
+    research_required: bool
     available_sources: list[str]
     style_intent: "StyleIntent"
     deck_dir: str
@@ -415,6 +417,8 @@ class StyleIntent:
 - 后续 skill 只能直接复制这个值，不要手写、缩写、翻译或重拼目录名
 - 如果用户未指定目录，`deck_dir` 使用 `query概述 + 时间戳` 自动创建
 - 不允许把工件散落写到 agent 根目录
+- `research_required` 由 `task-pack.json` 自己判断并显式记录
+- 不允许在 `task-pack` 之前做外部 research 决策
 
 ### 5.4 `style-spec.json`
 
@@ -667,21 +671,23 @@ class SpeakerNotePage:
 无上传文件时的最小路径：
 
 1. `ppt-task-pack`
-2. `ppt-style-spec`
-3. `ppt-storyboard`
-4. 如存在 `real-photo` 槽位，或页面语义明显需要人物 / 产品 / 场景图片，则先进入 `ppt-asset-plan`
-5. `ppt-page-html`
-6. `ppt-review`
-
-有上传文件时的常规路径：
-
-1. `ppt-source-analysis`
-2. `ppt-task-pack`
+2. 如 `task-pack.json.research_required` 为真且仍有内容缺口，则进入 `ppt-research-pack`
 3. `ppt-style-spec`
 4. `ppt-storyboard`
 5. 如存在 `real-photo` 槽位，或页面语义明显需要人物 / 产品 / 场景图片，则先进入 `ppt-asset-plan`
 6. `ppt-page-html`
 7. `ppt-review`
+
+有上传文件时的常规路径：
+
+1. `ppt-source-analysis`
+2. `ppt-task-pack`
+3. 如 `task-pack.json.research_required` 为真且仍有内容缺口，则进入 `ppt-research-pack`
+4. `ppt-style-spec`
+5. `ppt-storyboard`
+6. 如存在 `real-photo` 槽位，或页面语义明显需要人物 / 产品 / 场景图片，则先进入 `ppt-asset-plan`
+7. `ppt-page-html`
+8. `ppt-review`
 
 ### 6.2 按需插入
 
@@ -770,7 +776,7 @@ class StageFeedback:
 作用：
 
 - 提供事实、论点、章节信息
-- 进入 `ppt-research-pack`
+- 先进入 `ppt-task-pack`，由 `task-pack.json.research_required` 决定是否进入 `ppt-research-pack`
 
 ### 7.2 风格参考
 
@@ -901,6 +907,7 @@ class StageFeedback:
 
 期望：
 
+- `deck_dir -> task-pack -> research(按需) -> style-spec -> storyboard`
 - 走 `fast`
 - 生成 `task-pack.json`
 - 生成 `style-spec.json`
