@@ -18,54 +18,63 @@ llm:
       base_url: ${ANTHROPIC_BASE_URL}
       timeout: 180
       max_retries: 3
+      source_type: anthropic
 
     openai:
       api_key: ${OPENAI_API_KEY}
       base_url: ${OPENAI_BASE_URL}
       timeout: 180
       max_retries: 3
+      source_type: openai
 
     gemini:
       api_key: ${GEMINI_API_KEY}
       base_url: ${GEMINI_BASE_URL}
       timeout: 180
       max_retries: 3
+      source_type: gemini
 
     kimi:
       api_key: ${KIMI_API_KEY}
       base_url: https://api.moonshot.cn/v1
       timeout: 180
       max_retries: 3
+      source_type: kimi
 
     glm:
       api_key: ${GLM_API_KEY}
       base_url: https://open.bigmodel.cn/api/paas/v4/
       timeout: 180
       max_retries: 3
+      source_type: glm
 
     minimax:
       api_key: ${MINIMAX_API_KEY}
       base_url: https://api.minimax.chat/v1
       timeout: 180
       max_retries: 3
+      source_type: minimax
 
     qwen:
       api_key: ${QWEN_API_KEY}
       base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
       timeout: 180
       max_retries: 3
+      source_type: qwen
 
     deepseek:
       api_key: ${DEEPSEEK_API_KEY}
       base_url: https://api.deepseek.com
       timeout: 180
       max_retries: 3
+      source_type: deepseek
 
     step:
       api_key: ${STEP_API_KEY}
       base_url: https://api.stepfun.com/v1
       timeout: 180
       max_retries: 3
+      source_type: step
 
   models:
     # ── Anthropic ──

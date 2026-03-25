@@ -24,8 +24,8 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
       llm: {
         providers: {
           mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
-          openai: { api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' }, base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
-          anthropic: { api_key: '', base_url: 'https://api.anthropic.com', timeout: 45, max_retries: 2 },
+          openai: { source_type: 'openai', api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' }, base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
+          anthropic: { source_type: 'anthropic', api_key: '', base_url: 'https://api.anthropic.com', timeout: 45, max_retries: 2 },
         },
         models: {
           mock: { provider: 'mock', model_id: 'mock-agent-v1' },
@@ -150,10 +150,13 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
 
   await page.getByTestId('provider-base-url-input-openai').fill('https://proxy.example.com/v1');
   await page.getByTestId('provider-timeout-input-openai').fill('90');
+  await page.getByTestId('provider-source-type-select-openai').selectOption('openai-compatible');
 
   await page.getByTestId('add-llm-button-openai').click();
   await page.getByTestId('new-llm-name-input-openai').fill('gpt-4.1-mini');
   await page.getByTestId('confirm-add-llm-button-openai').click();
+  await expect(page.getByTestId('llm-card-gpt-4.1-mini')).toBeVisible();
+  await expect(page.getByTestId('llm-model-id-input-gpt-4.1-mini')).toBeEditable();
 
   await page.getByTestId('llm-model-id-input-gpt-4.1-mini').fill('gpt-4.1-mini');
   await page.getByTestId('llm-max-output-tokens-input-gpt-4.1-mini').fill('16384');
@@ -165,10 +168,13 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
   await page.getByTestId('add-provider-button').click();
   await page.getByTestId('new-provider-name-input').fill('deepseek');
   await page.getByTestId('confirm-add-provider-button').click();
+  await page.getByTestId('provider-source-type-select-deepseek').selectOption('deepseek');
   await page.getByTestId('provider-base-url-input-deepseek').fill('https://api.deepseek.com');
   await page.getByTestId('add-llm-button-deepseek').click();
   await page.getByTestId('new-llm-name-input-deepseek').fill('deepseek-chat');
   await page.getByTestId('confirm-add-llm-button-deepseek').click();
+  await expect(page.getByTestId('llm-card-deepseek-chat')).toBeVisible();
+  await expect(page.getByTestId('llm-model-id-input-deepseek-chat')).toBeEditable();
   await page.getByTestId('default-model-select').selectOption('deepseek-chat');
 
   await page.getByTestId('delete-provider-button-anthropic').click();
@@ -185,11 +191,13 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
     llm: {
       providers: {
         openai: {
+          source_type: 'openai-compatible',
           base_url: 'https://proxy.example.com/v1',
           timeout: 90,
           max_retries: 3,
         },
         deepseek: {
+          source_type: 'deepseek',
           api_key: '',
           base_url: 'https://api.deepseek.com',
           timeout: 60,
@@ -201,19 +209,22 @@ test('llms 页面应支持按 provider 管理 llm 配置并保存', async ({ pag
           provider: 'openai',
           model_id: 'gpt-4o-mini',
           timeout: 60,
+          max_tokens: 128000,
           max_output_tokens: 8192,
         },
         'gpt-4.1-mini': {
           provider: 'openai',
           model_id: 'gpt-4.1-mini',
           timeout: 60,
+          max_tokens: 128000,
           max_output_tokens: 16384,
         },
         'deepseek-chat': {
           provider: 'deepseek',
           model_id: '',
           timeout: 60,
-          max_output_tokens: 8192,
+          max_tokens: 128000,
+          max_output_tokens: 16384,
         },
       },
       default_model: 'deepseek-chat',

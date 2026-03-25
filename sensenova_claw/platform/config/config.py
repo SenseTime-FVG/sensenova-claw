@@ -14,6 +14,35 @@ from sensenova_claw.platform.secrets.store import SecretStoreError, build_defaul
 
 logger = logging.getLogger(__name__)
 
+KNOWN_LLM_SOURCE_TYPES = {
+    "mock",
+    "openai",
+    "anthropic",
+    "gemini",
+    "qwen",
+    "deepseek",
+    "minimax",
+    "glm",
+    "kimi",
+    "step",
+    "openai-compatible",
+    "anthropic-compatible",
+    "gemini-compatible",
+}
+
+LEGACY_PROVIDER_SOURCE_TYPES = {
+    "mock",
+    "openai",
+    "anthropic",
+    "gemini",
+    "qwen",
+    "deepseek",
+    "minimax",
+    "glm",
+    "kimi",
+    "step",
+}
+
 # sensenova_claw/platform/config/config.py -> 往上 3 层到项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -37,24 +66,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "llm": {
         "providers": {
             "mock": {
+                "source_type": "mock",
                 "api_key": "",
                 "base_url": "",
                 "timeout": 60,
                 "max_retries": 1,
             },
             "openai": {
+                "source_type": "openai",
                 "api_key": "${OPENAI_API_KEY}",
                 "base_url": "${OPENAI_BASE_URL}",
                 "timeout": 60,
                 "max_retries": 3,
             },
             "anthropic": {
+                "source_type": "anthropic",
                 "api_key": "${ANTHROPIC_API_KEY}",
                 "base_url": "${ANTHROPIC_BASE_URL}",
                 "timeout": 60,
                 "max_retries": 3,
             },
             "gemini": {
+                "source_type": "gemini",
                 "api_key": "${GEMINI_API_KEY}",
                 "base_url": "${GEMINI_BASE_URL}",
                 "timeout": 120,
@@ -381,6 +414,7 @@ class Config:
         for sensenova_claw_cfg in sensenova_claw_configs:
             config = self._deep_merge(config, sensenova_claw_cfg)
 
+        config = self._normalize_llm_provider_source_types(config)
         config = self._resolve_env(config)
         return config
 
@@ -419,8 +453,37 @@ class Config:
         else:
             logger.warning("配置文件不存在: %s，使用默认配置", self._config_path)
 
+        config = self._normalize_llm_provider_source_types(config)
         config = self._resolve_env(config)
         return config
+
+    def _normalize_llm_provider_source_types(self, config: dict[str, Any]) -> dict[str, Any]:
+        """为 provider 补齐 source_type，兼容旧配置。"""
+        result = deepcopy(config)
+        llm = result.get("llm")
+        if not isinstance(llm, dict):
+            return result
+
+        providers = llm.get("providers")
+        if not isinstance(providers, dict):
+            return result
+
+        normalized: dict[str, Any] = {}
+        for provider_id, provider_cfg in providers.items():
+            if not isinstance(provider_cfg, dict):
+                normalized[provider_id] = provider_cfg
+                continue
+            next_cfg = deepcopy(provider_cfg)
+            source_type = str(next_cfg.get("source_type", "") or "").strip()
+            if not source_type:
+                source_type = provider_id if provider_id in LEGACY_PROVIDER_SOURCE_TYPES else "openai-compatible"
+            if source_type not in KNOWN_LLM_SOURCE_TYPES:
+                source_type = "openai-compatible"
+            next_cfg["source_type"] = source_type
+            normalized[provider_id] = next_cfg
+
+        llm["providers"] = normalized
+        return result
 
     @staticmethod
     def _validate_config_format(user_config: dict[str, Any]) -> None:
