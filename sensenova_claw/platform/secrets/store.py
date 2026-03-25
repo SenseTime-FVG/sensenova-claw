@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
 
 class SecretStoreError(RuntimeError):
     """SecretStore 统一错误类型。"""
@@ -161,7 +163,7 @@ class FallbackSecretStore:
 
 
 def default_secret_file_path() -> Path:
-    return (Path.home() / ".sensenova-claw" / "data" / "secret" / "secret.yml").expanduser().resolve()
+    return (default_sensenova_claw_home() / "data" / "secret" / "secret.yml").expanduser().resolve()
 
 
 def build_default_secret_store() -> FallbackSecretStore:
