@@ -83,8 +83,12 @@ deck_dir/
 - 如果存在内容缺口，再进入 `ppt-research-pack`。
 - 如果存在模板约束，再进入 `ppt-template-pack`。
 - 如果存在图片槽位缺口，再进入 `ppt-asset-plan`，并保留搜图候选、筛选记录、下载结果。
+- 如果 `storyboard.json` 中存在 `real-photo` 或其他必须真实图片的槽位，必须先进入 `ppt-asset-plan`，再进入 `ppt-page-html`。
+- 如果 `storyboard.json` 虽然没有明确写出 `real-photo`，但 `visual_requirements`、页面语义或主题明显需要人物 / 产品 / 场景 / 活动现场图片，也必须先进入 `ppt-asset-plan`，不要直接跳到 `ppt-page-html`。
+- 如果页面只需要 `svg-illustration`、`svg-icon` 这类可直接绘制的插画或图标，可以直接交给 `ppt-page-html`，不要为它们强行走搜图下载。
 - 页面结果交给 `ppt-page-html`，并按 `pages/page_XX.html` 逐页落盘。
-- 最终结果必须经过 `ppt-review`。
+- 最终结果必须经过 `ppt-review`，并写出 `review.md` 或 `review.json`。
+- 如果没有 `review.md` 或 `review.json`，不要直接进入 `ppt-export-pptx`。
 - review 通过后，最后一步调用 `ppt-export-pptx` 将 HTML 导出为 PPTX 文件。
   - 执行：`node .sensenova-claw/skills/ppt-export-pptx/html_to_pptx.mjs --deck-dir <deck_dir>`
   - 输出文件名与 `deck_dir` 目录名一致，如 `<deck_dir>/AI_产品发布会_20260318_154500.pptx`

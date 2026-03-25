@@ -43,6 +43,8 @@ class AssetSlot:
     page_title: str
     slot_id: str
     purpose: str
+    asset_kind: str
+    render_strategy: str
     source_caption: str
     query: str
     selected: bool
@@ -82,11 +84,20 @@ class RejectedCandidate:
 
 从 `storyboard.json.pages[*]` 中提取有图片、插图、背景图、图标需求的槽位，并保留页面标题、页面类型、槽位用途、当前页核心摘要。
 
+- 必须先根据 `asset_requirements` 识别资产类型，例如 `real-photo`、`svg-illustration`、`svg-icon`、`qr-placeholder`。
+- `real-photo` 这类真实图片槽位使用 `download-local`。
+- `svg-illustration`、`svg-icon` 这类可直接绘制的资产使用 `draw-inline-svg`。
+- 不要为可直接绘制的图标或插画走搜图下载。
+- 如果 `asset_requirements` 写得过轻，但 `visual_requirements` 或页面语义明显指向真实图片，应补出对应的 `real-photo` 槽位，并在 `reason` 中注明这是对 storyboard 轻标注的修正。
+- 不要静默接受“整套都只有 SVG”的结果。
+- 不要把人物、产品、场景、活动现场、作品样张、环境氛围这类应由真实图片承载的内容误判成 `svg-illustration`。
+
 ### 3. 生成搜图 query
 
 - 优先使用槽位 caption 或描述作为主 query。
 - 可以在内部把中文 query 改写成更适合搜图的英文短语，但不要篡改源字段语言。
 - query 保持单意图、短语化，不要把整页大纲拼成一长串。
+- 只有 `real-photo` 或等价真实图片槽位才需要生成搜图 query。
 
 ### 4. 搜图并保留候选
 
@@ -112,9 +123,11 @@ class RejectedCandidate:
 - 优先将最终图片落地为本地文件。
 - `image_search_results.json` 必须保留每个槽位的原始候选与 query。
 - `image_selection.json` 和 `asset-plan.json` 必须保留 `selected_image` 与 `rejected_candidates`。
+- `asset-plan.json` 中必须显式记录 `asset_kind` 与 `render_strategy`。
 - 如果本地文件不存在，必须标记 `unresolved`。
 - 如果只有远程 URL 而没有下载成功的本地文件，不得标记为 `selected=True`。
 - 不要把远程 URL 伪装成最终本地资产。
+- 如果 deck 主题天然需要人物 / 产品 / 场景图片，而计划中没有任何 `real-photo` 槽位，必须把它当成风险或缺陷显式指出，不要假装资产规划已经完整。
 - 不要跳过筛选过程，也不要把“没有展示筛选过程”的结果当成完成。
 - 某个槽位失败不应阻塞其他页面继续生成。
 - 与页面语义不相关的图片不能硬塞。

@@ -23,10 +23,14 @@ const BROWSER_EXTRACT_FN = () => {
     'background-color', 'background-image',
     'border-radius', 'box-shadow',
     'border-top', 'border-right', 'border-bottom', 'border-left',
+    'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
     'opacity', 'text-align', 'line-height', 'letter-spacing',
     'text-decoration', 'display', 'overflow',
     'object-fit', 'vertical-align',
     'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+    'filter', 'backdrop-filter', 'text-shadow',
+    '-webkit-background-clip', 'background-clip',
+    '-webkit-text-fill-color',
   ];
 
   // kebab-case → camelCase 转换（用于返回对象的 key）
@@ -314,10 +318,21 @@ const BROWSER_EXTRACT_FN = () => {
   const footerEl = document.getElementById('footer');
   const footer = footerEl ? extractNode(footerEl, wrapperRect) : null;
 
+  // 提取 overlay 层（.wrapper 中非 #bg/#header/#ct/#footer 的绝对定位子元素）
+  const overlays = [];
+  for (const child of wrapper.children) {
+    if (child === bgEl || child === headerEl || child === ctEl || child === footerEl) continue;
+    const cs = window.getComputedStyle(child);
+    if (cs.getPropertyValue('position') === 'absolute' || cs.getPropertyValue('position') === 'fixed') {
+      const node = extractNode(child, wrapperRect);
+      if (node) overlays.push(node);
+    }
+  }
+
   // 提取 body 背景色（用于 opacity < 1 的 #bg 底色填充）
   const bodyBgColor = window.getComputedStyle(document.body).getPropertyValue('background-color');
 
-  return { bg, header, ct, footer, bodyBgColor };
+  return { bg, header, ct, footer, overlays, bodyBgColor };
 };
 
 // ---------------------------------------------------------------------------

@@ -70,6 +70,13 @@ class ContentBlock:
 - 页数必须严格匹配任务包要求。
 - 页面自然语言内容默认与用户 query 保持一致。
 - 页面顺序必须体现清晰叙事，而不是堆砌信息。
+- `style_variant` 必须直接引用 `style-spec.json` 中已声明的 variant 映射，不要重新发明一套名字。
+- `style_variant` 不要把它写成宽泛形容词；它必须是后续 `ppt-page-html` 可直接按 variant 落地的键。
+- `asset_requirements` 不要只写模糊的槽位名；要用能指导后续分流的提示，例如 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder`。
+- 资产类型判断必须先看页面语义，再看风格偏好。
+- 如果页面要呈现人物、产品、空间、场景、活动现场、作品样张、环境氛围等真实对象，默认应规划为 `real-photo`，必要时可叠加 `svg-illustration` 或 `svg-icon` 做装饰。
+- `插画感` 只影响装饰语法、背景氛围和前景点缀，不等于把证据型图片全部改成 `svg-illustration`。
+- 不要因为风格里有插画感、手作感、童趣感，就把整套 deck 的图片需求都改写成 `svg-illustration`。
 - `presenter_intent` 只表达讲述意图，不承担完整讲稿。
 - 每页必须显式记录 `asset_requirements` 与 `unresolved_issues`，便于后续局部修复。
 

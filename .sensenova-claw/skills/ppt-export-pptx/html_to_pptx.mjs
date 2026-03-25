@@ -4,8 +4,7 @@
 
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
-import { extractPages } from './lib/dom_extractor.mjs';
-import { buildPptx } from './lib/pptx_builder.mjs';
+import { ensureDeckPreconditions } from './lib/cli_guards.mjs';
 
 function parseArgs(args) {
   const result = { deckDir: null, output: null };
@@ -24,32 +23,10 @@ function parseArgs(args) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
-  // 前置检查 1: deck_dir 必须存在
-  if (!args.deckDir) {
-    console.error('错误: 必须指定 --deck-dir 参数');
-    process.exit(1);
-  }
-  if (!existsSync(args.deckDir)) {
-    console.error(`错误: deck_dir 不存在: ${args.deckDir}`);
-    process.exit(1);
-  }
+  const { htmlFiles } = ensureDeckPreconditions(args.deckDir);
 
-  // 前置检查 2: pages/ 目录必须存在且有 HTML 文件
-  const pagesDir = resolve(args.deckDir, 'pages');
-  if (!existsSync(pagesDir)) {
-    console.error(`错误: pages/ 目录不存在: ${pagesDir}`);
-    process.exit(1);
-  }
-
-  const htmlFiles = readdirSync(pagesDir)
-    .filter(f => /^page_\d+\.html$/.test(f))
-    .sort()
-    .map(f => resolve(pagesDir, f));
-
-  if (htmlFiles.length === 0) {
-    console.error(`错误: pages/ 目录中没有 page_*.html 文件`);
-    process.exit(1);
-  }
+  const { extractPages } = await import('./lib/dom_extractor.mjs');
+  const { buildPptx } = await import('./lib/pptx_builder.mjs');
 
   console.error(`正在处理 ${htmlFiles.length} 个 HTML 页面...`);
 
@@ -94,6 +71,6 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error(`致命错误: ${err.message}`);
+  console.error(`错误: ${err.message}`);
   process.exit(1);
 });

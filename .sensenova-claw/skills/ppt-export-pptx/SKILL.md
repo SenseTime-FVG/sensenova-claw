@@ -11,6 +11,8 @@ description: 将 deck_dir 中的 HTML 页面导出为可编辑的 PPTX 文件，
 
 1. `deck_dir` 已存在，且 `pages/` 目录下至少有一个 `page_*.html` 文件
 2. 依赖已安装（首次使用需执行 `cd .sensenova-claw/skills/ppt-export-pptx && npm install`）
+3. 必须先确认 `review.md` 或 `review.json` 存在；如果 review 标记为阻塞，或根本没有 review 工件，不得继续导出
+4. 如果 `style-spec.json` / `storyboard.json` 声明了背景或前景 motif recipe，页面 HTML 中必须存在对应的 `data-layer="bg-motif"`、`data-layer="fg-motif"` 与 `data-motif-key` 标记；缺失时不得继续导出
 
 ## 用户回显要求
 
