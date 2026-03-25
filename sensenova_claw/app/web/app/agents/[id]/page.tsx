@@ -29,7 +29,7 @@ interface AgentDetail {
   skills: string[];
   toolsDetail: ToolDetail[];
   skillsDetail: SkillDetail[];
-  canDelegateTo: string[];
+  canDelegateTo: string[] | null;
   maxDelegationDepth: number;
   sessions: { id: string; status: string; channel: string; messageCount: number }[];
 }
@@ -84,7 +84,7 @@ export default function AgentDetailPage() {
         setEditModel(data.model || '');
         setEditTemp(String(data.temperature ?? 0.2));
         setEditPrompt(data.systemPrompt || '');
-        setEditDelegateTo(data.canDelegateTo || []);
+        setEditDelegateTo(Array.isArray(data.canDelegateTo) ? data.canDelegateTo : []);
         setEditMaxDepth(String(data.maxDelegationDepth ?? 3));
         // tools/skills 状态
         const ts: Record<string, boolean> = {};
@@ -130,7 +130,7 @@ export default function AgentDetailPage() {
         model: editModel || undefined,
         temperature: parseFloat(editTemp) || 0.2,
         systemPrompt: editPrompt,
-        can_delegate_to: editDelegateTo,
+        can_delegate_to: editDelegateTo.length > 0 ? editDelegateTo : null,
         max_delegation_depth: parseInt(editMaxDepth) || 3,
       };
       const res = await authFetch(`${API_BASE}/api/agents/${agentId}/config`, {
@@ -376,7 +376,7 @@ export default function AgentDetailPage() {
                       <CfgInput label="Maximum Handoff Depth" type="number" value={editMaxDepth} onChange={setEditMaxDepth} />
                     </div>
                     <div>
-                      <label className="text-muted-foreground text-sm font-bold block mb-4 uppercase tracking-wider">Authorized Delegate Targets (Leave empty for all)</label>
+                      <label className="text-muted-foreground text-sm font-bold block mb-4 uppercase tracking-wider">Authorized Delegate Targets</label>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                         {allAgents.filter(a => a.id !== agentId).map(a => (
                           <label key={a.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all cursor-pointer shadow-sm ${
@@ -402,6 +402,9 @@ export default function AgentDetailPage() {
                           <p className="text-sm text-muted-foreground">No other active agents found in the system registry.</p>
                         </div>
                       )}
+                      <p className="mt-4 text-xs text-muted-foreground font-medium italic">
+                        If none are selected, delegation is disabled.
+                      </p>
                     </div>
                   </ConfigSection>
                 </div>

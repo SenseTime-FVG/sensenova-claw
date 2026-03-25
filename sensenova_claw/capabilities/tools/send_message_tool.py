@@ -189,8 +189,10 @@ class SendMessageTool(Tool):
         current_agent = self._registry.get(current_agent_id) or self._registry.get("default")
 
         if current_agent:
+            if current_agent.can_send_message_to is None:
+                return "发送失败：当前 Agent 未被授权向任何 Agent 发送消息。"
             sendable = self._registry.get_sendable(current_agent_id)
-            if sendable and target_id not in {agent.id for agent in sendable}:
+            if current_agent.can_send_message_to and target_id not in {agent.id for agent in sendable}:
                 return f"发送失败：当前 Agent 未被授权向 {target_id} 发送消息。"
 
         current_depth = int(current_meta.get("send_depth", 0) or 0)
