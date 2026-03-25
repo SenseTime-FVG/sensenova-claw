@@ -563,6 +563,393 @@ test('llms 页面测试失败时应先显示连接失败状态框，点击后再
   await expect(failedPopover).toHaveCount(0);
 });
 
+test('llms 页面应支持测试全部，并以最大并发 10 在浮层中展示进度和失败详情', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const llmModels = Object.fromEntries(
+      Array.from({ length: 12 }, (_, index) => [
+        `openai-model-${index + 1}`,
+        { provider: 'openai', model_id: `gpt-4.1-mini-${index + 1}`, timeout: 60, max_output_tokens: 8192 },
+      ]),
+    );
+
+    const state = {
+      llm: {
+        providers: {
+          mock: { source_type: 'mock', api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••openai', source: 'config' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+          anthropic: {
+            source_type: 'anthropic',
+            api_key: { configured: true, masked_value: 'sk-••••anthropic', source: 'config' },
+            base_url: 'https://api.anthropic.com',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          ...llmModels,
+          'claude-3-5-haiku': { provider: 'anthropic', model_id: 'claude-3-5-haiku-20241022', timeout: 60, max_output_tokens: 8192 },
+        },
+        default_model: 'openai-model-1',
+        _meta: {
+          explicit_provider_names: ['openai', 'anthropic'],
+        },
+      },
+    };
+
+    const pendingResolvers = new Map<string, () => void>();
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+    const startedModels: string[] = [];
+
+    Object.assign(window, {
+      __bulkTestState: {
+        activeRequests: 0,
+        maxActiveRequests: 0,
+        startedModels,
+      },
+      __releaseBulkTest(modelName: string) {
+        pendingResolvers.get(modelName)?.();
+      },
+      __releaseAllBulkTests() {
+        Array.from(pendingResolvers.values()).forEach((release) => release());
+      },
+    });
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai', 'anthropic'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/secret?path=llm.providers.openai.api_key') && method === 'GET') {
+        return new Response(JSON.stringify({ path: 'llm.providers.openai.api_key', value: 'sk-openai-real' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/secret?path=llm.providers.anthropic.api_key') && method === 'GET') {
+        return new Response(JSON.stringify({ path: 'llm.providers.anthropic.api_key', value: 'sk-anthropic-real' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/test-llm') && method === 'POST') {
+        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
+        const modelId = String(body.model_id ?? '');
+        const modelName = Object.entries(state.llm.models).find(([, model]) => model.model_id === modelId)?.[0] ?? modelId;
+
+        activeRequests += 1;
+        maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+        startedModels.push(modelName);
+        Object.assign(window, {
+          __bulkTestState: {
+            activeRequests,
+            maxActiveRequests,
+            startedModels,
+          },
+        });
+
+        await new Promise<void>((resolve) => {
+          pendingResolvers.set(modelName, () => {
+            pendingResolvers.delete(modelName);
+            resolve();
+          });
+        });
+
+        activeRequests -= 1;
+        Object.assign(window, {
+          __bulkTestState: {
+            activeRequests,
+            maxActiveRequests,
+            startedModels,
+          },
+        });
+
+        if (modelName === 'claude-3-5-haiku') {
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'Error code: 401 - invalid anthropic api key',
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        return new Response(JSON.stringify({ success: true, message: '连接成功' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await expect(page.getByTestId('test-all-llms')).toBeVisible();
+
+  await page.getByTestId('test-all-llms').click();
+
+  const bulkDialog = page.getByTestId('test-all-llms-dialog');
+  await expect(bulkDialog).toBeVisible();
+  await expect(bulkDialog).toContainText('openai: openai');
+  await expect(bulkDialog).toContainText('anthropic: anthropic');
+  await expect(page.getByTestId('test-all-llms-item-openai-model-1')).toContainText('连接中');
+
+  await expect.poll(async () => page.evaluate(() => {
+    return (window as typeof window & {
+      __bulkTestState?: { maxActiveRequests: number; startedModels: string[] };
+    }).__bulkTestState?.startedModels.length ?? 0;
+  })).toBe(10);
+
+  await expect.poll(async () => page.evaluate(() => {
+    return (window as typeof window & {
+      __bulkTestState?: { maxActiveRequests: number };
+    }).__bulkTestState?.maxActiveRequests ?? 0;
+  })).toBe(10);
+
+  await page.evaluate(() => {
+    (window as typeof window & { __releaseAllBulkTests?: () => void }).__releaseAllBulkTests?.();
+  });
+
+  await expect.poll(async () => page.evaluate(() => {
+    return (window as typeof window & {
+      __bulkTestState?: { startedModels: string[] };
+    }).__bulkTestState?.startedModels.length ?? 0;
+  })).toBe(13);
+
+  await page.evaluate(() => {
+    (window as typeof window & { __releaseAllBulkTests?: () => void }).__releaseAllBulkTests?.();
+  });
+
+  await expect(page.getByTestId('test-all-llms-item-openai-model-1')).toContainText('连接成功');
+  await expect(page.getByTestId('test-all-llms-item-claude-3-5-haiku')).toContainText('连接失败');
+  await expect(page.getByTestId('test-all-llms-error-claude-3-5-haiku')).toHaveCount(0);
+  await expect(page.getByTestId('test-all-llms')).toHaveCount(0);
+  await expect(page.getByTestId('retest-all-llms')).toBeVisible();
+  await expect(page.getByTestId('show-all-llms-test-results')).toBeVisible();
+
+  await page.getByTestId('test-all-llms-item-claude-3-5-haiku').click();
+  await expect(page.getByTestId('test-all-llms-error-claude-3-5-haiku')).toContainText('invalid anthropic api key');
+  await page.keyboard.press('Escape');
+  await expect(bulkDialog).toBeHidden();
+
+  await page.getByTestId('show-all-llms-test-results').click();
+  await expect(bulkDialog).toBeVisible();
+  await expect(page.getByTestId('test-all-llms-item-claude-3-5-haiku')).toContainText('连接失败');
+});
+
+test('llms 页面批量测试浮窗层级应高于顶部导航栏', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          mock: { source_type: 'mock', api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••openai', source: 'config' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+        _meta: {
+          explicit_provider_names: ['openai'],
+        },
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/secret?path=llm.providers.openai.api_key') && method === 'GET') {
+        return new Response(JSON.stringify({ path: 'llm.providers.openai.api_key', value: 'sk-openai-real' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/test-llm') && method === 'POST') {
+        return new Response(JSON.stringify({ success: true, message: '连接成功' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.getByTestId('test-all-llms').click();
+  await expect(page.getByTestId('test-all-llms-dialog')).toBeVisible();
+
+  const zIndex = await page.evaluate(() => {
+    const header = document.querySelector('header');
+    const dialog = document.querySelector('[data-testid="test-all-llms-dialog"]');
+    return {
+      header: header ? Number.parseInt(window.getComputedStyle(header).zIndex || '0', 10) : 0,
+      dialog: dialog ? Number.parseInt(window.getComputedStyle(dialog).zIndex || '0', 10) : 0,
+    };
+  });
+
+  expect(zIndex.dialog).toBeGreaterThan(zIndex.header);
+});
+
+test('llms 页面批量测试浮窗应由外层裁切圆角，滚动条位于内容区内部', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const llmModels = Object.fromEntries(
+      Array.from({ length: 18 }, (_, index) => [
+        `openai-model-${index + 1}`,
+        { provider: 'openai', model_id: `gpt-4.1-mini-${index + 1}`, timeout: 60, max_output_tokens: 8192 },
+      ]),
+    );
+
+    const state = {
+      llm: {
+        providers: {
+          mock: { source_type: 'mock', api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••openai', source: 'config' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          ...llmModels,
+        },
+        default_model: 'openai-model-1',
+        _meta: {
+          explicit_provider_names: ['openai'],
+        },
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/secret?path=llm.providers.openai.api_key') && method === 'GET') {
+        return new Response(JSON.stringify({ path: 'llm.providers.openai.api_key', value: 'sk-openai-real' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/test-llm') && method === 'POST') {
+        return new Response(JSON.stringify({ success: true, message: '连接成功' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.getByTestId('test-all-llms').click();
+  await expect(page.getByTestId('test-all-llms-dialog')).toBeVisible();
+
+  const overflow = await page.evaluate(() => {
+    const dialog = document.querySelector('[data-testid="test-all-llms-dialog"]');
+    const body = document.querySelector('[data-testid="test-all-llms-scroll-body"]');
+    return {
+      dialogOverflowY: dialog ? window.getComputedStyle(dialog).overflowY : '',
+      dialogOverflowX: dialog ? window.getComputedStyle(dialog).overflowX : '',
+      bodyOverflowY: body ? window.getComputedStyle(body).overflowY : '',
+    };
+  });
+
+  expect(overflow.dialogOverflowY).toBe('hidden');
+  expect(overflow.dialogOverflowX).toBe('hidden');
+  expect(overflow.bodyOverflowY).toBe('auto');
+});
+
 test('llms 页面当 secret reveal 返回占位符时不应显示占位符 API Key', async ({ page }) => {
   const token = readCurrentToken();
   await page.context().addCookies([{

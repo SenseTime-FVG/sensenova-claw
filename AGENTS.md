@@ -1226,3 +1226,34 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅靠前端 mock 成功响应的 Playwright 用例，可能掩盖真实后端“不支持新建”的语义缺口；如果问题涉及接口契约，必须至少补一层真实后端测试。
+
+### 2026-03-25 LLM 批量测试弹窗补充
+
+成功经验：
+- `/llms` 页的批量连通性测试适合直接复用现有单个 `test-llm` 链路；把“读取当前 draft、reveal secret、统一映射 success/error”收敛成一个 helper 后，单项测试和批量测试都能共用，避免两套逻辑漂移。
+- 前端实现“最大并发 10”时，用固定 worker 数量消费共享游标就足够稳定；这类功能的高价值断言应是 `maxActiveRequests === 10`，而不只是“最终都测完了”。
+
+失败/风险经验：
+- Playwright 若通过手动阻塞 mock 请求来验证限流，放行首批请求后还要继续放行后续波次；否则最后几个模型会一直停在“连接中”，这是测试夹具问题，不是页面并发队列问题。
+
+### 2026-03-25 LLM 批量测试按钮态补充
+
+成功经验：
+- `/llms` 页这种“首次动作后入口切换”的需求，最简单稳妥的状态是单独维护 `hasBulkTestResults`：首次未测试显示 `测试全部`，一旦产生过结果就切成纵向 `重新测试全部 + 测试结果`，弹窗开关仍独立管理。
+
+失败/风险经验：
+- 当前环境下 Playwright 跑 `/llms` 相关用例偶发会在 `page.goto('/llms')` 直接报 `net::ERR_ABORTED; maybe frame was detached?` 并耗尽 60 秒超时；这类失败发生在页面加载前，不能直接归因到本次按钮态改动。
+
+### 2026-03-25 Dialog 层级补充
+
+成功经验：
+- 当弹窗“看起来被导航栏挡住”时，先直接比较真实计算后的 `z-index` 最有效；这次通过 Playwright 断言拿到 `header=200, dialog=50`，快速锁定为全局 `Dialog` 组件层级过低，而不是 `/llms` 页面局部布局问题。
+- 对这类全站弹窗层级问题，优先修 `components/ui/dialog.tsx` 的 overlay/content `z-index`，比在单页弹窗上单独加类名更稳，也更不容易留下别的页面继续被顶栏压住。
+
+失败/风险经验：
+- 如果用户明确要求“只修当前浮窗，不改其他层级”，就不能顺手调整全局 `Dialog`；应把局部 `z-index` 直接加在目标页面的 `DialogContent` 上，并保留专门的层级回归测试锁定该页面。
+
+### 2026-03-25 Dialog 内部滚动补充
+
+成功经验：
+- 模态框如果既要保住外层圆角、又要让滚动条看起来属于同一个面板，最稳的结构是 `DialogContent` 自身 `overflow-hidden`，再放一个 `flex-1 overflow-y-auto` 的内部内容区；不要直接让 `DialogContent` 滚动。
