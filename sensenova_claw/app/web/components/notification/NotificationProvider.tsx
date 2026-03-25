@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useEffect, useState } from 'react';
+import { createContext, useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   NotificationToast,
@@ -87,6 +87,7 @@ function makeNotificationId() {
 }
 
 const MAX_CARDS = 50;
+const ACTION_TOAST_AUTO_DISMISS_MS = 60_000;
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<ToastNotification[]>([]);
@@ -95,10 +96,23 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
   // 操作回调：由 NotificationDropdown 注册，处理 WebSocket 响应
   const [onActionToastAction, setOnActionToastActionRaw] = useState<((cardId: string, actionValue: string, inputValue?: string) => void) | null>(null);
+  const actionToastTimeoutsRef = useRef<Map<string, number>>(new Map());
 
   const setOnActionToastAction = useCallback((fn: ((cardId: string, actionValue: string, inputValue?: string) => void) | null) => {
     setOnActionToastActionRaw(() => fn);
   }, []);
+
+  const clearActionToastTimer = useCallback((toastId: string) => {
+    const timerId = actionToastTimeoutsRef.current.get(toastId);
+    if (timerId === undefined) return;
+    window.clearTimeout(timerId);
+    actionToastTimeoutsRef.current.delete(toastId);
+  }, []);
+
+  const removeActionToast = useCallback((toastId: string) => {
+    clearActionToastTimer(toastId);
+    setActionToasts(prev => prev.filter(t => t.id !== toastId));
+  }, [clearActionToastTimer]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -106,6 +120,43 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       return;
     }
     setPermission(window.Notification.permission);
+  }, []);
+
+  useEffect(() => {
+    const visibleToastIds = new Set(actionToasts.map(toast => toast.id));
+    for (const toastId of actionToastTimeoutsRef.current.keys()) {
+      const toast = actionToasts.find(item => item.id === toastId);
+      if (!toast || toast.pending) {
+        clearActionToastTimer(toastId);
+      }
+    }
+
+    actionToasts.forEach((toast) => {
+      if (toast.pending || actionToastTimeoutsRef.current.has(toast.id)) {
+        return;
+      }
+      const remainingMs = Math.max(0, toast.createdAtMs + ACTION_TOAST_AUTO_DISMISS_MS - Date.now());
+      const timerId = window.setTimeout(() => {
+        actionToastTimeoutsRef.current.delete(toast.id);
+        setActionToasts(prev => prev.filter(t => t.id !== toast.id));
+      }, remainingMs);
+      actionToastTimeoutsRef.current.set(toast.id, timerId);
+    });
+
+    for (const toastId of actionToastTimeoutsRef.current.keys()) {
+      if (!visibleToastIds.has(toastId)) {
+        clearActionToastTimer(toastId);
+      }
+    }
+  }, [actionToasts, clearActionToastTimer]);
+
+  useEffect(() => {
+    return () => {
+      for (const timerId of actionToastTimeoutsRef.current.values()) {
+        window.clearTimeout(timerId);
+      }
+      actionToastTimeoutsRef.current.clear();
+    };
   }, []);
 
   const dismissNotification = (id: string) => {
@@ -248,13 +299,21 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         : c
     ));
     // 同时移除对应的操作弹窗
-    setActionToasts(prev => prev.filter(t => t.cardId !== id));
-  }, []);
+    setActionToasts(prev => {
+      const matchedToasts = prev.filter(t => t.cardId === id);
+      matchedToasts.forEach((toast) => clearActionToastTimer(toast.id));
+      return prev.filter(t => t.cardId !== id);
+    });
+  }, [clearActionToastTimer]);
 
   const dismissCard = useCallback((id: string) => {
     setCards(prev => prev.filter(c => c.id !== id));
-    setActionToasts(prev => prev.filter(t => t.cardId !== id));
-  }, []);
+    setActionToasts(prev => {
+      const matchedToasts = prev.filter(t => t.cardId === id);
+      matchedToasts.forEach((toast) => clearActionToastTimer(toast.id));
+      return prev.filter(t => t.cardId !== id);
+    });
+  }, [clearActionToastTimer]);
 
   const clearAllCards = useCallback(() => {
     setCards([]);
@@ -263,6 +322,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   // 操作弹窗：用户点击按钮
   const handleActionToastAction = useCallback((toastId: string, cardId: string, actionValue: string, inputValue?: string) => {
+    clearActionToastTimer(toastId);
     setActionToasts(prev => prev.map(t =>
       t.id === toastId
         ? { ...t, pending: true, pendingAction: actionValue }
@@ -271,12 +331,12 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     markCardPending(cardId, actionValue);
     // 触发回调（发送 WebSocket 响应）
     onActionToastAction?.(cardId, actionValue, inputValue);
-  }, [markCardPending, onActionToastAction]);
+  }, [clearActionToastTimer, markCardPending, onActionToastAction]);
 
   // 操作弹窗：用户关闭（不操作）
   const handleActionToastDismiss = useCallback((toastId: string) => {
-    setActionToasts(prev => prev.filter(t => t.id !== toastId));
-  }, []);
+    removeActionToast(toastId);
+  }, [removeActionToast]);
 
   const unreadCount = cards.filter(c => !c.read && !c.resolved).length;
 
