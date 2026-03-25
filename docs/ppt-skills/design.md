@@ -245,12 +245,15 @@
 
 #### `ppt-task-pack`
 
-负责统一记录任务目标、页数、受众、语言、限制、交付物、输出目录、推荐路径、`research_required` 和 `风格意图`，产出 `task-pack.json`。
+负责统一记录任务目标、页数、受众、语言、限制、交付物、输出目录、推荐路径、`research_required`、`content_gap_assessment`、`research_needs` 和 `风格意图`，产出 `task-pack.json`。
+在实验 1 中，`ppt-task-pack` 不只是任务收敛层，也是内容控制面：要先把内容缺口评估清楚，再决定 research 是否值得执行。
 
 #### `ppt-research-pack`
 
 负责内容研究和内容补充。它必须先读取 `task-pack.json`，并且只在 `task-pack.json.research_required` 为真时才执行，产出 `research-pack.md` 或 `research-pack.json`。
 上传报告、事实数据案例、长文档这些输入都要先交给 `ppt-task-pack` 消化，它们只是 `research_required` 的信号，不是绕过 `task-pack` 的独立入口。
+research 不是摘要，而是“可上页内容池”。
+pageworthy chunks 是 storyboard 的上游输入。
 
 #### `ppt-template-pack`
 
@@ -394,7 +397,9 @@ class TaskPack:
     must_have_sections: list[str]
     constraints: list[str]
     known_gaps: list[str]
+    content_gap_assessment: list[str]
     research_required: bool
+    research_needs: list["ResearchNeed"]
     available_sources: list[str]
     style_intent: "StyleIntent"
     deck_dir: str
@@ -407,6 +412,13 @@ class StyleIntent:
     tone: list[str]
     industry_context: str
     explicit_style_preference: str | None
+
+
+class ResearchNeed:
+    topic: str
+    reason: str
+    scope: list[str]
+    priority: str
 ```
 
 要求：
@@ -418,7 +430,9 @@ class StyleIntent:
 - 后续 skill 只能直接复制这个值，不要手写、缩写、翻译或重拼目录名
 - 如果用户未指定目录，`deck_dir` 使用 `query概述 + 时间戳` 自动创建
 - 不允许把工件散落写到 agent 根目录
+- `content_gap_assessment` 负责显式记录当前内容缺什么、为什么缺、会阻塞什么
 - `research_required` 由 `task-pack.json` 自己判断并显式记录
+- `research_needs` 负责把 research topic、reason、scope、priority 写成稳定输入
 - 不允许在 `task-pack` 之前做外部 research 决策
 
 ### 5.4 `style-spec.json`

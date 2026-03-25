@@ -8,6 +8,7 @@ description: 当 `task-pack` 判定存在内容缺口、需要进一步研究时
 ## 目标
 
 必须先读取 `task-pack.json`，再按 `task-pack.json.research_required` 决定是否执行研究，产出 `research-pack.md` 或 `research-pack.json`，作为内容依据。
+research 不是摘要，而是“可上页内容池”。
 
 ## 用户回显要求
 
@@ -28,10 +29,38 @@ description: 当 `task-pack` 判定存在内容缺口、需要进一步研究时
 研究结果至少应包含：
 
 - 核心结论
-- 关键论点
-- 证据摘要
-- 可用于分页的章节建议
+- `claims`
+- `evidence_points`
+- `pageworthy_chunks`
 - 已知信息缺口
+
+建议最小结构：
+
+```python
+class Claim:
+    claim: str
+    importance: str
+    evidence_refs: list[str]
+
+
+class EvidencePoint:
+    evidence: str
+    source: str
+    supports: list[str]
+
+
+class PageworthyChunk:
+    chunk: str
+    why_pageworthy: str
+    related_claims: list[str]
+
+
+class ResearchPack:
+    claims: list[Claim]
+    evidence_points: list[EvidencePoint]
+    pageworthy_chunks: list[PageworthyChunk]
+    risks_or_uncertainties: list[str]
+```
 
 ## 关键原则
 
@@ -41,6 +70,8 @@ description: 当 `task-pack` 判定存在内容缺口、需要进一步研究时
 - 由 `task-pack.json.research_required` 决定是否进入 `ppt-research-pack`。
 - 上传报告、事实数据案例、长文档等都只是 `task-pack` 的研究信号。
 - 研究包是内容依据，不是页面大纲。
+- research 不是摘要，而是“可上页内容池”。
+- `pageworthy_chunks` 是 storyboard 的上游输入。
 - 不要在研究阶段先决定最终页面布局。
 - 不要虚构事实、数据或案例。
 - 如果外部检索结果不稳定，必须写明不确定性。

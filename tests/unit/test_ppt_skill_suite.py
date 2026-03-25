@@ -166,6 +166,24 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("由 `task-pack.json.research_required` 决定是否进入 `ppt-research-pack`", research_pack_body)
         self.assertIn("research_required", task_pack_body)
 
+    def test_ppt_task_pack_elevates_content_gap_assessment_to_contract(self):
+        skills = _load_workspace_skills()
+
+        body = skills["ppt-task-pack"]
+
+        self.assertIn("content_gap_assessment", body)
+        self.assertIn("research_required", body)
+        self.assertIn("research_needs", body)
+
+    def test_ppt_research_pack_defines_pageworthy_content_pool_contract(self):
+        skills = _load_workspace_skills()
+
+        body = skills["ppt-research-pack"]
+
+        self.assertIn("claims", body)
+        self.assertIn("evidence_points", body)
+        self.assertIn("pageworthy_chunks", body)
+
     def test_key_ppt_skills_define_user_feedback_hooks(self):
         skills = _load_workspace_skills()
 
@@ -221,6 +239,12 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("必须先读取 `task-pack.json`", research_body)
         self.assertIn("research 不是默认第一步", research_body)
         self.assertIn("是否运行 research 取决于 `task-pack.json.research_required`", research_body)
+
+    def test_ppt_design_doc_marks_research_as_pageworthy_content_upstream(self):
+        content = DESIGN_DOC.read_text(encoding="utf-8")
+
+        self.assertIn("research 不是摘要，而是“可上页内容池”", content)
+        self.assertIn("pageworthy chunks 是 storyboard 的上游输入", content)
 
 
 if __name__ == "__main__":
