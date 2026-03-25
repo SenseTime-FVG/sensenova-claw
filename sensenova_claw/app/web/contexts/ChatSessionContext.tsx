@@ -653,7 +653,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         if (!questionId || !sourceSessionId) break;
         const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
         const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
-        setIsTyping(true);
+        setIsTyping(false);
         const rawOptions = Array.isArray(payload.options)
           ? payload.options.map((o: unknown) => String(o))
           : null;

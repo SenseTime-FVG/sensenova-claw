@@ -61,7 +61,7 @@ class SendMessageTool(Tool):
             },
             "timeout_seconds": {
                 "type": "number",
-                "description": "可选。整条消息链路的总超时秒数，默认使用系统配置。",
+                "description": "可选。无活动超时秒数（子 Agent 有活动时自动续期），默认使用系统配置。",
             },
             "max_retries": {
                 "type": "integer",
@@ -80,6 +80,8 @@ class SendMessageTool(Tool):
         coordinator: AgentMessageCoordinator,
         timeout: float = 300,
         default_max_retries: int = 0,
+        max_tool_calls: int = 30,
+        max_llm_calls: int = 15,
     ):
         self._registry = agent_registry
         self._bus = bus
@@ -87,6 +89,8 @@ class SendMessageTool(Tool):
         self._coordinator = coordinator
         self._timeout = timeout
         self._default_max_retries = default_max_retries
+        self._max_tool_calls = max_tool_calls
+        self._max_llm_calls = max_llm_calls
 
     async def execute(self, **kwargs: Any) -> Any:
         # 多目标并行模式
@@ -267,6 +271,8 @@ class SendMessageTool(Tool):
                     "parent_tool_call_id": current_tool_call_id,
                     "timeout_seconds": timeout_seconds,
                     "max_retries": max_retries,
+                    "max_tool_calls": self._max_tool_calls,
+                    "max_llm_calls": self._max_llm_calls,
                 },
             )
         )
@@ -283,17 +289,14 @@ class SendMessageTool(Tool):
             )
 
         assert waiter is not None
+        # 超时完全由 coordinator 心跳续期机制控制，
+        # cancel_message → _resolve_waiter_or_publish 会 set_result(payload)，
+        # 所以 await waiter 在超时时返回 {"status": "timed_out", ...}，
+        # 后续第 313 行已有处理。
         try:
-            result_payload = await asyncio.wait_for(waiter, timeout=timeout_seconds + 1)
-        except asyncio.TimeoutError:
-            await self._coordinator.cancel_message(
-                record_id=record_id,
-                reason=f"{target_id} 在 {timeout_seconds} 秒内未完成处理。",
-                status="timed_out",
-                propagate_to_child=True,
-                source_session_id=current_session_id or None,
-            )
-            return f"发送失败：{target_id} 在 {timeout_seconds} 秒内未完成处理。"
+            result_payload = await waiter
+        except asyncio.CancelledError:
+            return f"发送失败：{target_id} 的委托会话被清理。"
 
         if result_payload.get("status") == "completed":
             next_session_id = str(result_payload.get("child_session_id", ""))

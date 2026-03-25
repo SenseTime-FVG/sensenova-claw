@@ -34,7 +34,9 @@ export interface ActionToast {
   level: 'info' | 'warning' | 'error' | 'success';
   source: string;
   createdAtMs: number;
-  actions: { label: string; value: string }[];
+  actions?: { label: string; value: string }[];
+  allowsInput?: boolean;
+  inputPlaceholder?: string;
   // 关联的通知卡片 ID
   cardId: string;
   // ask_user 富交互数据
@@ -254,13 +256,138 @@ function QuestionToastBody({
 
 // ── 操作弹窗（不自动消失，需要用户操作） ──
 
+function ActionToastItem({
+  toast,
+  onAction,
+  onDismiss,
+}: {
+  toast: ActionToast;
+  onAction: (toastId: string, cardId: string, actionValue: string, inputValue?: string) => void;
+  onDismiss: (toastId: string) => void;
+}) {
+  const Icon = actionKindIcon[toast.source] || levelIcon[toast.level] || Bell;
+  const [inputValue, setInputValue] = useState('');
+  const trimmedInput = inputValue.trim();
+
+  const submitInput = () => {
+    if (!trimmedInput) return;
+    onAction(toast.id, toast.cardId, trimmedInput, trimmedInput);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    event.preventDefault();
+    submitInput();
+  };
+
+  return (
+    <div
+      key={toast.id}
+      data-testid="action-toast"
+      className={cn(
+        'pointer-events-auto rounded-2xl border-2 shadow-[0_20px_60px_rgba(15,23,42,0.2)] backdrop-blur-xl animate-in slide-in-from-top-4 fade-in duration-300',
+        'bg-background/98',
+        toast.level === 'warning'
+          ? 'border-amber-400/60'
+          : toast.level === 'info'
+            ? 'border-sky-400/60'
+            : 'border-neutral-300/60',
+      )}
+    >
+      <div className="flex items-start gap-3 p-4">
+        <div className={cn(
+          'mt-0.5 rounded-xl p-2.5',
+          toast.level === 'warning'
+            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+            : toast.level === 'info'
+              ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400'
+              : 'bg-neutral-500/10 text-neutral-600 dark:text-neutral-400',
+        )}>
+          <Icon size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm font-bold text-foreground">{toast.title}</p>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-6 w-6 shrink-0 rounded-full opacity-50 hover:opacity-100"
+              onClick={() => onDismiss(toast.id)}
+            >
+              <X size={12} />
+            </Button>
+          </div>
+          {toast.source === 'user_question' && toast.questionData ? (
+            <QuestionToastBody toast={toast} onAction={onAction} />
+          ) : (
+          <>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/70 line-clamp-2">
+            {toast.body}
+          </p>
+          {toast.allowsInput && (
+            <div className="mt-3 space-y-2">
+              <textarea
+                data-testid="action-toast-input"
+                value={inputValue}
+                onChange={(event) => setInputValue(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={toast.inputPlaceholder || '请输入回复'}
+                className="min-h-[88px] w-full resize-none rounded-lg border border-neutral-200 dark:border-neutral-700 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-sky-400 dark:focus:border-sky-500"
+                rows={3}
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-muted-foreground">Enter 提交，Shift+Enter 换行</span>
+                <button
+                  data-testid="action-toast-submit"
+                  type="button"
+                  onClick={submitInput}
+                  disabled={!trimmedInput}
+                  className="rounded-lg border border-sky-300 bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  确认
+                </button>
+              </div>
+            </div>
+          )}
+          {toast.actions && toast.actions.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {toast.actions.map((action) => (
+                <button
+                  key={action.value}
+                  data-testid="action-toast-button"
+                  type="button"
+                  onClick={() => onAction(toast.id, toast.cardId, action.value)}
+                  className={cn(
+                    'max-w-full rounded-lg border px-4 py-1.5 text-left text-xs font-semibold leading-relaxed whitespace-normal break-all transition-all hover:scale-[1.02] active:scale-[0.98]',
+                    action.value === 'approve' || action.value === 'accept'
+                      ? 'border-emerald-300 bg-emerald-500 text-white shadow-sm shadow-emerald-200 dark:shadow-emerald-900 hover:bg-emerald-600'
+                      : action.value === 'deny' || action.value === 'reject'
+                        ? 'border-rose-200 dark:border-rose-800 bg-background text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950'
+                        : action.value === 'view_session'
+                          ? 'border-violet-300 bg-violet-500 text-white shadow-sm shadow-violet-200 dark:shadow-violet-900 hover:bg-violet-600'
+                          : 'border-neutral-200 dark:border-neutral-700 bg-background text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800',
+                  )}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          )}
+          </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ActionToastPanel({
   toasts,
   onAction,
   onDismiss,
 }: {
   toasts: ActionToast[];
-  onAction: (toastId: string, cardId: string, actionValue: string) => void;
+  onAction: (toastId: string, cardId: string, actionValue: string, inputValue?: string) => void;
   onDismiss: (toastId: string) => void;
 }) {
   if (toasts.length === 0) return null;
@@ -270,83 +397,14 @@ export function ActionToastPanel({
 
   return (
     <div className="pointer-events-none fixed right-4 top-16 z-[300] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3">
-      {visibleToasts.map((toast) => {
-        const Icon = actionKindIcon[toast.source] || levelIcon[toast.level] || Bell;
-        const isQuestion = toast.source === 'user_question' && !!toast.questionData;
-        return (
-          <div
-            key={toast.id}
-            className={cn(
-              'pointer-events-auto rounded-2xl border-2 shadow-[0_20px_60px_rgba(15,23,42,0.2)] backdrop-blur-xl animate-in slide-in-from-top-4 fade-in duration-300',
-              'bg-background/98',
-              toast.level === 'warning'
-                ? 'border-amber-400/60'
-                : toast.level === 'info'
-                  ? 'border-sky-400/60'
-                  : 'border-neutral-300/60',
-            )}
-          >
-            <div className="flex items-start gap-3 p-4">
-              <div className={cn(
-                'mt-0.5 rounded-xl p-2.5',
-                toast.level === 'warning'
-                  ? 'bg-amber-500/10 text-amber-600'
-                  : toast.level === 'info'
-                    ? 'bg-sky-500/10 text-sky-600'
-                    : 'bg-neutral-500/10 text-neutral-600',
-              )}>
-                <Icon size={18} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-bold text-foreground">{toast.title}</p>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="h-6 w-6 shrink-0 rounded-full opacity-50 hover:opacity-100"
-                    onClick={() => onDismiss(toast.id)}
-                  >
-                    <X size={12} />
-                  </Button>
-                </div>
-
-                {isQuestion ? (
-                  /* ask_user 富交互 */
-                  <QuestionToastBody toast={toast} onAction={onAction} />
-                ) : (
-                  /* 默认：简单按钮 */
-                  <>
-                    <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/70 line-clamp-2">
-                      {toast.body}
-                    </p>
-                    <div className="mt-3 flex gap-2">
-                      {toast.actions.map((action) => (
-                        <button
-                          key={action.value}
-                          type="button"
-                          onClick={() => onAction(toast.id, toast.cardId, action.value)}
-                          className={cn(
-                            'rounded-lg border px-4 py-1.5 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]',
-                            action.value === 'approve' || action.value === 'accept'
-                              ? 'border-emerald-300 bg-emerald-500 text-white shadow-sm shadow-emerald-200 hover:bg-emerald-600'
-                              : action.value === 'deny' || action.value === 'reject'
-                                ? 'border-rose-200 bg-white text-rose-600 hover:bg-rose-50'
-                                : action.value === 'view_session'
-                                  ? 'border-violet-300 bg-violet-500 text-white shadow-sm shadow-violet-200 hover:bg-violet-600'
-                                  : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50',
-                          )}
-                        >
-                          {action.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })}
+      {visibleToasts.map((toast) => (
+        <ActionToastItem
+          key={toast.id}
+          toast={toast}
+          onAction={onAction}
+          onDismiss={onDismiss}
+        />
+      ))}
     </div>
   );
 }

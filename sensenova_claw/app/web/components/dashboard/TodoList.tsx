@@ -150,7 +150,7 @@ function TodoItemCard({
     return (
       <div
         ref={ref}
-        className="relative flex flex-col gap-2 rounded-2xl border border-violet-200 bg-white/90 px-3 py-3 shadow-[0_6px_18px_rgba(15,23,42,0.06)] backdrop-blur-xl"
+        className="relative flex flex-col gap-2 rounded-2xl border border-violet-200 dark:border-violet-800 bg-[var(--glass-bg-heavy)] px-3 py-3 shadow-[0_6px_18px_rgba(15,23,42,0.06)] dark:shadow-[0_6px_18px_rgba(0,0,0,0.2)] backdrop-blur-xl"
       >
         {/* 标题编辑 */}
         <input
@@ -162,14 +162,14 @@ function TodoItemCard({
             if (e.key === 'Enter') saveEdit();
             if (e.key === 'Escape') cancelEdit();
           }}
-          className="flex-1 rounded-lg border border-white/80 bg-white/60 px-2 py-1.5 text-sm text-neutral-800 outline-none focus:border-violet-300"
+          className="flex-1 rounded-lg border border-[var(--glass-border-heavy)] bg-[var(--glass-bg)] px-2 py-1.5 text-sm text-[var(--glass-text)] outline-none focus:border-violet-300 dark:focus:border-violet-600"
           placeholder="待办内容"
         />
 
         {/* 优先级 + 日期 + 操作 */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
-            <Flag className="h-3.5 w-3.5 text-neutral-400" />
+            <Flag className="h-3.5 w-3.5 text-muted-foreground" />
             {(['high', 'medium', 'low'] as const).map((p) => (
               <button
                 key={p}
@@ -178,7 +178,7 @@ function TodoItemCard({
                 className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition-all ${
                   editPriority === p
                     ? priorityConfig[p].pill + ' border-current'
-                    : 'border-transparent text-neutral-400 hover:text-neutral-600'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {priorityConfig[p].label}
@@ -187,19 +187,19 @@ function TodoItemCard({
           </div>
 
           <div className="relative flex items-center gap-1.5">
-            <Calendar className="h-3.5 w-3.5 text-neutral-400" />
+            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
             <div className="relative">
               <input
                 type="date"
                 value={editDueDate}
                 onChange={(e) => setEditDueDate(e.target.value)}
-                className={`rounded-lg border border-white/80 bg-white/60 px-2 py-0.5 text-[11px] outline-none ${
-                  editDueDate ? 'text-neutral-600' : 'text-transparent'
+                className={`rounded-lg border border-[var(--glass-border-heavy)] bg-[var(--glass-bg)] px-2 py-0.5 text-[11px] outline-none ${
+                  editDueDate ? 'text-muted-foreground' : 'text-transparent'
                 }`}
                 style={{ minWidth: '5.5rem' }}
               />
               {!editDueDate && (
-                <span className="pointer-events-none absolute inset-0 flex items-center px-2 text-[11px] text-neutral-400">
+                <span className="pointer-events-none absolute inset-0 flex items-center px-2 text-[11px] text-muted-foreground">
                   截止日期
                 </span>
               )}
@@ -217,7 +217,7 @@ function TodoItemCard({
             <button
               type="button"
               onClick={cancelEdit}
-              className="rounded-lg px-2.5 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-100"
+              className="rounded-lg px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -231,14 +231,14 @@ function TodoItemCard({
   return (
     <div
       ref={ref}
-      className={`group relative flex items-center gap-3 rounded-2xl border border-white/80 bg-white/70 px-3 py-3 shadow-[0_6px_18px_rgba(15,23,42,0.04)] backdrop-blur-xl transition-all duration-200 ${
+      className={`group relative flex items-center gap-3 rounded-2xl border border-[var(--glass-border-heavy)] bg-[var(--glass-bg)] px-3 py-3 shadow-[0_6px_18px_rgba(15,23,42,0.04)] dark:shadow-[0_6px_18px_rgba(0,0,0,0.12)] backdrop-blur-xl transition-all duration-200 ${
         isDragging ? 'opacity-40 scale-[0.97]' : 'opacity-100'
-      } ${isDone ? 'bg-white/50' : ''}`}
+      } ${isDone ? 'bg-[var(--glass-bg-light)]' : ''}`}
     >
       {/* 拖拽手柄 */}
       <div
         ref={(node) => { drag(node); }}
-        className="flex cursor-grab items-center text-neutral-300 transition-colors hover:text-neutral-500 active:cursor-grabbing"
+        className="flex cursor-grab items-center text-muted-foreground/50 transition-colors hover:text-muted-foreground active:cursor-grabbing"
       >
         <GripVertical className="h-4 w-4" />
       </div>
@@ -249,13 +249,13 @@ function TodoItemCard({
         onClick={() => onToggle(item.id)}
         className={`relative flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-all duration-300 ${
           isDone
-            ? 'border-violet-400 bg-violet-400 shadow-sm shadow-violet-200'
-            : 'border-neutral-300 bg-white hover:border-violet-400'
+            ? 'border-violet-400 bg-violet-400 shadow-sm shadow-violet-200 dark:shadow-violet-900/50'
+            : 'border-muted-foreground/30 bg-background hover:border-violet-400'
         }`}
       >
         {isDone && (
           <svg
-            className="h-3 w-3 text-white"
+            className="h-3 w-3 text-white dark:text-background"
             viewBox="0 0 12 12"
             fill="none"
             stroke="currentColor"
@@ -272,8 +272,8 @@ function TodoItemCard({
       <span
         className={`min-w-0 flex-1 text-sm cursor-default transition-all duration-300 ${
           isDone
-            ? 'text-neutral-400 line-through decoration-neutral-300'
-            : 'text-neutral-800 font-medium'
+            ? 'text-muted-foreground line-through decoration-muted-foreground/50'
+            : 'text-[var(--glass-text)] font-medium'
         }`}
         onDoubleClick={startEdit}
         title="双击编辑"
@@ -294,8 +294,8 @@ function TodoItemCard({
         <span
           className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
             overdue
-              ? 'border-rose-200 bg-rose-500/10 text-rose-600'
-              : 'border-white/80 bg-white/75 text-neutral-500'
+              ? 'border-rose-200 dark:border-rose-800 bg-rose-500/10 text-rose-600 dark:text-rose-400'
+              : 'border-[var(--glass-border-heavy)] bg-[var(--glass-bg)] text-muted-foreground'
           }`}
         >
           <Calendar className="h-3 w-3" />
@@ -307,7 +307,7 @@ function TodoItemCard({
       <button
         type="button"
         onClick={startEdit}
-        className="shrink-0 rounded-lg p-1 text-neutral-300 opacity-0 transition-all hover:bg-violet-50 hover:text-violet-500 group-hover:opacity-100"
+        className="shrink-0 rounded-lg p-1 text-muted-foreground/50 opacity-0 transition-all hover:bg-violet-50 dark:hover:bg-violet-950 hover:text-violet-500 group-hover:opacity-100"
         title="编辑"
       >
         <Pencil className="h-3.5 w-3.5" />
@@ -317,7 +317,7 @@ function TodoItemCard({
       <button
         type="button"
         onClick={() => onDelete(item.id)}
-        className="shrink-0 rounded-lg p-1 text-neutral-300 opacity-0 transition-all hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"
+        className="shrink-0 rounded-lg p-1 text-muted-foreground/50 opacity-0 transition-all hover:bg-rose-50 dark:hover:bg-rose-950 hover:text-rose-500 group-hover:opacity-100"
       >
         <X className="h-3.5 w-3.5" />
       </button>
@@ -351,8 +351,8 @@ function TodoQuickAdd({
 
   return (
     <div className="mb-4">
-      <div className="flex items-center gap-2 rounded-2xl border border-white/80 bg-white/60 px-3 py-2 shadow-inner backdrop-blur-xl transition-colors focus-within:border-violet-300 focus-within:bg-white/80">
-        <Plus className="h-4 w-4 text-neutral-400" />
+      <div className="flex items-center gap-2 rounded-2xl border border-[var(--glass-border-heavy)] bg-[var(--glass-bg)] px-3 py-2 shadow-inner backdrop-blur-xl transition-colors focus-within:border-violet-300 dark:focus-within:border-violet-600 focus-within:bg-[var(--glass-bg-heavy)]">
+        <Plus className="h-4 w-4 text-muted-foreground" />
         <input
           ref={inputRef}
           type="text"
@@ -363,7 +363,7 @@ function TodoQuickAdd({
           }}
           onFocus={() => setShowOptions(true)}
           placeholder="添加新待办..."
-          className="flex-1 bg-transparent text-sm text-neutral-800 placeholder:text-neutral-400 outline-none"
+          className="flex-1 bg-transparent text-sm text-[var(--glass-text)] placeholder:text-muted-foreground outline-none"
         />
         {title.trim() && (
           <button
@@ -380,7 +380,7 @@ function TodoQuickAdd({
       {showOptions && (
         <div className="mt-2 flex items-center gap-3 px-1">
           <div className="flex items-center gap-1.5">
-            <Flag className="h-3.5 w-3.5 text-neutral-400" />
+            <Flag className="h-3.5 w-3.5 text-muted-foreground" />
             {(['high', 'medium', 'low'] as const).map((p) => (
               <button
                 key={p}
@@ -389,7 +389,7 @@ function TodoQuickAdd({
                 className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition-all ${
                   priority === p
                     ? priorityConfig[p].pill + ' border-current'
-                    : 'border-transparent text-neutral-400 hover:text-neutral-600'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {priorityConfig[p].label}
@@ -397,20 +397,20 @@ function TodoQuickAdd({
             ))}
           </div>
           <div className="relative flex items-center gap-1.5">
-            <Calendar className="h-3.5 w-3.5 text-neutral-400" />
+            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
             <div className="relative">
               <input
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
-                className={`rounded-lg border border-white/80 bg-white/60 px-2 py-0.5 text-[11px] outline-none ${
-                  dueDate ? 'text-neutral-600' : 'text-transparent'
+                className={`rounded-lg border border-[var(--glass-border-heavy)] bg-[var(--glass-bg)] px-2 py-0.5 text-[11px] outline-none ${
+                  dueDate ? 'text-muted-foreground' : 'text-transparent'
                 }`}
                 style={{ minWidth: '5.5rem' }}
                 title="截止日期"
               />
               {!dueDate && (
-                <span className="pointer-events-none absolute inset-0 flex items-center px-2 text-[11px] text-neutral-400">
+                <span className="pointer-events-none absolute inset-0 flex items-center px-2 text-[11px] text-muted-foreground">
                   截止日期
                 </span>
               )}
@@ -466,8 +466,8 @@ export function TodoList() {
   return (
     <div className="flex h-full flex-col p-4">
       {/* 背景渐变 */}
-      <div className="absolute inset-0 bg-gradient-to-br from-violet-50/70 via-white/90 to-fuchsia-50/50" />
-      <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-violet-200/30 blur-3xl" />
+      <div className="absolute inset-0 bg-gradient-to-br from-violet-50/70 via-background/90 to-fuchsia-50/50 dark:from-violet-950/30 dark:via-background/90 dark:to-fuchsia-950/20" />
+      <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-violet-200/30 dark:bg-violet-800/20 blur-3xl" />
 
       <div className="relative z-10 flex h-full flex-col">
         <SectionHeader
@@ -484,11 +484,11 @@ export function TodoList() {
 
         {loading ? (
           <div className="flex flex-1 items-center justify-center">
-            <span className="text-[11px] text-neutral-300">加载中...</span>
+            <span className="text-[11px] text-muted-foreground">加载中...</span>
           </div>
         ) : displayItems.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-neutral-200 bg-white/40">
-            <span className="text-[11px] text-neutral-300">添加一个待办吧</span>
+          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-[var(--glass-bg-light)]">
+            <span className="text-[11px] text-muted-foreground">添加一个待办吧</span>
           </div>
         ) : (
           <div

@@ -3,6 +3,7 @@ Config API - 按 section 读写 config.yml，管理 LLM provider/model
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from copy import deepcopy
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
+from sensenova_claw.capabilities.miniapps.acp_wizard import ACPWizardInstallError, ACPWizardService
 from sensenova_claw.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
 from sensenova_claw.platform.secrets.migration import migrate_plaintext_secrets
 from sensenova_claw.platform.secrets.registry import is_secret_path
@@ -53,6 +55,20 @@ class DefaultModelUpdateBody(BaseModel):
     default_model: str = ""
 
 
+class ACPWizardInstallBody(BaseModel):
+    agent_id: str
+    step_ids: list[str] = []
+
+
+def _get_acp_wizard(request: Request) -> ACPWizardService:
+    service = getattr(request.app.state, "acp_wizard_service", None)
+    if service is not None:
+        return service
+    service = ACPWizardService(project_root=getattr(request.app.state, "project_root", None))
+    request.app.state.acp_wizard_service = service
+    return service
+
+
 @router.get("/secret")
 async def get_secret_value(path: str, request: Request):
     """按路径读取敏感配置的真实值，仅允许注册过的 secret path。"""
@@ -85,6 +101,29 @@ async def get_config_sections(request: Request):
     return config_manager.get_sections(default_sections)
 
 
+@router.get("/acp/wizard")
+async def get_acp_wizard(request: Request):
+    cfg = request.app.state.config
+    wizard = _get_acp_wizard(request)
+    return wizard.inspect(current_config=cfg.get("miniapps.acp", {}) or {})
+
+
+@router.post("/acp/wizard/install")
+async def install_acp_agent(body: ACPWizardInstallBody, request: Request):
+    cfg = request.app.state.config
+    wizard = _get_acp_wizard(request)
+    try:
+        return await wizard.install(
+            body.agent_id,
+            step_ids=body.step_ids,
+            current_config=cfg.get("miniapps.acp", {}) or {},
+        )
+    except ACPWizardInstallError as exc:
+        raise HTTPException(400, str(exc))
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(504, f"ACP 安装超时: {exc}")
+
+
 @router.put("/sections")
 async def update_config_sections(body: dict[str, Any], request: Request):
     """更新指定 section 并持久化到 config.yml，同时热更新运行时配置"""
@@ -110,16 +149,14 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
     providers = deepcopy(llm_section.get("providers", {}))
     models = deepcopy(llm_section.get("models", {}))
 
-    if provider_name not in providers:
-        raise HTTPException(404, f"Provider 不存在: {provider_name}")
-
+    provider_exists = provider_name in providers
     next_name = (body.name or provider_name).strip().lower()
     if not next_name:
         raise HTTPException(400, "Provider 名称不能为空")
-    if next_name != provider_name and next_name in providers:
+    if provider_exists and next_name != provider_name and next_name in providers:
         raise HTTPException(400, f"Provider 已存在: {next_name}")
 
-    existing = providers.pop(provider_name)
+    existing = providers.pop(provider_name, {})
     provider_payload: dict[str, Any] = {
         "base_url": body.base_url,
         "timeout": body.timeout,
@@ -133,7 +170,7 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
     providers[next_name] = provider_payload
     llm_section["providers"] = providers
 
-    if next_name != provider_name:
+    if provider_exists and next_name != provider_name:
         for model in models.values():
             if isinstance(model, dict) and model.get("provider") == provider_name:
                 model["provider"] = next_name
@@ -158,16 +195,14 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     llm_section = deepcopy(raw_config.get("llm", {}))
     models = deepcopy(llm_section.get("models", {}))
 
-    if model_name not in models:
-        raise HTTPException(404, f"Model 不存在: {model_name}")
-
+    model_exists = model_name in models
     next_name = (body.name or model_name).strip()
     if not next_name:
         raise HTTPException(400, "Model 名称不能为空")
-    if next_name != model_name and next_name in models:
+    if model_exists and next_name != model_name and next_name in models:
         raise HTTPException(400, f"Model 已存在: {next_name}")
 
-    models.pop(model_name)
+    models.pop(model_name, None)
     models[next_name] = {
         "provider": body.provider,
         "model_id": body.model_id,
@@ -176,7 +211,7 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
         "max_output_tokens": body.max_output_tokens,
     }
     llm_section["models"] = models
-    if llm_section.get("default_model") == model_name:
+    if model_exists and llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
 
     try:

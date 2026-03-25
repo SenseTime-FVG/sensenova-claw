@@ -28,33 +28,33 @@ const kindConfig: Record<NotificationCardKind, {
 }> = {
   task_completed: {
     icon: CheckCircle2,
-    color: 'text-emerald-600',
-    bg: 'bg-emerald-50',
-    border: 'border-emerald-200',
+    color: 'text-emerald-600 dark:text-emerald-400',
+    bg: 'bg-emerald-50 dark:bg-emerald-900/30',
+    border: 'border-emerald-200 dark:border-emerald-800',
   },
   user_question: {
     icon: HelpCircle,
-    color: 'text-sky-600',
-    bg: 'bg-sky-50',
-    border: 'border-sky-200',
+    color: 'text-sky-600 dark:text-sky-400',
+    bg: 'bg-sky-50 dark:bg-sky-900/30',
+    border: 'border-sky-200 dark:border-sky-800',
   },
   tool_confirmation: {
     icon: ShieldAlert,
-    color: 'text-amber-600',
-    bg: 'bg-amber-50',
-    border: 'border-amber-200',
+    color: 'text-amber-600 dark:text-amber-400',
+    bg: 'bg-amber-50 dark:bg-amber-900/30',
+    border: 'border-amber-200 dark:border-amber-800',
   },
   proactive: {
     icon: Lightbulb,
-    color: 'text-violet-600',
-    bg: 'bg-violet-50',
-    border: 'border-violet-200',
+    color: 'text-violet-600 dark:text-violet-400',
+    bg: 'bg-violet-50 dark:bg-violet-900/30',
+    border: 'border-violet-200 dark:border-violet-800',
   },
   general: {
     icon: Info,
-    color: 'text-neutral-600',
-    bg: 'bg-neutral-50',
-    border: 'border-neutral-200',
+    color: 'text-neutral-600 dark:text-neutral-400',
+    bg: 'bg-neutral-50 dark:bg-neutral-900/30',
+    border: 'border-neutral-200 dark:border-neutral-700',
   },
 };
 
@@ -191,18 +191,20 @@ function NotificationCardItem({
   onNavigate,
 }: {
   card: NotificationCard;
-  onResolve: (id: string, action?: string) => void;
+  onResolve: (id: string, action?: string, inputValue?: string) => void;
   onDismiss: (id: string) => void;
   onNavigate: (sessionId: string) => void;
 }) {
   const config = kindConfig[card.kind] || kindConfig.general;
   const Icon = config.icon;
+  const [inputValue, setInputValue] = useState('');
+  const trimmedInput = inputValue.trim();
 
   return (
     <div
       className={`group relative rounded-xl border px-3 py-2.5 transition-all ${
         card.resolved
-          ? 'border-neutral-100 bg-neutral-50/50 opacity-60'
+          ? 'border-neutral-100 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/50 opacity-60'
           : card.read
             ? `${config.border} ${config.bg}/50`
             : `${config.border} ${config.bg}`
@@ -217,16 +219,16 @@ function NotificationCardItem({
         {/* 内容 */}
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-1">
-            <span className="text-xs font-semibold text-neutral-800 leading-tight">{card.title}</span>
+            <span className="text-xs font-semibold text-foreground leading-tight">{card.title}</span>
             {!card.read && !card.resolved && (
               <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />
             )}
           </div>
-          <p className="mt-0.5 text-[11px] text-neutral-500 leading-relaxed line-clamp-2">{card.body}</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed line-clamp-2">{card.body}</p>
           <div className="mt-1.5 flex items-center gap-2">
-            <span className="text-[10px] text-neutral-400">{timeAgo(card.createdAtMs)}</span>
+            <span className="text-[10px] text-muted-foreground">{timeAgo(card.createdAtMs)}</span>
             {card.source && (
-              <span className="text-[10px] text-neutral-400">· {card.source}</span>
+              <span className="text-[10px] text-muted-foreground">· {card.source}</span>
             )}
           </div>
 
@@ -245,10 +247,10 @@ function NotificationCardItem({
                   onClick={(e) => { e.stopPropagation(); onResolve(card.id, action.value); }}
                   className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
                     action.value === 'approve' || action.value === 'accept'
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
                       : action.value === 'deny' || action.value === 'reject'
-                        ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
-                        : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
+                        ? 'border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/50'
+                        : 'border-neutral-200 dark:border-neutral-700 bg-background text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800'
                   }`}
                 >
                   {action.label}
@@ -256,10 +258,35 @@ function NotificationCardItem({
               ))}
             </div>
           )}
+          {!card.resolved && card.allowsInput && (
+            <div className="mt-2 space-y-2">
+              <textarea
+                value={inputValue}
+                onChange={(event) => setInputValue(event.target.value)}
+                placeholder={card.inputPlaceholder || '请输入回复'}
+                className="min-h-[88px] w-full resize-none rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-xs text-neutral-800 outline-none transition-colors focus:border-sky-300"
+                rows={3}
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-neutral-400">可直接输入文本回复</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onResolve(card.id, trimmedInput, trimmedInput);
+                  }}
+                  disabled={!trimmedInput}
+                  className="rounded-lg border border-sky-300 bg-sky-500 px-2.5 py-1 text-[11px] font-medium text-white transition-colors hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  确认
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 已处理状态 */}
           {card.resolved && card.resolvedAction && (
-            <div className="mt-1.5 flex items-center gap-1 text-[10px] text-neutral-400">
+            <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
               <Check className="h-3 w-3" />
               <span>
                 {card.resolvedAction === 'approve' ? '已批准' :
@@ -285,7 +312,7 @@ function NotificationCardItem({
         <button
           type="button"
           onClick={() => onDismiss(card.id)}
-          className="shrink-0 rounded-md p-0.5 text-neutral-300 opacity-0 transition-all hover:bg-neutral-100 hover:text-neutral-500 group-hover:opacity-100"
+          className="shrink-0 rounded-md p-0.5 text-muted-foreground/50 opacity-0 transition-all hover:bg-muted hover:text-muted-foreground group-hover:opacity-100"
         >
           <X className="h-3 w-3" />
         </button>
@@ -332,7 +359,7 @@ export function NotificationDropdown() {
   };
 
   // 处理卡片操作：根据类型发送 WebSocket 响应
-  const handleResolve = useCallback((cardId: string, action?: string) => {
+  const handleResolve = useCallback((cardId: string, action?: string, inputValue?: string) => {
     const card = cards.find(c => c.id === cardId);
     if (!card || card.resolved) return;
 
@@ -356,7 +383,7 @@ export function NotificationDropdown() {
         session_id: card.sessionId,
         payload: {
           question_id: card.interactionId,
-          answer: isCancelled ? null : (action || ''),
+          answer: isCancelled ? null : (inputValue ?? action ?? ''),
           cancelled: isCancelled,
         },
         timestamp: Date.now() / 1000,
@@ -373,8 +400,8 @@ export function NotificationDropdown() {
 
   // 注册操作弹窗的回调，使弹窗按钮也能发送 WebSocket 响应
   useEffect(() => {
-    setOnActionToastAction((cardId: string, actionValue: string) => {
-      handleResolve(cardId, actionValue);
+    setOnActionToastAction((cardId: string, actionValue: string, inputValue?: string) => {
+      handleResolve(cardId, actionValue, inputValue);
     });
     return () => setOnActionToastAction(null);
   }, [handleResolve, setOnActionToastAction]);
@@ -400,13 +427,13 @@ export function NotificationDropdown() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-96 rounded-2xl border border-white/80 bg-white/95 shadow-[0_20px_60px_rgba(15,23,42,0.12)] backdrop-blur-2xl z-[100]">
+        <div className="absolute right-0 top-full mt-2 w-96 rounded-2xl border border-[var(--glass-border-heavy)] bg-[var(--glass-bg-heavy)] shadow-[0_20px_60px_rgba(15,23,42,0.12)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.3)] backdrop-blur-2xl z-[100]">
           {/* 头部 */}
-          <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-3">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-neutral-800">通知中心</span>
+              <span className="text-sm font-semibold text-foreground">通知中心</span>
               {pendingCards.length > 0 && (
-                <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-700">
+                <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-400">
                   {pendingCards.length} 待处理
                 </span>
               )}
@@ -427,7 +454,7 @@ export function NotificationDropdown() {
           <div className="max-h-[420px] overflow-y-auto p-3 space-y-2 hide-scrollbar">
             {cards.length === 0 ? (
               <div className="flex h-24 items-center justify-center">
-                <span className="text-xs text-neutral-400">暂无通知</span>
+                <span className="text-xs text-muted-foreground">暂无通知</span>
               </div>
             ) : (
               <>
@@ -441,7 +468,7 @@ export function NotificationDropdown() {
                   />
                 ))}
                 {resolvedCards.length > 0 && pendingCards.length > 0 && (
-                  <div className="my-2 border-t border-neutral-100" />
+                  <div className="my-2 border-t border-border" />
                 )}
                 {resolvedCards.map(card => (
                   <NotificationCardItem

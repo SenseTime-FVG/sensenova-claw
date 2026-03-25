@@ -59,7 +59,7 @@ class ToolSessionWorker(SessionWorker):
             return False
         return state_store.is_turn_cancelled(event.session_id, event.turn_id)
 
-    def _truncate_result(self, result: Any, tool_call_id: str) -> Any:
+    def _truncate_result(self, result: Any, tool_call_id: str, agent_id: str | None = None) -> Any:
         """Token 截断：统一控制传给 LLM 的结果长度"""
         result_str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
 
@@ -70,13 +70,15 @@ class ToolSessionWorker(SessionWorker):
             return result
 
         save_dir = config.get("tools.result_truncation.save_dir", "workspace")
-        from sensenova_claw.platform.config.workspace import resolve_sensenova_claw_home
+        from sensenova_claw.platform.config.workspace import (
+            resolve_sensenova_claw_home,
+            resolve_session_artifact_dir,
+        )
         home = resolve_sensenova_claw_home(config)
         if save_dir == "workspace":
-            base_dir = home
+            session_dir = resolve_session_artifact_dir(home, self.session_id, agent_id=agent_id)
         else:
-            base_dir = Path(save_dir)
-        session_dir = base_dir / self.session_id
+            session_dir = resolve_session_artifact_dir(save_dir, self.session_id, agent_id=agent_id)
         session_dir.mkdir(parents=True, exist_ok=True)
 
         file_name = f"tool_result_{tool_call_id[:8]}_{uuid.uuid4().hex[:6]}.txt"
@@ -96,7 +98,13 @@ class ToolSessionWorker(SessionWorker):
         return tool.risk_level.value not in auto_levels
 
     async def _request_confirmation(self, event: EventEnvelope, tool: Tool) -> bool:
-        """发布确认请求并挂起等待，超时自动拒绝"""
+        """发布确认请求并挂起等待，根据 timeout_action 决定超时行为。
+
+        timeout_action 取值：
+        - "reject"（默认）: 超时自动拒绝
+        - "approve": 超时自动批准
+        - "block": 无限等待直到用户响应
+        """
         tool_call_id = event.payload["tool_call_id"]
         wait_event = asyncio.Event()
         self._pending_confirmations[tool_call_id] = wait_event
@@ -119,14 +127,23 @@ class ToolSessionWorker(SessionWorker):
             )
         )
 
-        # 挂起等待，超时自动拒绝
-        timeout = float(config.get("tools.permission.confirmation_timeout", 60))
+        timeout_action = str(config.get("tools.permission.timeout_action", "reject")).lower()
+
         try:
-            await asyncio.wait_for(wait_event.wait(), timeout=timeout)
+            if timeout_action == "block":
+                # 无限等待，直到用户响应或 worker 停止
+                await wait_event.wait()
+            else:
+                timeout = float(config.get("tools.permission.confirmation_timeout", 60))
+                await asyncio.wait_for(wait_event.wait(), timeout=timeout)
             return self._confirmation_results.pop(tool_call_id, False)
         except asyncio.TimeoutError:
-            logger.warning("工具确认超时，自动拒绝: tool_call_id=%s", tool_call_id)
-            return False
+            if timeout_action == "approve":
+                logger.warning("工具确认超时，自动批准: tool_call_id=%s", tool_call_id)
+                return True
+            else:
+                logger.warning("工具确认超时，自动拒绝: tool_call_id=%s", tool_call_id)
+                return False
         finally:
             self._pending_confirmations.pop(tool_call_id, None)
 
@@ -184,7 +201,12 @@ class ToolSessionWorker(SessionWorker):
                 future.set_result({"success": True, "answer": event.payload.get("answer", "")})
 
     async def stop(self) -> None:
-        """停止时取消所有挂起的问题"""
+        """停止时取消所有挂起的问题，并唤醒所有挂起的确认等待"""
+        # 唤醒 block 模式下挂起的确认等待
+        for wait_event in self._pending_confirmations.values():
+            wait_event.set()
+        self._pending_confirmations.clear()
+        self._confirmation_results.clear()
         for future in self._pending_questions.values():
             if not future.done():
                 future.cancel()
@@ -330,9 +352,8 @@ class ToolSessionWorker(SessionWorker):
         agent_workdir = event.payload.get("_agent_workdir")
         if agent_workdir:
             exec_kwargs["_agent_workdir"] = agent_workdir
-        exec_kwargs["_source_agent_id"] = (
-            str(event.payload.get("_source_agent_id") or event.agent_id or "").strip() or "default"
-        )
+        source_agent_id = str(event.payload.get("_source_agent_id") or event.agent_id or "").strip() or "default"
+        exec_kwargs["_source_agent_id"] = source_agent_id
         if event.turn_id:
             exec_kwargs["_turn_id"] = event.turn_id
         if tool_call_id:
@@ -347,7 +368,7 @@ class ToolSessionWorker(SessionWorker):
                 tool.execute(**exec_kwargs, _session_id=event.session_id),
                 timeout=timeout,
             )
-            result = self._truncate_result(result, tool_call_id)
+            result = self._truncate_result(result, tool_call_id, agent_id=source_agent_id)
         except Exception as exc:  # noqa: BLE001
             success = False
             error = str(exc).strip() or type(exc).__name__

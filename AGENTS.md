@@ -377,6 +377,46 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - WeCom 之前没有显式 `event_filter()`，默认 `None` 看起来“像是全订阅”，但如果 `send_event()` 不处理 `USER_QUESTION_ASKED`，实际效果仍然是静默丢弃；不能只看订阅层，不看分发层。
 
+### 2026-03-24 Workbench ask_user 输入修复补充
+
+成功经验：
+- 工作台 `/chat` 的 `ask_user` 不只是“输入框被禁用”问题，还要检查主输入框提交路径是否会把自由文本映射成 `user_question_answered`；只解锁输入框但仍发送普通 `user_input`，后端 `ask_user` 仍会一直挂起。
+- `ChatSessionContext` 已经暴露了 `activeInteraction/sendQuestionAnswer`，在聊天页直接复用这条能力，比重新造一套 `ask_user` 提交协议更稳，改动也更小。
+
+失败/风险经验：
+- `sensenova_claw/app/web/e2e/ask-user.spec.ts` 当前夹具陈旧，至少有三类问题会干扰业务回归：鉴权会落到登录页、mock WebSocket 会影响 Next dev HMR、旧断言仍假设 `/chat` 使用 `ask-user-dialog` 弹窗而不是通知卡片。
+- 对 `/chat` 做 Playwright 回归时，若直接全局替换 `window.WebSocket`，必须只拦截业务 `localhost:8000/ws`，并保留 Next dev/HMR 所需的 `addEventListener/removeEventListener`；否则页面会先 client-side exception，根本到不了业务断言。
+
+### 2026-03-24 WhatsApp sidecar 入口路径兼容补充
+
+成功经验：
+- 当 WhatsApp 状态接口显示 `WhatsApp sidecar command timed out: start` 时，先看 `~/.sensenova-claw/logs/system.log` 里的 sidecar `stderr`，可以快速区分“协议启动慢”和“Node 入口文件根本不存在”；这次真实根因是 `MODULE_NOT_FOUND`。
+- `plugins.whatsapp.bridge.entry` 的历史配置可能混入仓库目录名 `sensenova-claw/...`，而真实 Python 包路径是 `sensenova_claw/...`；在 `WhatsAppConfig._normalize_bridge_entry()` 里兼容这类连字符路径，比只依赖用户手动改配置更稳。
+- 用一个最小单测锁定 `bridge.entry` 的归一化行为最有效：先让 `sensenova-claw/.../index.mjs` 明确失败，再做最小修复转绿，能避免把问题误判成 sidecar 超时参数不足。
+
+失败/风险经验：
+- 当前 `SidecarBridgeClient.start()` 在 sidecar 进程启动即崩溃时，对外仍只会表现为 `start` 超时；若后续还要提升可观测性，可以考虑把“子进程已退出 + 最近 stderr”直接折叠进异常信息，避免用户只看到泛化 timeout。
+
+### 2026-03-24 WhatsApp sidecar 语法错误补充
+
+成功经验：
+- 当 `start` 超时在修正入口路径后仍存在，必须继续看 sidecar `stderr`，这次根因是 Node 在加载 `runtime.mjs` 时直接抛了 `SyntaxError: Invalid left-hand side in assignment`，并非 Baileys 启动卡住。
+- JavaScript 内部私有挂载字段如果想保留“项目名前缀”，不要写成 `sock._sensenova-clawXxx` 这种带 `-` 的点属性；应统一改成字符串常量 + `sock[KEY]` 访问，既合法又便于复用。
+- `node --test sensenova_claw/adapters/plugins/whatsapp/bridge/tests/runtime.test.mjs` 很适合做 sidecar 第一层红绿验证；模块级语法错误会在这里秒暴露，比等 Python 侧 30 秒超时高效得多。
+
+失败/风险经验：
+- Python 侧当前仍把“sidecar 进程启动后立即语法崩溃”包装成 `TimeoutError`，如果只看 `channel.py` 堆栈而不追 `stderr`，很容易误判成超时参数需要调大。
+
+### 2026-03-24 WhatsApp 登录页瞬时错误态补充
+
+成功经验：
+- WhatsApp 扫码后的 `515 restart required after pairing` 属于预期中的瞬时重连，不应在登录页当成真正失败态展示；前端应把 `connecting/restarting/reconnecting/refreshing_qr` 这类状态视为过渡态。
+- 登录页渲染错误卡时，除了 `lastError` 外，还要结合 `authorized/state/lastQrDataUrl` 一起判断；仅凭 `lastError` 很容易把“历史错误”误显示成“当前失败”。
+- 给 Playwright 加一个 `state=restarting + lastError` 的最小用例很有价值，即使本机浏览器受沙箱限制暂时跑不起来，也能把预期行为固化在测试文件里，方便后续在可运行环境回归。
+
+失败/风险经验：
+- 当前 macOS 受限环境下 Playwright Chromium 仍会因 `bootstrap_check_in ... Permission denied (1100)` 无法启动，前端浏览器级断言不能在本机作为是否修复成功的唯一依据。
+
 ### 2026-03-19 WhatsApp Self Chat 补充
 
 成功经验：
@@ -554,6 +594,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 如果在 `AGENTS.md` 里继续硬编码 `tools`、`can_delegate_to` 之类清单，文案很容易和真实运行时配置漂移，后续维护成本会越来越高。
 - 强执行型 prompt 如果不显式加入”无重要变化时保持简洁””不要为了显得主动而主动”等约束，很容易把主动推送写成高频、低信息量的噪音输出。
 
+### 2026-03-24 Uvicorn 关闭噪音补充
+
+成功经验：
+- 当堆栈同时出现 `uvicorn.server.capture_signals -> signal.raise_signal(...) -> asyncio.runners._on_sigint -> KeyboardInterrupt`，并伴随 `starlette`/`uvicorn.lifespan.on.receive_queue.get()` 的 `CancelledError` 时，优先判断为”收到 SIGINT/SIGTERM 后的关闭链路”，不应先怀疑业务代码抛异常。
+- 判断是否是业务层 shutdown 真失败，最直接的方法是看堆栈里是否落到项目自己的 `lifespan finally` 清理代码；如果只有框架内部 `receive()`/`capture_signals()`，通常只是退出时的噪音日志。
+- 根目录 `npm run dev` 实际会走 `agentos.app.main` 的父进程监管逻辑；当前端退出、父进程收到 `Ctrl+C`，或 IDE 停止按钮终止父进程时，父进程会反向 `terminate()` 后端，后端打印这类信号关闭堆栈是符合预期的。
+
+失败/风险经验：
+- `uvicorn --reload` 会让”父进程/重载进程/工作进程”的信号传播更绕；如果只盯着后端最后那条 `CancelledError`，很容易误判为服务内部 bug，而忽略真正先退出的是前端、父进程或外层进程管理器。
+
 ### 2026-03-20 飞书 Wiki token 兼容修复补充
 
 成功经验：
@@ -664,6 +714,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅依赖前端不回传某些字段不够稳；一旦用户浏览器缓存了旧前端，或历史配置里已存在异常 secret ref，后端仍会再次踩到删除异常。对 secret 清空链路，后端必须保证幂等。
+
+### 2026-03-24 Secret 文件回退补充
+
+成功经验：
+- 把“keyring 主存储”和“本地 `secret.yml` 回退存储”拆成 `FallbackSecretStore(primary, fallback)` 最稳，`Config`、`ConfigManager`、迁移与 reveal API 都不需要改调用协议。
+- 回退文件用单个 YAML 扁平映射 `{ref: value}` 最省事，直接复用现有 secret ref（如 `sensenova_claw/llm.providers.openai.api_key`）作为 key，避免路径编码和目录散落问题。
+- `get()` 不能只在 keyring 抛错时回退；当历史写入曾回退到文件、而当前 keyring 恢复但查不到值时，也需要在 primary 返回空值时继续查 fallback，才能真正读回旧 secret。
+
+失败/风险经验：
+- 文档里“keyring 不可用时降级为明文写 config.yml”的旧口径容易过时；现在行为改成落到 `~/.sensenova-claw/data/secret/secret.yml` 后，配置与安全文档必须一起更新，否则会误导排查。
 
 ### 2026-03-21 LLM 编辑态补充
 
@@ -1043,3 +1103,126 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前仓库把 `.next/` 产物纳入版本管理，调试前端路由时很容易产生大量噪音改动；完成后需要显式回退 `.next/`，只保留真实源码变更。
+
+### 2026-03-24 Proactive Agent Prompt 收敛补充
+
+成功经验：
+- 对这类“runtime 自动触发 + 用户直聊”双入口 agent，`SYSTEM_PROMPT.md` 最适合承载硬规则、判断顺序和执行协议，`AGENTS.md` 更适合承载角色边界、默认协作策略和风格偏好；两者分层清楚后，提示词更稳也更容易维护。
+- Prompt 文案应尽量贴真实运行时能力来写，例如 proactive 当前稳定支持的是 `time/event` 触发，以及 `list/create/enable/disable/delete` 管理动作；把不存在的“条件触发”“字段级 update”写进 prompt，只会让模型产生幻觉。
+- 对这类 prompt-only 改动，跑 `./.venv/bin/python -m pytest tests/unit/test_agent_registry.py` 作为最小回归很高效，能快速确认 `SYSTEM_PROMPT.md` 的加载链路未被破坏。
+
+失败/风险经验：
+- 当前 `proactive` 任务虽然支持 `system_prompt_override` 元数据注入，但是否在完整消息构建链路中被最终消费，仍需后续单独核查；不能仅凭字段存在就默认该能力已稳定可用。
+### 2026-03-24 setup 跳过按钮补充
+
+成功经验：
+- `setup` 页的“跳过，稍后配置”如果只做 `router.push('/')`，会被后续守卫重新拦回；最小可行修法是在前端会话里显式写 `llm_setup_skipped`，并让 `ProtectedRoute` 在当前浏览器会话内跳过 LLM 强制配置检查。
+- 登录态刚建立时，`verifyToken()` 与 `AuthProvider` 初始化可能并发，后者会把前者刚设成 `true` 的状态覆盖回 `false`；用 `auth_just_verified` + `verifiedInSessionRef` 兜住这个短暂窗口，能避免“刚验证完 token 就又被打回 /login”。
+- Playwright 回归前必须先确认 `reuseExistingServer` 复用的是当前仓库的 dev 进程；这次 3000 端口一度连到另一个仓库 `agentos-dev/.../app/web`，导致浏览器现象与源码完全对不上。最稳的做法是先查端口占用，再跑正式用例。
+- 当 `playwright test` 本身被 webServer 复用/残留进程干扰时，先用一次性的 Playwright 脚本直接驱动页面、打印 URL 与 `sessionStorage`，可以快速区分“代码没生效”和“测试基础设施跑偏”。
+
+失败/风险经验：
+- 根目录 Playwright 配置会同时拉起前后端，一旦 8000/3000 端口有残留进程，失败现象会混入大量非业务噪音；在这种情况下不能直接把浏览器断言失败等同于页面逻辑失败。
+- 当前 `npx tsc --noEmit` 仍会先撞到仓库既有类型问题（如 `app/settings/page.tsx`、`components/chat/MessageList.tsx`、`e2e/miniapp-workspace.spec.ts`），不能把这类全局红灯误判成这次 `setup` 修复引入的新错误。
+
+### 2026-03-24 Secret Skill 接入补充
+
+成功经验：
+- 给内置 skill 新增能力时，先补一个“从 `.sensenova-claw/skills` 加载该 skill”的最小单测最有效；可以快速证明失败原因是 skill 缺失，而不是 `SkillRegistry` 扫描路径不对。
+- 当前后端 secret 读取与写入不是同一个接口：读取走 `GET /api/config/secret?path=...`，写入应走 `PUT /api/config/sections`，由 `ConfigManager` 自动写入 keyring / fallback secret store 并将 `config.yml` 改写为 `${secret:...}`。
+- 适合作为通用桥接 skill 的敏感路径范围，应严格对齐 `platform/secrets/registry.py` 里的注册模式，尤其是 `tools.*.api_key` 与 `llm.providers.*.api_key`，这样像 Brave Search 这类 skill 才能稳定复用。
+- 如果希望 skill 自身保留“它依赖哪个 secret 标识”的可追踪信息，最轻量的约定是在目标 skill 目录下维护 `secret.yml`，只写映射不写明文，例如 `OPENAI_API_KEY: secret:openai-whisper-api:OPENAI_API_KEY`；读取时优先查这个文件，写入成功后同步创建或更新它。
+- 如果用户要求 skill 不经过 HTTP，而是直接调用项目内能力，最稳的做法是在 skill 目录下放脚本，通过 stdin JSON 契约驱动，并在脚本内部直接复用 `Config`、`ConfigManager` 与 `SecretStore`；这样行为可测、文档也不会再漂移回接口说明。
+
+失败/风险经验：
+- 如果把 secret skill 设计成“任意 path 都可读写”的通用管理器，很容易和后端 `is_secret_path()` 的约束冲突，最终在运行时直接返回 400；文档必须明确只支持已注册敏感路径。
+- 测试这类脚本时不能直接依赖宿主机 keyring；需要显式加一个仅测试用的“禁用 keyring”分支，把写入强制落到指定 fallback `secret.yml`，否则结果会被本机已有 keyring 状态污染。
+
+### 2026-03-24 ask_user 提示框溢出补充
+
+成功经验：
+- 先确认当前真实渲染链路很关键；`chat` 页 ask_user 已不再走 `QuestionDialog`，而是通过 `NotificationToast` 的 action toast 展示选项，修 UI 前必须先对准现网组件。
+- 长选项按钮的稳定修法是组合处理：外层按钮容器加 `flex-wrap`，按钮本身加 `max-w-full`、`whitespace-normal`、`break-all` 和 `text-left`，这样长 URL 与中英文混排都能在卡片内换行。
+- 这类布局回归用 Playwright 几何断言最有效：直接比较按钮右边界和 toast 右边界，能避免“文本可见但其实已经溢出”的假通过。
+
+失败/风险经验：
+- 旧的 `sensenova_claw/app/web/e2e/ask-user.spec.ts` 仍按已废弃的弹窗交互建模，和当前通知卡片实现已漂移；后续若要维护整套 ask_user 前端回归，应该先统一到现有通知交互模型再扩展断言。
+
+### 2026-03-24 WhatsApp 授权页错误信息补充
+
+成功经验：
+- `/api/gateway/whatsapp/status` 已经返回了 `lastError/lastStatusCode/debugMessage/authDir`，如果授权页只展示 `state`，用户会把“可定位的启动失败”误看成泛化 `error`；前端应直接把这些字段展示出来。
+- 这类问题的最小修法通常不在 sidecar 或 channel，本质是“后端已有证据但前端没透出”；先核对接口 payload，再决定是否真的要改运行时。
+
+失败/风险经验：
+- 当前仓库的 Playwright 默认 `webServer` 仍依赖根目录 `npm run dev`，而这条链路会受 `uv` 缓存权限和 `uv` 自身 panic 影响；前端单用例失败时，必须先区分是页面断言失败还是测试基础设施没起来。
+
+### 2026-03-24 LLM 回退链路补充
+
+成功经验：
+- 当回退策略从“当前模型 -> default -> mock”扩展为“当前模型 -> default -> 任意可用 LLM -> mock”时，最稳的落点是集中改 `llm_worker._fallback_targets()`，不要把“找备用模型”的逻辑分散到 `LLMFactory` 或 `AgentWorker`。
+- “任意可用 LLM”如果不想引入额外配置，直接按 `llm.models` 的定义顺序扫描、结合 provider `api_key` 可用性判断即可，行为可预测，也方便测试锁定。
+- 这类回退改动最适合用 `tests/unit/test_llm_worker.py` 做 TDD：先写“default 失败后应落到第三跳可用模型”的失败用例，再跑整份文件补齐旧断言，能快速识别哪些是新行为，哪些只是历史测试文案过窄。
+
+失败/风险经验：
+- 现有 `MockProvider` 的兜底文案并不包含字符串 `mock`，而是“当前没有可用的 LLM...”；如果测试把“回退到 mock”硬编码成断言回复里必须出现 `mock`，会把文案实现细节误当成行为契约。
+### 2026-03-24 ACP Wizard 多平台补充
+
+成功经验：
+- ACP 多 agent 支持最适合收敛成一个后端 catalog/service：把 `agent 预设`、`平台支持`、`依赖探测`、`安装 recipe`、`推荐 command/args/env` 放在同一份 `ACPWizardService` 中，前端只消费结构化结果即可，避免在 UI 里硬编码平台分支。
+- Windows 支持不能只做 `platform == windows`；还要同时处理命令名归一化与真实可执行路径。像 `codex.cmd` / `python.exe` 的配置比对需要去掉扩展名，而安装步骤执行时又必须优先使用实际探测到的二进制路径，否则会出现“向导显示已检测，点击安装却起不来”的假成功。
+- `powershell` 相关 recipe 最容易踩坑：探测层应允许 `pwsh` 与 `powershell` 统一归到同一个 installer，执行层再把命令首项替换为实际探测到的路径，这样 Windows PowerShell 和 PowerShell 7 都能覆盖。
+- 前端 ACP 设置页做向导时，最稳的交互闭环是“三步走”：`检测 -> 一键安装缺失项 -> 回填推荐配置再统一保存`；把“安装”和“保存 config.yml”拆开后，用户更容易理解当前状态，也便于 Playwright 断言。
+- 这类 ACP 预设不要靠记忆猜命令；先对照 ACP 官方 agents 列表和各 CLI 官方文档确认真实入口，再写成预设，能显著减少 `args`/adapter 命名漂移。
+
+失败/风险经验：
+- 当前环境执行 `uv run ...` 会把 `uv.lock` 重写成本机镜像源 URL，即使业务代码没变也会产生超大噪音 diff；完成测试后要记得把 `uv.lock` 恢复回仓库版本，再做最终状态检查。
+
+### 2026-03-24 Default Agent 默认模型补充
+
+成功经验：
+- 当 `default agent` 看起来“用户没配 model 却仍固定走 mock”时，优先检查 `DEFAULT_CONFIG` 与用户配置的深度合并结果，而不是只盯着 `~/.sensenova-claw/config.yml`；这次根因正是内置默认值里的 `agents.default.model: mock` 被保留下来了。
+- 对这类配置继承问题，最高价值的回归测试应直接覆盖“真实 `Config` 加载 + `AgentRegistry.load_from_config()`”链路；仅测 `AgentWorker` 下游现象，不足以锁住错误来源。
+- `default agent` 若希望继承全局 `llm.default_model`，最干净的实现不是在运行时特殊判断 `mock`，而是从默认配置源头移除 `agents.default.model`，让缺省值真正表现为“未设置”。
+
+失败/风险经验：
+- 如果只修用户配置或手工在本机 `config.yml` 里补 `agents.default.model`，表面上能恢复真实 LLM，但无法阻止其他新环境继续因同一默认值设计再次落回 mock。
+### 2026-03-24 edit 工具移植补充
+
+成功经验：
+- 文件精确编辑工具最稳的落点是独立模块，而不是继续扩张 `builtin.py`；这次新增 `sensenova_claw/capabilities/tools/edit_tool.py` 后，路径解析、替换校验、diff 生成和恢复逻辑都能独立测试。
+- `edit` 的核心契约必须锁死为“`oldText` 恰好命中一次”；把“未命中 / 多次命中 / `_agent_workdir` 相对路径 / post-write recovery”都放进集成测试后，行为边界会清晰很多。
+- `openclaw` 的 post-write recovery 很值得保留：当文件已经写成功但 diff/格式化阶段报错时，重新读盘并按最终内容恢复成功结果，可以避免误向用户报告假失败。
+
+失败/风险经验：
+- 当前实现虽然兼容了 `old_text/new_text` 与 `old_string/new_string`，但对外主 schema 仍以 `oldText/newText` 为中心；若后续要继续补更多上游兼容别名，需要先核对各 provider 的 tool schema 约束，避免把参数面扩得过宽。
+
+### 2026-03-24 apply_patch 工具移植补充
+
+成功经验：
+- `apply_patch` 这类复杂文件变更能力，适合像 `edit` 一样拆成独立模块；把解析、路径解析、更新替换和 summary 输出都放在 `sensenova_claw/capabilities/tools/apply_patch_tool.py` 后，测试与后续演进都更稳。
+- 从 `openclaw` 移植时，优先保留补丁格式契约（`*** Begin/End Patch`、`Add/Delete/Update File`、`Move to`、`@@` chunk）而不是生搬硬套它的 sandbox 安全层，能更好地贴合当前仓库的 `_agent_workdir` 工具语义。
+- 对这类工具最有效的测试组合是“一个多 hunk 端到端用例 + 一个 `_agent_workdir` 相对路径用例 + 一个非法边界用例 + 一个 `_path_policy` 拦截用例”，既覆盖 happy path，也锁住关键失败态。
+
+失败/风险经验：
+- 当前 `apply_patch` 的 `_path_policy` 接入是按已解析的绝对路径做 `check_write`，这和 `PathPolicy` 内部“相对路径默认基于 workspace”语义并不完全一致；若后续要把所有文件工具统一到严格路径策略，需要整体收敛 `read_file/write_file/edit/apply_patch`，不能只单独加强一个。
+
+### 2026-03-24 apply_patch 解析器对齐补充
+
+成功经验：
+- 如果目标是“严格对齐上游解析器”，最稳的方法不是口头比对，而是直接把上游 parser 的失败态一个个翻译成测试：非法 hunk header、第二个 update chunk 缺 `@@`、update hunk 非法行、`<<EOF ... EOF` 包裹的 lenient boundary，都应先红后绿。
+- `openclaw` 的 parser 有一个关键细节：首个 update chunk 可以省略 `@@`，但后续 chunk 不行；只有把 `allowMissingContext` 这条规则一起移过来，错误行号和报错文案才能真正对齐。
+- 对模型友好的做法不是自动兼容错误方言，而是像上游一样在 schema/description 里只展示一种合法格式，并在解析失败时返回带“Valid hunk headers ...”的明确错误。
+
+失败/风险经验：
+- 看起来像“第二个 chunk 缺少 `@@`”的补丁，未必真的会分裂成第二个 chunk；像 `+tail` 这种行在上游仍会被视为同一个 chunk 的新增行，测试样例必须先按 parser 规则推演，不然容易把错误归因到实现。
+
+### 2026-03-25 LLM 新增项单项保存补充
+
+成功经验：
+- `/llms` 页面里“新增 provider/model 后再点单项保存”这类问题，先区分“前端按钮真不能点”和“点击后后端 404”；这次根因在后者，最有效的证据是补一个后端 API 红测，而不是只盯着前端交互。
+- 对配置编辑接口，前端允许“本地先新增，再单项保存”时，后端 `PUT /llm/providers/{name}` 与 `PUT /llm/models/{name}` 最好直接做 upsert；否则 UI 看起来支持新增，真实保存链路却只支持更新已存在项。
+- 这类修复适合双侧回归：`tests/unit/test_config_api.py` 锁住 provider/model upsert，`sensenova_claw/app/web/e2e/llms-edit-modes.spec.ts` 锁住新增 provider 后进入编辑并保存的页面行为。
+
+失败/风险经验：
+- 仅靠前端 mock 成功响应的 Playwright 用例，可能掩盖真实后端“不支持新建”的语义缺口；如果问题涉及接口契约，必须至少补一层真实后端测试。

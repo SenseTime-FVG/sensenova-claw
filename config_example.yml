@@ -16,55 +16,55 @@ llm:
     anthropic:
       api_key: ${ANTHROPIC_API_KEY}
       base_url: ${ANTHROPIC_BASE_URL}
-      timeout: 60
+      timeout: 180
       max_retries: 3
 
     openai:
       api_key: ${OPENAI_API_KEY}
       base_url: ${OPENAI_BASE_URL}
-      timeout: 60
+      timeout: 180
       max_retries: 3
 
     gemini:
       api_key: ${GEMINI_API_KEY}
       base_url: ${GEMINI_BASE_URL}
-      timeout: 120
+      timeout: 180
       max_retries: 3
 
     kimi:
       api_key: ${KIMI_API_KEY}
       base_url: https://api.moonshot.cn/v1
-      timeout: 60
+      timeout: 180
       max_retries: 3
 
     glm:
       api_key: ${GLM_API_KEY}
       base_url: https://open.bigmodel.cn/api/paas/v4/
-      timeout: 60
+      timeout: 180
       max_retries: 3
 
     minimax:
       api_key: ${MINIMAX_API_KEY}
       base_url: https://api.minimax.chat/v1
-      timeout: 60
+      timeout: 180
       max_retries: 3
 
     qwen:
       api_key: ${QWEN_API_KEY}
       base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      timeout: 60
+      timeout: 180
       max_retries: 3
 
     deepseek:
       api_key: ${DEEPSEEK_API_KEY}
       base_url: https://api.deepseek.com
-      timeout: 60
+      timeout: 180
       max_retries: 3
 
     step:
       api_key: ${STEP_API_KEY}
       base_url: https://api.stepfun.com/v1
-      timeout: 60
+      timeout: 180
       max_retries: 3
 
   models:
@@ -72,14 +72,14 @@ llm:
     claude-opus:
       provider: anthropic
       model_id: claude-opus-4-6
-      timeout: 60
+      timeout: 180
       max_tokens: 200000
       max_output_tokens: 16384
 
     claude-sonnet:
       provider: anthropic
       model_id: claude-sonnet-4-6
-      timeout: 60
+      timeout: 180
       max_tokens: 200000
       max_output_tokens: 16384
 
@@ -87,7 +87,7 @@ llm:
     gpt-5.4:
       provider: openai
       model_id: gpt-5.4
-      timeout: 60
+      timeout: 180
       max_tokens: 128000
       max_output_tokens: 16384
 
@@ -95,7 +95,7 @@ llm:
     gemini-pro:
       provider: gemini
       model_id: gemini-2.0-flash
-      timeout: 120
+      timeout: 180
       max_tokens: 1048576
       max_output_tokens: 65536
 
@@ -103,7 +103,7 @@ llm:
     kimi-k2.5:
       provider: kimi
       model_id: kimi-k2.5
-      timeout: 60
+      timeout: 180
       max_tokens: 262144
       max_output_tokens: 16384
 
@@ -111,7 +111,7 @@ llm:
     glm-5:
       provider: glm
       model_id: GLM-5
-      timeout: 60
+      timeout: 180
       max_tokens: 200000
       max_output_tokens: 16384
 
@@ -119,7 +119,7 @@ llm:
     minimax-m2.7:
       provider: minimax
       model_id: MiniMax-M2.7-highspeed
-      timeout: 60
+      timeout: 180
       max_tokens: 204800
       max_output_tokens: 16384
 
@@ -127,7 +127,7 @@ llm:
     qwen-3.5-plus:
       provider: qwen
       model_id: qwen3.5-plus
-      timeout: 60
+      timeout: 180
       max_tokens: 1000000
       max_output_tokens: 16384
 
@@ -135,7 +135,7 @@ llm:
     deepseek-chat:
       provider: deepseek
       model_id: deepseek-chat
-      timeout: 60
+      timeout: 180
       max_tokens: 128000
       max_output_tokens: 16384
 
@@ -143,7 +143,7 @@ llm:
     step-3.5-flash:
       provider: step
       model_id: step-3.5-flash
-      timeout: 60
+      timeout: 180
       max_tokens: 256000
       max_output_tokens: 16384
 
@@ -157,10 +157,13 @@ agents:
   default:
     name: Default Agent
     description: 默认 AI Agent
-    model: gemini-pro
     temperature: 0.6
     tools: []
     skills: []
+    # can_send_message_to: null    # null = 禁止向任何 Agent 发消息
+    # can_send_message_to: []      # [] = 可以向所有 Agent 发消息（默认）
+    # can_send_message_to:         # 仅限指定 Agent
+    #   - system-admin
 
   system-admin:
     name: 系统运维管理员
@@ -212,16 +215,59 @@ agents:
     tools: [bash_command, read_file, write_file, send_message, send_email, list_emails, read_email, download_attachment, mark_email, search_emails, ask_user]
     skills: []
 
+  proactive-agent:
+    name: Proactive Agent
+    description: 自主执行定时任务和信息推送的 agent
+    temperature: 0.2
+    tools: [send_message, fetch_url, read_file, serper_search, memory_search, list_proactive_jobs, create_proactive_job, manage_proactive_job]
+    skills: []
+    max_send_depth: 2
+    enabled: true
+
+# ════════════════════════════════════════════════════
+# Proactive Agent 配置
+# ════════════════════════════════════════════════════
+proactive:
+  enabled: false
+  max_concurrent_runs: 3
+  jobs:
+    # 示例：每日新闻简报
+    - name: "每日新闻简报"
+      enabled: true
+      agent_id: proactive-agent
+      trigger:
+        kind: time
+        cron: "0 8 * * *"            # 每天早上 8 点
+      task:
+        prompt: "搜索并汇总今日重要新闻，输出不超过 10 条的新闻摘要，每条包含标题、来源和一句话概要。"
+        use_memory: false
+      delivery:
+        channels: ["web"]
+      safety:
+        max_llm_calls: 10
+        max_duration_ms: 120000
 
 # ════════════════════════════════════════════════════
 # 工具配置
 # ════════════════════════════════════════════════════
 tools:
+  permission:
+    enabled: false
+    auto_approve_levels: ["low"]       # 自动批准的风险等级
+    confirmation_timeout: 60           # 确认超时（秒）
+    timeout_action: reject             # 超时策略：reject（拒绝）| approve（批准）| block（无限等待）
+
   serper_search:
     enabled: true
     api_key: ${SERPER_API_KEY}
     timeout: 15
     max_results: 10
+
+  image_search:
+    enabled: true
+    api_key: ""   # 留空时复用 SERPER_API_KEY 也可
+    timeout: 30
+    top_k: 10
 
 # Skills 配置
 skills:
@@ -270,10 +316,10 @@ plugins:
     bot_token: "${DISCORD_BOT_TOKEN}"
     dm_policy: "open"  # open | allowlist | disabled
     group_policy: "allowlist"  # open | allowlist | disabled
-    allowlist: []
-    group_allowlist: []
-    channel_allowlist: []
-    require_mention: true
+    allowlist: [ ]  # 私聊allow_list
+    group_allowlist: [ ]  # 可以在群聊触发的allow_list
+    channel_allowlist: [ ]  # 允许的频道id
+    require_mention: true  # 群里即使用户和频道都满足，还必须 @bot 才会响应
     show_tool_progress: false
     reply_in_thread: true
   whatsapp:

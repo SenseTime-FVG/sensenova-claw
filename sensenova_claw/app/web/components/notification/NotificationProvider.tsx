@@ -44,6 +44,8 @@ export interface NotificationCard {
   actions?: { label: string; value: string }[];
   // ask_user 富交互数据
   questionData?: QuestionData;
+  allowsInput?: boolean;
+  inputPlaceholder?: string;
   // 已处理标记
   resolved?: boolean;
   resolvedAction?: string;
@@ -71,8 +73,8 @@ interface NotificationContextValue {
   dismissCard: (id: string) => void;
   clearAllCards: () => void;
   // 操作弹窗回调（由 NotificationDropdown 注册）
-  onActionToastAction: ((cardId: string, actionValue: string) => void) | null;
-  setOnActionToastAction: (fn: ((cardId: string, actionValue: string) => void) | null) => void;
+  onActionToastAction: ((cardId: string, actionValue: string, inputValue?: string) => void) | null;
+  setOnActionToastAction: (fn: ((cardId: string, actionValue: string, inputValue?: string) => void) | null) => void;
 }
 
 export const NotificationContext = createContext<NotificationContextValue | null>(null);
@@ -89,9 +91,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const [actionToasts, setActionToasts] = useState<ActionToast[]>([]);
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
   // 操作回调：由 NotificationDropdown 注册，处理 WebSocket 响应
-  const [onActionToastAction, setOnActionToastActionRaw] = useState<((cardId: string, actionValue: string) => void) | null>(null);
+  const [onActionToastAction, setOnActionToastActionRaw] = useState<((cardId: string, actionValue: string, inputValue?: string) => void) | null>(null);
 
-  const setOnActionToastAction = useCallback((fn: ((cardId: string, actionValue: string) => void) | null) => {
+  const setOnActionToastAction = useCallback((fn: ((cardId: string, actionValue: string, inputValue?: string) => void) | null) => {
     setOnActionToastActionRaw(() => fn);
   }, []);
 
@@ -169,7 +171,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     });
 
     // 如果是需要用户操作的类型，同时弹出操作弹窗
-    if (ACTIONABLE_KINDS.includes(card.kind) && card.actions && card.actions.length > 0) {
+    if (ACTIONABLE_KINDS.includes(card.kind) && ((card.actions && card.actions.length > 0) || card.allowsInput)) {
       const toast: ActionToast = {
         id: `toast_${card.id}`,
         title: card.title,
@@ -178,6 +180,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         source: card.kind,
         createdAtMs: card.createdAtMs,
         actions: card.actions,
+        allowsInput: card.allowsInput,
+        inputPlaceholder: card.inputPlaceholder,
         cardId: card.id,
         questionData: card.questionData,
       };
@@ -234,13 +238,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, []);
 
   // 操作弹窗：用户点击按钮
-  const handleActionToastAction = useCallback((toastId: string, cardId: string, actionValue: string) => {
+  const handleActionToastAction = useCallback((toastId: string, cardId: string, actionValue: string, inputValue?: string) => {
     // 移除弹窗
     setActionToasts(prev => prev.filter(t => t.id !== toastId));
     // 标记卡片已处理
     resolveCard(cardId, actionValue);
     // 触发回调（发送 WebSocket 响应）
-    onActionToastAction?.(cardId, actionValue);
+    onActionToastAction?.(cardId, actionValue, inputValue);
   }, [resolveCard, onActionToastAction]);
 
   // 操作弹窗：用户关闭（不操作）

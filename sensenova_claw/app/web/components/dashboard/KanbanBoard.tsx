@@ -23,12 +23,12 @@ function TaskCard({
     <button
       type="button"
       onClick={onClick}
-      className="w-full rounded-xl border border-white/70 bg-white/65 p-3 text-left shadow-[0_2px_8px_rgba(15,23,42,0.03)] backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(15,23,42,0.07)]"
+      className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-3 text-left shadow-[0_2px_8px_rgba(15,23,42,0.03)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.12)] backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(15,23,42,0.07)] dark:hover:shadow-[0_4px_16px_rgba(0,0,0,0.2)]"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-semibold text-neutral-800">{task.title}</div>
-          <div className="mt-0.5 text-[11px]" style={{ color: '#94a3b8' }}>{task.owner}</div>
+          <div className="truncate text-[13px] font-semibold text-[var(--glass-text)]">{task.title}</div>
+          <div className="mt-0.5 text-[11px] text-[var(--glass-text-muted)]">{task.owner}</div>
         </div>
         {task.action && (
           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${tone.pill}`}>
@@ -38,16 +38,16 @@ function TaskCard({
       </div>
 
       {task.meta && (
-        <div className="mt-1.5 text-[11px] leading-4" style={{ color: '#94a3b8' }}>{task.meta}</div>
+        <div className="mt-1.5 text-[11px] leading-4 text-[var(--glass-text-muted)]">{task.meta}</div>
       )}
 
       {typeof task.progress === 'number' && (
         <div className="mt-2">
-          <div className="mb-1 flex items-center justify-between text-[10px]" style={{ color: '#94a3b8' }}>
+          <div className="mb-1 flex items-center justify-between text-[10px] text-[var(--glass-text-muted)]">
             <span>进度</span>
             <span className="font-medium">{task.progress}%</span>
           </div>
-          <div className="h-1.5 rounded-full bg-black/[0.04]">
+          <div className="h-1.5 rounded-full bg-black/[0.04] dark:bg-white/[0.08]">
             <div
               className={`h-1.5 rounded-full ${tone.progress} transition-all duration-500`}
               style={{ width: `${task.progress}%` }}
@@ -59,8 +59,8 @@ function TaskCard({
       {task.checklist && (
         <div className="mt-2 space-y-1">
           {task.checklist.map(item => (
-            <div key={item} className="flex items-center gap-1.5 text-[11px] text-neutral-500">
-              <div className="h-3.5 w-3.5 rounded border border-neutral-200 bg-white/80" />
+            <div key={item} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <div className="h-3.5 w-3.5 rounded border border-border bg-[var(--glass-bg-heavy)]" />
               <span>{item}</span>
             </div>
           ))}
@@ -73,7 +73,7 @@ function TaskCard({
 export function KanbanBoard({ columns, onTaskClick }: KanbanBoardProps) {
   return (
     <div className="flex h-full flex-col p-4 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-50/80 via-white/90 to-zinc-50/60" />
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-50/80 via-background/90 to-zinc-50/60 dark:from-slate-950/30 dark:via-background/90 dark:to-zinc-950/20" />
       <div className="relative z-10 flex h-full flex-col min-h-0">
         <SectionHeader
           title="任务看板"
@@ -90,12 +90,12 @@ export function KanbanBoard({ columns, onTaskClick }: KanbanBoardProps) {
               return (
                 <div
                   key={column.title}
-                  className="flex w-[200px] shrink-0 flex-col rounded-xl border border-black/[0.03] bg-white/50 p-3"
+                  className="flex w-[200px] shrink-0 flex-col rounded-xl border border-black/[0.03] dark:border-white/[0.05] bg-[var(--glass-bg-light)] p-3"
                 >
                   <div className="mb-2.5 flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
                       <div className={`h-2 w-2 rounded-full ${tone.dot}`} />
-                      <div className="text-[12px] font-semibold text-neutral-700">{column.title}</div>
+                      <div className="text-[12px] font-semibold text-[var(--glass-text)]">{column.title}</div>
                     </div>
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${tone.pill}`}>
                       {column.tasks.length}
@@ -104,8 +104,8 @@ export function KanbanBoard({ columns, onTaskClick }: KanbanBoardProps) {
 
                   <div className="flex-1 space-y-2">
                     {column.tasks.length === 0 ? (
-                      <div className="flex h-full min-h-[60px] items-center justify-center rounded-xl border border-dashed border-neutral-200 bg-white/40">
-                        <span className="text-[11px] text-neutral-300">空</span>
+                      <div className="flex h-full min-h-[60px] items-center justify-center rounded-xl border border-dashed border-border bg-[var(--glass-bg-light)]">
+                        <span className="text-[11px] text-muted-foreground">空</span>
                       </div>
                     ) : (
                       column.tasks.map(task => (
