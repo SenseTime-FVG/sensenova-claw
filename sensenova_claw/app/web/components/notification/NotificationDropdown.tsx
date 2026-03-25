@@ -191,12 +191,14 @@ function NotificationCardItem({
   onNavigate,
 }: {
   card: NotificationCard;
-  onResolve: (id: string, action?: string) => void;
+  onResolve: (id: string, action?: string, inputValue?: string) => void;
   onDismiss: (id: string) => void;
   onNavigate: (sessionId: string) => void;
 }) {
   const config = kindConfig[card.kind] || kindConfig.general;
   const Icon = config.icon;
+  const [inputValue, setInputValue] = useState('');
+  const trimmedInput = inputValue.trim();
 
   return (
     <div
@@ -254,6 +256,31 @@ function NotificationCardItem({
                   {action.label}
                 </button>
               ))}
+            </div>
+          )}
+          {!card.resolved && card.allowsInput && (
+            <div className="mt-2 space-y-2">
+              <textarea
+                value={inputValue}
+                onChange={(event) => setInputValue(event.target.value)}
+                placeholder={card.inputPlaceholder || '请输入回复'}
+                className="min-h-[88px] w-full resize-none rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-xs text-neutral-800 outline-none transition-colors focus:border-sky-300"
+                rows={3}
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-neutral-400">可直接输入文本回复</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onResolve(card.id, trimmedInput, trimmedInput);
+                  }}
+                  disabled={!trimmedInput}
+                  className="rounded-lg border border-sky-300 bg-sky-500 px-2.5 py-1 text-[11px] font-medium text-white transition-colors hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  确认
+                </button>
+              </div>
             </div>
           )}
 
@@ -332,7 +359,7 @@ export function NotificationDropdown() {
   };
 
   // 处理卡片操作：根据类型发送 WebSocket 响应
-  const handleResolve = useCallback((cardId: string, action?: string) => {
+  const handleResolve = useCallback((cardId: string, action?: string, inputValue?: string) => {
     const card = cards.find(c => c.id === cardId);
     if (!card || card.resolved) return;
 
@@ -356,7 +383,7 @@ export function NotificationDropdown() {
         session_id: card.sessionId,
         payload: {
           question_id: card.interactionId,
-          answer: isCancelled ? null : (action || ''),
+          answer: isCancelled ? null : (inputValue ?? action ?? ''),
           cancelled: isCancelled,
         },
         timestamp: Date.now() / 1000,
@@ -373,8 +400,8 @@ export function NotificationDropdown() {
 
   // 注册操作弹窗的回调，使弹窗按钮也能发送 WebSocket 响应
   useEffect(() => {
-    setOnActionToastAction((cardId: string, actionValue: string) => {
-      handleResolve(cardId, actionValue);
+    setOnActionToastAction((cardId: string, actionValue: string, inputValue?: string) => {
+      handleResolve(cardId, actionValue, inputValue);
     });
     return () => setOnActionToastAction(null);
   }, [handleResolve, setOnActionToastAction]);

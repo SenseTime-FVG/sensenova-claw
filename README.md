@@ -1,6 +1,10 @@
 <div align="center">
-  <h1>Sensenova-Claw</h1>
-  <p><strong>基于事件驱动架构的 AI Agent 平台</strong></p>
+  <table><tr><td>
+    <img src="assets/icon.png" alt="Sensenova-Claw Logo" width="80">
+  </td><td>
+    <h1>Sensenova-Claw</h1>
+    <strong>基于事件驱动架构的 AI Agent 平台</strong>
+  </td></tr></table>
   <p>
     <img src="https://img.shields.io/badge/python-≥3.12-blue" alt="Python">
     <img src="https://img.shields.io/badge/node-≥18-green" alt="Node.js">
@@ -235,6 +239,35 @@ plugins:
 </details>
 
 <details>
+<summary><b>Discord 配置</b></summary>
+
+```yaml
+plugins:
+  discord:
+    enabled: true
+    bot_token: "discord-bot-token"
+    dm_policy: "open"            # open / allowlist / disabled
+    group_policy: "open"         # open / allowlist / disabled
+    allowlist: []                # 私聊允许名单，填 Discord 用户 ID
+    group_allowlist: []          # 群聊允许名单，填 Discord 用户 ID
+    channel_allowlist: []        # 允许接入的频道/线程 ID
+    require_mention: true        # 群聊中是否必须 @bot
+    reply_in_thread: true        # 在线程内收到消息时，是否继续在线程中回复
+    show_tool_progress: false
+```
+
+[怎么创建Discord Bot](docs/channel/discord.md)
+
+使用说明：
+
+- `channel_allowlist` 用来限制允许接入的频道或线程；填 Discord 频道 ID / 线程 ID
+- `group_allowlist` 当前限制的是“允许在群里触发机器人的用户 ID”，不是服务器 ID
+- 若希望群聊里只限制频道、不限制具体用户，建议 `group_policy: "open"` 并配合 `channel_allowlist` 使用
+- 若在 Gateway 页面看到 “未启用 Discord Privileged Intents”，需要到 Discord Developer Portal 为该 Bot 开启 `Message Content Intent`
+
+</details>
+
+<details>
 <summary><b>企微配置</b></summary>
 
 ```yaml
@@ -278,7 +311,7 @@ plugins:
       send_timeout_seconds: 15
 ```
 
-安装 sidecar 依赖（必需）：
+安装 sidecar 依赖（如果启动后显示没有依赖）：
 
 ```bash
 npm install --prefix sensenova_claw/adapters/plugins/whatsapp/bridge

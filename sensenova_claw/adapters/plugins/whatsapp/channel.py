@@ -85,7 +85,7 @@ class WhatsAppChannel(Channel):
             self._runtime_state.last_error = str(exc).strip() or type(exc).__name__
             self._runtime_state.last_event = "start_failed"
             self._runtime_state.last_event_at = time.time()
-            self._runtime_state.debug_message = "bridge start failed"
+            self._runtime_state.debug_message = self._runtime_state.debug_message or "bridge start failed"
             logger.exception("WhatsAppChannel start failed")
             return
         logger.info("WhatsAppChannel started")

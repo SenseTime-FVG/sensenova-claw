@@ -57,7 +57,7 @@ class CreateJobRequest(BaseModel):
 async def create_job(body: CreateJobRequest, request: Request):
     """创建新的 proactive job。"""
     from sensenova_claw.kernel.proactive.models import (
-        ConditionTrigger, DeliveryConfig, EventTrigger, JobState,
+        DeliveryConfig, EventTrigger, JobState,
         ProactiveJob, ProactiveTask, SafetyConfig, TimeTrigger,
     )
     import uuid
@@ -68,19 +68,12 @@ async def create_job(body: CreateJobRequest, request: Request):
         trigger = TimeTrigger(
             cron=body.trigger.get("cron"),
             every=body.trigger.get("every"),
-            condition=body.trigger.get("condition"),
         )
     elif trigger_kind == "event":
         trigger = EventTrigger(
             event_type=body.trigger.get("event_type", ""),
             filter=body.trigger.get("filter"),
             debounce_ms=body.trigger.get("debounce_ms", 5000),
-            condition=body.trigger.get("condition"),
-        )
-    elif trigger_kind == "condition":
-        trigger = ConditionTrigger(
-            check_interval=body.trigger.get("check_interval", "5m"),
-            condition=body.trigger.get("condition", ""),
         )
     else:
         raise HTTPException(400, f"不支持的 trigger kind: {trigger_kind}")

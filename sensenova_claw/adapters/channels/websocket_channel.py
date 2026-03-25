@@ -20,6 +20,7 @@ from sensenova_claw.kernel.events.types import (
     LLM_CALL_REQUESTED,
     NOTIFICATION_PUSH,
     NOTIFICATION_SESSION,
+    PROACTIVE_RESULT,
     SESSION_CREATED,
     TODOLIST_UPDATED,
     TOOL_CALL_REQUESTED,
@@ -304,7 +305,7 @@ class WebSocketChannel(Channel):
             return
 
         # 通知/cron 事件：有 session 则路由到绑定连接，否则广播
-        if event.type in {CRON_DELIVERY_REQUESTED, NOTIFICATION_PUSH}:
+        if event.type in {CRON_DELIVERY_REQUESTED, NOTIFICATION_PUSH, PROACTIVE_RESULT}:
             if event.session_id and event.session_id != "system":
                 await self._send_to_websockets(self._session_bindings.get(event.session_id, set()), mapped)
             else:
@@ -511,6 +512,18 @@ class WebSocketChannel(Channel):
                     "actions": event.payload.get("actions"),
                     "metadata": metadata,
                     "created_at_ms": event.payload.get("created_at_ms"),
+                },
+                "timestamp": event.ts,
+            }
+        if event.type == PROACTIVE_RESULT:
+            return {
+                "type": "proactive_result",
+                "session_id": event.session_id,
+                "payload": {
+                    "job_id": event.payload.get("job_id"),
+                    "job_name": event.payload.get("job_name"),
+                    "result": event.payload.get("result", ""),
+                    "session_id": event.payload.get("session_id"),
                 },
                 "timestamp": event.ts,
             }

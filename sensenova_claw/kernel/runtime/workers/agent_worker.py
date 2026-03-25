@@ -114,16 +114,20 @@ class AgentSessionWorker(SessionWorker):
             tools = all_tools  # 空列表 = 全部工具
         else:
             allowed = set(self.agent_config.tools)
-            # 始终保留 send_message 工具
-            always_keep = {"send_message"}
-            tools = [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
+            # 保留 send_message 工具（除非 can_delegate_to 为 None 表示禁止委托）
+            if self.agent_config.can_delegate_to is not None:
+                allowed.add("send_message")
+            tools = [t for t in all_tools if t["name"] in allowed]
 
         # 仅对 proactive 会话应用安全限制
         if self._session_meta and self._session_meta.get("proactive_job_id"):
             allowed_tools = self._session_meta.get("allowed_tools")
             blocked_tools = self._session_meta.get("blocked_tools")
             if allowed_tools:
-                tools = [t for t in tools if t["name"] in allowed_tools or t["name"] == "send_message"]
+                keep = set(allowed_tools)
+                if self.agent_config and self.agent_config.can_delegate_to is not None:
+                    keep.add("send_message")
+                tools = [t for t in tools if t["name"] in keep]
             elif blocked_tools:
                 tools = [t for t in tools if t["name"] not in blocked_tools]
 
@@ -132,6 +136,15 @@ class AgentSessionWorker(SessionWorker):
     def _is_proactive_session(self) -> bool:
         """判断当前会话是否为 proactive 会话"""
         return bool(self._session_meta and self._session_meta.get("proactive_job_id"))
+
+    def _is_autonomous_session(self) -> bool:
+        """判断当前会话是否为自治会话（proactive 或 delegation）"""
+        if not self._session_meta:
+            return False
+        return bool(
+            self._session_meta.get("proactive_job_id")
+            or self._session_meta.get("message_trace_id")
+        )
 
     async def _force_complete_on_limit(
         self,
@@ -349,9 +362,9 @@ class AgentSessionWorker(SessionWorker):
         )
 
         llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
-        # 计数并检查 LLM 调用限制（仅 proactive 会话）
+        # 计数并检查 LLM 调用限制（仅自治会话（proactive/delegation））
         self._llm_call_count += 1
-        if self._is_proactive_session():
+        if self._is_autonomous_session():
             max_llm = self._session_meta.get("max_llm_calls")  # type: ignore[union-attr]
             if max_llm and self._llm_call_count > max_llm:
                 await self._force_complete_on_limit(self.session_id, turn_id, "max_llm_calls")
@@ -560,8 +573,8 @@ class AgentSessionWorker(SessionWorker):
         if state.pending_tool_calls:
             return
 
-        # 计数并检查工具调用限制（仅 proactive 会话，每批工具完成后累计）
-        if self._is_proactive_session():
+        # 计数并检查工具调用限制（仅自治会话（proactive/delegation），每批工具完成后累计）
+        if self._is_autonomous_session():
             # 统计本批次完成的工具调用数（从 tool_results 推断）
             self._tool_call_count = len(state.tool_results)
             max_tools = self._session_meta.get("max_tool_calls")  # type: ignore[union-attr]
@@ -572,9 +585,9 @@ class AgentSessionWorker(SessionWorker):
                 return
 
         llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
-        # 计数并检查 LLM 调用限制（仅 proactive 会话）
+        # 计数并检查 LLM 调用限制（仅自治会话（proactive/delegation））
         self._llm_call_count += 1
-        if self._is_proactive_session():
+        if self._is_autonomous_session():
             max_llm = self._session_meta.get("max_llm_calls")  # type: ignore[union-attr]
             if max_llm and self._llm_call_count > max_llm:
                 await self._force_complete_on_limit(

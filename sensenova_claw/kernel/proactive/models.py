@@ -33,7 +33,6 @@ class TimeTrigger:
     kind: Literal["time"] = "time"
     cron: str | None = None
     every: str | None = None
-    condition: str | None = None
 
 
 @dataclass
@@ -43,18 +42,9 @@ class EventTrigger:
     event_type: str = ""
     filter: dict | None = None
     debounce_ms: int = 5000
-    condition: str | None = None
 
 
-@dataclass
-class ConditionTrigger:
-    """条件触发：按间隔检查条件是否满足"""
-    kind: Literal["condition"] = "condition"
-    check_interval: str = "5m"
-    condition: str = ""
-
-
-Trigger = TimeTrigger | EventTrigger | ConditionTrigger
+Trigger = TimeTrigger | EventTrigger
 
 
 # ---------- Task ----------
@@ -135,7 +125,6 @@ def trigger_to_json(trigger: Trigger) -> str:
             "kind": "time",
             "cron": trigger.cron,
             "every": trigger.every,
-            "condition": trigger.condition,
         })
     elif isinstance(trigger, EventTrigger):
         return json.dumps({
@@ -143,13 +132,6 @@ def trigger_to_json(trigger: Trigger) -> str:
             "event_type": trigger.event_type,
             "filter": trigger.filter,
             "debounce_ms": trigger.debounce_ms,
-            "condition": trigger.condition,
-        })
-    elif isinstance(trigger, ConditionTrigger):
-        return json.dumps({
-            "kind": "condition",
-            "check_interval": trigger.check_interval,
-            "condition": trigger.condition,
         })
     raise ValueError(f"未知 trigger 类型: {type(trigger)}")
 
@@ -162,21 +144,14 @@ def trigger_from_json(raw: str) -> Trigger:
         return TimeTrigger(
             cron=d.get("cron"),
             every=d.get("every"),
-            condition=d.get("condition"),
         )
     elif kind == "event":
         return EventTrigger(
             event_type=d.get("event_type", ""),
             filter=d.get("filter"),
             debounce_ms=d.get("debounce_ms", 5000),
-            condition=d.get("condition"),
         )
-    elif kind == "condition":
-        return ConditionTrigger(
-            check_interval=d.get("check_interval", "5m"),
-            condition=d.get("condition", ""),
-        )
-    raise ValueError(f"未知 trigger kind: {kind}")
+    raise ValueError(f"Unknown trigger kind: {kind}")
 
 
 def _task_to_dict(task: ProactiveTask) -> dict:

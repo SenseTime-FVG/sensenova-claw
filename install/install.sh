@@ -477,7 +477,7 @@ main() {
 
   echo ""
   echo -e "${BLUE}╔══════════════════════════════════════════════╗${NC}"
-  echo -e "${BLUE}║         Sensenova-Claw 一键安装脚本                ║${NC}"
+  echo -e "${BLUE}║         Sensenova-Claw 一键安装脚本          ║${NC}"
   echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}"
   echo ""
 

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from sensenova_claw.platform.config.config import Config, DEFAULT_CONFIG_PATH
 from sensenova_claw.platform.secrets.migration import migrate_plaintext_secrets
-from sensenova_claw.platform.secrets.store import KeyringSecretStore
+from sensenova_claw.platform.secrets.store import build_default_secret_store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -272,7 +272,7 @@ def cmd_version(args: argparse.Namespace) -> int:
 def cmd_migrate_secrets(args: argparse.Namespace) -> int:
     """迁移当前 config.yml 中的明文敏感字段到 keyring。"""
     config_path = Path(args.config).resolve() if getattr(args, "config", None) else _default_config_path()
-    cfg = Config(config_path=config_path, secret_store=KeyringSecretStore())
+    cfg = Config(config_path=config_path, secret_store=build_default_secret_store())
     report = migrate_plaintext_secrets(cfg, secret_store=cfg._secret_store)
     print(f"migrated={report['migrated']}")
     for path in report["migrated_paths"]:

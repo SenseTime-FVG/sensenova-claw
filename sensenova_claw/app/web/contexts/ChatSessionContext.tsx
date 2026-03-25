@@ -653,7 +653,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         if (!questionId || !sourceSessionId) break;
         const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
         const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
-        setIsTyping(true);
+        // ask_user 进入“等待用户输入”，不应继续锁死底部聊天输入框
+        setIsTyping(false);
         const rawOptions = Array.isArray(payload.options)
           ? payload.options.map((o: unknown) => String(o))
           : null;
@@ -682,6 +683,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           sessionId: sourceSessionId,
           interactionId: questionId,
           actions: questionCardActions,
+          questionData: {
+            question: String(payload.question || ''),
+            options: rawOptions || undefined,
+            multiSelect: Boolean(payload.multi_select),
+          },
+          allowsInput: !questionCardActions || questionCardActions.length === 0,
+          inputPlaceholder: '请输入回复',
         });
         break;
       }

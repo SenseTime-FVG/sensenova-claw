@@ -13,13 +13,18 @@ interface WhatsAppStatus {
   enabled: boolean;
   authorized: boolean;
   state: string;
+  authDir?: string | null;
   phone: string | null;
   lastQr: string | null;
   lastQrDataUrl: string | null;
   lastError: string | null;
+  lastStatusCode?: number | null;
+  lastEvent?: string | null;
+  debugMessage?: string | null;
 }
 
 const POLL_MS = 2000;
+const TRANSIENT_STATES = new Set(['connecting', 'restarting', 'reconnecting', 'refreshing_qr']);
 
 export default function WhatsAppGatewayPage() {
   const router = useRouter();
@@ -27,6 +32,12 @@ export default function WhatsAppGatewayPage() {
   const [status, setStatus] = useState<WhatsAppStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const returnTo = searchParams.get('returnTo') || '/chat';
+  const shouldShowErrorCard = Boolean(
+    status?.lastError
+      && !status?.authorized
+      && !TRANSIENT_STATES.has(status?.state || '')
+      && !status?.lastQrDataUrl,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -130,8 +141,26 @@ export default function WhatsAppGatewayPage() {
                     <div>启用状态：{status?.enabled ? '已启用' : '未启用'}</div>
                     <div>授权状态：{status?.authorized ? '已授权' : '未授权'}</div>
                     <div>手机号：{status?.phone || '未知'}</div>
+                    <div>最近事件：{status?.lastEvent || '未知'}</div>
+                    <div>鉴权目录：{status?.authDir || '未配置'}</div>
                   </div>
                 </div>
+
+                {shouldShowErrorCard ? (
+                  <div className="rounded-2xl border border-red-300 bg-red-50/80 p-5 text-sm text-red-950">
+                    <p className="text-xs font-black uppercase tracking-[0.2em] text-red-700/80">最近错误</p>
+                    <p className="mt-3 break-words font-medium">{status?.lastError}</p>
+                    {status?.lastStatusCode ? (
+                      <p className="mt-2 text-red-900/80">状态码：{status?.lastStatusCode}</p>
+                    ) : null}
+                    {status?.debugMessage ? (
+                      <p className="mt-2 text-red-900/80">调试信息：{status?.debugMessage}</p>
+                    ) : null}
+                    <p className="mt-3 text-red-900/80">
+                      请优先检查 sidecar 进程日志，以及上述鉴权目录是否可写、是否存在旧登录态损坏。
+                    </p>
+                  </div>
+                ) : null}
 
                 {status?.lastQr && !status?.lastQrDataUrl ? (
                   <div className="rounded-2xl border p-5 bg-muted/20">
