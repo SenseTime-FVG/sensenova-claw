@@ -47,12 +47,20 @@ class StoryboardPage:
     audience_takeaway: str
     layout_intent: str
     style_variant: str
+    payload_budget: "PayloadBudget"
     content_blocks: list["ContentBlock"]
     visual_requirements: list[str]
     data_requirements: list[str]
     asset_requirements: list[str]
     unresolved_issues: list[str]
     presenter_intent: str
+
+
+class PayloadBudget:
+    claim_count: int
+    evidence_count: int
+    structure_block_count: int
+    require_comparison_or_summary: bool
 
 
 class ContentBlock:
@@ -73,6 +81,13 @@ class ContentBlock:
 - 页数必须严格匹配任务包要求。
 - 页面自然语言内容默认与用户 query 保持一致。
 - 页面顺序必须体现清晰叙事，而不是堆砌信息。
+- 必须先读取 `task-pack.json.content_density_profile`，结合 `page_type`、`narrative_role` 和 `style-spec.json` 中已声明的 `density_rules`，把 `content_density_profile` 转成可执行的 `payload_budget`。
+- 每页必须声明页级 `payload_budget`，不要只停在 deck 级 profile 描述。
+- `payload_budget` 至少要写出 `claim_count`、`evidence_count`、`structure_block_count` 和 `require_comparison_or_summary`，供后续 `ppt-page-html` 直接消费。
+- `analysis-heavy` 下的分析类页应给更高预算：允许更多 claim / evidence，并且优先要求 2 块以上结构块，必要时要求对比或摘要。
+- `balanced` 采用中位预算，让正文页既不空也不过载。
+- `showcase-light` 下的展示类页预算可以更轻，但仍要明确最低承载，不要把内容责任完全让给主视觉。
+- 分析类页与展示类页不能共用同一套预算；前者更强调论点、证据和结构块，后者更强调聚焦表达与节奏控制。
 - 不允许只拿 research 主题词重新写一遍；必须把 research 中可上页的 claim、evidence 和未解决缺口落到页面级对象。
 - 每页必须能说明主 claim 和 evidence 从哪里来。
 - 每个 `content_blocks[n]` 都必须显式填写 `source_claim_ids` 与 `source_evidence_ids`，引用 `research-pack` 中实际存在的条目，而不是写模糊主题词。

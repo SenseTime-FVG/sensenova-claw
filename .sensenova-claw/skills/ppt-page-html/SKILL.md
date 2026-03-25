@@ -36,6 +36,8 @@ description: 当需要根据 style-spec、storyboard 和 asset-plan 逐页生成
 - 必须逐页直接生成最终 HTML
 - 不要先写生成器脚本再批量产出页面
 - 每一页都要直接参考对应的 `storyboard.json.pages[n]` 与同一份 `style-spec.json` 落地成最终 HTML 文件
+- 必须按 `storyboard.json.pages[n].payload_budget` 落地，不要把内容密度只停留在控制面
+- `claim_count`、`evidence_count`、`structure_block_count`、`require_comparison_or_summary` 都属于必须消费的执行预算
 
 ### 固定画布
 
@@ -100,6 +102,17 @@ HTML 必须保留这些层级：
 - 不能把多个不同 `style_variant` 页面落成同一种安全模板。
 - 不要让大多数正文页都复用同一套左竖线标题 + 毛玻璃卡片。
 - 局部重做页面时，也必须与同 deck 其他页面保持同一视觉系统。
+
+## 内容预算执行规则
+
+- 必须按 `payload_budget` 落地，不允许把应承载 3 块内容的页面退回成“一个标题 + 一张大卡片”。
+- `structure_block_count` 表示页面上至少要有对应数量的可感知内容结构块，例如对比区、数据卡、摘要块、步骤块、图文块或表格区。
+- `claim_count` 表示页面上要有足够数量的独立论点承载位，不要把多个 claim 压成一段无法区分的长文。
+- `evidence_count` 表示页面上要落地对应数量的证据承载位，例如数据点、指标、来源说明、案例事实、图表标注或对照信息。
+- `require_comparison_or_summary=True` 时，页面必须显式出现对比结构或摘要结构；不能只有零散内容块而没有收束。
+- 如果预算要求对比，应优先使用双列 / 多列 / before-after / 指标对照等结构。
+- 如果预算要求摘要，应提供明确的结论块、takeaway 区或 recap 区，而不是只靠标题暗示。
+- 视觉张力不能成为删减预算的理由；如果空间紧张，应该调布局、组件尺寸和层级，而不是静默降低承载。
 
 ## 资源规则
 

@@ -408,10 +408,82 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertNotIn("根据主题/场景选择默认 profile", body)
         self.assertNotIn("重算默认 profile", design)
         self.assertNotIn("payload_budget", body)
-
         self.assertIn("承载策略", design)
         self.assertIn("不是单纯视觉风格切换", design)
-        self.assertNotIn("payload_budget", design)
+
+    def test_ppt_storyboard_defines_page_level_payload_budget_contract(self):
+        skills = _load_workspace_skills()
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        body = skills["ppt-storyboard"]
+
+        self.assertIn("payload_budget", body)
+        self.assertIn('payload_budget: "PayloadBudget"', body)
+        self.assertIn("class PayloadBudget", body)
+        self.assertIn("claim_count: int", body)
+        self.assertIn("evidence_count: int", body)
+        self.assertIn("structure_block_count: int", body)
+        self.assertIn("require_comparison_or_summary: bool", body)
+        self.assertIn("每页必须声明页级 `payload_budget`", body)
+
+        self.assertIn("payload_budget", design)
+        self.assertIn("class PayloadBudget", design)
+        self.assertIn("每页必须声明页级 `payload_budget`", design)
+
+    def test_ppt_storyboard_maps_density_profile_to_payload_budget(self):
+        skills = _load_workspace_skills()
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        body = skills["ppt-storyboard"]
+
+        self.assertIn("content_density_profile", body)
+        self.assertIn("analysis-heavy", body)
+        self.assertIn("balanced", body)
+        self.assertIn("showcase-light", body)
+        self.assertIn("分析类页", body)
+        self.assertIn("展示类页", body)
+        self.assertIn("把 `content_density_profile` 转成可执行的 `payload_budget`", body)
+
+        self.assertIn("content_density_profile", design)
+        self.assertIn("把 `content_density_profile` 转成可执行的 `payload_budget`", design)
+        self.assertIn("分析类页", design)
+        self.assertIn("展示类页", design)
+
+    def test_ppt_page_html_consumes_payload_budget_instead_of_collapsing_layout(self):
+        skills = _load_workspace_skills()
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        body = skills["ppt-page-html"]
+
+        self.assertIn("payload_budget", body)
+        self.assertIn("必须按 `payload_budget` 落地", body)
+        self.assertIn("claim_count", body)
+        self.assertIn("evidence_count", body)
+        self.assertIn("structure_block_count", body)
+        self.assertIn("require_comparison_or_summary", body)
+        self.assertIn("不允许把应承载 3 块内容的页面退回成“一个标题 + 一张大卡片”", body)
+
+        self.assertIn("payload_budget", design)
+        self.assertIn("不允许把应承载 3 块内容的页面退回成“一个标题 + 一张大卡片”", design)
+
+    def test_ppt_review_flags_payload_budget_underdelivery(self):
+        skills = _load_workspace_skills()
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        body = skills["ppt-review"]
+
+        self.assertIn("payload_budget", body)
+        self.assertIn("承载不足", body)
+        self.assertIn("结构块不足", body)
+        self.assertIn("缺少对比或摘要", body)
+        self.assertIn("claim_count", body)
+        self.assertIn("evidence_count", body)
+        self.assertIn("structure_block_count", body)
+        self.assertIn("require_comparison_or_summary", body)
+
+        self.assertIn("承载不足", design)
+        self.assertIn("结构块不足", design)
+        self.assertIn("缺少对比或摘要", design)
 
 
 if __name__ == "__main__":
