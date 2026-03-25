@@ -71,6 +71,7 @@ class WhatsAppConfig:
     def _normalize_bridge_entry(entry: str) -> str:
         legacy_rel = Path("sensenova_claw/adapters/channels/whatsapp/bridge/src/index.mjs")
         plugin_rel = Path("sensenova_claw/adapters/plugins/whatsapp/bridge/src/index.mjs")
+        hyphenated_plugin_rel = Path("sensenova-claw/adapters/plugins/whatsapp/bridge/src/index.mjs")
 
         if not entry:
             return entry
@@ -87,6 +88,16 @@ class WhatsAppConfig:
             if replacement_candidate.exists():
                 logger.warning(
                     "WhatsApp bridge entry uses legacy channels path, remapping to %s",
+                    replacement,
+                )
+                return replacement
+
+        if normalized.endswith(hyphenated_plugin_rel.as_posix()):
+            replacement = str(plugin_rel)
+            replacement_candidate = PROJECT_ROOT / plugin_rel
+            if replacement_candidate.exists():
+                logger.warning(
+                    "WhatsApp bridge entry uses hyphenated repo path, remapping to %s",
                     replacement,
                 )
                 return replacement

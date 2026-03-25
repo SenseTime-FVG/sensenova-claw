@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Loader2, Save, Plus, Trash2, ChevronDown, ChevronRight, Server, Cpu, Settings2, Workflow } from 'lucide-react';
+import { Loader2, Save, Plus, Trash2, ChevronDown, ChevronRight, Server, Cpu, Settings2, Workflow, RefreshCw, Wand2, HardDriveDownload, TerminalSquare } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { authFetch, API_BASE } from '@/lib/authFetch';
@@ -43,6 +43,78 @@ interface MiniAppsConfig {
   acp: ACPConfig;
 }
 
+interface ACPWizardInstaller {
+  id: string;
+  label: string;
+  found: boolean;
+  path: string;
+  candidate: string;
+}
+
+interface ACPWizardComponent {
+  id: string;
+  label: string;
+  found: boolean;
+  path: string;
+  candidate: string;
+}
+
+interface ACPWizardInstallStep {
+  id: string;
+  label: string;
+  installed: boolean;
+  available: boolean;
+  selected_recipe_id: string;
+  command_preview: string;
+  note: string;
+}
+
+interface ACPWizardEnvHint {
+  key: string;
+  description: string;
+  required: boolean;
+}
+
+interface ACPWizardRecommendedConfig {
+  enabled: boolean;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  startup_timeout_seconds: number;
+  request_timeout_seconds: number;
+  default_builder: 'builtin' | 'acp';
+}
+
+interface ACPWizardAgent {
+  id: string;
+  name: string;
+  summary: string;
+  homepage: string;
+  platforms: string[];
+  supported_on_current_platform: boolean;
+  mode: 'native' | 'adapter' | 'bridge';
+  ready: boolean;
+  configured: boolean;
+  components: ACPWizardComponent[];
+  runtime: ACPWizardComponent;
+  missing_components: string[];
+  recommended_config: ACPWizardRecommendedConfig;
+  install_steps: ACPWizardInstallStep[];
+  env_hints: ACPWizardEnvHint[];
+  notes: string[];
+}
+
+interface ACPWizardState {
+  platform: {
+    id: string;
+    label: string;
+    python: string;
+  };
+  installers: Record<string, ACPWizardInstaller>;
+  agents: ACPWizardAgent[];
+  current_config: ACPConfig;
+}
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -55,6 +127,9 @@ export default function SettingsPage() {
   const [miniappsConfig, setMiniappsConfig] = useState<MiniAppsConfig>(normalizeMiniAppsConfig({}));
   const [acpArgsText, setAcpArgsText] = useState('[]');
   const [acpEnvText, setAcpEnvText] = useState('{}');
+  const [wizardState, setWizardState] = useState<ACPWizardState | null>(null);
+  const [wizardLoading, setWizardLoading] = useState(true);
+  const [installingAgentId, setInstallingAgentId] = useState('');
 
   // 展开状态
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -71,9 +146,11 @@ export default function SettingsPage() {
 
   // 加载配置
   useEffect(() => {
-    authFetch(`${API_BASE}/api/config/sections`)
-      .then(res => res.json())
-      .then(data => {
+    Promise.all([
+      authFetch(`${API_BASE}/api/config/sections`).then(res => res.json()),
+      authFetch(`${API_BASE}/api/config/acp/wizard`).then(res => res.json()).catch(() => null),
+    ])
+      .then(([data, wizard]) => {
         const llm = data?.llm || {};
         const p = normalizeProviders(llm.providers || {});
         // 过滤掉 mock provider
@@ -87,9 +164,13 @@ export default function SettingsPage() {
         setMiniappsConfig(nextMiniappsConfig);
         setAcpArgsText(JSON.stringify(nextMiniappsConfig.acp.args || [], null, 2));
         setAcpEnvText(JSON.stringify(nextMiniappsConfig.acp.env || {}, null, 2));
+        setWizardState(normalizeWizardState(wizard));
       })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        setWizardLoading(false);
+      });
   }, []);
 
   // 保存配置
@@ -137,6 +218,7 @@ export default function SettingsPage() {
         setMiniappsConfig(miniapps);
         setAcpArgsText(JSON.stringify(miniapps.acp.args, null, 2));
         setAcpEnvText(JSON.stringify(miniapps.acp.env, null, 2));
+        void refreshWizard();
       } else {
         const err = await res.json().catch(() => ({}));
         setSaveMsg(err.detail || '保存失败');
@@ -145,6 +227,62 @@ export default function SettingsPage() {
       setSaveMsg('保存失败');
     } finally {
       setSaving(false);
+      setTimeout(() => setSaveMsg(''), 3000);
+    }
+  };
+
+  const refreshWizard = async () => {
+    setWizardLoading(true);
+    try {
+      const res = await authFetch(`${API_BASE}/api/config/acp/wizard`);
+      const data = await res.json();
+      setWizardState(normalizeWizardState(data));
+    } catch {
+      setSaveMsg('ACP 向导刷新失败');
+    } finally {
+      setWizardLoading(false);
+    }
+  };
+
+  const applyWizardConfig = (agent: ACPWizardAgent) => {
+    const next = normalizeMiniAppsConfig({
+      default_builder: agent.recommended_config.default_builder,
+      acp: {
+        enabled: agent.recommended_config.enabled,
+        command: agent.recommended_config.command,
+        args: agent.recommended_config.args,
+        env: agent.recommended_config.env,
+        startup_timeout_seconds: agent.recommended_config.startup_timeout_seconds,
+        request_timeout_seconds: agent.recommended_config.request_timeout_seconds,
+      },
+    });
+    setMiniappsConfig(next);
+    setAcpArgsText(JSON.stringify(next.acp.args, null, 2));
+    setAcpEnvText(JSON.stringify(next.acp.env, null, 2));
+    setSaveMsg(`已应用 ${agent.name} 推荐配置，请保存`);
+    setTimeout(() => setSaveMsg(''), 3000);
+  };
+
+  const installWizardAgent = async (agent: ACPWizardAgent) => {
+    setInstallingAgentId(agent.id);
+    setSaveMsg('');
+    try {
+      const res = await authFetch(`${API_BASE}/api/config/acp/wizard/install`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: agent.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaveMsg(data?.detail || '安装失败');
+        return;
+      }
+      setWizardState(normalizeWizardState(data?.wizard));
+      setSaveMsg(`${agent.name} 安装完成`);
+    } catch {
+      setSaveMsg('安装失败');
+    } finally {
+      setInstallingAgentId('');
       setTimeout(() => setSaveMsg(''), 3000);
     }
   };
@@ -215,6 +353,7 @@ export default function SettingsPage() {
 
   const providerNames = Object.keys(providers);
   const modelNames = Object.keys(models);
+  const saveMsgIsSuccess = Boolean(saveMsg) && !/失败|错误/.test(saveMsg);
 
   if (loading) {
     return (
@@ -235,7 +374,7 @@ export default function SettingsPage() {
           <div className="flex items-center gap-4">
             {saveMsg && (
               <span className={`text-sm font-semibold px-3 py-1.5 rounded-full border shadow-sm ${
-                saveMsg === '已保存'
+                saveMsgIsSuccess
                   ? 'text-green-600 bg-green-500/10 border-green-500/20 dark:text-green-400'
                   : 'text-destructive bg-destructive/10 border-destructive/20'
               }`}>
@@ -321,6 +460,165 @@ export default function SettingsPage() {
               <Section title="Mini-App Builder" desc="ACP 与默认 builder 配置" icon={<Workflow size={18} />}
                 expanded={expandedSections.miniapps} onToggle={() => setExpandedSections(p => ({ ...p, miniapps: !p.miniapps }))}>
                 <div className="space-y-5">
+                  <div className="rounded-2xl border border-border/70 bg-muted/20 p-5 space-y-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                          <TerminalSquare size={16} className="text-primary" />
+                          ACP Wizard
+                        </div>
+                        <p className="text-xs leading-6 text-muted-foreground">
+                          自动检测当前平台可用的 ACP agent / adapter，并生成对应的 `command`、`args` 与安装动作。
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="inline-flex items-center rounded-full border border-border bg-background px-3 py-1 text-xs font-semibold text-muted-foreground"
+                          data-testid="acp-wizard-platform"
+                        >
+                          当前平台: {wizardState?.platform?.label || 'Unknown'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={refreshWizard}
+                          disabled={wizardLoading}
+                          data-testid="acp-wizard-refresh"
+                          className="inline-flex items-center gap-2 rounded-xl border border-input bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/40 disabled:opacity-50"
+                        >
+                          {wizardLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                          刷新检测
+                        </button>
+                      </div>
+                    </div>
+
+                    {wizardLoading && !wizardState ? (
+                      <div className="flex items-center gap-3 rounded-xl border border-dashed border-border/70 bg-background px-4 py-4 text-sm text-muted-foreground">
+                        <Loader2 size={16} className="animate-spin text-primary" />
+                        正在检测 ACP agent 与安装器...
+                      </div>
+                    ) : wizardState && wizardState.agents.length > 0 ? (
+                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        {wizardState.agents.map(agent => (
+                          <div
+                            key={agent.id}
+                            className="rounded-2xl border border-border/60 bg-background p-4 shadow-sm space-y-4"
+                            data-testid={`acp-wizard-card-${agent.id}`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-semibold text-foreground">{agent.name}</div>
+                                  <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                                    {renderAgentMode(agent.mode)}
+                                  </span>
+                                </div>
+                                <p className="text-xs leading-6 text-muted-foreground">{agent.summary}</p>
+                              </div>
+                              <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-bold ${
+                                agent.configured
+                                  ? 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400'
+                                  : agent.ready
+                                    ? 'border-primary/30 bg-primary/10 text-primary'
+                                    : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                              }`}>
+                                {agent.configured ? '已配置' : agent.ready ? '可直接使用' : '缺少依赖'}
+                              </span>
+                            </div>
+
+                            <div className="rounded-xl border border-border/60 bg-muted/20 p-3 space-y-2 text-xs text-muted-foreground">
+                              <div>
+                                <span className="font-semibold text-foreground/90">推荐命令</span>
+                                <pre className="mt-1 overflow-auto rounded-lg bg-background px-3 py-2 font-mono text-[11px] text-foreground/80">{`${agent.recommended_config.command}${agent.recommended_config.args.length ? ` ${agent.recommended_config.args.join(' ')}` : ''}`}</pre>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {agent.components.map(component => (
+                                  <span key={component.id} className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                                    component.found
+                                      ? 'border-green-500/25 bg-green-500/10 text-green-700 dark:text-green-400'
+                                      : 'border-border text-muted-foreground'
+                                  }`}>
+                                    {component.label}: {component.found ? '已检测' : '未检测'}
+                                  </span>
+                                ))}
+                              </div>
+                              {agent.env_hints.length > 0 && (
+                                <div className="space-y-1">
+                                  <div className="font-semibold text-foreground/90">常见环境变量</div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {agent.env_hints.map(hint => (
+                                      <span key={hint.key} className="inline-flex items-center rounded-full border border-border bg-background px-2 py-1 text-[10px] font-semibold text-muted-foreground">
+                                        {hint.key}{hint.required ? ' *' : ''}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {agent.install_steps.length > 0 && (
+                              <div className="space-y-2">
+                                {agent.install_steps.map(step => (
+                                  <div key={step.id} className="rounded-xl border border-border/50 px-3 py-2 text-xs text-muted-foreground">
+                                    <div className="flex items-center justify-between gap-3">
+                                      <span className="font-semibold text-foreground/90">{step.label}</span>
+                                      <span>{step.installed ? '已安装' : step.available ? '可安装' : '当前环境不可安装'}</span>
+                                    </div>
+                                    {step.command_preview && (
+                                      <pre className="mt-2 overflow-auto rounded-lg bg-muted/30 px-3 py-2 font-mono text-[11px] text-foreground/80">{step.command_preview}</pre>
+                                    )}
+                                    {step.note && <p className="mt-2 leading-5">{step.note}</p>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {agent.notes.length > 0 && (
+                              <div className="space-y-1 text-xs text-muted-foreground">
+                                {agent.notes.map(note => (
+                                  <p key={note} className="leading-6">{note}</p>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => applyWizardConfig(agent)}
+                                data-testid={`acp-wizard-apply-${agent.id}`}
+                                className="inline-flex items-center gap-2 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90"
+                              >
+                                <Wand2 size={14} />
+                                应用推荐配置
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => installWizardAgent(agent)}
+                                disabled={installingAgentId === agent.id || agent.install_steps.every(step => step.installed || !step.available)}
+                                data-testid={`acp-wizard-install-${agent.id}`}
+                                className="inline-flex items-center gap-2 rounded-xl border border-input bg-background px-3.5 py-2 text-xs font-bold text-foreground hover:bg-muted/40 disabled:opacity-50"
+                              >
+                                {installingAgentId === agent.id ? <Loader2 size={14} className="animate-spin" /> : <HardDriveDownload size={14} />}
+                                安装缺失项
+                              </button>
+                              <a
+                                href={agent.homepage}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-3.5 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/40"
+                              >
+                                官方文档
+                              </a>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-border/70 bg-background px-4 py-4 text-sm text-muted-foreground">
+                        当前无法加载 ACP 向导数据，请稍后重试。
+                      </div>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-muted-foreground text-xs font-semibold">Default Builder</label>
@@ -406,21 +704,18 @@ export default function SettingsPage() {
                   </div>
 
                   <p className="text-xs text-muted-foreground leading-6">
-                    `args` 需要填写 JSON 字符串数组，`env` 需要填写 JSON 对象。只有开启 ACP 且配置了 command 时，mini-app 才会使用外部 ACP coding agent 生成。
+                    `args` 需要填写 JSON 字符串数组，`env` 需要填写 JSON 对象。上面的 ACP Wizard 会根据当前平台生成推荐配置；这里仍保留手工编辑入口，方便你继续微调 command / args / env。
                   </p>
                   <div className="rounded-2xl border border-border/60 bg-muted/30 p-4">
-                    <div className="text-sm font-semibold text-foreground mb-2">Codex 推荐配置</div>
+                    <div className="text-sm font-semibold text-foreground mb-2">常见 ACP 启动命令</div>
                     <div className="space-y-2 text-xs text-muted-foreground leading-6">
-                      <p>如果你要让 mini-app 自动使用本机 Codex，优先推荐官方 `codex-acp` 适配器。</p>
-                      <pre className="rounded-xl bg-background px-3 py-3 font-mono text-[11px] overflow-auto text-foreground/80">{`command: npx
-args: [
-  "-y",
-  "-p", "@zed-industries/codex-acp",
-  "-p", "@zed-industries/codex-acp-linux-x64",
-  "codex-acp"
-]
-env: {}`}</pre>
-                      <p>如果你已经把 `codex-acp` 装到 PATH，也可以直接把 command 改成 `codex-acp`。</p>
+                      <pre className="rounded-xl bg-background px-3 py-3 font-mono text-[11px] overflow-auto text-foreground/80">{`Codex CLI      -> command: codex-acp,          args: []
+Claude         -> command: claude-agent-acp,   args: []
+Gemini CLI     -> command: gemini,             args: ["--experimental-acp"]
+Kimi CLI       -> command: kimi,               args: ["acp"]
+OpenCode       -> command: opencode,           args: ["acp"]
+Codex Bridge   -> command: python3,            args: ["-m", "sensenova_claw.capabilities.miniapps.codex_acp_bridge"]`}</pre>
+                      <p>如果某个 agent / adapter 还没装，优先直接使用上方 ACP Wizard 检测并安装；Wizard 会按当前平台给出更稳的命令路径。</p>
                     </div>
                   </div>
                 </div>
@@ -613,6 +908,108 @@ function FieldTextArea({ label, value, onChange, placeholder, dataTestId }: {
       />
     </div>
   );
+}
+
+function renderAgentMode(mode: ACPWizardAgent['mode']): string {
+  switch (mode) {
+    case 'native':
+      return 'Native ACP';
+    case 'bridge':
+      return 'Bridge';
+    default:
+      return 'Adapter';
+  }
+}
+
+function normalizeWizardState(input: any): ACPWizardState | null {
+  if (!input || typeof input !== 'object') return null;
+  const agents = Array.isArray(input.agents) ? input.agents : [];
+  return {
+    platform: {
+      id: String(input.platform?.id || ''),
+      label: String(input.platform?.label || ''),
+      python: String(input.platform?.python || ''),
+    },
+    installers: Object.fromEntries(
+      Object.entries(input.installers && typeof input.installers === 'object' ? input.installers : {}).map(([key, value]) => {
+        const installer = value && typeof value === 'object' ? value : {};
+        return [
+          key,
+          {
+            id: String(installer.id || key),
+            label: String(installer.label || key),
+            found: Boolean(installer.found),
+            path: String(installer.path || ''),
+            candidate: String(installer.candidate || ''),
+          },
+        ];
+      }),
+    ),
+    agents: agents.map((item): ACPWizardAgent => {
+      const agent = item && typeof item === 'object' ? item : {};
+      return {
+        id: String(agent.id || ''),
+        name: String(agent.name || ''),
+        summary: String(agent.summary || ''),
+        homepage: String(agent.homepage || ''),
+        platforms: Array.isArray(agent.platforms) ? agent.platforms.map((platform: unknown) => String(platform)) : [],
+        supported_on_current_platform: Boolean(agent.supported_on_current_platform),
+        mode: agent.mode === 'native' || agent.mode === 'bridge' ? agent.mode : 'adapter',
+        ready: Boolean(agent.ready),
+        configured: Boolean(agent.configured),
+        components: Array.isArray(agent.components)
+          ? agent.components.map((component: any) => ({
+              id: String(component?.id || ''),
+              label: String(component?.label || ''),
+              found: Boolean(component?.found),
+              path: String(component?.path || ''),
+              candidate: String(component?.candidate || ''),
+            }))
+          : [],
+        runtime: {
+          id: String(agent.runtime?.id || ''),
+          label: String(agent.runtime?.label || ''),
+          found: Boolean(agent.runtime?.found),
+          path: String(agent.runtime?.path || ''),
+          candidate: String(agent.runtime?.candidate || ''),
+        },
+        missing_components: Array.isArray(agent.missing_components)
+          ? agent.missing_components.map((part: unknown) => String(part))
+          : [],
+        recommended_config: {
+          enabled: Boolean(agent.recommended_config?.enabled),
+          command: String(agent.recommended_config?.command || ''),
+          args: Array.isArray(agent.recommended_config?.args) ? agent.recommended_config.args.map((part: unknown) => String(part)) : [],
+          env: Object.fromEntries(
+            Object.entries(agent.recommended_config?.env && typeof agent.recommended_config.env === 'object' ? agent.recommended_config.env : {}).map(([key, value]) => [String(key), String(value)])
+          ),
+          startup_timeout_seconds: Number(agent.recommended_config?.startup_timeout_seconds || 20),
+          request_timeout_seconds: Number(agent.recommended_config?.request_timeout_seconds || 180),
+          default_builder: agent.recommended_config?.default_builder === 'acp' ? 'acp' : 'builtin',
+        },
+        install_steps: Array.isArray(agent.install_steps)
+          ? agent.install_steps.map((step: any) => ({
+              id: String(step?.id || ''),
+              label: String(step?.label || ''),
+              installed: Boolean(step?.installed),
+              available: Boolean(step?.available),
+              selected_recipe_id: String(step?.selected_recipe_id || ''),
+              command_preview: String(step?.command_preview || ''),
+              note: String(step?.note || ''),
+            }))
+          : [],
+        env_hints: Array.isArray(agent.env_hints)
+          ? agent.env_hints.map((hint: any) => ({
+              key: String(hint?.key || ''),
+              description: String(hint?.description || ''),
+              required: Boolean(hint?.required),
+            }))
+          : [],
+        notes: Array.isArray(agent.notes) ? agent.notes.map((note: unknown) => String(note)) : [],
+      };
+    }),
+    current_config: normalizeMiniAppsConfig({ acp: input.current_config || {} }).acp,
+  };
 }
 
 function normalizeProviders(input: Record<string, any>): Record<string, ProviderConfig> {

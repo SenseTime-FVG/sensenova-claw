@@ -372,6 +372,121 @@ class TestPermissionManagement:
         assert wait_event.is_set()
 
 
+# ---------- 超时策略 (timeout_action) ----------
+
+
+class TestTimeoutAction:
+    """验证 tools.permission.timeout_action 三种策略"""
+
+    async def test_timeout_action_reject_default(self, tmp_path):
+        """默认 reject 策略：超时返回 False"""
+        worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": True,
+            "tools.permission.auto_approve_levels": [],
+            "tools.permission.confirmation_timeout": 0.1,
+            # timeout_action 默认为 reject
+        })
+
+        tool = BashCommandTool()
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_session",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": "tc_timeout_reject",
+                "tool_name": "bash_command",
+                "arguments": {"command": "echo hi"},
+            },
+        )
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            result = await worker._request_confirmation(event, tool)
+            assert result is False
+        finally:
+            tw.config = original_config
+
+    async def test_timeout_action_approve(self, tmp_path):
+        """approve 策略：超时返回 True"""
+        worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": True,
+            "tools.permission.auto_approve_levels": [],
+            "tools.permission.confirmation_timeout": 0.1,
+            "tools.permission.timeout_action": "approve",
+        })
+
+        tool = BashCommandTool()
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_session",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": "tc_timeout_approve",
+                "tool_name": "bash_command",
+                "arguments": {"command": "echo hi"},
+            },
+        )
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            result = await worker._request_confirmation(event, tool)
+            assert result is True
+        finally:
+            tw.config = original_config
+
+    async def test_timeout_action_block(self, tmp_path):
+        """block 策略：无限等待，手动唤醒后返回用户选择"""
+        worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": True,
+            "tools.permission.auto_approve_levels": [],
+            "tools.permission.timeout_action": "block",
+        })
+
+        tool = BashCommandTool()
+        tool_call_id = "tc_timeout_block"
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_session",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": tool_call_id,
+                "tool_name": "bash_command",
+                "arguments": {"command": "echo hi"},
+            },
+        )
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+
+            # 在后台启动 _request_confirmation，它会无限等待
+            async def simulate_user_approve():
+                # 等待 pending confirmation 出现
+                for _ in range(50):
+                    if tool_call_id in worker._pending_confirmations:
+                        break
+                    await asyncio.sleep(0.01)
+                # 模拟用户批准
+                worker._confirmation_results[tool_call_id] = True
+                worker._pending_confirmations[tool_call_id].set()
+
+            approve_task = asyncio.create_task(simulate_user_approve())
+            result = await worker._request_confirmation(event, tool)
+            await approve_task
+
+            assert result is True
+        finally:
+            tw.config = original_config
+
+
 # ---------- AgentRegistry 注入不污染 arguments ----------
 
 

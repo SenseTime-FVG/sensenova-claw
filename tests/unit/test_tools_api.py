@@ -51,6 +51,7 @@ def test_list_tools(client):
     assert len(data) >= 1
     names = [t["name"] for t in data]
     assert "bash_command" in names
+    assert "edit" in names
     # 验证字段结构
     bash_tool = [t for t in data if t["name"] == "bash_command"][0]
     assert bash_tool["id"] == "tool-bash_command"

@@ -51,7 +51,10 @@ class ContextBuilder:
             tools = self.tool_registry.as_llm_tools()
             # 根据 agent_config 过滤工具信息注入 prompt
             if agent_config and agent_config.tools:
-                allowed = set(agent_config.tools) | {"send_message"}
+                allowed = set(agent_config.tools)
+                # 保留 send_message（除非 can_delegate_to 为 None 表示禁止委托）
+                if agent_config.can_delegate_to is not None:
+                    allowed.add("send_message")
                 tools = [t for t in tools if t["name"] in allowed]
             for t in tools:
                 tool_names.append(t["name"])

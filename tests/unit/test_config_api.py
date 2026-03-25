@@ -76,6 +76,43 @@ def test_get_sections_has_defaults(client, app):
     assert "miniapps" in data
 
 
+def test_get_acp_wizard_returns_detected_agents(client):
+    resp = client.get("/api/config/acp/wizard")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["platform"]["id"] in {"linux", "macos", "windows"}
+    ids = {item["id"] for item in data["agents"]}
+    assert {"codex", "claude", "gemini", "kimi", "opencode", "codex-bridge"} <= ids
+
+
+def test_install_acp_wizard_uses_injected_service(client, app):
+    class FakeWizard:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, list[str], dict]] = []
+
+        async def install(self, agent_id: str, *, step_ids: list[str] | None = None, current_config: dict | None = None):
+            self.calls.append((agent_id, step_ids or [], current_config or {}))
+            return {
+                "ok": True,
+                "agent_id": agent_id,
+                "executed_steps": [],
+                "wizard": {"platform": {"id": "linux", "label": "Linux", "python": "/usr/bin/python3"}, "installers": {}, "agents": [], "current_config": {}},
+            }
+
+    fake = FakeWizard()
+    app.state.acp_wizard_service = fake
+
+    resp = client.post("/api/config/acp/wizard/install", json={
+        "agent_id": "gemini",
+        "step_ids": ["agent"],
+    })
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert fake.calls == [("gemini", ["agent"], {"enabled": False, "command": "", "args": [], "env": {}, "startup_timeout_seconds": 20, "request_timeout_seconds": 180})]
+
+
 # ── 更新 sections ──
 
 

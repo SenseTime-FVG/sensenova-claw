@@ -176,6 +176,27 @@ def resolve_agent_workdir(sensenova_claw_home: str, agent_config: Any = None) ->
     return str((Path(sensenova_claw_home).resolve() / "workdir" / agent_id))
 
 
+def resolve_session_artifact_dir(
+    sensenova_claw_home: str | Path,
+    session_id: str,
+    agent_id: str | None = None,
+) -> Path:
+    """解析 session 附件目录。
+
+    统一布局：
+        {sensenova_claw_home}/agents/{agent_id}/sessions/{session_id}/
+
+    这里专门存放与 session 相关的落盘附件，例如：
+    - tool_result_*.txt
+    - compression_phase*.json
+    """
+    home = Path(sensenova_claw_home).expanduser().resolve()
+    safe_agent = str(agent_id or "").strip() or "default"
+    safe_agent = safe_agent.replace("/", "_").replace("\\", "_")
+    safe_session = str(session_id).replace("/", "_").replace("\\", "_")
+    return home / "agents" / safe_agent / "sessions" / safe_session
+
+
 # ---------- 加载 workspace 文件 ----------
 
 async def load_workspace_files(

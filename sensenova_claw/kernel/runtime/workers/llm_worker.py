@@ -79,14 +79,43 @@ def _format_target(provider_name: str, model: str) -> str:
     return f"{provider_name}:{model}"
 
 
+def _provider_is_available(provider_name: str) -> bool:
+    """判断 provider 当前是否可用。"""
+    if provider_name == "mock":
+        return True
+    provider_cfg = config.get(f"llm.providers.{provider_name}", {})
+    api_key = str(provider_cfg.get("api_key", ""))
+    return bool(api_key) and not api_key.startswith("${")
+
+
+def _first_available_llm_target(
+    excluded_targets: set[tuple[str, str]],
+) -> tuple[str, str] | None:
+    """按 llm.models 配置顺序，返回第一个可用的非 mock 模型。"""
+    models = config.get("llm.models", {})
+    for model_key, entry in models.items():
+        if not isinstance(entry, dict):
+            continue
+        provider_name = str(entry.get("provider", "mock"))
+        if provider_name == "mock" or not _provider_is_available(provider_name):
+            continue
+        target = (provider_name, str(entry.get("model_id", model_key)))
+        if target not in excluded_targets:
+            return target
+    return None
+
+
 def _fallback_targets(provider_name: str, model: str) -> list[tuple[str, str]]:
-    """构造受控回退链路：当前模型 -> default model -> mock。"""
+    """构造受控回退链路：当前模型 -> default model -> 第一个可用 LLM -> mock。"""
     targets: list[tuple[str, str]] = [(provider_name, model)]
     default_target = config.resolve_model(config.get("llm.default_model", "mock"))
     mock_target = config.resolve_model("mock")
 
     if default_target not in targets:
         targets.append(default_target)
+    available_target = _first_available_llm_target(set(targets))
+    if available_target and available_target not in targets:
+        targets.append(available_target)
     if mock_target not in targets:
         targets.append(mock_target)
     return targets

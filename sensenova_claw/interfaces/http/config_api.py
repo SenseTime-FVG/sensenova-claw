@@ -3,6 +3,7 @@ Config API - 按 section 读写 config.yml，管理 LLM provider/model
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from copy import deepcopy
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
+from sensenova_claw.capabilities.miniapps.acp_wizard import ACPWizardInstallError, ACPWizardService
 from sensenova_claw.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
 from sensenova_claw.platform.secrets.migration import migrate_plaintext_secrets
 from sensenova_claw.platform.secrets.registry import is_secret_path
@@ -53,6 +55,20 @@ class DefaultModelUpdateBody(BaseModel):
     default_model: str = ""
 
 
+class ACPWizardInstallBody(BaseModel):
+    agent_id: str
+    step_ids: list[str] = []
+
+
+def _get_acp_wizard(request: Request) -> ACPWizardService:
+    service = getattr(request.app.state, "acp_wizard_service", None)
+    if service is not None:
+        return service
+    service = ACPWizardService(project_root=getattr(request.app.state, "project_root", None))
+    request.app.state.acp_wizard_service = service
+    return service
+
+
 @router.get("/secret")
 async def get_secret_value(path: str, request: Request):
     """按路径读取敏感配置的真实值，仅允许注册过的 secret path。"""
@@ -83,6 +99,29 @@ async def get_config_sections(request: Request):
     config_manager = request.app.state.config_manager
     default_sections = ["llm", "agent", "plugins", "miniapps"]
     return config_manager.get_sections(default_sections)
+
+
+@router.get("/acp/wizard")
+async def get_acp_wizard(request: Request):
+    cfg = request.app.state.config
+    wizard = _get_acp_wizard(request)
+    return wizard.inspect(current_config=cfg.get("miniapps.acp", {}) or {})
+
+
+@router.post("/acp/wizard/install")
+async def install_acp_agent(body: ACPWizardInstallBody, request: Request):
+    cfg = request.app.state.config
+    wizard = _get_acp_wizard(request)
+    try:
+        return await wizard.install(
+            body.agent_id,
+            step_ids=body.step_ids,
+            current_config=cfg.get("miniapps.acp", {}) or {},
+        )
+    except ACPWizardInstallError as exc:
+        raise HTTPException(400, str(exc))
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(504, f"ACP 安装超时: {exc}")
 
 
 @router.put("/sections")

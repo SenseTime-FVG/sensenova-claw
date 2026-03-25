@@ -13,7 +13,6 @@ from typing import Any
 
 from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
 from sensenova_claw.kernel.proactive.models import (
-    ConditionTrigger,
     DeliveryConfig,
     EventTrigger,
     ProactiveJob,
@@ -23,26 +22,19 @@ from sensenova_claw.kernel.proactive.models import (
 )
 
 
-def _parse_trigger(trigger_dict: dict) -> TimeTrigger | EventTrigger | ConditionTrigger:
+def _parse_trigger(trigger_dict: dict) -> TimeTrigger | EventTrigger:
     """将 dict 解析为对应的 Trigger 对象"""
     kind = trigger_dict.get("kind", "time")
     if kind == "time":
         return TimeTrigger(
             cron=trigger_dict.get("cron"),
             every=trigger_dict.get("every"),
-            condition=trigger_dict.get("condition"),
         )
     elif kind == "event":
         return EventTrigger(
             event_type=trigger_dict.get("event_type", ""),
             filter=trigger_dict.get("filter"),
             debounce_ms=trigger_dict.get("debounce_ms", 5000),
-            condition=trigger_dict.get("condition"),
-        )
-    elif kind == "condition":
-        return ConditionTrigger(
-            check_interval=trigger_dict.get("check_interval", "5m"),
-            condition=trigger_dict.get("condition", ""),
         )
     raise ValueError(f"未知 trigger kind: {kind!r}")
 
@@ -51,7 +43,7 @@ class CreateProactiveJobTool(Tool):
     """从对话中创建主动任务"""
 
     name = "create_proactive_job"
-    description = "创建一个主动任务（ProactiveJob），支持定时、事件、条件三种触发方式"
+    description = "创建一个主动任务（ProactiveJob），支持定时、事件两种触发方式"
     risk_level = ToolRiskLevel.HIGH
     parameters = {
         "type": "object",
@@ -59,7 +51,7 @@ class CreateProactiveJobTool(Tool):
             "name": {"type": "string", "description": "任务名称"},
             "trigger": {
                 "type": "object",
-                "description": "触发配置，包含 kind(time/event/condition) 及对应字段",
+                "description": "触发配置，包含 kind(time/event) 及对应字段",
             },
             "task": {
                 "type": "object",
@@ -70,6 +62,14 @@ class CreateProactiveJobTool(Tool):
                 "description": "投递配置，包含 channels 列表",
             },
             "agent_id": {"type": "string", "description": "执行任务的 agent id，默认 proactive-agent"},
+            "safety": {
+                "type": "object",
+                "description": "安全限制配置，支持 max_llm_calls(int) 和 max_duration_ms(int)",
+                "properties": {
+                    "max_llm_calls": {"type": "integer", "description": "最大 LLM 调用次数"},
+                    "max_duration_ms": {"type": "integer", "description": "最大执行时长（毫秒）"},
+                },
+            },
         },
         "required": ["name", "trigger", "task"],
     }
@@ -83,6 +83,7 @@ class CreateProactiveJobTool(Tool):
         task_dict = kwargs.get("task", {})
         delivery_dict = kwargs.get("delivery", {})
         agent_id = kwargs.get("agent_id", "proactive-agent")
+        safety_dict = kwargs.get("safety") or {}
 
         trigger = _parse_trigger(trigger_dict)
         task = ProactiveTask(
@@ -96,6 +97,13 @@ class CreateProactiveJobTool(Tool):
             summary_prompt=delivery_dict.get("summary_prompt"),
         )
 
+        # 从 safety 参数构建 SafetyConfig，未指定的字段使用默认值
+        safety_kwargs: dict[str, Any] = {}
+        if "max_llm_calls" in safety_dict:
+            safety_kwargs["max_llm_calls"] = int(safety_dict["max_llm_calls"])
+        if "max_duration_ms" in safety_dict:
+            safety_kwargs["max_duration_ms"] = int(safety_dict["max_duration_ms"])
+
         job = ProactiveJob(
             id=f"pj-{uuid.uuid4().hex[:8]}",
             name=name,
@@ -104,7 +112,7 @@ class CreateProactiveJobTool(Tool):
             trigger=trigger,
             task=task,
             delivery=delivery,
-            safety=SafetyConfig(),
+            safety=SafetyConfig(**safety_kwargs),
             source="conversation",
         )
 
@@ -124,7 +132,7 @@ class ListProactiveJobsTool(Tool):
         self._runtime = runtime
 
     async def execute(self, **kwargs: Any) -> str:
-        jobs: list[ProactiveJob] = self._runtime.list_jobs()
+        jobs: list[ProactiveJob] = await self._runtime.list_jobs()
         if not jobs:
             return "当前没有主动任务"
         lines = []
