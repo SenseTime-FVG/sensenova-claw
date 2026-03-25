@@ -11,9 +11,10 @@ AGENT_STEP_STARTED = "agent.step_started"
 AGENT_STEP_COMPLETED = "agent.step_completed"
 AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
 
-# LLM 执行事件（四阶段：requested → started → result → completed）
+# LLM 执行事件（五阶段：requested → started → [delta...] → result → completed）
 LLM_CALL_REQUESTED = "llm.call_requested"
 LLM_CALL_STARTED = "llm.call_started"
+LLM_CALL_DELTA = "llm.call_delta"
 LLM_CALL_RESULT = "llm.call_result"
 LLM_CALL_COMPLETED = "llm.call_completed"
 
@@ -66,6 +67,9 @@ PROACTIVE_RESULT = "proactive.result"
 
 # 会话生命周期事件
 SESSION_CREATED = "session.created"
+
+# Todolist 变更事件
+TODOLIST_UPDATED = "todolist.updated"
 
 # 配置变更事件
 CONFIG_UPDATED = "config.updated"

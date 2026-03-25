@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, type KeyboardEvent } from 'react';
-
-import { Bell, CircleAlert, CircleCheck, Info, X, ShieldAlert, HelpCircle } from 'lucide-react';
+import { Bell, CircleAlert, CircleCheck, Info, X, ShieldAlert, HelpCircle, Send } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -14,6 +13,16 @@ export interface ToastNotification {
   level: 'info' | 'warning' | 'error' | 'success';
   source: string;
   createdAtMs: number;
+}
+
+// ── ask_user 问题数据 ──
+
+export interface QuestionData {
+  question: string;
+  options: string[] | null;
+  multiSelect: boolean;
+  interactionId: string;
+  sessionId: string;
 }
 
 // ── 带操作按钮的弹窗 ──
@@ -30,6 +39,8 @@ export interface ActionToast {
   inputPlaceholder?: string;
   // 关联的通知卡片 ID
   cardId: string;
+  // ask_user 富交互数据
+  questionData?: QuestionData;
 }
 
 const levelIcon = {
@@ -110,6 +121,139 @@ export function NotificationToast({
   );
 }
 
+// ── ask_user 富交互弹窗（内嵌选项 + 自定义输入） ──
+
+function QuestionToastBody({
+  toast,
+  onAction,
+}: {
+  toast: ActionToast;
+  onAction: (toastId: string, cardId: string, actionValue: string) => void;
+}) {
+  const qd = toast.questionData!;
+  const [customInput, setCustomInput] = useState('');
+  const [singleChoice, setSingleChoice] = useState('');
+  const [multiChoices, setMultiChoices] = useState<string[]>([]);
+
+  const toggleMulti = (opt: string) => {
+    setMultiChoices(prev =>
+      prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt],
+    );
+  };
+
+  const getAnswer = (): string | null => {
+    const custom = customInput.trim();
+    if (custom) return custom;
+    if (qd.options && qd.options.length > 0) {
+      if (qd.multiSelect) {
+        return multiChoices.length > 0 ? multiChoices.join(', ') : null;
+      }
+      return singleChoice || null;
+    }
+    return null;
+  };
+
+  const submit = () => {
+    const answer = getAnswer();
+    if (answer) onAction(toast.id, toast.cardId, answer);
+  };
+
+  const cancel = () => {
+    onAction(toast.id, toast.cardId, '__cancelled__');
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  };
+
+  return (
+    <div className="mt-2 space-y-2.5">
+      {/* 问题文本 */}
+      <p className="text-[13px] leading-relaxed text-foreground/80 whitespace-pre-wrap">
+        {qd.question}
+      </p>
+
+      {/* 选项 */}
+      {qd.options && qd.options.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="text-[11px] text-muted-foreground">
+            {qd.multiSelect ? '可多选' : '可单选'}
+          </div>
+          <div className="space-y-1">
+            {qd.options.map((opt, idx) => (
+              <label
+                key={`${opt}_${idx}`}
+                className="flex items-center gap-2 text-[13px] text-foreground/80 cursor-pointer hover:text-foreground transition-colors"
+              >
+                {qd.multiSelect ? (
+                  <input
+                    type="checkbox"
+                    checked={multiChoices.includes(opt)}
+                    onChange={() => toggleMulti(opt)}
+                    className="accent-sky-500 h-3.5 w-3.5"
+                  />
+                ) : (
+                  <input
+                    type="radio"
+                    name={`toast-q-${toast.id}`}
+                    checked={singleChoice === opt}
+                    onChange={() => setSingleChoice(opt)}
+                    className="accent-sky-500 h-3.5 w-3.5"
+                  />
+                )}
+                <span>{opt}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 自定义输入 */}
+      <div className="space-y-1">
+        <div className="text-[11px] text-muted-foreground">
+          {qd.options && qd.options.length > 0 ? '自定义输入（优先级高于选项）' : '请输入回复'}
+        </div>
+        <textarea
+          value={customInput}
+          onChange={e => setCustomInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="输入你的回复..."
+          rows={2}
+          className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] text-foreground placeholder-muted-foreground/50 focus:outline-none focus:border-sky-400 resize-none"
+        />
+      </div>
+
+      {/* 操作按钮 */}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={cancel}
+          className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-600 hover:bg-neutral-50 transition-colors"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!getAnswer()}
+          className={cn(
+            'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all',
+            getAnswer()
+              ? 'border-sky-300 bg-sky-500 text-white shadow-sm shadow-sky-200 hover:bg-sky-600'
+              : 'border-neutral-200 bg-neutral-100 text-neutral-400 cursor-not-allowed',
+          )}
+        >
+          <Send size={12} />
+          确认
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── 操作弹窗（不自动消失，需要用户操作） ──
 
 function ActionToastItem({
@@ -173,6 +317,10 @@ function ActionToastItem({
               <X size={12} />
             </Button>
           </div>
+          {toast.source === 'user_question' && toast.questionData ? (
+            <QuestionToastBody toast={toast} onAction={onAction} />
+          ) : (
+          <>
           <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/70 line-clamp-2">
             {toast.body}
           </p>
@@ -225,6 +373,8 @@ function ActionToastItem({
               ))}
             </div>
           )}
+          </>
+          )}
         </div>
       </div>
     </div>
@@ -242,9 +392,12 @@ export function ActionToastPanel({
 }) {
   if (toasts.length === 0) return null;
 
+  // 只显示前 5 个，剩余的在处理后自动补位
+  const visibleToasts = toasts.slice(0, 5);
+
   return (
     <div className="pointer-events-none fixed right-4 top-16 z-[300] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3">
-      {toasts.map((toast) => (
+      {visibleToasts.map((toast) => (
         <ActionToastItem
           key={toast.id}
           toast={toast}

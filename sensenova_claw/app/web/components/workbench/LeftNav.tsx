@@ -3,12 +3,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Plus, RefreshCw,
-  MessageSquare, Bot, Clock, Loader2, Trash2,
+  MessageSquare, Bot, Clock, Loader2, Trash2, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { authFetch, API_BASE } from '@/lib/authFetch';
+import { authFetch, authGet, API_BASE } from '@/lib/authFetch';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { type SessionItem, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
+import type { CronJob } from '@/hooks/useDashboardData';
 
 // ── 最近对话列表项 ──
 
@@ -185,12 +186,147 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
   );
 }
 
+// ── 定时任务紧凑面板 ──
+
+function cronStatusDot(job: CronJob): string {
+  if (job.running_at_ms) return 'bg-blue-400 animate-pulse';
+  if (job.last_run_status === 'error') return 'bg-amber-400';
+  if (!job.enabled) return 'bg-neutral-300';
+  return 'bg-emerald-400';
+}
+
+function cronNextText(job: CronJob): string {
+  if (job.running_at_ms) return '运行中';
+  if (!job.enabled) return '已暂停';
+  if (job.next_run_at_ms) {
+    const diff = job.next_run_at_ms - Date.now();
+    if (diff <= 0) return '即将运行';
+    const min = Math.floor(diff / 60000);
+    if (min < 60) return `${min}m 后`;
+    const hour = Math.floor(min / 60);
+    return `${hour}h 后`;
+  }
+  return job.schedule_value;
+}
+
+function CronSidebarPanel() {
+  const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
+
+  const loadCron = useCallback(async () => {
+    try {
+      const data = await authGet(`${API_BASE}/api/cron/jobs`);
+      if (Array.isArray(data)) setCronJobs(data);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    loadCron();
+    const timer = setInterval(loadCron, 30_000);
+    return () => clearInterval(timer);
+  }, [loadCron]);
+
+  if (cronJobs.length === 0) return null;
+
+  return (
+    <div className="border-t border-border/40">
+      <div className="flex items-center gap-2 px-4 py-2.5">
+        <Clock className="w-3 h-3 text-muted-foreground/60" />
+        <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-[0.15em]">
+          定时任务
+        </span>
+        <span className="ml-auto text-[10px] text-muted-foreground/40">{cronJobs.length}</span>
+      </div>
+      <div className="px-2.5 pb-2.5 space-y-1 max-h-[160px] overflow-y-auto thin-scrollbar">
+        {cronJobs.map(job => (
+          <div
+            key={job.id}
+            className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-muted/30 hover:bg-muted/60 transition-colors"
+          >
+            <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', cronStatusDot(job))} />
+            <span className="text-[11px] font-medium text-foreground/80 truncate flex-1">
+              {job.name || job.text}
+            </span>
+            <span className="text-[10px] text-muted-foreground/60 shrink-0 tabular-nums">
+              {cronNextText(job)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 主动推送紧凑面板 ──
+
+const PROACTIVE_AGENT_ID = 'proactive-agent';
+
+function proactiveTimeLabel(ts: number): string {
+  const ms = ts < 1e12 ? ts * 1000 : ts;
+  const diff = Date.now() - ms;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return '刚刚';
+  if (min < 60) return `${min}分钟前`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return `${hour}小时前`;
+  return `${Math.floor(hour / 24)}天前`;
+}
+
+function ProactiveSidebarPanel() {
+  const { sessions, switchSession } = useChatSession();
+
+  const proactiveSessions = [...sessions]
+    .filter(s => {
+      try {
+        const meta = JSON.parse(s.meta || '{}');
+        return meta.agent_id === PROACTIVE_AGENT_ID;
+      } catch { return false; }
+    })
+    .sort((a, b) => b.last_active - a.last_active)
+    .slice(0, 5);
+
+  if (proactiveSessions.length === 0) return null;
+
+  return (
+    <div className="border-t border-border/40">
+      <div className="flex items-center gap-2 px-4 py-2.5">
+        <Sparkles className="w-3 h-3 text-violet-400" />
+        <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-[0.15em]">
+          主动推送
+        </span>
+        <span className="ml-auto text-[10px] text-muted-foreground/40">{proactiveSessions.length}</span>
+      </div>
+      <div className="px-2.5 pb-2.5 space-y-1 max-h-[160px] overflow-y-auto thin-scrollbar">
+        {proactiveSessions.map(s => {
+          let title = '未命名';
+          try { title = JSON.parse(s.meta || '{}').title || '未命名'; } catch {}
+          return (
+            <button
+              key={s.session_id}
+              type="button"
+              onClick={() => switchSession(s.session_id)}
+              className="flex items-start gap-2 w-full px-2.5 py-2 rounded-lg bg-violet-50/50 hover:bg-violet-100/60 dark:bg-violet-900/10 dark:hover:bg-violet-900/20 transition-colors text-left"
+            >
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0 mt-1.5" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-medium text-foreground/80 truncate">{title}</div>
+                <div className="text-[10px] text-muted-foreground/50 mt-0.5">{proactiveTimeLabel(s.last_active)}</div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── LeftNav ──
 
 export function LeftNav({ agentFilter }: { agentFilter?: string }) {
   return (
     <nav className="h-full flex flex-col">
       <RecentChatsPanel agentFilter={agentFilter} />
+      <ProactiveSidebarPanel />
+      <CronSidebarPanel />
     </nav>
   );
 }

@@ -92,6 +92,7 @@ export interface DashboardData {
   kanbanColumns: KanbanColumn[];
   recentOutputs: RecentOutput[];
   proactiveItems: ProactiveItem[];
+  proactiveOutputs: RecentOutput[];
   loading: boolean;
   error: string | null;
 }
@@ -283,6 +284,22 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
   // ── Proactive 输出（基于最近完成的 cron 和活跃会话生成建议） ──
   const proactiveItems: ProactiveItem[] = [];
 
+  // ── Proactive Agent 会话产出 ──
+  const PROACTIVE_AGENT_ID = 'proactive-agent';
+  const proactiveSessions = [...namedSessions]
+    .filter(s => getSessionAgentId(s.meta) === PROACTIVE_AGENT_ID)
+    .sort((a, b) => getLastActive(b) - getLastActive(a))
+    .slice(0, 20);
+
+  const proactiveOutputs: RecentOutput[] = proactiveSessions.map((s, i) => ({
+    id: s.session_id,
+    title: getSessionTitle(s.meta),
+    agentName: 'Proactive Agent',
+    timeLabel: timeLabel(s.last_active),
+    tone: OUTPUT_TONES[i % OUTPUT_TONES.length],
+    preview: (s.last_agent_response || '').slice(0, 150) || undefined,
+  }));
+
   return {
     agents,
     cronJobs,
@@ -294,6 +311,7 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
     kanbanColumns,
     recentOutputs,
     proactiveItems,
+    proactiveOutputs,
     loading,
     error,
     refresh: fetchData,
