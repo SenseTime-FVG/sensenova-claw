@@ -289,17 +289,14 @@ class SendMessageTool(Tool):
             )
 
         assert waiter is not None
+        # 超时完全由 coordinator 心跳续期机制控制，
+        # cancel_message → _resolve_waiter_or_publish 会 set_result(payload)，
+        # 所以 await waiter 在超时时返回 {"status": "timed_out", ...}，
+        # 后续第 313 行已有处理。
         try:
-            result_payload = await asyncio.wait_for(waiter, timeout=timeout_seconds + 1)
-        except asyncio.TimeoutError:
-            await self._coordinator.cancel_message(
-                record_id=record_id,
-                reason=f"{target_id} 在 {timeout_seconds} 秒内未完成处理。",
-                status="timed_out",
-                propagate_to_child=True,
-                source_session_id=current_session_id or None,
-            )
-            return f"发送失败：{target_id} 在 {timeout_seconds} 秒内未完成处理。"
+            result_payload = await waiter
+        except asyncio.CancelledError:
+            return f"发送失败：{target_id} 的委托会话被清理。"
 
         if result_payload.get("status") == "completed":
             next_session_id = str(result_payload.get("child_session_id", ""))

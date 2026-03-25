@@ -60,6 +60,7 @@ class AgentMessageCoordinator:
         self._timeout_tasks: dict[str, asyncio.Task] = {}
         self._retry_tasks: dict[str, asyncio.Task] = {}
         self._last_heartbeat: dict[str, float] = {}
+        self._record_parent_session: dict[str, str] = {}  # record_id → parent_session_id
 
     async def start(self) -> None:
         self._agent_runtime.bus_router.on_destroy(self._on_session_destroy)
@@ -151,21 +152,31 @@ class AgentMessageCoordinator:
     async def _event_loop(self) -> None:
         async for event in self._bus.subscribe():
             try:
-                if event.type == AGENT_MESSAGE_REQUESTED:
-                    await self._handle_message_requested(event)
-                elif event.type == AGENT_STEP_COMPLETED:
-                    await self._handle_child_completed(event)
-                elif event.type == ERROR_RAISED:
-                    await self._handle_child_failed(event)
-                elif event.type == USER_TURN_CANCEL_REQUESTED:
-                    await self._handle_cancel_requested(event)
-                # 心跳续期（独立 if，不与上面 elif 冲突）
-                if event.type in self.HEARTBEAT_TYPES:
-                    record_id = self._child_session_index.get(event.session_id)
-                    if record_id and record_id in self._last_heartbeat:
-                        self._last_heartbeat[record_id] = time.time()
+                await self._dispatch_event(event)
             except Exception:  # noqa: BLE001
                 logger.exception("AgentMessageCoordinator 处理事件失败")
+
+    async def _dispatch_event(self, event: EventEnvelope) -> None:
+        if event.type == AGENT_MESSAGE_REQUESTED:
+            await self._handle_message_requested(event)
+        elif event.type == AGENT_STEP_COMPLETED:
+            await self._handle_child_completed(event)
+        elif event.type == ERROR_RAISED:
+            await self._handle_child_failed(event)
+        elif event.type == USER_TURN_CANCEL_REQUESTED:
+            await self._handle_cancel_requested(event)
+        # 心跳续期（独立 if，不与上面 elif 冲突）
+        if event.type in self.HEARTBEAT_TYPES:
+            self._renew_heartbeat_chain(event.session_id)
+
+    def _renew_heartbeat_chain(self, session_id: str) -> None:
+        """续期 session_id 对应的 record 及所有祖先 record 的心跳。"""
+        record_id = self._child_session_index.get(session_id)
+        now = time.time()
+        while record_id and record_id in self._last_heartbeat:
+            self._last_heartbeat[record_id] = now
+            parent_sid = self._record_parent_session.get(record_id, "")
+            record_id = self._child_session_index.get(parent_sid) if parent_sid else None
 
     async def _handle_message_requested(self, event: EventEnvelope) -> None:
         payload = event.payload
@@ -213,6 +224,8 @@ class AgentMessageCoordinator:
             timeout_seconds=timeout_seconds,
         )
         self._child_session_index[child_session_id] = record_id
+        if parent_session_id:
+            self._record_parent_session[record_id] = parent_session_id
         await self._repo.save_message_record(record)
 
         if mode == "async" and parent_session_id:
@@ -467,6 +480,7 @@ class AgentMessageCoordinator:
         record_id = self._child_session_index.pop(session_id, None)
         if not record_id:
             return
+        self._record_parent_session.pop(record_id, None)
         self._cancel_record_tasks(record_id)
         future = self._sync_waiters.pop(record_id, None)
         if future and not future.done():
