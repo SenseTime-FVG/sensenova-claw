@@ -23,6 +23,12 @@ from sensenova_claw.capabilities.tools.email import (
     SearchEmailsTool,
     SendEmailTool,
 )
+from sensenova_claw.capabilities.tools.obsidian_tool import (
+    ObsidianListVaultsTool,
+    ObsidianReadTool,
+    ObsidianSearchTool,
+    ObsidianWriteTool,
+)
 from sensenova_claw.capabilities.tools.orchestration import CreateAgentTool
 from sensenova_claw.platform.config.config import config
 
@@ -47,6 +53,10 @@ class ToolRegistry:
             EditTool(),
             CreateAgentTool(),
             AskUserTool(),
+            ObsidianSearchTool(),
+            ObsidianReadTool(),
+            ObsidianWriteTool(),
+            ObsidianListVaultsTool(),
         ]:
             self.register(tool)
         if config.get("tools.email.enabled", False):

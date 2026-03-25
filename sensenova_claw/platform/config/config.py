@@ -101,7 +101,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "agent": {
         "temperature": 0.2,
         "max_turns_per_session": 50,
-        "system_prompt": "你是一个有工具能力的AI助手，请在必要时调用工具。",
+        "system_prompt": """你是一个有工具能力的AI助手，请在必要时调用工具。
+
+## 知识管理
+你可以使用 Obsidian 笔记库作为知识库：
+- 当需要查找相关知识时，优先使用 obsidian_search 搜索笔记
+- 当用户提到笔记、文档或知识库时，使用 obsidian_read 读取内容
+- 当获得重要信息、总结或用户要求保存时，使用 obsidian_write 保存到笔记
+- 使用 obsidian_list_vaults 查看可用的笔记库""",
     },
     "tools": {
         "bash_command": {"enabled": True, "timeout": 15},
