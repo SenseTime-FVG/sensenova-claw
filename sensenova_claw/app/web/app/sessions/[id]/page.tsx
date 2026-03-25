@@ -299,6 +299,7 @@ export default function SessionDetailPage() {
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
@@ -609,6 +610,7 @@ export default function SessionDetailPage() {
   }, [activeInteraction, resolveInteraction]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || isComposingRef.current) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -707,6 +709,8 @@ export default function SessionDetailPage() {
                   value={inputValue}
                   onChange={handleTextareaInput}
                   onKeyDown={handleKeyDown}
+                  onCompositionStart={() => { isComposingRef.current = true; }}
+                  onCompositionEnd={() => { isComposingRef.current = false; }}
                   placeholder={wsConnected ? 'Type a message... (Enter to send, Shift+Enter for newline)' : 'Waiting for connection...'}
                   disabled={!wsConnected || isTyping || !!activeInteraction || interactionSubmitting}
                   rows={1}
