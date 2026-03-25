@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 function readCurrentToken(): string {
   return fs.readFileSync(path.join(os.homedir(), '.sensenova-claw', 'token'), 'utf-8').trim();
@@ -88,7 +88,7 @@ function installMockChatApp() {
   });
 }
 
-async function expectNoUserInputSent(page: Parameters<typeof test>[0]['page']) {
+async function expectNoUserInputSent(page: Page) {
   await expect.poll(async () => {
     return page.evaluate(() => {
       const sentMessages = (window as Window & {
@@ -99,10 +99,10 @@ async function expectNoUserInputSent(page: Parameters<typeof test>[0]['page']) {
   }).toBe(false);
 }
 
-async function expectUserInputSent(page: Parameters<typeof test>[0]['page'], sessionId: string, content: string) {
+async function expectUserInputSent(page: Page, sessionId: string, content: string) {
   await expect.poll(async () => {
     return page.evaluate(
-      ({ expectedSessionId, expectedContent }) => {
+      ({ expectedSessionId, expectedContent }: { expectedSessionId: string; expectedContent: string }) => {
         const sentMessages = (window as Window & {
           __mockWsSentMessages?: Array<Record<string, unknown>>;
         }).__mockWsSentMessages ?? [];
