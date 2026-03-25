@@ -7,6 +7,7 @@ import {
   ActionToastPanel,
   type ToastNotification,
   type ActionToast,
+  type QuestionData,
 } from '@/components/notification/NotificationToast';
 
 export interface NotificationInput {
@@ -41,6 +42,8 @@ export interface NotificationCard {
   interactionId?: string;
   // 用于 proactive / 可操作通知
   actions?: { label: string; value: string }[];
+  // ask_user 富交互数据
+  questionData?: QuestionData;
   allowsInput?: boolean;
   inputPlaceholder?: string;
   pending?: boolean;
@@ -183,10 +186,30 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         allowsInput: card.allowsInput,
         inputPlaceholder: card.inputPlaceholder,
         cardId: card.id,
+        questionData: card.questionData,
       };
       setActionToasts(prev => {
         if (prev.some(t => t.cardId === card.id)) return prev;
-        return [toast, ...prev].slice(0, 5);
+        return [toast, ...prev];
+      });
+    }
+
+    // 对于 user_question 类型，即使没有 actions 也弹出富交互弹窗
+    if (card.kind === 'user_question' && card.questionData && (!card.actions || card.actions.length === 0)) {
+      const toast: ActionToast = {
+        id: `toast_${card.id}`,
+        title: card.title,
+        body: card.body,
+        level: card.level,
+        source: card.kind,
+        createdAtMs: card.createdAtMs,
+        actions: [],
+        cardId: card.id,
+        questionData: card.questionData,
+      };
+      setActionToasts(prev => {
+        if (prev.some(t => t.cardId === card.id)) return prev;
+        return [toast, ...prev];
       });
     }
   }, []);

@@ -167,3 +167,104 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
     return page.evaluate(() => ((window as typeof window & { __sectionPuts?: unknown[] }).__sectionPuts ?? []).length);
   }).toBe(1);
 });
+
+test('llms 页面新增 provider 后应支持单项编辑并保存', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: { api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' }, base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+      },
+    };
+
+    const providerPuts: Array<{ url: string; body: Record<string, unknown> }> = [];
+
+    Object.assign(window, {
+      __providerPuts: providerPuts,
+    });
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm/providers/') && method === 'PUT') {
+        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
+        providerPuts.push({ url, body });
+        (window as typeof window & { __providerPuts: Array<{ url: string; body: Record<string, unknown> }> }).__providerPuts = providerPuts;
+        return new Response(JSON.stringify({ status: 'saved' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+
+  await page.getByTestId('add-provider-button').click();
+  await page.getByTestId('new-provider-name-input').fill('deepseek');
+  await page.getByTestId('confirm-add-provider-button').click();
+  await expect(page.getByTestId('provider-card-deepseek')).toBeVisible();
+  await expect(page.getByTestId('provider-body-deepseek')).toBeVisible();
+  await expect(page.getByTestId('provider-base-url-input-deepseek')).toBeDisabled();
+
+  await page.getByTestId('provider-edit-deepseek').click();
+  await expect(page.getByTestId('provider-base-url-input-deepseek')).toBeEditable();
+  await page.getByTestId('provider-base-url-input-deepseek').fill('https://api.deepseek.com/v1');
+  await page.getByTestId('provider-save-deepseek').click();
+
+  await expect.poll(async () => {
+    return page.evaluate(() => ((window as typeof window & {
+      __providerPuts?: Array<{ url: string; body: Record<string, unknown> }>;
+    }).__providerPuts ?? []).length);
+  }).toBe(1);
+
+  await expect.poll(async () => {
+    return page.evaluate(() => ((window as typeof window & {
+      __providerPuts?: Array<{ url: string; body: Record<string, unknown> }>;
+    }).__providerPuts ?? [])[0]);
+  }).toEqual({
+    url: 'http://localhost:8000/api/config/llm/providers/deepseek',
+    body: {
+      name: 'deepseek',
+      base_url: 'https://api.deepseek.com/v1',
+      timeout: 60,
+      max_retries: 3,
+      api_key: '',
+    },
+  });
+});

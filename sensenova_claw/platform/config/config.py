@@ -102,6 +102,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "temperature": 0.2,
         "max_turns_per_session": 50,
         "system_prompt": "你是一个有工具能力的AI助手，请在必要时调用工具。",
+        "stream": True,
     },
     "tools": {
         "bash_command": {"enabled": True, "timeout": 15},
@@ -182,6 +183,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "cron": {
         "enabled": True,
+        "timezone": "local",  # "local" = 读取系统时区，或指定如 "Asia/Shanghai"
         "max_concurrent_runs": 1,
         "retry": {
             "max_attempts": 3,
@@ -280,7 +282,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default": {
             "name": "Default Agent",
             "description": "默认 AI Agent",
-            "model": "mock",
             "temperature": 0.2,
             "tools": [],
             "skills": [],

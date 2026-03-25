@@ -149,16 +149,14 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
     providers = deepcopy(llm_section.get("providers", {}))
     models = deepcopy(llm_section.get("models", {}))
 
-    if provider_name not in providers:
-        raise HTTPException(404, f"Provider 不存在: {provider_name}")
-
+    provider_exists = provider_name in providers
     next_name = (body.name or provider_name).strip().lower()
     if not next_name:
         raise HTTPException(400, "Provider 名称不能为空")
-    if next_name != provider_name and next_name in providers:
+    if provider_exists and next_name != provider_name and next_name in providers:
         raise HTTPException(400, f"Provider 已存在: {next_name}")
 
-    existing = providers.pop(provider_name)
+    existing = providers.pop(provider_name, {})
     provider_payload: dict[str, Any] = {
         "base_url": body.base_url,
         "timeout": body.timeout,
@@ -172,7 +170,7 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
     providers[next_name] = provider_payload
     llm_section["providers"] = providers
 
-    if next_name != provider_name:
+    if provider_exists and next_name != provider_name:
         for model in models.values():
             if isinstance(model, dict) and model.get("provider") == provider_name:
                 model["provider"] = next_name
@@ -197,16 +195,14 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     llm_section = deepcopy(raw_config.get("llm", {}))
     models = deepcopy(llm_section.get("models", {}))
 
-    if model_name not in models:
-        raise HTTPException(404, f"Model 不存在: {model_name}")
-
+    model_exists = model_name in models
     next_name = (body.name or model_name).strip()
     if not next_name:
         raise HTTPException(400, "Model 名称不能为空")
-    if next_name != model_name and next_name in models:
+    if model_exists and next_name != model_name and next_name in models:
         raise HTTPException(400, f"Model 已存在: {next_name}")
 
-    models.pop(model_name)
+    models.pop(model_name, None)
     models[next_name] = {
         "provider": body.provider,
         "model_id": body.model_id,
@@ -215,7 +211,7 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
         "max_output_tokens": body.max_output_tokens,
     }
     llm_section["models"] = models
-    if llm_section.get("default_model") == model_name:
+    if model_exists and llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
 
     try:

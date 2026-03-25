@@ -120,3 +120,8 @@ export function useWebSocketContext(): WebSocketContextValue {
   }
   return ctx;
 }
+
+/** 安全版本：在 WebSocketProvider 外使用时返回 null 而不是 throw */
+export function useOptionalWebSocket(): WebSocketContextValue | null {
+  return useContext(WebSocketContext);
+}

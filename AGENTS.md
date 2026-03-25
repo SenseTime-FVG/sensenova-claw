@@ -1143,9 +1143,11 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前后端 secret 读取与写入不是同一个接口：读取走 `GET /api/config/secret?path=...`，写入应走 `PUT /api/config/sections`，由 `ConfigManager` 自动写入 keyring / fallback secret store 并将 `config.yml` 改写为 `${secret:...}`。
 - 适合作为通用桥接 skill 的敏感路径范围，应严格对齐 `platform/secrets/registry.py` 里的注册模式，尤其是 `tools.*.api_key` 与 `llm.providers.*.api_key`，这样像 Brave Search 这类 skill 才能稳定复用。
 - 如果希望 skill 自身保留“它依赖哪个 secret 标识”的可追踪信息，最轻量的约定是在目标 skill 目录下维护 `secret.yml`，只写映射不写明文，例如 `OPENAI_API_KEY: secret:openai-whisper-api:OPENAI_API_KEY`；读取时优先查这个文件，写入成功后同步创建或更新它。
+- 如果用户要求 skill 不经过 HTTP，而是直接调用项目内能力，最稳的做法是在 skill 目录下放脚本，通过 stdin JSON 契约驱动，并在脚本内部直接复用 `Config`、`ConfigManager` 与 `SecretStore`；这样行为可测、文档也不会再漂移回接口说明。
 
 失败/风险经验：
 - 如果把 secret skill 设计成“任意 path 都可读写”的通用管理器，很容易和后端 `is_secret_path()` 的约束冲突，最终在运行时直接返回 400；文档必须明确只支持已注册敏感路径。
+- 测试这类脚本时不能直接依赖宿主机 keyring；需要显式加一个仅测试用的“禁用 keyring”分支，把写入强制落到指定 fallback `secret.yml`，否则结果会被本机已有 keyring 状态污染。
 
 ### 2026-03-24 ask_user 提示框溢出补充
 
@@ -1186,3 +1188,52 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前环境执行 `uv run ...` 会把 `uv.lock` 重写成本机镜像源 URL，即使业务代码没变也会产生超大噪音 diff；完成测试后要记得把 `uv.lock` 恢复回仓库版本，再做最终状态检查。
+
+### 2026-03-24 Default Agent 默认模型补充
+
+成功经验：
+- 当 `default agent` 看起来“用户没配 model 却仍固定走 mock”时，优先检查 `DEFAULT_CONFIG` 与用户配置的深度合并结果，而不是只盯着 `~/.sensenova-claw/config.yml`；这次根因正是内置默认值里的 `agents.default.model: mock` 被保留下来了。
+- 对这类配置继承问题，最高价值的回归测试应直接覆盖“真实 `Config` 加载 + `AgentRegistry.load_from_config()`”链路；仅测 `AgentWorker` 下游现象，不足以锁住错误来源。
+- `default agent` 若希望继承全局 `llm.default_model`，最干净的实现不是在运行时特殊判断 `mock`，而是从默认配置源头移除 `agents.default.model`，让缺省值真正表现为“未设置”。
+
+失败/风险经验：
+- 如果只修用户配置或手工在本机 `config.yml` 里补 `agents.default.model`，表面上能恢复真实 LLM，但无法阻止其他新环境继续因同一默认值设计再次落回 mock。
+### 2026-03-24 edit 工具移植补充
+
+成功经验：
+- 文件精确编辑工具最稳的落点是独立模块，而不是继续扩张 `builtin.py`；这次新增 `sensenova_claw/capabilities/tools/edit_tool.py` 后，路径解析、替换校验、diff 生成和恢复逻辑都能独立测试。
+- `edit` 的核心契约必须锁死为“`oldText` 恰好命中一次”；把“未命中 / 多次命中 / `_agent_workdir` 相对路径 / post-write recovery”都放进集成测试后，行为边界会清晰很多。
+- `openclaw` 的 post-write recovery 很值得保留：当文件已经写成功但 diff/格式化阶段报错时，重新读盘并按最终内容恢复成功结果，可以避免误向用户报告假失败。
+
+失败/风险经验：
+- 当前实现虽然兼容了 `old_text/new_text` 与 `old_string/new_string`，但对外主 schema 仍以 `oldText/newText` 为中心；若后续要继续补更多上游兼容别名，需要先核对各 provider 的 tool schema 约束，避免把参数面扩得过宽。
+
+### 2026-03-24 apply_patch 工具移植补充
+
+成功经验：
+- `apply_patch` 这类复杂文件变更能力，适合像 `edit` 一样拆成独立模块；把解析、路径解析、更新替换和 summary 输出都放在 `sensenova_claw/capabilities/tools/apply_patch_tool.py` 后，测试与后续演进都更稳。
+- 从 `openclaw` 移植时，优先保留补丁格式契约（`*** Begin/End Patch`、`Add/Delete/Update File`、`Move to`、`@@` chunk）而不是生搬硬套它的 sandbox 安全层，能更好地贴合当前仓库的 `_agent_workdir` 工具语义。
+- 对这类工具最有效的测试组合是“一个多 hunk 端到端用例 + 一个 `_agent_workdir` 相对路径用例 + 一个非法边界用例 + 一个 `_path_policy` 拦截用例”，既覆盖 happy path，也锁住关键失败态。
+
+失败/风险经验：
+- 当前 `apply_patch` 的 `_path_policy` 接入是按已解析的绝对路径做 `check_write`，这和 `PathPolicy` 内部“相对路径默认基于 workspace”语义并不完全一致；若后续要把所有文件工具统一到严格路径策略，需要整体收敛 `read_file/write_file/edit/apply_patch`，不能只单独加强一个。
+
+### 2026-03-24 apply_patch 解析器对齐补充
+
+成功经验：
+- 如果目标是“严格对齐上游解析器”，最稳的方法不是口头比对，而是直接把上游 parser 的失败态一个个翻译成测试：非法 hunk header、第二个 update chunk 缺 `@@`、update hunk 非法行、`<<EOF ... EOF` 包裹的 lenient boundary，都应先红后绿。
+- `openclaw` 的 parser 有一个关键细节：首个 update chunk 可以省略 `@@`，但后续 chunk 不行；只有把 `allowMissingContext` 这条规则一起移过来，错误行号和报错文案才能真正对齐。
+- 对模型友好的做法不是自动兼容错误方言，而是像上游一样在 schema/description 里只展示一种合法格式，并在解析失败时返回带“Valid hunk headers ...”的明确错误。
+
+失败/风险经验：
+- 看起来像“第二个 chunk 缺少 `@@`”的补丁，未必真的会分裂成第二个 chunk；像 `+tail` 这种行在上游仍会被视为同一个 chunk 的新增行，测试样例必须先按 parser 规则推演，不然容易把错误归因到实现。
+
+### 2026-03-25 LLM 新增项单项保存补充
+
+成功经验：
+- `/llms` 页面里“新增 provider/model 后再点单项保存”这类问题，先区分“前端按钮真不能点”和“点击后后端 404”；这次根因在后者，最有效的证据是补一个后端 API 红测，而不是只盯着前端交互。
+- 对配置编辑接口，前端允许“本地先新增，再单项保存”时，后端 `PUT /llm/providers/{name}` 与 `PUT /llm/models/{name}` 最好直接做 upsert；否则 UI 看起来支持新增，真实保存链路却只支持更新已存在项。
+- 这类修复适合双侧回归：`tests/unit/test_config_api.py` 锁住 provider/model upsert，`sensenova_claw/app/web/e2e/llms-edit-modes.spec.ts` 锁住新增 provider 后进入编辑并保存的页面行为。
+
+失败/风险经验：
+- 仅靠前端 mock 成功响应的 Playwright 用例，可能掩盖真实后端“不支持新建”的语义缺口；如果问题涉及接口契约，必须至少补一层真实后端测试。

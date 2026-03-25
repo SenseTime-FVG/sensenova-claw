@@ -8,6 +8,8 @@ import { MessageList } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { SlideViewer, useSlideSet } from '@/components/ppt/PPTViewer';
+import { FilePreview } from '@/components/files/FilePreview';
+import type { FilePreviewType } from '@/components/files/fileTypes';
 import { type ContextFileRef, getAgentId } from '@/lib/chatTypes';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 
@@ -51,12 +53,14 @@ export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockA
     resetIfNeeded,
     startNewChat,
     handleSkillInvoke,
+    cancelTurn,
     wsSend,
   } = useChatSession();
 
   const { openToPath } = useFilePanel();
   const [selectedAgent, setSelectedAgent] = useState(defaultAgentId);
   const [slidePreviewDir, setSlidePreviewDir] = useState<string | null>(null);
+  const [filePreview, setFilePreview] = useState<{ path: string; type: FilePreviewType } | null>(null);
   const [previewHeight, setPreviewHeight] = useState(350);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
@@ -128,6 +132,7 @@ export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockA
       }
 
       setSlidePreviewDir(resolvedDir);
+      setFilePreview(null); // 互斥：关闭文件预览
       setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     };
 
@@ -138,7 +143,20 @@ export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockA
   // 切换会话时关闭预览
   useEffect(() => {
     setSlidePreviewDir(null);
+    setFilePreview(null);
   }, [currentSessionId]);
+
+  // 监听文件预览事件
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { path: string; type: FilePreviewType };
+      setFilePreview(detail);
+      setSlidePreviewDir(null); // 互斥：关闭 PPT 预览
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    };
+    window.addEventListener('sensenova-claw:open-file-preview', handler);
+    return () => window.removeEventListener('sensenova-claw:open-file-preview', handler);
+  }, []);
 
   const handleSend = useCallback((content: string, contextFiles?: ContextFileRef[]) => {
     sendMessage(content, contextFiles, selectedAgent);
@@ -208,6 +226,23 @@ export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockA
         </div>
       )}
 
+      {/* 文件内联预览（可拖拽调整高度） */}
+      {filePreview && !slideSet && (
+        <div className="shrink-0 flex flex-col" style={{ height: previewHeight }}>
+          <div
+            className="flex items-center justify-center h-2 cursor-ns-resize hover:bg-primary/20 transition-colors group border-t border-border/60"
+            onMouseDown={onPreviewResize}
+          >
+            <div className="w-8 h-0.5 rounded-full bg-border group-hover:bg-primary/50 transition-colors" />
+          </div>
+          <FilePreview
+            path={filePreview.path}
+            type={filePreview.type}
+            onClose={() => setFilePreview(null)}
+          />
+        </div>
+      )}
+
       {/* 底部输入区 */}
       <ChatInput
         ref={chatInputRef}
@@ -216,6 +251,7 @@ export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockA
         onSelectAgent={setSelectedAgent}
         onSend={handleSend}
         onSlashSubmit={handleSlashSubmit}
+        onStop={cancelTurn}
         disabled={isTyping}
         wsConnected={wsConnected}
         handleSkillInvoke={handleSkillInvoke}

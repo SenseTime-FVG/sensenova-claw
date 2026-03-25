@@ -4,12 +4,13 @@ import { useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { Settings, ChevronDown, Zap } from 'lucide-react';
+import { Settings, ChevronDown, Zap, Presentation } from 'lucide-react';
 import { useCustomPages } from '@/hooks/useCustomPages';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 
-const mainNavItems = [
+const mainNavItems: { path: string; label: string; exact?: boolean; icon?: string }[] = [
   { path: '/', label: '工作台', exact: true },
+  { path: '/ppt', label: 'PPT', icon: 'presentation' },
   { path: '/chat', label: '消息' },
   { path: '/office', label: '办公室' },
 ];
@@ -18,7 +19,6 @@ export type SubNavGroup = 'features' | 'admin' | null;
 
 export const builtinFeatureNavItems = [
   { path: '/research', label: '深度研究' },
-  { path: '/ppt', label: 'PPT' },
   { path: '/automation', label: '自动化' },
 ];
 
@@ -94,12 +94,15 @@ export function DashboardNav({
           href={item.path}
           onClick={() => { if (isActive(item)) startNewChat(); }}
           className={cn(
-            'px-3 py-1.5 text-[13px] font-medium rounded-lg transition-all duration-150',
-            isActive(item)
-              ? 'text-foreground bg-[var(--nav-pill-active)]'
-              : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
+            'px-3 py-1.5 text-[13px] font-medium rounded-lg transition-all duration-150 flex items-center gap-1.5',
+            item.icon === 'presentation' && isActive(item)
+              ? 'text-primary bg-primary/10 font-semibold'
+              : isActive(item)
+                ? 'text-foreground bg-[var(--nav-pill-active)]'
+                : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
           )}
         >
+          {item.icon === 'presentation' && <Presentation className="w-3.5 h-3.5" />}
           {item.label}
         </Link>
       ))}

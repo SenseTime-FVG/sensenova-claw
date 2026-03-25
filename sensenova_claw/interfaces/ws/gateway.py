@@ -7,6 +7,7 @@ import time
 import uuid
 
 from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.router import BusRouter
 from sensenova_claw.kernel.events.types import USER_INPUT, USER_TURN_CANCEL_REQUESTED, TOOL_CONFIRMATION_RESPONSE
 from sensenova_claw.adapters.channels.base import Channel, OutboundCapable
 from sensenova_claw.kernel.runtime.publisher import EventPublisher
@@ -22,10 +23,12 @@ class Gateway:
         publisher: EventPublisher,
         repo=None,
         agent_registry=None,
+        bus_router: BusRouter | None = None,
     ):
         self.publisher = publisher
         self.repo = repo
         self.agent_registry = agent_registry
+        self.bus_router = bus_router
         self._channels: dict[str, Channel] = {}
         self._session_bindings: dict[str, str] = {}  # session_id -> channel_id
         self._task: asyncio.Task | None = None
@@ -112,14 +115,17 @@ class Gateway:
         self, session_id: str, reason: str = "user_cancel", source: str = "websocket",
     ) -> None:
         """取消当前轮次"""
-        await self.publish_from_channel(
-            EventEnvelope(
-                type=USER_TURN_CANCEL_REQUESTED,
-                session_id=session_id,
-                source=source,
-                payload={"reason": reason},
-            )
+        event = EventEnvelope(
+            type=USER_TURN_CANCEL_REQUESTED,
+            session_id=session_id,
+            source=source,
+            payload={"reason": reason},
         )
+        private_bus = self.bus_router.get(session_id) if self.bus_router else None
+        if private_bus:
+            await private_bus.publish(event)
+            return
+        await self.publish_from_channel(event)
 
     async def confirm_tool(
         self, session_id: str, tool_call_id: str, approved: bool, source: str = "websocket",
@@ -191,13 +197,16 @@ class Gateway:
 
     async def _event_loop(self) -> None:
         """订阅 PublicEventBus 并分发事件到对应的 Channel"""
+        from sensenova_claw.kernel.events.types import TODOLIST_UPDATED
+        _BROADCAST_EVENTS = {TODOLIST_UPDATED}
+
         async for event in self.publisher.bus.subscribe():
-            if event.type.startswith("config."):
+            if event.type.startswith("config.") or event.type in _BROADCAST_EVENTS:
                 for channel in self._channels.values():
                     try:
                         await channel.send_event(event)
                     except Exception as exc:
-                        logger.error("Failed to broadcast config event to channel: %s", exc)
+                        logger.error("Failed to broadcast event %s to channel: %s", event.type, exc)
             else:
                 await self._dispatch_event(event)
 

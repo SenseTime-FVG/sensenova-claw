@@ -5,6 +5,7 @@ from typing import Any
 
 from sensenova_claw.kernel.events.bus import PrivateEventBus
 from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.runtime.state import SessionStateStore
 from sensenova_claw.kernel.runtime.workers.tool_worker import ToolSessionWorker
 from sensenova_claw.capabilities.tools.registry import ToolRegistry
 
@@ -14,11 +15,17 @@ logger = logging.getLogger(__name__)
 class ToolRuntime:
     """全局单例管理者：持有 ToolRegistry，管理 ToolSessionWorker 生命周期"""
 
-    def __init__(self, bus_router: BusRouter, registry: ToolRegistry,
-                 agent_registry: Any = None):
+    def __init__(
+        self,
+        bus_router: BusRouter,
+        registry: ToolRegistry,
+        agent_registry: Any = None,
+        state_store: SessionStateStore | None = None,
+    ):
         self.bus_router = bus_router
         self.registry = registry
         self.agent_registry = agent_registry
+        self.state_store = state_store
         self._workers: dict[str, ToolSessionWorker] = {}
 
     async def start(self) -> None:

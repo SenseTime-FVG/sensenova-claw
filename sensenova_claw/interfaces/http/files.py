@@ -10,6 +10,7 @@ import os
 import platform
 import re
 import string
+import subprocess
 import time
 from pathlib import Path
 from urllib.parse import unquote
@@ -68,6 +69,10 @@ async def list_roots(request: Request):
         roots.append({"name": f"Home ({Path.home().name})", "path": home, "type": "folder"})
 
     workspace = _resolve_workspace_dir(request)
+    sensenova_claw_home = str(workspace)
+    if os.path.isdir(sensenova_claw_home):
+        roots.append({"name": "Sensenova-Claw", "path": sensenova_claw_home, "type": "folder"})
+
     workdir = str(workspace / "workdir")
     if os.path.isdir(workdir):
         roots.append({"name": "Agent 工作区", "path": workdir, "type": "folder"})
@@ -106,10 +111,11 @@ async def list_files(
     if not resolved.is_dir():
         raise HTTPException(400, f"不是目录: {path}")
 
+    sensenova_claw_dir = workspace.name  # ".sensenova-claw"
     items = []
     try:
         for entry in sorted(resolved.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
-            if entry.name.startswith('.'):
+            if entry.name.startswith('.') and entry.name != sensenova_claw_dir:
                 continue
             item = {
                 "name": entry.name,
@@ -288,12 +294,24 @@ async def list_workdir_slides(
         raise HTTPException(404, f"目录不存在: {dir}")
 
     slides: list[dict] = []
-    for entry in sorted(resolved.iterdir(), key=lambda e: e.name):
+    # 先扫描指定目录，找不到 HTML 时再扫描 pages/ 子目录
+    scan_dir = resolved
+    for entry in sorted(scan_dir.iterdir(), key=lambda e: e.name):
         if entry.is_file() and entry.suffix.lower() == ".html":
             slides.append({
                 "name": entry.name,
                 "path": str(entry.relative_to(workdir)).replace("\\", "/"),
             })
+
+    if not slides:
+        pages_dir = resolved / "pages"
+        if pages_dir.is_dir():
+            for entry in sorted(pages_dir.iterdir(), key=lambda e: e.name):
+                if entry.is_file() and entry.suffix.lower() == ".html":
+                    slides.append({
+                        "name": entry.name,
+                        "path": str(entry.relative_to(workdir)).replace("\\", "/"),
+                    })
 
     return {"dir": dir, "slides": slides}
 
@@ -381,6 +399,7 @@ async def serve_dir_file(request: Request, dir_token: str, filepath: str):
 async def download_file(
     request: Request,
     path: str = Query(..., description="要下载的文件绝对路径"),
+    inline: bool = Query(False, description="true 时内联显示，不触发下载"),
 ):
     """下载/预览指定路径的文件，Content-Type 根据扩展名自动推断"""
     workspace = _resolve_workspace_dir(request)
@@ -398,6 +417,8 @@ async def download_file(
         raise HTTPException(404, f"文件不存在: {path}")
 
     media_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    if inline:
+        return FileResponse(path=str(resolved), media_type=media_type)
     return FileResponse(
         path=str(resolved),
         filename=resolved.name,
@@ -420,6 +441,72 @@ async def delete_upload(request: Request, filename: str):
     target.unlink()
     return {"ok": True}
 
+
+# ── 在系统文件管理器中打开 ──
+
+# Windows 系统关键目录拒绝列表
+_WINDOWS_DENY_PREFIXES = [
+    "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)",
+    "C:\\ProgramData\\Microsoft",
+]
+# Unix 系统关键目录拒绝列表
+_UNIX_DENY_PREFIXES = ["/etc", "/root", "/var/run", "/proc", "/sys", "/boot", "/sbin"]
+
+
+def _is_explorer_path_allowed(target: Path, workspace: Path) -> bool:
+    """open-in-explorer 专用路径校验，比通用校验更严格"""
+    if not _is_path_allowed(target, workspace):
+        return False
+    resolved_str = str(target.resolve())
+    if platform.system() == "Windows":
+        for prefix in _WINDOWS_DENY_PREFIXES:
+            if resolved_str.lower().startswith(prefix.lower()):
+                return False
+    else:
+        for prefix in _UNIX_DENY_PREFIXES:
+            if resolved_str.startswith(prefix):
+                return False
+    return True
+
+
+class OpenInExplorerRequest(BaseModel):
+    path: str
+
+
+@router.post("/files/open-in-explorer")
+async def open_in_explorer(request: Request, body: OpenInExplorerRequest):
+    """在系统文件管理器中打开指定文件/文件夹的位置"""
+    workspace = _resolve_workspace_dir(request)
+    target = Path(body.path)
+
+    try:
+        resolved = target.resolve()
+    except (OSError, ValueError):
+        raise HTTPException(400, f"无效路径: {body.path}")
+
+    if not _is_explorer_path_allowed(resolved, workspace):
+        raise HTTPException(403, f"无权访问: {body.path}")
+
+    if not resolved.exists():
+        raise HTTPException(404, f"路径不存在: {body.path}")
+
+    try:
+        system = platform.system()
+        if system == "Windows":
+            if resolved.is_file():
+                subprocess.Popen(["explorer", "/select,", str(resolved)])
+            else:
+                subprocess.Popen(["explorer", str(resolved)])
+        elif system == "Darwin":
+            subprocess.Popen(["open", "-R", str(resolved)])
+        else:
+            dir_path = str(resolved) if resolved.is_dir() else str(resolved.parent)
+            subprocess.Popen(["xdg-open", dir_path])
+    except Exception as exc:
+        logger.error("打开文件管理器失败: %s", exc)
+        raise HTTPException(500, f"打开文件管理器失败: {exc}")
+
+    return {"success": True}
 
 # ---------------------------------------------------------------------------
 # 文件存在性检查

@@ -50,15 +50,15 @@ function ScheduledTaskCard({ job }: { job: CronJob }) {
   const tone = getTone(toneName);
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-white/70 bg-white/60 p-3 shadow-[0_2px_8px_rgba(15,23,42,0.03)] backdrop-blur-xl">
+    <div className="relative overflow-hidden rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-3 shadow-[0_2px_8px_rgba(15,23,42,0.03)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.12)] backdrop-blur-xl">
       <div className={`absolute inset-0 bg-gradient-to-br ${tone.surface} opacity-40`} />
       <div className="relative z-10 flex items-start gap-2.5">
         <div className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${tone.dot} shadow-sm`} />
         <div className="min-w-0 flex-1">
-          <div className="text-[12px] font-semibold text-neutral-800 truncate">{job.name || job.text}</div>
+          <div className="text-[12px] font-semibold text-[var(--glass-text)] truncate">{job.name || job.text}</div>
           <div className="mt-0.5 flex items-center gap-2">
-            <span className="text-[10px]" style={{ color: '#94a3b8' }}>{cronStatusText(job)}</span>
-            <span className={`rounded-full border border-white/70 bg-white/70 px-1.5 py-[1px] text-[9px] font-medium shadow-sm`} style={{ color: '#64748b' }}>
+            <span className="text-[10px] text-[var(--glass-text-muted)]">{cronStatusText(job)}</span>
+            <span className="rounded-full border border-[var(--glass-border)] bg-[var(--glass-bg)] px-1.5 py-[1px] text-[9px] font-medium shadow-sm text-[var(--glass-text-muted)]">
               {cronTimeText(job)}
             </span>
           </div>
@@ -71,7 +71,7 @@ function ScheduledTaskCard({ job }: { job: CronJob }) {
 export function ScheduledTasks({ cronJobs }: ScheduledTasksProps) {
   return (
     <div className="flex h-full flex-col p-4">
-      <div className="absolute inset-0 bg-gradient-to-br from-sky-50/70 via-white/90 to-cyan-50/50" />
+      <div className="absolute inset-0 bg-gradient-to-br from-sky-50/70 via-background/90 to-cyan-50/50 dark:from-sky-950/30 dark:via-background/90 dark:to-cyan-950/20" />
       <div className="relative z-10 flex h-full flex-col">
         <SectionHeader
           title="定时任务"
@@ -81,8 +81,8 @@ export function ScheduledTasks({ cronJobs }: ScheduledTasksProps) {
           icon={<Clock className="h-4 w-4 text-blue-500" />}
         />
         {cronJobs.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-neutral-200 bg-white/40">
-            <span className="text-[11px] text-neutral-300">暂无定时任务</span>
+          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-[var(--glass-bg-light)]">
+            <span className="text-[11px] text-muted-foreground">暂无定时任务</span>
           </div>
         ) : (
           <div className="flex-1 space-y-2 overflow-auto thin-scrollbar">

@@ -129,10 +129,12 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
 
     tools_detail = []
     for name, tool in tool_registry._tools.items():
-        # 如果 Agent 配置了 tools 列表，过滤展示
-        if agent_cfg.tools and name not in agent_cfg.tools:
-            continue
-        enabled = tool_prefs.get(name, True)
+        # 显示所有工具，根据 Agent 配置决定 enabled 状态
+        if agent_cfg.tools:
+            enabled = name in agent_cfg.tools
+        else:
+            # 未配置工具列表时，使用全局偏好（向后兼容）
+            enabled = tool_prefs.get(name, True)
         tools_detail.append({
             "name": name,
             "description": tool.description or "",
@@ -141,9 +143,11 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
 
     skills_detail = []
     for skill in skill_registry.get_all():
-        if agent_cfg.skills and skill.name not in agent_cfg.skills:
-            continue
-        enabled = skill_prefs.get(skill.name, True)
+        # 显示所有技能，根据 Agent 配置决定 enabled 状态
+        if agent_cfg.skills:
+            enabled = skill.name in agent_cfg.skills
+        else:
+            enabled = skill_prefs.get(skill.name, True)
         # 分类: installed / builtin / workspace
         if skill.install_info:
             category = "installed"
@@ -169,10 +173,10 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
         "systemPrompt": agent_cfg.system_prompt,
         "temperature": agent_cfg.temperature,
         "maxTokens": agent_cfg.max_tokens,
-        "toolCount": len(tools_detail),
-        "skillCount": len(skills_detail),
-        "tools": [t["name"] for t in tools_detail],
-        "skills": [s["name"] for s in skills_detail],
+        "toolCount": sum(1 for t in tools_detail if t["enabled"]),
+        "skillCount": sum(1 for s in skills_detail if s["enabled"]),
+        "tools": [t["name"] for t in tools_detail if t["enabled"]],
+        "skills": [s["name"] for s in skills_detail if s["enabled"]],
         "toolsDetail": tools_detail,
         "skillsDetail": skills_detail,
         "canDelegateTo": agent_cfg.can_delegate_to,

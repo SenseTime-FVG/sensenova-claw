@@ -81,11 +81,17 @@ export interface ChatSessionContextValue {
   // 斜杠命令
   handleSkillInvoke: (skillName: string, args: string) => void;
 
+  // 停止当前轮次
+  cancelTurn: () => void;
+
   // 全局 agent 活动状态
   globalActivity: GlobalAgentActivity;
 
   // 底层发送
   wsSend: (msg: Record<string, unknown>) => void;
+
+  // 通知面板回答 ask_user 时同步解除阻塞
+  resolveInteractionFromNotification?: (kind: 'question' | 'confirmation', interactionId: string) => void;
 }
 
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
@@ -153,13 +159,18 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     const { turnId, content, thinkingContent, thinkingState } = message;
     setMessages((prev) => {
       if (turnId) {
-        const existingIndex = prev.findIndex((item) => item.role === 'assistant' && item.turnId === turnId);
+        // 从末尾搜索：优先找到最新的流式 assistant，避免命中旧的同 turnId assistant
+        let existingIndex = -1;
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === 'assistant' && prev[i].turnId === turnId) {
+            existingIndex = i;
+            break;
+          }
+        }
         if (existingIndex !== -1) {
-          // 检查该 assistant 消息之后是否已经插入了 tool 消息
-          // 如果有，说明这是新一轮 LLM 调用的结果，应创建新消息而不是覆盖
           const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
           if (hasToolAfter) {
-            // 新一轮 LLM 思考，追加新的 assistant 消息
+            // 旧 assistant 后面有 tool 消息 → 追加新气泡（保持原始 turnId）
             return [
               ...prev,
               {
@@ -167,7 +178,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
                 role: 'assistant' as const,
                 content,
                 timestamp: Date.now(),
-                turnId: `${turnId}_${Date.now()}`,
+                turnId,
                 thinkingContent,
                 thinkingState,
               },
@@ -369,13 +380,76 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       case 'agent_thinking':
         setIsTyping(true);
         break;
+      case 'llm_delta': {
+        const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
+        const contentDelta = String(payload.content_delta || '');
+        const reasoningDelta = String(payload.reasoning_delta || '');
+        const contentSnapshot = String(payload.content_snapshot || '');
+
+        if (contentDelta || reasoningDelta || contentSnapshot) {
+          setIsTyping(true);
+          setMessages((prev) => {
+            if (turnId) {
+              // 从末尾搜索：优先找到最新的流式 assistant 消息，
+              // 避免命中旧的（触发工具调用的）同 turnId assistant
+              let existingIndex = -1;
+              for (let i = prev.length - 1; i >= 0; i--) {
+                if (prev[i].role === 'assistant' && prev[i].turnId === turnId) {
+                  existingIndex = i;
+                  break;
+                }
+              }
+              if (existingIndex !== -1) {
+                const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
+                if (hasToolAfter) {
+                  // 旧 assistant 后面有 tool 消息 → 追加新的流式气泡（保持原始 turnId）
+                  return [
+                    ...prev,
+                    {
+                      id: makeId(),
+                      role: 'assistant' as const,
+                      content: contentSnapshot || contentDelta,
+                      timestamp: Date.now(),
+                      turnId,
+                      thinkingContent: reasoningDelta || undefined,
+                      thinkingState: reasoningDelta ? 'streaming' as const : undefined,
+                    },
+                  ];
+                }
+                const existing = prev[existingIndex];
+                const next = [...prev];
+                next[existingIndex] = {
+                  ...existing,
+                  content: contentSnapshot || ((existing.content || '') + contentDelta),
+                  thinkingContent: reasoningDelta
+                    ? (existing.thinkingContent || '') + reasoningDelta
+                    : existing.thinkingContent,
+                  thinkingState: reasoningDelta ? 'streaming' as const : existing.thinkingState,
+                };
+                return next;
+              }
+            }
+            return [
+              ...prev,
+              {
+                id: makeId(),
+                role: 'assistant' as const,
+                content: contentSnapshot || contentDelta,
+                timestamp: Date.now(),
+                turnId,
+                thinkingContent: reasoningDelta || undefined,
+                thinkingState: reasoningDelta ? 'streaming' as const : undefined,
+              },
+            ];
+          });
+        }
+        break;
+      }
       case 'llm_result': {
         const content = String(payload.content || '');
         const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
         const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
         const hasToolCalls = Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0;
-        // 有内容、有思考过程、或有工具调用时，都创建 assistant 消息
-        // 确保工具调用前的思考过程不会丢失
         if (content || thinkingContent || hasToolCalls) {
           upsertAssistantMessage({
             turnId,
@@ -546,9 +620,18 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const toolCallId = String(payload.tool_call_id || '');
         const sourceSessionId = incomingSessionId || '';
         if (!toolCallId || !sourceSessionId) break;
-        // 不再弹出 InteractionDialog，改为通知卡片处理
         setIsTyping(true);
-        console.log('[NotificationCard] pushing tool_confirmation card:', toolCallId, payload.tool_name);
+        enqueueInteraction({
+          kind: 'confirmation',
+          interactionId: toolCallId,
+          sourceSessionId,
+          timeout: Number(payload.timeout || 300),
+          createdAt: Date.now(),
+          toolName: String(payload.tool_name || ''),
+          riskLevel: String(payload.risk_level || 'medium'),
+          arguments: (typeof payload.arguments === 'object' && payload.arguments !== null
+            ? payload.arguments : {}) as Record<string, unknown>,
+        });
         pushCard({
           id: `confirm_${toolCallId}`,
           kind: 'tool_confirmation',
@@ -578,10 +661,24 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         if (!questionId || !sourceSessionId) break;
         const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
         const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
-        // ask_user 进入“等待用户输入”，不应继续锁死底部聊天输入框
         setIsTyping(false);
-        const questionOptions = Array.isArray(payload.options)
-          ? payload.options.map((o: unknown) => ({ label: String(o), value: String(o) }))
+        const rawOptions = Array.isArray(payload.options)
+          ? payload.options.map((o: unknown) => String(o))
+          : null;
+        enqueueInteraction({
+          kind: 'question',
+          interactionId: questionId,
+          sourceSessionId,
+          timeout: Number(payload.timeout || 300),
+          createdAt: Date.now(),
+          sourceAgentId,
+          sourceAgentName,
+          question: String(payload.question || ''),
+          options: rawOptions,
+          multiSelect: Boolean(payload.multi_select),
+        });
+        const questionCardActions = rawOptions
+          ? rawOptions.map((o) => ({ label: o, value: o }))
           : undefined;
         pushCard({
           id: `question_${questionId}`,
@@ -592,9 +689,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           source: sourceAgentName,
           sessionId: sourceSessionId,
           interactionId: questionId,
-          actions: questionOptions,
-          allowsInput: !questionOptions || questionOptions.length === 0,
-          inputPlaceholder: '请输入回复',
+          actions: questionCardActions,
         });
         break;
       }
@@ -806,8 +901,9 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       payload: { question_id: interaction.interactionId, answer, cancelled },
       timestamp: Date.now() / 1000,
     });
+    resolveCard(`question_${interaction.interactionId}`, cancelled ? 'cancel' : 'answered');
     resolveInteraction('question', interaction.interactionId);
-  }, [wsSend]);
+  }, [wsSend, resolveCard]);
 
   const sendConfirmationResponseFn = useCallback((approved: boolean) => {
     const interaction = activeInteractionRef.current;
@@ -823,6 +919,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       payload: { tool_call_id: interaction.interactionId, approved },
       timestamp: Date.now() / 1000,
     });
+    // 不在本地立即 resolve，等待服务端 tool_confirmation_resolved 事件关闭 UI
   }, [wsSend]);
 
   const handleInteractionTimeoutFn = useCallback(() => {
@@ -847,6 +944,16 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     });
     setIsTyping(true);
   }, []);
+
+  const cancelTurn = useCallback(() => {
+    if (!sessionIdRef.current) return;
+    wsSend({
+      type: 'cancel_turn',
+      session_id: sessionIdRef.current,
+      timestamp: Date.now() / 1000,
+    });
+    setIsTyping(false);
+  }, [wsSend]);
 
   // 计算任务分组
   const taskGroups = groupSessionsToTasks(sessions);
@@ -875,6 +982,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     sendConfirmationResponse: sendConfirmationResponseFn,
     handleInteractionTimeout: handleInteractionTimeoutFn,
     handleSkillInvoke,
+    cancelTurn,
     globalActivity: {
       anyWorking: globalWorkingSessions.size > 0,
       workingSessionIds: globalWorkingSessions,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect } from 'react';
-import { Send, Paperclip, File, FolderOpen } from 'lucide-react';
+import { Send, Square, Paperclip, File, FolderOpen } from 'lucide-react';
 import { useDrop } from 'react-dnd';
 import { TargetSelector } from './TargetSelector';
 import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
@@ -15,6 +15,7 @@ interface ChatInputProps {
   onSelectAgent: (id: string) => void;
   onSend: (content: string, contextFiles?: ContextFileRef[]) => void;
   onSlashSubmit: (content: string) => boolean;
+  onStop?: () => void;
   disabled: boolean;
   wsConnected: boolean;
   handleSkillInvoke: (skillName: string, args: string) => void;
@@ -32,6 +33,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onSelectAgent,
   onSend,
   onSlashSubmit,
+  onStop,
   disabled,
   wsConnected,
   handleSkillInvoke,
@@ -41,6 +43,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [inputValue, setInputValue] = useState('');
   const [showUploadMenu, setShowUploadMenu] = useState(false);
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
+  const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -211,6 +214,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, [inputValue, wsConnected, disabled, handleSlashSubmitHook, onSlashSubmit, onSend, parseAtRefs]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || isComposingRef.current) return;
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
@@ -283,6 +287,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               value={inputValue}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
+              onCompositionStart={() => { isComposingRef.current = true; }}
+              onCompositionEnd={() => { isComposingRef.current = false; }}
               placeholder={
                 wsConnected
                   ? '输入消息… 拖拽文件插入 @引用 (Enter 发送)'
@@ -294,14 +300,25 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               style={{ minHeight: '40px', maxHeight: '240px' }}
             />
           </div>
-          <button
-            data-testid="send-button"
-            onClick={handleSend}
-            disabled={!inputValue.trim() || !wsConnected || disabled}
-            className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-md shadow-primary/20"
-          >
-            <Send size={20} className="ml-0.5" />
-          </button>
+          {disabled && onStop ? (
+            <button
+              data-testid="stop-button"
+              onClick={onStop}
+              className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-red-500 text-white hover:bg-red-600 flex items-center justify-center shrink-0 transition-all active:scale-90 shadow-md shadow-red-500/20"
+              title="停止生成"
+            >
+              <Square size={16} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              data-testid="send-button"
+              onClick={handleSend}
+              disabled={!inputValue.trim() || !wsConnected || disabled}
+              className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-md shadow-primary/20"
+            >
+              <Send size={20} className="ml-0.5" />
+            </button>
+          )}
         </div>
         <div className="text-center mt-2 text-[10px] text-muted-foreground/70">
           Sensenova-Claw can make mistakes. Consider verifying important information.

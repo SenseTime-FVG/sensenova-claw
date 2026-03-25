@@ -18,6 +18,7 @@ class MockTool(Tool):
 class TestToolRegistry:
     def test_builtin_registered(self):
         r = ToolRegistry()
+        assert r.get("apply_patch") is not None
         assert r.get("bash_command") is not None
         assert r.get("serper_search") is not None
         assert r.get("fetch_url") is not None
@@ -71,3 +72,32 @@ class TestToolRegistry:
             assert "name" in t
             assert "description" in t
             assert "parameters" in t
+
+    def test_apply_patch_schema_explicitly_restricts_format(self):
+        r = ToolRegistry()
+        tool = r.get("apply_patch")
+        assert tool is not None
+        assert tool.description == (
+            "Apply a patch to one or more files using the apply_patch format. "
+            "The input should include *** Begin Patch and *** End Patch markers."
+        )
+        input_desc = tool.parameters["properties"]["input"]["description"]
+        assert input_desc == (
+            "Patch content using the *** Begin Patch/End Patch format. "
+            "Use *** Add File:, *** Delete File:, or *** Update File: as hunk headers. "
+            "Within an update hunk, @@ starts a chunk; use plain @@ for no explicit context, "
+            "or @@ <context> to anchor the chunk on an existing line. "
+            "Use *** Move to: inside *** Update File: to rename a file, and *** End of File "
+            "for EOF-only inserts. "
+            "Example:\n"
+            "*** Begin Patch\n"
+            "*** Add File: path/to/file.txt\n"
+            "+line 1\n"
+            "+line 2\n"
+            "*** Update File: src/app.py\n"
+            "@@\n"
+            "-old line\n"
+            "+new line\n"
+            "*** Delete File: obsolete.txt\n"
+            "*** End Patch"
+        )
