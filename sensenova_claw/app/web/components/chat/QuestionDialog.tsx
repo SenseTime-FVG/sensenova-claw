@@ -26,6 +26,7 @@ export interface PendingConfirmationInteraction extends PendingInteractionBase {
   toolName: string;
   riskLevel: string;
   arguments: Record<string, unknown>;
+  timeoutAction?: string;
 }
 
 export type PendingInteraction =
@@ -80,6 +81,7 @@ export function InteractionDialog({
 
   useEffect(() => {
     if (!open || !interaction) return;
+    if (interaction.kind === 'confirmation') return;
     if (remainingSeconds > 0) return;
     const timeoutKey = `${interaction.kind}:${interaction.interactionId}`;
     if (timeoutNotifiedRef.current == timeoutKey) return;
@@ -106,7 +108,13 @@ export function InteractionDialog({
     || submitting
     || !wsConnected
     || remainingSeconds <= 0;
-  const confirmationDisabled = submitting || !wsConnected || remainingSeconds <= 0;
+  const confirmationTimedOut = interaction?.kind === 'confirmation' && remainingSeconds <= 0;
+  const confirmationAwaitingServer = interaction?.kind === 'confirmation'
+    && remainingSeconds <= 0
+    && interaction.timeoutAction !== 'block';
+  const confirmationDisabled = submitting
+    || !wsConnected
+    || Boolean(confirmationAwaitingServer);
 
   const toggleMultiChoice = (opt: string) => {
     setMultiChoices((prev) => {
@@ -141,7 +149,11 @@ export function InteractionDialog({
           <div className="px-4 py-3 border-b border-[#2d2d30] flex items-center justify-between">
             <div className="text-sm font-semibold text-[#cccccc]">工具执行审批</div>
             <div className="text-xs text-[#858585]">
-              剩余 {remainingSeconds}s
+              {confirmationAwaitingServer
+                ? '等待服务端裁决'
+                : remainingSeconds > 0
+                  ? `剩余 ${remainingSeconds}s`
+                  : '已超出建议等待时间'}
             </div>
           </div>
           <div className="p-4 space-y-4">
@@ -171,6 +183,16 @@ export function InteractionDialog({
                 {JSON.stringify(interaction.arguments || {}, null, 2)}
               </pre>
             </div>
+            {confirmationAwaitingServer && (
+              <div className="rounded-md border border-[#d7ba7d]/40 bg-[#3c3c3c]/40 px-3 py-2 text-xs text-[#d7ba7d]">
+                等待服务端确认超时处理结果
+              </div>
+            )}
+            {confirmationTimedOut && interaction.timeoutAction === 'block' && (
+              <div className="rounded-md border border-[#9cdcfe]/30 bg-[#3c3c3c]/40 px-3 py-2 text-xs text-[#9cdcfe]">
+                已超出建议等待时间，仍可继续手动审批。
+              </div>
+            )}
             {!wsConnected && (
               <div className="text-xs text-red-400">连接已断开，暂时无法提交审批结果</div>
             )}

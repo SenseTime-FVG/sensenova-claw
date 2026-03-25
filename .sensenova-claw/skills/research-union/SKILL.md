@@ -1,6 +1,6 @@
 ---
 name: research-union
-description: 当用户需要深度调研、全网搜索、竞品或方案对比、事实核验、趋势梳理、资料汇总时，优先使用本技能。它会先判断任务是简单还是复杂：简单请求直接搜索并回答；复杂请求采用 8 阶段迭代式 deep research 架构（PLAN → DIVERGE → SEARCH → TRIAGE → READ → REASSESS → SYNTHESIZE），支持多轮搜索-阅读-评估循环，直到覆盖度达标。
+description: 当用户要求深度调研、系统梳理、研究报告、竞品分析、方案对比、趋势分析或事实核查，且需要多来源检索、交叉验证并附来源依据时使用；不用于单点事实查询或快速摘要。
 ---
 
 # research-union（迭代式 Deep Research 编排）

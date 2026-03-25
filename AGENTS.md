@@ -210,6 +210,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前 Playwright 配置会联动启动整套 `npm run dev`，在受限环境下后端 watch 模式可能直接因为系统权限失败，导致前端 e2e 不是页面逻辑失败而是基础设施失败。
 - `next build` 在当前环境会因为 `next/font` 访问 Google Fonts 失败而中断；这种网络型失败不能误判为新页面或跳转逻辑本身有语法问题。
 
+### 2026-03-25 工具审批收口补充
+
+成功经验：
+- 对“用户点击”和“服务端最终裁决”分离的交互，最稳的协议是保留前端上行 `tool_confirmation_response`，新增后端下行 `tool_confirmation_resolved`，让前端只用 `resolved` 收口 UI，`tool_result` 只更新工具消息。
+- `/chat` 与 `/sessions/[id]` 并存时，修审批类 bug 必须同时检查“全局通知卡片/action toast”与“本地 InteractionDialog”两套状态机；只修其中一套很容易留下旧入口悬挂。
+- 对通知中心这类可操作 UI，给卡片和 toast 增加 `pending` 状态，比点击后立刻本地 `resolve` 更稳，能正确覆盖超时自动处理、跨窗口先处理和晚到点击被忽略的场景。
+
+失败/风险经验：
+- 当前环境运行 Playwright 仍缺 `libnspr4.so`，即使越权成功启动 webServer，也会在浏览器拉起阶段失败；前端浏览器级回归需要在具备系统库的环境执行，不能把这类环境错误误判为页面逻辑失败。
+- `npx tsc --noEmit` 目前会先撞上仓库既有类型错误（如 `app/settings/page.tsx`、`components/chat/MessageList.tsx` 等），验证本次前端改动时要明确区分“本次变更相关文件”与“仓库历史遗留错误”。
+
 ### 2026-03-18 Feishu 插件发现补充
 
 成功经验：

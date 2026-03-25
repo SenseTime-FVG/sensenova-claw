@@ -25,6 +25,7 @@ from sensenova_claw.kernel.events.types import (
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
     TOOL_CONFIRMATION_REQUESTED,
+    TOOL_CONFIRMATION_RESOLVED,
     USER_QUESTION_ASKED,
     USER_QUESTION_ANSWERED,
 )
@@ -310,6 +311,7 @@ class WebSocketChannel(Channel):
         if event.type in {
             SESSION_CREATED,
             TOOL_CONFIRMATION_REQUESTED,
+            TOOL_CONFIRMATION_RESOLVED,
             USER_QUESTION_ASKED,
             USER_QUESTION_ANSWERED,
         }:
@@ -518,6 +520,24 @@ class WebSocketChannel(Channel):
                     "tool_name": event.payload.get("tool_name"),
                     "arguments": event.payload.get("arguments", {}),
                     "risk_level": event.payload.get("risk_level", "high"),
+                    "timeout": event.payload.get("timeout"),
+                    "timeout_action": event.payload.get("timeout_action"),
+                    "requested_at_ms": event.payload.get("requested_at_ms"),
+                },
+                "timestamp": event.ts,
+            }
+        if event.type == TOOL_CONFIRMATION_RESOLVED:
+            return {
+                "type": "tool_confirmation_resolved",
+                "session_id": event.session_id,
+                "payload": {
+                    "tool_call_id": event.payload.get("tool_call_id"),
+                    "tool_name": event.payload.get("tool_name"),
+                    "approved": event.payload.get("approved", False),
+                    "status": event.payload.get("status"),
+                    "reason": event.payload.get("reason"),
+                    "resolved_by": event.payload.get("resolved_by"),
+                    "resolved_at_ms": event.payload.get("resolved_at_ms"),
                 },
                 "timestamp": event.ts,
             }

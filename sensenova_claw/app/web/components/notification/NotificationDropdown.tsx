@@ -68,6 +68,22 @@ function timeAgo(ms: number): string {
   return `${Math.floor(hour / 24)} 天前`;
 }
 
+function describeResolvedAction(action: string | undefined, kind: NotificationCardKind): string {
+  if (!action) {
+    return kind === 'user_question' ? '已提交回复' : '已处理';
+  }
+  if (['approve', 'accepted', 'user_approved', 'timeout_approved', 'auto_approved'].includes(action)) {
+    return '已批准';
+  }
+  if (['deny', 'reject', 'rejected', 'user_rejected', 'timeout_rejected', 'auto_rejected'].includes(action)) {
+    return '已拒绝';
+  }
+  if (action === 'answered') {
+    return '已提交回复';
+  }
+  return `已处理: ${action}`;
+}
+
 function NotificationCardItem({
   card,
   onResolve,
@@ -83,6 +99,9 @@ function NotificationCardItem({
   const Icon = config.icon;
   const [inputValue, setInputValue] = useState('');
   const trimmedInput = inputValue.trim();
+  const pendingText = card.kind === 'tool_confirmation'
+    ? '已提交审批，等待服务端确认最终结果。'
+    : '已提交回复，等待服务端确认最终结果。';
 
   return (
     <div
@@ -117,7 +136,7 @@ function NotificationCardItem({
           </div>
 
           {/* 操作按钮 */}
-          {!card.resolved && card.actions && card.actions.length > 0 && (
+          {!card.resolved && !card.pending && card.actions && card.actions.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {card.actions.map((action) => (
                 <button
@@ -137,7 +156,7 @@ function NotificationCardItem({
               ))}
             </div>
           )}
-          {!card.resolved && card.allowsInput && (
+          {!card.resolved && !card.pending && card.allowsInput && (
             <div className="mt-2 space-y-2">
               <textarea
                 value={inputValue}
@@ -162,21 +181,24 @@ function NotificationCardItem({
               </div>
             </div>
           )}
+          {!card.resolved && card.pending && (
+            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-700">
+              {pendingText}
+            </div>
+          )}
 
           {/* 已处理状态 */}
           {card.resolved && card.resolvedAction && (
             <div className="mt-1.5 flex items-center gap-1 text-[10px] text-neutral-400">
               <Check className="h-3 w-3" />
               <span>
-                {card.resolvedAction === 'approve' ? '已批准' :
-                 card.resolvedAction === 'deny' ? '已拒绝' :
-                 `已处理: ${card.resolvedAction}`}
+                {describeResolvedAction(card.resolvedAction, card.kind)}
               </span>
             </div>
           )}
 
           {/* 跳转到会话 */}
-          {card.sessionId && !card.resolved && (
+          {card.sessionId && !card.resolved && !card.pending && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onNavigate(card.sessionId!); }}
@@ -208,6 +230,7 @@ export function NotificationDropdown() {
     cards,
     unreadCount,
     markAllRead,
+    markCardPending,
     resolveCard,
     dismissCard,
     clearAllCards,
@@ -240,7 +263,7 @@ export function NotificationDropdown() {
   // 处理卡片操作：根据类型发送 WebSocket 响应
   const handleResolve = useCallback((cardId: string, action?: string, inputValue?: string) => {
     const card = cards.find(c => c.id === cardId);
-    if (!card || card.resolved) return;
+    if (!card || card.resolved || card.pending) return;
 
     if (card.kind === 'tool_confirmation' && card.interactionId && card.sessionId) {
       // 发送工具确认响应
@@ -253,6 +276,7 @@ export function NotificationDropdown() {
         },
         timestamp: Date.now() / 1000,
       });
+      markCardPending(cardId, action);
     } else if (card.kind === 'user_question' && card.interactionId && card.sessionId) {
       // 发送问题回答
       wsSend({
@@ -265,13 +289,14 @@ export function NotificationDropdown() {
         },
         timestamp: Date.now() / 1000,
       });
+      markCardPending(cardId, inputValue ?? action ?? 'answered');
     } else if (action === 'view_session' && card.sessionId) {
       // 导航到对应会话
       handleNavigate(card.sessionId);
+      resolveCard(cardId, action);
+      return;
     }
-
-    resolveCard(cardId, action);
-  }, [cards, wsSend, resolveCard]);
+  }, [cards, wsSend, markCardPending, resolveCard, handleNavigate]);
 
   // 注册操作弹窗的回调，使弹窗按钮也能发送 WebSocket 响应
   useEffect(() => {

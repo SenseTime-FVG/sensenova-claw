@@ -93,7 +93,7 @@ const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
 // ── Provider ──
 
 export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
-  const { pushNotification, pushCard } = useNotification();
+  const { pushNotification, pushCard, resolveCard } = useNotification();
   const { isAuthenticated, isLoading } = useAuth();
   const pathname = usePathname();
 
@@ -309,6 +309,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     const eventType = String(data.type || '');
     const incomingSessionId = typeof data.session_id === 'string' ? data.session_id : null;
     const isGlobalInteractionEvent = eventType === 'tool_confirmation_requested'
+      || eventType === 'tool_confirmation_resolved'
       || eventType === 'user_question_asked'
       || eventType === 'user_question_answered_event';
 
@@ -564,6 +565,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         });
         break;
       }
+      case 'tool_confirmation_resolved': {
+        const toolCallId = String(payload.tool_call_id || '');
+        const status = String(payload.status || '');
+        if (!toolCallId) break;
+        resolveCard(`confirm_${toolCallId}`, status === 'approved' ? 'approve' : 'deny');
+        break;
+      }
       case 'user_question_asked': {
         const questionId = String(payload.question_id || '');
         const sourceSessionId = incomingSessionId || '';
@@ -592,7 +600,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       }
       case 'user_question_answered_event': {
         const questionId = String(payload.question_id || '');
-        if (questionId) resolveInteraction('question', questionId);
+        if (questionId) {
+          resolveInteraction('question', questionId);
+          resolveCard(`question_${questionId}`, 'answered');
+        }
         break;
       }
     }
@@ -812,15 +823,15 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       payload: { tool_call_id: interaction.interactionId, approved },
       timestamp: Date.now() / 1000,
     });
-    resolveInteraction('confirmation', interaction.interactionId);
   }, [wsSend]);
 
   const handleInteractionTimeoutFn = useCallback(() => {
     const interaction = activeInteractionRef.current;
     if (!interaction) return;
     if (interaction.kind === 'confirmation') {
-      addMsg('system', '工具审批已超时，系统将按后端策略拒绝。');
-      resolveInteraction('confirmation', interaction.interactionId);
+      if (interaction.timeoutAction !== 'block') {
+        addMsg('system', '工具审批等待已到期，正在等待服务端确认最终处理结果。');
+      }
       return;
     }
     addMsg('system', '问题已超时，已取消等待。');
