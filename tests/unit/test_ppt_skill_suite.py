@@ -139,6 +139,14 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("品牌 / 展示 / 活动 / 发布类主题", design)
         self.assertIn("用户明确要求更满或更克制时，可覆盖默认 profile", design)
 
+    def test_ppt_task_pack_keeps_density_contract_out_of_payload_budget_scope(self):
+        skills = _load_workspace_skills()
+
+        body = skills["ppt-task-pack"]
+
+        self.assertIn("不要在这一轮引入 `payload_budget`", body)
+        self.assertNotIn("payload_budget:", body)
+
     def test_ppt_superpower_maps_outline_review_requests_to_guided_mode(self):
         skills = _load_workspace_skills()
 
@@ -396,6 +404,9 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("analysis-heavy", body)
         self.assertIn("balanced", body)
         self.assertIn("showcase-light", body)
+        self.assertIn("只负责解释 profile，不重算默认 profile", body)
+        self.assertNotIn("根据主题/场景选择默认 profile", body)
+        self.assertNotIn("重算默认 profile", design)
         self.assertNotIn("payload_budget", body)
 
         self.assertIn("承载策略", design)
