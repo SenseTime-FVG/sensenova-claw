@@ -657,6 +657,8 @@ class TestPptSkillSuite(unittest.TestCase):
         content = DESIGN_DOC.read_text(encoding="utf-8")
 
         self.assertIn("deck_dir -> task-pack -> research(按需) -> style-spec -> storyboard", content)
+        self.assertIn("无上传文件时的最小路径", content)
+        self.assertIn("有上传文件时的常规路径", content)
 
     # ── ppt-export-pptx 契约测试 ──
 

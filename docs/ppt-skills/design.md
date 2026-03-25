@@ -670,6 +670,8 @@ class SpeakerNotePage:
 
 无上传文件时的最小路径：
 
+主路径从 `deck_dir -> task-pack -> research(按需) -> style-spec -> storyboard` 开始。
+
 1. `ppt-task-pack`
 2. 如 `task-pack.json.research_required` 为真且仍有内容缺口，则进入 `ppt-research-pack`
 3. `ppt-style-spec`
@@ -679,6 +681,8 @@ class SpeakerNotePage:
 7. `ppt-review`
 
 有上传文件时的常规路径：
+
+主路径从 `deck_dir -> task-pack -> research(按需) -> style-spec -> storyboard` 开始。
 
 1. `ppt-source-analysis`
 2. `ppt-task-pack`
