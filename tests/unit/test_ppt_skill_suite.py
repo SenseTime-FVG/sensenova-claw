@@ -440,6 +440,9 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("analysis-heavy", body)
         self.assertIn("balanced", body)
         self.assertIn("showcase-light", body)
+        self.assertIn("page_type", body)
+        self.assertIn("narrative_role", body)
+        self.assertIn("density_rules", body)
         self.assertIn("分析类页", body)
         self.assertIn("展示类页", body)
         self.assertIn("把 `content_density_profile` 转成可执行的 `payload_budget`", body)
@@ -456,12 +459,14 @@ class TestPptSkillSuite(unittest.TestCase):
         body = skills["ppt-page-html"]
 
         self.assertIn("payload_budget", body)
+        self.assertIn("storyboard.json.pages[n].payload_budget", body)
         self.assertIn("必须按 `payload_budget` 落地", body)
         self.assertIn("claim_count", body)
         self.assertIn("evidence_count", body)
         self.assertIn("structure_block_count", body)
         self.assertIn("require_comparison_or_summary", body)
         self.assertIn("不允许把应承载 3 块内容的页面退回成“一个标题 + 一张大卡片”", body)
+        self.assertNotIn("content_density_profile", body)
 
         self.assertIn("payload_budget", design)
         self.assertIn("不允许把应承载 3 块内容的页面退回成“一个标题 + 一张大卡片”", design)
@@ -473,6 +478,7 @@ class TestPptSkillSuite(unittest.TestCase):
         body = skills["ppt-review"]
 
         self.assertIn("payload_budget", body)
+        self.assertIn("storyboard.json.pages[n].payload_budget", body)
         self.assertIn("承载不足", body)
         self.assertIn("结构块不足", body)
         self.assertIn("缺少对比或摘要", body)
@@ -480,6 +486,7 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("evidence_count", body)
         self.assertIn("structure_block_count", body)
         self.assertIn("require_comparison_or_summary", body)
+        self.assertNotIn("content_density_profile", body)
 
         self.assertIn("承载不足", design)
         self.assertIn("结构块不足", design)
