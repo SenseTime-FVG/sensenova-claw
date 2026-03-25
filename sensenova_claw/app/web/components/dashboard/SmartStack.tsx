@@ -1,7 +1,6 @@
 'use client';
 
-import { useRef, useState, useCallback, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { getTone } from './widgetTones';
 import type { ToneName } from './widgetTones';
 import type { AgentInfo } from '@/hooks/useDashboardData';
@@ -61,26 +60,6 @@ export function SmartStack({ agents, onAgentClick }: SmartStackProps) {
     .sort((a, b) => (b.sessionCount || 0) - (a.sessionCount || 0))
     .slice(0, 12);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-
-  const updateScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 4);
-    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
-  }, []);
-
-  const scroll = useCallback((dir: 'left' | 'right') => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollBy({ left: dir === 'left' ? -280 : 280, behavior: 'smooth' });
-    setTimeout(updateScroll, 300);
-  }, [updateScroll]);
-
-  useEffect(() => { updateScroll(); }, [updateScroll, topAgents.length]);
-
   if (topAgents.length === 0) return null;
 
   return (
@@ -95,32 +74,11 @@ export function SmartStack({ agents, onAgentClick }: SmartStackProps) {
           icon={<Sparkles className="h-3.5 w-3.5 text-violet-500" />}
         />
 
-        {/* 3×N 网格横向滚动 */}
-        <div className="relative flex-1 min-h-0 mt-0.5">
-          {canScrollLeft && (
-            <button
-              type="button"
-              onClick={() => scroll('left')}
-              className="absolute left-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/80 bg-white/90 p-1 shadow-md backdrop-blur-xl transition hover:bg-white"
-            >
-              <ChevronLeft className="h-3 w-3 text-neutral-500" />
-            </button>
-          )}
-
-          <div
-            ref={scrollRef}
-            onScroll={updateScroll}
-            className="overflow-x-auto snap-x thin-scrollbar h-full"
-            style={{
-              display: 'grid',
-              gridTemplateRows: 'repeat(3, 46px)',
-              gridAutoFlow: 'column',
-              gridAutoColumns: 'calc(50% - 4px)',
-              gap: '7px',
-            }}
-          >
+        {/* N×2 纵向网格 */}
+        <div className="flex-1 min-h-0 mt-0.5 overflow-y-auto thin-scrollbar">
+          <div className="grid grid-cols-2 gap-[7px]">
             {topAgents.map((agent, i) => (
-              <div key={agent.id} className="snap-start min-w-0">
+              <div key={agent.id} className="min-w-0 h-[46px]">
                 <CompactAgentCard
                   agent={agent}
                   tone={AGENT_TONES[i % AGENT_TONES.length]}
@@ -129,16 +87,6 @@ export function SmartStack({ agents, onAgentClick }: SmartStackProps) {
               </div>
             ))}
           </div>
-
-          {canScrollRight && (
-            <button
-              type="button"
-              onClick={() => scroll('right')}
-              className="absolute right-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/80 bg-white/90 p-1 shadow-md backdrop-blur-xl transition hover:bg-white"
-            >
-              <ChevronRight className="h-3 w-3 text-neutral-500" />
-            </button>
-          )}
         </div>
       </div>
     </div>

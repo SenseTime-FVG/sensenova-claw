@@ -167,6 +167,7 @@ async def setup_services(tmp_dir: Path, provider: str, model: str | None):
         logger.info("已加载 config.yml: %s", PROJECT_ROOT / "config.yml")
 
     config.data["system"]["database_path"] = str(db_path)
+    config.data["system"]["sensenova_claw_home"] = str(tmp_dir / ".sensenova-claw")
     config.data["system"]["workspace_dir"] = str(workspace)
     config.data["system"]["log_level"] = "DEBUG"
 
@@ -206,11 +207,11 @@ async def setup_services(tmp_dir: Path, provider: str, model: str | None):
         tool_registry=tool_registry,
         state_store=state_store,
     )
-    llm_runtime = LLMRuntime(bus_router=bus_router, factory=LLMFactory())
-    tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry)
+    llm_runtime = LLMRuntime(bus_router=bus_router, factory=LLMFactory(), state_store=state_store)
+    tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry, state_store=state_store)
     title_runtime = TitleRuntime(bus=bus, repo=repo)
 
-    gateway = Gateway(publisher=publisher)
+    gateway = Gateway(publisher=publisher, bus_router=bus_router)
 
     await persister.start()
     await bus_router.start()
@@ -227,6 +228,7 @@ async def setup_services(tmp_dir: Path, provider: str, model: str | None):
         "publisher": publisher,
         "persister": persister,
         "bus_router": bus_router,
+        "state_store": state_store,
         "agent_runtime": agent_runtime,
         "llm_runtime": llm_runtime,
         "tool_runtime": tool_runtime,

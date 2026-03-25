@@ -51,6 +51,14 @@ class ToolSessionWorker(SessionWorker):
         elif event.type == USER_QUESTION_ANSWERED:
             self._resolve_question(event)
 
+    def _is_turn_cancelled(self, event: EventEnvelope) -> bool:
+        if not event.turn_id:
+            return False
+        state_store = getattr(self.rt, "state_store", None)
+        if state_store is None:
+            return False
+        return state_store.is_turn_cancelled(event.session_id, event.turn_id)
+
     def _truncate_result(self, result: Any, tool_call_id: str) -> Any:
         """Token 截断：统一控制传给 LLM 的结果长度"""
         result_str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
@@ -236,6 +244,14 @@ class ToolSessionWorker(SessionWorker):
         if not tool_call_id:
             logger.error("Missing tool_call_id in event: %s", event)
             return
+        if self._is_turn_cancelled(event):
+            logger.info(
+                "skip tool request for cancelled turn session=%s turn=%s tool_call_id=%s",
+                event.session_id,
+                event.turn_id,
+                tool_call_id,
+            )
+            return
 
         await self.bus.publish(
             EventEnvelope(
@@ -303,7 +319,12 @@ class ToolSessionWorker(SessionWorker):
         error = ""
         result = None
         # 构建执行参数：注入内部上下文对象（不可 JSON 序列化，仅供工具内部使用）
-        exec_kwargs = dict(arguments)
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except (json.JSONDecodeError, TypeError):
+                arguments = {}
+        exec_kwargs = dict(arguments) if isinstance(arguments, dict) else {}
         if self.rt.agent_registry:
             exec_kwargs["_agent_registry"] = self.rt.agent_registry
         agent_workdir = event.payload.get("_agent_workdir")
@@ -318,6 +339,8 @@ class ToolSessionWorker(SessionWorker):
             exec_kwargs["_tool_call_id"] = tool_call_id
         # 注入 ask_user 回调（AskUserTool 内部调用）
         exec_kwargs["_ask_user_handler"] = self._make_ask_user_handler()
+        # 注入公共事件总线（供 manage_todolist 等工具发布广播事件）
+        exec_kwargs["_event_bus"] = self.bus._public_bus
 
         try:
             result = await asyncio.wait_for(

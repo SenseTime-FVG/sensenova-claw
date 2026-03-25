@@ -20,6 +20,7 @@ from sensenova_claw.kernel.events.types import (
     LLM_CALL_STARTED,
     NOTIFICATION_SESSION,
 )
+from sensenova_claw.kernel.runtime.state import SessionStateStore
 from sensenova_claw.kernel.runtime.workers.llm_worker import LLMSessionWorker
 from sensenova_claw.platform.config.config import config
 from tests.conftest import load_gemini_config, skip_if_gemini_unavailable
@@ -126,8 +127,9 @@ class _RetryableThenErrorProvider(LLMProvider):
 class _SimpleLLMRuntime:
     """轻量级 LLMRuntime 替身，持有真实 LLMFactory"""
 
-    def __init__(self, factory: LLMFactory):
+    def __init__(self, factory: LLMFactory, state_store: SessionStateStore | None = None):
         self.factory = factory
+        self.state_store = state_store
 
 
 # ── Fixtures ─────────────────────────────────────────────
@@ -149,8 +151,13 @@ def factory():
 
 
 @pytest.fixture
-def runtime(factory):
-    return _SimpleLLMRuntime(factory)
+def state_store():
+    return SessionStateStore()
+
+
+@pytest.fixture
+def runtime(factory, state_store):
+    return _SimpleLLMRuntime(factory, state_store)
 
 
 def _make_llm_event(provider: str, model: str, messages: list[dict],
@@ -614,3 +621,26 @@ class TestLLMWorkerConfigFallback:
             assert result_events[0].payload["response"]["content"]
         finally:
             config.data = original
+
+
+class TestLLMWorkerTurnCancellation:
+    async def test_cancelled_turn_skips_llm_execution(self, private_bus, public_bus, state_store):
+        factory = LLMFactory()
+        provider = _SuccessProvider("should not run")
+        factory._providers["mock"] = provider
+        runtime = _SimpleLLMRuntime(factory, state_store)
+        worker = LLMSessionWorker("s1", private_bus, runtime)
+        state_store.mark_turn_cancelled("s1", "t1")
+
+        collected, done, task = await _collect_from_bus(public_bus, 1)
+        event = _make_llm_event("mock", "mock-agent-v1", [{"role": "user", "content": "hello"}])
+
+        try:
+            await worker._handle(event)
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(done.wait(), timeout=0.1)
+        finally:
+            task.cancel()
+
+        assert collected == []
+        assert provider.calls == []

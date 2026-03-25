@@ -8,6 +8,7 @@ from sensenova_claw.capabilities.tools.builtin import (
     BraveSearchTool,
     FetchUrlTool,
     ImageSearchTool,
+    ManageTodolistTool,
     ReadFileTool,
     SerperSearchTool,
     TavilySearchTool,
@@ -41,6 +42,7 @@ class ToolRegistry:
             FetchUrlTool(),
             ReadFileTool(),
             WriteFileTool(),
+            ManageTodolistTool(),
             CreateAgentTool(),
             AskUserTool(),
         ]:

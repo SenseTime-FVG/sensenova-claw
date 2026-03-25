@@ -17,6 +17,7 @@ import { SlideViewer, useSlideSet } from '@/components/ppt/PPTViewer';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 
+
 /* ── workdir 根目录缓存 ── */
 let _workdirRootCache: string | null | undefined;
 async function fetchWorkdirRoot(): Promise<string | null> {
@@ -179,6 +180,7 @@ function ChatContent() {
     refreshTaskGroups,
     loadingSessions,
     handleSkillInvoke,
+    cancelTurn,
     cleanupEmptySession,
   } = useChatSession();
 
@@ -392,6 +394,7 @@ function ChatContent() {
   };
 
   return (
+    <>
       <ResizablePanelGroup orientation="horizontal" className="h-full overflow-hidden gap-3">
 
         {/* ====== 左栏：Agent 列表 ====== */}
@@ -582,6 +585,7 @@ function ChatContent() {
                 onSelectAgent={() => {}}
                 onSend={handleSend}
                 onSlashSubmit={handleSlashSubmit}
+                onStop={cancelTurn}
                 disabled={isTyping}
                 wsConnected={wsConnected}
                 handleSkillInvoke={handleSkillInvoke}
@@ -592,6 +596,7 @@ function ChatContent() {
         </ResizablePanel>
 
       </ResizablePanelGroup>
+    </>
   );
 }
 

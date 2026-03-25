@@ -25,6 +25,7 @@ from sensenova_claw.kernel.events.types import (
 from sensenova_claw.kernel.runtime.workers.tool_worker import ToolSessionWorker
 from sensenova_claw.kernel.runtime.tool_runtime import ToolRuntime
 from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.runtime.state import SessionStateStore
 from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
 from sensenova_claw.capabilities.tools.builtin import (
     BashCommandTool,
@@ -194,10 +195,12 @@ def _make_worker(
     agent_registry.load_from_config(cfg.data)
 
     bus_router = BusRouter(public_bus=public)
+    state_store = SessionStateStore()
     rt = ToolRuntime(
         bus_router=bus_router,
         registry=registry,
         agent_registry=agent_registry,
+        state_store=state_store,
     )
 
     worker = ToolSessionWorker(
@@ -521,3 +524,57 @@ class TestContextInjectionIsolation:
                 json.dumps(evt.payload, ensure_ascii=False)
             except TypeError as e:
                 pytest.fail(f"事件 {evt.type} 的 payload 不可 JSON 序列化: {e}")
+class _TrackingTool(Tool):
+    name = "tracking_tool"
+    description = "测试用工具"
+    parameters = {"type": "object", "properties": {}}
+    risk_level = ToolRiskLevel.LOW
+
+    def __init__(self):
+        self.executed = False
+
+    async def execute(self, **kwargs):
+        self.executed = True
+        return {"success": True, "kwargs": kwargs}
+
+
+class TestToolTurnCancellation:
+    async def test_cancelled_turn_skips_tool_execution_and_started_event(self, tmp_path):
+        worker, cfg = _make_worker(session_id="test_cancelled", tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": False,
+        })
+        tool = _TrackingTool()
+        worker.rt.registry.register(tool)
+        worker.rt.state_store.mark_turn_cancelled("test_cancelled", "turn_1")
+
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_cancelled",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": "tc_cancelled",
+                "tool_name": "tracking_tool",
+                "arguments": {},
+            },
+        )
+
+        published: list[EventEnvelope] = []
+        original_publish = worker.bus.publish
+
+        async def capture_publish(evt: EventEnvelope):
+            published.append(evt)
+            await original_publish(evt)
+
+        worker.bus.publish = capture_publish
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            await worker._handle_tool_requested(event)
+        finally:
+            tw.config = original_config
+
+        assert tool.executed is False
+        assert published == []
