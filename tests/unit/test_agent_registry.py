@@ -1,6 +1,7 @@
 """AgentRegistry CRUD + config 加载 + Agent 发现"""
 from sensenova_claw.capabilities.agents.config import AgentConfig
 from sensenova_claw.capabilities.agents.registry import AgentRegistry
+from sensenova_claw.platform.config.config import Config
 
 
 class TestAgentRegistry:
@@ -83,6 +84,27 @@ class TestAgentRegistry:
         assert helper.can_send_message_to == ["writer"]
         assert helper.max_send_depth == 6
         assert helper.max_pingpong_turns == 9
+
+    def test_default_agent_inherits_global_default_model_when_model_omitted(self, tmp_path):
+        """default agent 未显式配置 model 时，应继承 llm.default_model。"""
+        config_path = tmp_path / "config.yml"
+        config_path.write_text(
+            "llm:\n"
+            "  default_model: gpt-5.4\n"
+            "agents:\n"
+            "  default:\n"
+            "    name: Default Agent\n"
+            "    temperature: 0.6\n",
+            encoding="utf-8",
+        )
+
+        cfg = Config(config_path=config_path)
+        r = AgentRegistry()
+        r.load_from_config(cfg.data)
+
+        default_agent = r.get("default")
+        assert default_agent is not None
+        assert default_agent.model == ""
 
     def test_load_from_config_with_email_agent(self):
         """从 config 加载 email-agent 并验证工具列表"""

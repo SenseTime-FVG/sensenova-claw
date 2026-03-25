@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time
 from sensenova_claw.kernel.proactive.models import (
-    ProactiveJob, TimeTrigger, EventTrigger, ConditionTrigger,
+    ProactiveJob, TimeTrigger, EventTrigger,
     parse_duration_ms,
 )
 from sensenova_claw.kernel.scheduler.scheduler import _croniter_next_ms
@@ -16,8 +16,6 @@ def compute_next_fire_ms(job: ProactiveJob, now_ms: int) -> int | None:
             return _croniter_next_ms(trigger.cron, now_ms, None)
         elif trigger.every:
             return now_ms + parse_duration_ms(trigger.every)
-    elif isinstance(trigger, ConditionTrigger):
-        return now_ms + parse_duration_ms(trigger.check_interval)
     return None
 
 
@@ -39,21 +37,3 @@ def should_debounce(job_id: str, debounce_ms: int, last_fires: dict[str, int]) -
     if last is None:
         return False
     return (now_ms - last) < debounce_ms
-
-
-def build_condition_prompt(condition: str, context: str | None = None) -> str:
-    """构建条件评估 prompt。"""
-    parts = [
-        "你是一个条件评估器。根据以下信息判断条件是否满足。",
-        f"条件: {condition}",
-        f"当前时间: {time.strftime('%Y-%m-%d %H:%M:%S')}",
-    ]
-    if context:
-        parts.append(f"上下文: {context}")
-    parts.append("请只回答 YES 或 NO，不要解释。")
-    return "\n".join(parts)
-
-
-def parse_condition_response(response: str) -> bool:
-    """解析 LLM 条件评估响应。非 YES 一律视为 False。"""
-    return response.strip().upper() == "YES"

@@ -47,8 +47,12 @@ workspace/memory/
 workspace/skills/
 workspace/*.json
 my_workspace/
+.agentos/
 .sensenova-claw/workdir/
 .sensenova-claw/token
+.sensenova-claw/data/
+.sensenova-claw/logs/
+.sensenova-claw/memory/
 .sensenova-claw/agents/*/sessions/
 
 # var/ 运行时数据（数据库等）默认忽略，但保留内置 skills
@@ -83,6 +87,7 @@ config.yaml
 # ========== 临时文件 ==========
 *.tmp
 *.bak
+*.bak.*
 *.orig
 pytest_tmp/
 tmp_docs/

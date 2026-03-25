@@ -594,6 +594,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 如果在 `AGENTS.md` 里继续硬编码 `tools`、`can_delegate_to` 之类清单，文案很容易和真实运行时配置漂移，后续维护成本会越来越高。
 - 强执行型 prompt 如果不显式加入”无重要变化时保持简洁””不要为了显得主动而主动”等约束，很容易把主动推送写成高频、低信息量的噪音输出。
 
+### 2026-03-24 Uvicorn 关闭噪音补充
+
+成功经验：
+- 当堆栈同时出现 `uvicorn.server.capture_signals -> signal.raise_signal(...) -> asyncio.runners._on_sigint -> KeyboardInterrupt`，并伴随 `starlette`/`uvicorn.lifespan.on.receive_queue.get()` 的 `CancelledError` 时，优先判断为”收到 SIGINT/SIGTERM 后的关闭链路”，不应先怀疑业务代码抛异常。
+- 判断是否是业务层 shutdown 真失败，最直接的方法是看堆栈里是否落到项目自己的 `lifespan finally` 清理代码；如果只有框架内部 `receive()`/`capture_signals()`，通常只是退出时的噪音日志。
+- 根目录 `npm run dev` 实际会走 `agentos.app.main` 的父进程监管逻辑；当前端退出、父进程收到 `Ctrl+C`，或 IDE 停止按钮终止父进程时，父进程会反向 `terminate()` 后端，后端打印这类信号关闭堆栈是符合预期的。
+
+失败/风险经验：
+- `uvicorn --reload` 会让”父进程/重载进程/工作进程”的信号传播更绕；如果只盯着后端最后那条 `CancelledError`，很容易误判为服务内部 bug，而忽略真正先退出的是前端、父进程或外层进程管理器。
+
 ### 2026-03-20 飞书 Wiki token 兼容修复补充
 
 成功经验：
@@ -1094,6 +1104,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前仓库把 `.next/` 产物纳入版本管理，调试前端路由时很容易产生大量噪音改动；完成后需要显式回退 `.next/`，只保留真实源码变更。
 
+### 2026-03-24 Proactive Agent Prompt 收敛补充
+
+成功经验：
+- 对这类“runtime 自动触发 + 用户直聊”双入口 agent，`SYSTEM_PROMPT.md` 最适合承载硬规则、判断顺序和执行协议，`AGENTS.md` 更适合承载角色边界、默认协作策略和风格偏好；两者分层清楚后，提示词更稳也更容易维护。
+- Prompt 文案应尽量贴真实运行时能力来写，例如 proactive 当前稳定支持的是 `time/event` 触发，以及 `list/create/enable/disable/delete` 管理动作；把不存在的“条件触发”“字段级 update”写进 prompt，只会让模型产生幻觉。
+- 对这类 prompt-only 改动，跑 `./.venv/bin/python -m pytest tests/unit/test_agent_registry.py` 作为最小回归很高效，能快速确认 `SYSTEM_PROMPT.md` 的加载链路未被破坏。
+
+失败/风险经验：
+- 当前 `proactive` 任务虽然支持 `system_prompt_override` 元数据注入，但是否在完整消息构建链路中被最终消费，仍需后续单独核查；不能仅凭字段存在就默认该能力已稳定可用。
 ### 2026-03-24 setup 跳过按钮补充
 
 成功经验：
@@ -1157,6 +1176,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境执行 `uv run ...` 会把 `uv.lock` 重写成本机镜像源 URL，即使业务代码没变也会产生超大噪音 diff；完成测试后要记得把 `uv.lock` 恢复回仓库版本，再做最终状态检查。
 
+### 2026-03-24 Default Agent 默认模型补充
+
+成功经验：
+- 当 `default agent` 看起来“用户没配 model 却仍固定走 mock”时，优先检查 `DEFAULT_CONFIG` 与用户配置的深度合并结果，而不是只盯着 `~/.sensenova-claw/config.yml`；这次根因正是内置默认值里的 `agents.default.model: mock` 被保留下来了。
+- 对这类配置继承问题，最高价值的回归测试应直接覆盖“真实 `Config` 加载 + `AgentRegistry.load_from_config()`”链路；仅测 `AgentWorker` 下游现象，不足以锁住错误来源。
+- `default agent` 若希望继承全局 `llm.default_model`，最干净的实现不是在运行时特殊判断 `mock`，而是从默认配置源头移除 `agents.default.model`，让缺省值真正表现为“未设置”。
+
+失败/风险经验：
+- 如果只修用户配置或手工在本机 `config.yml` 里补 `agents.default.model`，表面上能恢复真实 LLM，但无法阻止其他新环境继续因同一默认值设计再次落回 mock。
 ### 2026-03-24 edit 工具移植补充
 
 成功经验：

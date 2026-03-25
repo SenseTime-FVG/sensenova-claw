@@ -19,6 +19,16 @@ class PublicEventBus:
         for q in list(self._subscribers):
             await q.put(event)
 
+    def subscribe_queue(self) -> asyncio.Queue[EventEnvelope]:
+        """创建并注册一个事件队列，调用方负责在完成后调用 unsubscribe_queue。"""
+        queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
+        self._subscribers.add(queue)
+        return queue
+
+    def unsubscribe_queue(self, queue: asyncio.Queue[EventEnvelope]) -> None:
+        """注销事件队列。"""
+        self._subscribers.discard(queue)
+
     async def subscribe(self) -> AsyncIterator[EventEnvelope]:
         queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
         self._subscribers.add(queue)

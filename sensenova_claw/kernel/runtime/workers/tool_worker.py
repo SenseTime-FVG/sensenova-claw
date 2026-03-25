@@ -90,7 +90,13 @@ class ToolSessionWorker(SessionWorker):
         return tool.risk_level.value not in auto_levels
 
     async def _request_confirmation(self, event: EventEnvelope, tool: Tool) -> bool:
-        """发布确认请求并挂起等待，超时自动拒绝"""
+        """发布确认请求并挂起等待，根据 timeout_action 决定超时行为。
+
+        timeout_action 取值：
+        - "reject"（默认）: 超时自动拒绝
+        - "approve": 超时自动批准
+        - "block": 无限等待直到用户响应
+        """
         tool_call_id = event.payload["tool_call_id"]
         wait_event = asyncio.Event()
         self._pending_confirmations[tool_call_id] = wait_event
@@ -113,14 +119,23 @@ class ToolSessionWorker(SessionWorker):
             )
         )
 
-        # 挂起等待，超时自动拒绝
-        timeout = float(config.get("tools.permission.confirmation_timeout", 60))
+        timeout_action = str(config.get("tools.permission.timeout_action", "reject")).lower()
+
         try:
-            await asyncio.wait_for(wait_event.wait(), timeout=timeout)
+            if timeout_action == "block":
+                # 无限等待，直到用户响应或 worker 停止
+                await wait_event.wait()
+            else:
+                timeout = float(config.get("tools.permission.confirmation_timeout", 60))
+                await asyncio.wait_for(wait_event.wait(), timeout=timeout)
             return self._confirmation_results.pop(tool_call_id, False)
         except asyncio.TimeoutError:
-            logger.warning("工具确认超时，自动拒绝: tool_call_id=%s", tool_call_id)
-            return False
+            if timeout_action == "approve":
+                logger.warning("工具确认超时，自动批准: tool_call_id=%s", tool_call_id)
+                return True
+            else:
+                logger.warning("工具确认超时，自动拒绝: tool_call_id=%s", tool_call_id)
+                return False
         finally:
             self._pending_confirmations.pop(tool_call_id, None)
 
@@ -178,7 +193,12 @@ class ToolSessionWorker(SessionWorker):
                 future.set_result({"success": True, "answer": event.payload.get("answer", "")})
 
     async def stop(self) -> None:
-        """停止时取消所有挂起的问题"""
+        """停止时取消所有挂起的问题，并唤醒所有挂起的确认等待"""
+        # 唤醒 block 模式下挂起的确认等待
+        for wait_event in self._pending_confirmations.values():
+            wait_event.set()
+        self._pending_confirmations.clear()
+        self._confirmation_results.clear()
         for future in self._pending_questions.values():
             if not future.done():
                 future.cancel()

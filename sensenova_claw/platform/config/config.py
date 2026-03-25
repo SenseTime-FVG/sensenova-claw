@@ -135,6 +135,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "enabled": False,
             "auto_approve_levels": ["low"],
             "confirmation_timeout": 60,
+            "timeout_action": "reject",  # reject | approve | block
         },
     },
     "skills": {
@@ -279,7 +280,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default": {
             "name": "Default Agent",
             "description": "默认 AI Agent",
-            "model": "mock",
             "temperature": 0.2,
             "tools": [],
             "skills": [],
@@ -288,6 +288,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "delegation": {
         "max_depth": 3,
         "default_timeout": 300,
+        "max_tool_calls": 30,
+        "max_llm_calls": 15,
         "retry": {
             "max_retries": 0,
             "backoff_seconds": [0, 1, 3],

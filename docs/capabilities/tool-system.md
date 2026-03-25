@@ -123,7 +123,7 @@ def _needs_confirmation(self, tool: Tool) -> bool:
 2. 创建 `asyncio.Event` 挂起等待
 3. 前端展示确认对话框，用户操作后发布 `tool.confirmation_response`
 4. 超时时间由 `tools.permission.confirmation_timeout` 控制，默认 60 秒
-5. 超时自动拒绝
+5. 超时行为由 `tools.permission.timeout_action` 控制：`reject`（默认，自动拒绝）、`approve`（自动批准）、`block`（无限等待）
 
 ### 5. 执行工具
 
@@ -223,6 +223,7 @@ tools:
     enabled: false                    # 是否启用权限确认
     auto_approve_levels: ["low"]      # 自动批准的风险等级
     confirmation_timeout: 60          # 确认超时（秒）
+    timeout_action: reject            # 超时策略：reject | approve | block
 
   result_truncation:
     max_tokens: 8000                  # 结果最大 token 数
