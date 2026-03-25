@@ -46,6 +46,8 @@ export interface NotificationCard {
   questionData?: QuestionData;
   allowsInput?: boolean;
   inputPlaceholder?: string;
+  pending?: boolean;
+  pendingAction?: string;
   // 已处理标记
   resolved?: boolean;
   resolvedAction?: string;
@@ -69,6 +71,7 @@ interface NotificationContextValue {
   pushCard: (card: Omit<NotificationCard, 'id' | 'createdAtMs' | 'read'> & { id?: string; createdAtMs?: number }) => void;
   markCardRead: (id: string) => void;
   markAllRead: () => void;
+  markCardPending: (id: string, action?: string) => void;
   resolveCard: (id: string, action?: string) => void;
   dismissCard: (id: string) => void;
   clearAllCards: () => void;
@@ -219,9 +222,30 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     setCards(prev => prev.map(c => ({ ...c, read: true })));
   }, []);
 
+  const markCardPending = useCallback((id: string, action?: string) => {
+    setCards(prev => prev.map(c =>
+      c.id === id && !c.resolved
+        ? { ...c, pending: true, pendingAction: action, read: true }
+        : c
+    ));
+    setActionToasts(prev => prev.map(t =>
+      t.cardId === id
+        ? { ...t, pending: true, pendingAction: action }
+        : t
+    ));
+  }, []);
+
   const resolveCard = useCallback((id: string, action?: string) => {
     setCards(prev => prev.map(c =>
-      c.id === id ? { ...c, resolved: true, resolvedAction: action, read: true } : c
+      c.id === id
+        ? {
+            ...c,
+            pending: false,
+            resolved: true,
+            resolvedAction: action || c.pendingAction,
+            read: true,
+          }
+        : c
     ));
     // 同时移除对应的操作弹窗
     setActionToasts(prev => prev.filter(t => t.cardId !== id));
@@ -239,13 +263,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   // 操作弹窗：用户点击按钮
   const handleActionToastAction = useCallback((toastId: string, cardId: string, actionValue: string, inputValue?: string) => {
-    // 移除弹窗
-    setActionToasts(prev => prev.filter(t => t.id !== toastId));
-    // 标记卡片已处理
-    resolveCard(cardId, actionValue);
+    setActionToasts(prev => prev.map(t =>
+      t.id === toastId
+        ? { ...t, pending: true, pendingAction: actionValue }
+        : t
+    ));
+    markCardPending(cardId, actionValue);
     // 触发回调（发送 WebSocket 响应）
     onActionToastAction?.(cardId, actionValue, inputValue);
-  }, [resolveCard, onActionToastAction]);
+  }, [markCardPending, onActionToastAction]);
 
   // 操作弹窗：用户关闭（不操作）
   const handleActionToastDismiss = useCallback((toastId: string) => {
@@ -267,6 +293,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         pushCard,
         markCardRead,
         markAllRead,
+        markCardPending,
         resolveCard,
         dismissCard,
         clearAllCards,
