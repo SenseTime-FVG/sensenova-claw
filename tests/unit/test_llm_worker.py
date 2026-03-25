@@ -14,11 +14,13 @@ from sensenova_claw.kernel.events.bus import PublicEventBus, PrivateEventBus
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
     ERROR_RAISED,
+    LLM_CALL_DELTA,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
     LLM_CALL_RESULT,
     LLM_CALL_STARTED,
     NOTIFICATION_SESSION,
+    USER_TURN_CANCEL_REQUESTED,
 )
 from sensenova_claw.kernel.runtime.state import SessionStateStore
 from sensenova_claw.kernel.runtime.workers.llm_worker import LLMSessionWorker
@@ -104,6 +106,28 @@ class _SuccessProvider(LLMProvider):
             "tool_calls": [],
             "finish_reason": "stop",
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+
+class _SlowStreamingProvider(LLMProvider):
+    """逐段输出的流式 Provider，用于验证取消时能打断在途流。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def call(self, **kwargs):
+        raise AssertionError("streaming test should not call non-stream path")
+
+    async def stream_call(self, **kwargs):
+        self.calls.append(kwargs)
+        for index in range(1000):
+            await asyncio.sleep(0.05)
+            yield {"type": "delta", "content": f"chunk-{index}"}
+        yield {
+            "type": "finish",
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "tool_calls": [],
         }
 
 
@@ -695,3 +719,63 @@ class TestLLMWorkerTurnCancellation:
 
         assert collected == []
         assert provider.calls == []
+
+    async def test_cancel_request_stops_inflight_stream_and_suppresses_completion(
+        self, private_bus, public_bus, state_store
+    ):
+        factory = LLMFactory()
+        provider = _SlowStreamingProvider()
+        runtime = _SimpleLLMRuntime(factory, state_store)
+        factory._providers["mock"] = provider
+        worker = LLMSessionWorker("s1", private_bus, runtime)
+
+        collected: list[EventEnvelope] = []
+        first_delta = asyncio.Event()
+
+        async def collector():
+            async for evt in public_bus.subscribe():
+                collected.append(evt)
+                if evt.type == LLM_CALL_DELTA:
+                    first_delta.set()
+
+        collect_task = asyncio.create_task(collector())
+        await asyncio.sleep(0.01)
+
+        request = EventEnvelope(
+            type=LLM_CALL_REQUESTED,
+            session_id="s1",
+            turn_id="t1",
+            payload={
+                "llm_call_id": "llm_stream_cancel",
+                "provider": "mock",
+                "model": "mock-agent-v1",
+                "messages": [{"role": "user", "content": "repeat abc"}],
+                "stream": True,
+            },
+        )
+        cancel = EventEnvelope(
+            type=USER_TURN_CANCEL_REQUESTED,
+            session_id="s1",
+            turn_id="t1",
+            payload={"reason": "user_cancel"},
+        )
+
+        try:
+            await worker._handle(request)
+            await asyncio.wait_for(first_delta.wait(), timeout=1)
+            await worker._handle(cancel)
+            await asyncio.sleep(0.2)
+        finally:
+            collect_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await collect_task
+            await worker.stop()
+
+        delta_events = [event for event in collected if event.type == LLM_CALL_DELTA]
+        event_types = [event.type for event in collected]
+
+        assert provider.calls != []
+        assert LLM_CALL_STARTED in event_types
+        assert len(delta_events) == 1
+        assert LLM_CALL_RESULT not in event_types
+        assert LLM_CALL_COMPLETED not in event_types

@@ -78,3 +78,30 @@ def test_map_error_exposes_error_code_and_user_message():
         },
         "timestamp": event.ts,
     }
+
+
+def test_map_turn_cancelled_error_as_turn_cancelled_event():
+    channel = WebSocketChannel("websocket")
+    event = EventEnvelope(
+        type=ERROR_RAISED,
+        session_id="sess_cancel",
+        turn_id="turn_cancel",
+        payload={
+            "error_type": "TurnCancelled",
+            "error_message": "user_cancel",
+            "context": {"cancelled": True},
+        },
+    )
+
+    mapped = channel._map(event)
+
+    assert mapped == {
+        "type": "turn_cancelled",
+        "session_id": "sess_cancel",
+        "payload": {
+            "turn_id": "turn_cancel",
+            "reason": "user_cancel",
+            "cancelled": True,
+        },
+        "timestamp": event.ts,
+    }

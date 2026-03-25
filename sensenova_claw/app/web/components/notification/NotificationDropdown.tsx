@@ -21,7 +21,6 @@ import type { NotificationCard, NotificationCardKind } from '@/components/notifi
 
 const AGENT_PAGE_MAP: Record<string, string> = {
   'ppt-agent': '/ppt',
-  'search-agent': '/research',
 };
 
 // ── 卡片图标 & 配色 ──

@@ -109,14 +109,16 @@ function AgentContactItem({
 /* ── Session 列表项（中栏） ── */
 
 function SessionListItem({
-  session, isActive, onClick, onDelete, index, indent,
+  session, isActive, onClick, onDelete, index, isChild, isLast, noMargin,
 }: {
   session: SessionItem;
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
   index: number;
-  indent?: boolean;
+  isChild?: boolean;
+  isLast?: boolean;
+  noMargin?: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -131,30 +133,73 @@ function SessionListItem({
     }
   };
 
+  if (isChild) {
+    return (
+      <div className="flex items-stretch">
+        {/* 树形连线 */}
+        <div className="w-5 shrink-0 flex flex-col items-center">
+          <div className={cn(
+            'w-px flex-1 bg-violet-300/40 dark:bg-violet-500/25',
+            isLast && 'max-h-[50%]',
+          )} />
+          {isLast && <div className="flex-1" />}
+        </div>
+        <div className="flex items-center -ml-[3px]">
+          <div className="w-2.5 h-px bg-violet-300/40 dark:bg-violet-500/25" />
+        </div>
+        <div
+          onClick={onClick}
+          className={cn(
+            'flex items-center gap-2 flex-1 min-w-0 px-2.5 py-2 rounded-lg cursor-pointer transition-all group',
+            'animate-in fade-in duration-150',
+            isActive
+              ? 'bg-violet-100/80 text-foreground shadow-sm dark:bg-violet-900/30'
+              : 'hover:bg-violet-50/60 text-foreground/70 dark:hover:bg-violet-900/10',
+          )}
+          style={{ animationDelay: `${index * 30}ms`, animationFillMode: 'both' }}
+        >
+          <div className={cn(
+            'w-1.5 h-1.5 rounded-full shrink-0',
+            isActive ? 'bg-violet-500' : 'bg-violet-300/60 dark:bg-violet-500/40',
+          )} />
+          <div className="flex-1 min-w-0">
+            <div className="truncate text-[11px] font-medium">{getTitle(session.meta)}</div>
+            <div className="text-[9px] text-muted-foreground/50 mt-0.5">{timeLabel(session.last_active)}</div>
+          </div>
+          <button
+            onClick={handleDelete}
+            className={cn(
+              'shrink-0 p-0.5 rounded transition-colors',
+              confirmDelete
+                ? 'opacity-100 text-destructive hover:bg-destructive/10'
+                : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10',
+            )}
+            title={confirmDelete ? '确认删除' : '删除会话'}
+          >
+            <Trash2 className="w-2.5 h-2.5" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       onClick={onClick}
       className={cn(
-        'flex items-center gap-2.5 px-3 py-2.5 mx-2 rounded-xl cursor-pointer transition-all text-sm group relative',
+        'flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-all text-sm group relative',
         'animate-in fade-in slide-in-from-left-2 duration-200',
-        indent && 'ml-6 border-l-2 border-muted-foreground/10 rounded-l-none pl-2.5',
+        !noMargin && 'mx-2',
         isActive ? 'bg-blue-100 dark:bg-blue-900/40 text-foreground shadow-md' : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
       )}
       style={{ animationDelay: `${index * 30}ms`, animationFillMode: 'both' }}
     >
-      {indent ? (
-        <GitBranch className={cn(
-          'w-3.5 h-3.5 shrink-0',
-          isActive ? 'text-blue-400' : 'text-muted-foreground/40',
-        )} />
-      ) : (
-        <MessageSquare className={cn(
-          'w-4 h-4 shrink-0',
-          isActive ? 'text-blue-500' : 'text-muted-foreground',
-        )} />
-      )}
+      <MessageSquare className={cn(
+        'w-4 h-4 shrink-0',
+        isActive ? 'text-blue-500' : 'text-muted-foreground',
+      )} />
       <div className="flex-1 min-w-0">
-        <div className={cn('truncate font-medium', indent ? 'text-[11px]' : 'text-xs')}>{getTitle(session.meta)}</div>
+        <div className="truncate font-medium text-xs">{getTitle(session.meta)}</div>
         <div className="text-[10px] text-muted-foreground mt-0.5">{timeLabel(session.last_active)}</div>
       </div>
       <button
@@ -203,36 +248,45 @@ function SessionListGroup({
   };
 
   return (
-    <div>
-      <div className="relative">
-        <SessionListItem
-          session={session}
-          isActive={currentSessionId === session.session_id}
-          onClick={() => switchSession(session.session_id)}
-          onDelete={() => deleteSession(session.session_id)}
-          index={index}
-        />
-        {childSessions.length > 0 && (
-          <button
-            onClick={toggleExpand}
-            className="absolute left-1 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-background border border-border/60 hover:bg-muted transition-colors z-10"
-            title={expanded ? '收起派生会话' : `展开 ${childSessions.length} 个派生会话`}
-          >
-            {expanded
-              ? <ChevronDown className="w-2.5 h-2.5 text-muted-foreground" />
-              : <ChevronRight className="w-2.5 h-2.5 text-muted-foreground" />
-            }
-          </button>
+    <div className={cn(
+      'mx-2 rounded-xl transition-colors',
+      expanded && 'bg-violet-50/40 dark:bg-violet-950/20 pb-1.5',
+    )}>
+      {/* 主会话 */}
+      <SessionListItem
+        session={session}
+        isActive={currentSessionId === session.session_id}
+        onClick={() => switchSession(session.session_id)}
+        onDelete={() => deleteSession(session.session_id)}
+        index={index}
+        noMargin
+      />
+
+      {/* 展开/收起按钮 */}
+      <button
+        onClick={toggleExpand}
+        className={cn(
+          'flex items-center gap-1.5 w-full pl-6 pr-3 py-1 transition-colors',
+          'text-[10px] font-medium',
+          expanded
+            ? 'text-violet-500 dark:text-violet-400'
+            : 'text-muted-foreground/50 hover:text-violet-500 dark:hover:text-violet-400',
         )}
-        {!expanded && childSessions.length > 0 && (
-          <span className="absolute right-10 top-1/2 -translate-y-1/2 flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-muted/60 text-[9px] text-muted-foreground/70">
-            <GitBranch className="w-2.5 h-2.5" />
-            {childSessions.length}
-          </span>
-        )}
-      </div>
-      {expanded && childSessions.length > 0 && (
-        <div className="space-y-0.5">
+      >
+        <div className="flex items-center gap-1">
+          {expanded
+            ? <ChevronDown className="w-3 h-3" />
+            : <ChevronRight className="w-3 h-3" />
+          }
+          <GitBranch className="w-3 h-3" />
+        </div>
+        <span>{childSessions.length} 个团队会话</span>
+        <div className="flex-1 h-px bg-current opacity-10 ml-1" />
+      </button>
+
+      {/* 子会话列表 */}
+      {expanded && (
+        <div className="pl-4 pr-1">
           {childSessions.map((child, childIdx) => (
             <SessionListItem
               key={child.session_id}
@@ -241,7 +295,8 @@ function SessionListGroup({
               onClick={() => switchSession(child.session_id)}
               onDelete={() => deleteSession(child.session_id)}
               index={index + 1 + childIdx}
-              indent
+              isChild
+              isLast={childIdx === childSessions.length - 1}
             />
           ))}
         </div>
