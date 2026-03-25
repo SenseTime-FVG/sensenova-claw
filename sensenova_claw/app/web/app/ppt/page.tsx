@@ -27,76 +27,31 @@ import { StoryboardPanel } from '@/components/ppt/StoryboardPanel';
 import { StylePanel } from '@/components/ppt/StylePanel';
 import { ReviewPanel, type PageIssue } from '@/components/ppt/ReviewPanel';
 import { SpeakerNotesPanel } from '@/components/ppt/SpeakerNotesPanel';
+import { AssetPanel } from '@/components/ppt/AssetPanel';
 import { ExportDropdown } from '@/components/ppt/ExportDropdown';
 import { TemplateStrip, type TemplateItem } from '@/components/ppt/TemplateSelector';
 import { useDeckData } from '@/hooks/useDeckData';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { Button } from '@/components/ui/button';
 import {
-  Presentation, Upload, FileDown, Sparkles, Wand2,
-  Palette, ShieldCheck, Mic,
-  Search as SearchIcon, BookOpen, Layers, FileText, ArrowRight, Loader2,
-  RefreshCw, Plus, MessageSquare, Trash2, Clock,
+  Presentation, Upload, FileDown,
+  Palette, ShieldCheck, Mic, Image as ImageIcon,
+  Layers, Loader2,
+  RefreshCw, Plus, MessageSquare, Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { type SessionItem, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
 
-// ── 快捷模板入口 ──
-
-const QUICK_TEMPLATES = [
-  { label: '商业路演', prompt: '帮我制作一份商业路演 PPT，包含项目背景、市场分析、商业模式、团队介绍和融资计划', emoji: '🏢' },
-  { label: '技术分享', prompt: '帮我制作一份技术分享 PPT，主题是', emoji: '💻' },
-  { label: '年度总结', prompt: '帮我制作一份年度工作总结 PPT，包含业绩回顾、项目成果、个人成长和来年规划', emoji: '📊' },
-  { label: '产品介绍', prompt: '帮我制作一份产品介绍 PPT，包含产品概述、核心功能、竞品对比和未来规划', emoji: '🚀' },
-  { label: '教学课件', prompt: '帮我制作一份教学课件 PPT，主题是', emoji: '📚' },
-  { label: '项目汇报', prompt: '帮我制作一份项目进展汇报 PPT，包含项目目标、当前进度、风险与问题、下一步计划', emoji: '📋' },
-];
-
-// ── Pipeline 阶段大卡（欢迎页用） ──
-
-const PIPELINE_STAGES_DISPLAY = [
-  { icon: SearchIcon, title: '素材研究', subtitle: 'Research Pack', gradient: 'from-amber-500/15 to-orange-500/10', accent: 'text-amber-600 dark:text-amber-400', ring: 'ring-amber-500/20' },
-  { icon: BookOpen,   title: '叙事编排', subtitle: 'Storyboard',    gradient: 'from-sky-500/15 to-blue-500/10',     accent: 'text-sky-600 dark:text-sky-400',     ring: 'ring-sky-500/20' },
-  { icon: Palette,    title: '风格定义', subtitle: 'Style Spec',    gradient: 'from-violet-500/15 to-purple-500/10', accent: 'text-violet-600 dark:text-violet-400', ring: 'ring-violet-500/20' },
-  { icon: Layers,     title: '资源规划', subtitle: 'Asset Plan',    gradient: 'from-emerald-500/15 to-teal-500/10',  accent: 'text-emerald-600 dark:text-emerald-400', ring: 'ring-emerald-500/20' },
-  { icon: FileText,   title: '页面生成', subtitle: 'Page HTML',     gradient: 'from-rose-500/15 to-pink-500/10',     accent: 'text-rose-600 dark:text-rose-400',     ring: 'ring-rose-500/20' },
-];
-
-function PipelineVisualHero() {
-  return (
-    <div className="flex items-center gap-2 overflow-x-auto px-1 py-2 scrollbar-none">
-      {PIPELINE_STAGES_DISPLAY.map((stage, idx) => {
-        const Icon = stage.icon;
-        return (
-          <div key={stage.subtitle} className="flex items-center gap-2 shrink-0">
-            <div className={cn('flex items-center gap-3 rounded-xl bg-gradient-to-br px-4 py-3 ring-1 transition-all duration-200 hover:scale-[1.03] hover:shadow-md cursor-default', stage.gradient, stage.ring)}>
-              <div className={cn('shrink-0', stage.accent)}>
-                <Icon className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-foreground/90 leading-tight">{stage.title}</div>
-                <div className="text-[10px] text-muted-foreground/70 leading-tight mt-0.5">{stage.subtitle}</div>
-              </div>
-            </div>
-            {idx < PIPELINE_STAGES_DISPLAY.length - 1 && (
-              <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/30 shrink-0" />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ── 左栏 Tab 定义 ──
 
-type LeftTab = 'outline' | 'style' | 'review' | 'notes';
+type LeftTab = 'outline' | 'style' | 'assets' | 'review' | 'notes';
 
 const LEFT_TABS: { id: LeftTab; label: string; icon: React.ElementType }[] = [
   { id: 'outline', label: '大纲',   icon: Layers },
   { id: 'style',   label: '风格',   icon: Palette },
+  { id: 'assets',  label: '资产',   icon: ImageIcon },
   { id: 'review',  label: '审查',   icon: ShieldCheck },
   { id: 'notes',   label: '讲稿',   icon: Mic },
 ];
@@ -167,15 +122,7 @@ function PPTWorkspace() {
   const [leftTab, setLeftTab] = useState<LeftTab>('outline');
   const [previewPptx, setPreviewPptx] = useState<DroppedFile | null>(null);
   const [loadingDrop, setLoadingDrop] = useState(false);
-  const [showWelcome, setShowWelcome] = useState(true);
   const dropContainerRef = useRef<HTMLDivElement>(null);
-
-  // 当有 deck 数据时切换到工作区模式
-  useEffect(() => {
-    if (deckData.deckDir || (messages.length > 0 && messages.some(m => m.role === 'assistant'))) {
-      setShowWelcome(false);
-    }
-  }, [deckData.deckDir, messages]);
 
   // 同步活动页到 SlideViewer
   const handlePageSelect = useCallback((pageNumber: number) => {
@@ -198,7 +145,6 @@ function PPTWorkspace() {
   const handleTemplateSelect = useCallback((template: TemplateItem) => {
     const prompt = `帮我制作一份 PPT，使用「${template.name}」风格模板。${template.description}`;
     sendMessage(prompt, [], 'ppt-agent');
-    setShowWelcome(false);
   }, [sendMessage]);
 
   // 拖拽接收
@@ -238,57 +184,6 @@ function PPTWorkspace() {
 
   const hasDeck = !!deckData.slideSet || !!deckData.storyboard;
   const stages = hasDeck ? deckData.stages : DEFAULT_STAGES;
-
-  // ── 欢迎状态（首次创建） ──
-  if (showWelcome && !currentSessionId) {
-    return (
-      <div ref={setRef} className="flex flex-col h-full">
-        {/* 欢迎页 Hero */}
-        <div className="flex-1 flex flex-col items-center justify-center px-6 py-10 overflow-auto">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/8 text-primary text-xs font-medium mb-4">
-              <Wand2 className="w-3.5 h-3.5" />
-              AI 驱动的演示文稿工作流
-            </div>
-            <h2 className="text-2xl font-bold text-foreground tracking-tight mb-2">创建专业演示文稿</h2>
-            <p className="text-sm text-muted-foreground max-w-lg mx-auto leading-relaxed">
-              描述你的需求，AI 将自动完成研究、编排、设计到页面生成的完整流水线
-            </p>
-          </div>
-          <div className="w-full max-w-3xl mb-8"><PipelineVisualHero /></div>
-          <div className="w-full max-w-2xl mb-8">
-            <div className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider mb-3 px-1">快速开始</div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {QUICK_TEMPLATES.map(tpl => (
-                <button key={tpl.label} onClick={() => { sendMessage(tpl.prompt, [], 'ppt-agent'); setShowWelcome(false); }}
-                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl text-left transition-all duration-200 border border-border/50 hover:border-primary/30 hover:bg-primary/5 hover:shadow-sm group cursor-pointer">
-                  <span className="text-lg shrink-0">{tpl.emoji}</span>
-                  <span className="text-sm font-medium text-foreground/80 group-hover:text-foreground transition-colors">{tpl.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          {/* 拖拽区 */}
-          <div className={cn(
-            'w-full max-w-md rounded-2xl border-2 border-dashed px-8 py-6 text-center transition-all duration-300',
-            isOver && canDrop ? 'border-primary bg-primary/5 scale-[1.02]' : 'border-border/40 hover:border-border/60',
-          )}>
-            {loadingDrop ? (
-              <p className="text-sm text-muted-foreground">加载中...</p>
-            ) : isOver && canDrop ? (
-              <><Upload className="w-8 h-8 text-primary/60 mx-auto mb-2" /><p className="text-sm font-medium text-primary/80">释放以预览</p></>
-            ) : (
-              <><Sparkles className="w-6 h-6 text-muted-foreground/30 mx-auto mb-2" /><p className="text-xs text-muted-foreground/60">或从文件面板拖入 HTML 文件夹 / PPTX 文件预览</p></>
-            )}
-          </div>
-        </div>
-        {/* 底栏模板条 */}
-        <div className="shrink-0 border-t border-border/40 bg-muted/10">
-          <TemplateStrip onSelect={handleTemplateSelect} />
-        </div>
-      </div>
-    );
-  }
 
   // ── 工作台模式（三栏布局） ──
   return (
@@ -335,6 +230,7 @@ function PPTWorkspace() {
                 const isActive = leftTab === tab.id;
                 const hasBadge =
                   (tab.id === 'style' && !!deckData.styleSpec) ||
+                  (tab.id === 'assets' && !!deckData.assetPlan) ||
                   (tab.id === 'review' && !!deckData.review) ||
                   (tab.id === 'notes' && !!deckData.speakerNotes);
 
@@ -373,6 +269,12 @@ function PPTWorkspace() {
                 <StylePanel
                   styleSpec={deckData.styleSpec}
                   onRefineRequest={handleStyleRefine}
+                />
+              )}
+              {leftTab === 'assets' && (
+                <AssetPanel
+                  assetPlan={deckData.assetPlan}
+                  deckDir={deckData.deckDir}
                 />
               )}
               {leftTab === 'review' && (

@@ -128,6 +128,17 @@ export function inferStagesFromFiles(fileNames: string[]): PipelineStage[] {
   if (has('page_'))        stages[5].status = 'done';
   if (has('review'))       stages[6].status = 'done';
 
+  // 如果某个 pending 阶段后面已有 done 阶段，说明被跳过，也标记为 done
+  let lastDone = -1;
+  for (let i = stages.length - 1; i >= 0; i--) {
+    if (stages[i].status === 'done') { lastDone = i; break; }
+  }
+  if (lastDone > 0) {
+    for (let i = 0; i < lastDone; i++) {
+      if (stages[i].status === 'pending') stages[i].status = 'done';
+    }
+  }
+
   // 找到第一个未完成的阶段标记为 active
   const firstPending = stages.findIndex(s => s.status === 'pending');
   if (firstPending > 0) {

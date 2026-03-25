@@ -294,12 +294,24 @@ async def list_workdir_slides(
         raise HTTPException(404, f"目录不存在: {dir}")
 
     slides: list[dict] = []
-    for entry in sorted(resolved.iterdir(), key=lambda e: e.name):
+    # 先扫描指定目录，找不到 HTML 时再扫描 pages/ 子目录
+    scan_dir = resolved
+    for entry in sorted(scan_dir.iterdir(), key=lambda e: e.name):
         if entry.is_file() and entry.suffix.lower() == ".html":
             slides.append({
                 "name": entry.name,
                 "path": str(entry.relative_to(workdir)).replace("\\", "/"),
             })
+
+    if not slides:
+        pages_dir = resolved / "pages"
+        if pages_dir.is_dir():
+            for entry in sorted(pages_dir.iterdir(), key=lambda e: e.name):
+                if entry.is_file() and entry.suffix.lower() == ".html":
+                    slides.append({
+                        "name": entry.name,
+                        "path": str(entry.relative_to(workdir)).replace("\\", "/"),
+                    })
 
     return {"dir": dir, "slides": slides}
 

@@ -93,7 +93,7 @@ export function StylePanel({
   }
 
   const colorEntries = Object.entries(styleSpec.color_roles || {}).filter(
-    ([, v]) => typeof v === 'string' || typeof v === 'number',
+    ([, v]) => typeof v === 'string',
   );
   const keywords = styleSpec.design_keywords || [];
   const typography = styleSpec.typography || {};
@@ -147,7 +147,7 @@ export function StylePanel({
             <span className="text-[11px] font-bold text-foreground/80 uppercase tracking-wider">字体</span>
           </div>
           <div className="space-y-1.5">
-            {Object.entries(typography).filter(([, v]) => v).map(([key, val]) => (
+            {Object.entries(typography).filter(([, v]) => v && typeof v === 'string').map(([key, val]) => (
               <div key={key} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-muted/30">
                 <span className="text-[10px] text-muted-foreground capitalize">{key.replace(/_/g, ' ')}</span>
                 <span className="text-[11px] font-medium text-foreground/80">{val}</span>
