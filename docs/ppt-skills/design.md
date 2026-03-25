@@ -156,6 +156,7 @@
 
 - 页面叙事和页面生成的控制面
 - 前端阶段展示和局部编辑的稳定契约
+- research 的消费层；把可上页的 claim、evidence 和缺口显式落到页面级对象
 
 ### 3.6 上传文件必须先分类
 
@@ -272,6 +273,8 @@ pageworthy chunks 是 storyboard 的上游输入。
 #### `ppt-storyboard`
 
 负责分页叙事和前端契约，产出 `storyboard.json`。默认必产。
+storyboard 是 research 的消费层，不允许只把 research 主题词重新改写成页面摘要；每页必须能说明主 claim 和 evidence 从哪里来。
+如果 research 里存在缺口、证据不足或待确认项，必须在页面级 `content_blocks[].unresolved_gaps` 或页级未解决项里显式保留，不要静默吞掉。
 其中每页的 `style_variant` 必须直接引用 `style-spec.json` 中已声明的 variant 映射，不要把它写成宽泛形容词。
 `asset_requirements` 也不能只写模糊槽位名；要带上 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder` 这类类型提示。
 资产类型判断必须先看页面语义。如果页面要呈现人物、产品、空间、场景、活动现场、作品样张或环境氛围，默认应规划为 `real-photo`；`插画感` 只影响装饰语法，不要因为风格里有插画感，就把整套 deck 的图片需求都改成 `svg-illustration`。
@@ -584,17 +587,24 @@ class ContentBlock:
     block_id: str
     heading: str
     summary: str
-    evidence_refs: list[str]
+    source_claim_ids: list[str]
+    source_evidence_ids: list[str]
+    unresolved_gaps: list[str]
 ```
 
 设计要求：
 
+- storyboard 是 research 的消费层
 - 消费前必须先确认依赖文件真实存在且可读
 - 如果目标文件不存在、路径不一致或关键字段缺失，先补齐依赖，不要猜测
 - 页数必须与 `task-pack.json` 对齐
 - 内容语言必须默认与用户 query 保持一致
 - 允许前端稳定渲染页面列表
 - 允许后续 skill 基于 `page_id` 做局部重写
+- 不允许只拿 research 主题词重新写一遍
+- 每页必须能说明主 claim 和 evidence 从哪里来
+- 每个 `ContentBlock` 都必须显式记录 `source_claim_ids` 与 `source_evidence_ids`
+- 缺证据时要显式记录 `unresolved_gaps`
 - `style_variant` 必须直接引用 `style-spec.json` 中已声明的 variant 映射
 - `style_variant` 不要把它写成宽泛形容词；后续 `ppt-page-html` 可直接按 variant 落地
 - `asset_requirements` 不要只写模糊的槽位名，应带 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder` 这类类型提示

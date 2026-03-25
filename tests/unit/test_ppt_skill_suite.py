@@ -219,6 +219,28 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("信息缺口", body)
         self.assertIn("证据不确定性", body)
 
+    def test_ppt_storyboard_declares_research_traceback_fields(self):
+        skills = _load_workspace_skills()
+
+        body = skills["ppt-storyboard"]
+
+        self.assertIn("source_claim_ids: list[str]", body)
+        self.assertIn("source_evidence_ids: list[str]", body)
+        self.assertIn("unresolved_gaps: list[str]", body)
+        self.assertIn("storyboard 是 research 的消费层", body)
+        self.assertIn("不允许只拿 research 主题词重新写一遍", body)
+        self.assertIn("每页必须能说明主 claim 和 evidence 从哪里来", body)
+        self.assertIn("缺证据时要显式记录 `unresolved_gaps`", body)
+
+    def test_ppt_design_doc_declares_storyboard_as_research_consumer(self):
+        content = DESIGN_DOC.read_text(encoding="utf-8")
+
+        self.assertIn("storyboard 是 research 的消费层", content)
+        self.assertIn("source_claim_ids", content)
+        self.assertIn("source_evidence_ids", content)
+        self.assertIn("unresolved_gaps", content)
+        self.assertIn("缺证据时要显式记录 `unresolved_gaps`", content)
+
     def test_key_ppt_skills_define_user_feedback_hooks(self):
         skills = _load_workspace_skills()
 
