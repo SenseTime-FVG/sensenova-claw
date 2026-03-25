@@ -382,9 +382,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Sensenova-Claw Backend", version="0.1.0", lifespan=lifespan)
+# CORS 配置：开发环境允许所有 Origin（Cursor 端口转发兼容）
+cors_origins = config.get("server.cors_origins", [])
+if not cors_origins:
+    cors_origins = ["*"]  # 未配置时允许所有 Origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.get("server.cors_origins", []),
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

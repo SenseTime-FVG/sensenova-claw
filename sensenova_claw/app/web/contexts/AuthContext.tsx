@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 const COOKIE_NAME = 'sensenova_claw_token';
 const AUTH_JUST_VERIFIED_KEY = 'auth_just_verified';
 
