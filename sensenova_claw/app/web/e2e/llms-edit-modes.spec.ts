@@ -170,6 +170,75 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
   }).toBe(1);
 });
 
+test('llms 页面只显示用户显式配置过的 provider', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: { source_type: 'openai', api_key: '', base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
+          anthropic: { source_type: 'anthropic', api_key: '', base_url: 'https://api.anthropic.com', timeout: 60, max_retries: 3 },
+          deepseek: { source_type: 'deepseek', api_key: { configured: true, masked_value: 'sk-••••deep', source: 'config' }, base_url: 'https://api.deepseek.com', timeout: 60, max_retries: 3 },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          'deepseek-chat': { provider: 'deepseek', model_id: 'deepseek-chat', timeout: 60, max_output_tokens: 8192 },
+        },
+        default_model: 'deepseek-chat',
+        _meta: {
+          explicit_provider_names: ['deepseek'],
+        },
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['deepseek'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+
+  await expect(page.getByTestId('provider-card-deepseek')).toBeVisible();
+  await expect(page.getByTestId('provider-card-openai')).toHaveCount(0);
+  await expect(page.getByTestId('provider-card-anthropic')).toHaveCount(0);
+  await expect(page.getByTestId('llm-card-deepseek-chat')).toHaveCount(0);
+
+  await page.getByTestId('provider-toggle-deepseek').click();
+  await expect(page.getByTestId('llm-card-deepseek-chat')).toBeVisible();
+});
+
 test('llms 页面新增 provider 后应支持单项编辑并保存', async ({ page }) => {
   const token = readCurrentToken();
   await page.context().addCookies([{

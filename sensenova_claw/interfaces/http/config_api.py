@@ -99,7 +99,20 @@ async def get_config_sections(request: Request):
     """返回 llm / agent / plugins / miniapps 四个 section 的当前值"""
     config_manager = request.app.state.config_manager
     default_sections = ["llm", "agent", "plugins", "miniapps"]
-    return config_manager.get_sections(default_sections)
+    sections = config_manager.get_sections(default_sections)
+    raw_config = config_manager._load_raw_yaml()
+    raw_llm = raw_config.get("llm", {}) if isinstance(raw_config, dict) else {}
+    raw_providers = raw_llm.get("providers", {}) if isinstance(raw_llm, dict) else {}
+    explicit_provider_names = [
+        name for name, value in raw_providers.items()
+        if isinstance(name, str) and isinstance(value, dict)
+    ]
+    llm_section = sections.get("llm", {})
+    if isinstance(llm_section, dict):
+        llm_section["_meta"] = {
+            "explicit_provider_names": explicit_provider_names,
+        }
+    return sections
 
 
 @router.get("/acp/wizard")

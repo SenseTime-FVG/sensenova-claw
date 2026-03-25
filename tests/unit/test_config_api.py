@@ -63,6 +63,7 @@ def test_get_sections(client):
     assert data["agent"]["model"] == "gpt-5.4"
     assert data["llm"]["providers"]["openai"]["api_key"]["configured"] is True
     assert data["llm"]["providers"]["openai"]["api_key"]["source"] == "plain"
+    assert data["llm"]["_meta"]["explicit_provider_names"] == ["openai"]
     assert data["miniapps"]["default_builder"] == "builtin"
     assert data["miniapps"]["acp"]["request_timeout_seconds"] == 180
 

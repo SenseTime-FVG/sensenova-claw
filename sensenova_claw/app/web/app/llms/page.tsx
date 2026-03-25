@@ -45,6 +45,10 @@ interface GlobalDraft {
   defaultModel: string;
 }
 
+interface LlmMeta {
+  explicit_provider_names?: string[];
+}
+
 interface ModelTestResult {
   success: boolean;
   message: string;
@@ -104,14 +108,23 @@ export default function LlmsPage() {
       .then((data) => {
         const llm = data?.llm || {};
         const normalizedProviders = normalizeProviders(llm.providers || {});
+        const explicitProviderNames = normalizeExplicitProviderNames(llm._meta);
         const { mock, ...realProviders } = normalizedProviders;
+        const visibleProviders = explicitProviderNames.length > 0
+          ? Object.fromEntries(
+            Object.entries(realProviders).filter(([name]) => explicitProviderNames.includes(name)),
+          )
+          : {};
         const rawModels = normalizeModels(llm.models || {});
         const { mock: _mockModel, ...realModels } = rawModels;
-        setProviders(realProviders);
-        setModels(realModels);
-        setDefaultModel(llm.default_model || '');
+        const visibleModels = Object.fromEntries(
+          Object.entries(realModels).filter(([, model]) => model.provider in visibleProviders),
+        );
+        setProviders(visibleProviders);
+        setModels(visibleModels);
+        setDefaultModel(llm.default_model && llm.default_model in visibleModels ? llm.default_model : '');
         setExpandedProviders(
-          Object.fromEntries(Object.keys(realProviders).map((name) => [name, false])),
+          Object.fromEntries(Object.keys(visibleProviders).map((name) => [name, false])),
         );
         setEditingAll(false);
         setEditingProvider(null);
@@ -1478,6 +1491,13 @@ function normalizeProviders(input: Record<string, unknown>): Record<string, Prov
       ];
     }),
   );
+}
+
+function normalizeExplicitProviderNames(input: unknown): string[] {
+  if (!input || typeof input !== 'object') return [];
+  const meta = input as LlmMeta;
+  if (!Array.isArray(meta.explicit_provider_names)) return [];
+  return meta.explicit_provider_names.filter((name): name is string => typeof name === 'string');
 }
 
 function normalizeModels(input: Record<string, unknown>): Record<string, ModelConfig> {
