@@ -82,6 +82,8 @@ HTML 必须保留这些层级：
 - 必须显式消费 `background_system`、`foreground_motifs`、`component_skins`、`density_rules`、`page_type_variants` 这些风格控制字段。
 - 优先按 `style_variant` 映射页面壳子；只有缺少 variant 映射时，才允许退回 `page_type` 层级。
 - `style-spec.json` 里的 `variant_key`、`layout_shell`、`header_strategy` 必须被具体落地，不要只把它们当参考文字。
+- 可见标题必须放在 `#ct` 内，或放在单独的 `#header` 容器内。
+- 不要把 `.header` 当作 `#bg` 和 `#ct` 之间的裸兄弟节点，否则很容易被内容层盖住。
 - 必须显式消费 `svg_motif_library` 与 variant 的 `required_svg_motifs`。
 - 非极简页面必须至少 1 层背景装饰，且至少 1 处前景装饰。
 - 如果页面只有纯色或渐变背景，而没有按 recipe 落地 motif，应视为未完成。
