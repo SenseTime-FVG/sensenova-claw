@@ -87,7 +87,10 @@ class TaskPack:
 - `deck_dir` 必须在这里被明确固定，后续所有 skill 都复用同一个输出目录。
 - 后续 skill 只能直接复制这个值，不要自行改写、缩写、翻译或重拼目录名。
 - 如果用户没有指定输出地点，`deck_dir` 应使用 `query概述 + 时间戳` 自动创建，而不是把产物直接写到当前目录顶层。
+- `known_gaps` 保留“当前已知但尚未补齐的问题清单”角色，适合记录用户未提供的信息、待确认项、缺失材料等简短缺口。
 - `content_gap_assessment` 必须显式列出当前内容还缺什么、为什么缺，以及这些缺口会阻塞哪些后续判断。
+- `content_gap_assessment` 负责更结构化的判断，用来解释缺口对 research、分页叙事和内容决策的影响。
+- 避免两个字段看起来重复：`known_gaps` 记录现象，`content_gap_assessment` 记录判断。
 - `research_required` 由 `task-pack.json` 自己判断并显式记录。
 - `research_needs` 必须把需要补充的 topic、reason、scope、priority 写清楚，避免 research 退化成泛化搜索。
 - 不允许在 `task-pack` 之前做外部 research 决策。

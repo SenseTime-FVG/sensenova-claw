@@ -32,7 +32,7 @@ research 不是摘要，而是“可上页内容池”。
 - `claims`
 - `evidence_points`
 - `pageworthy_chunks`
-- 已知信息缺口
+- `risks_or_uncertainties`
 
 建议最小结构：
 
@@ -72,6 +72,7 @@ class ResearchPack:
 - 研究包是内容依据，不是页面大纲。
 - research 不是摘要，而是“可上页内容池”。
 - `pageworthy_chunks` 是 storyboard 的上游输入。
+- `risks_or_uncertainties` 统一承接信息缺口与证据不确定性，不再额外拆成另一套“已知信息缺口”字段语义。
 - 不要在研究阶段先决定最终页面布局。
 - 不要虚构事实、数据或案例。
 - 如果外部检索结果不稳定，必须写明不确定性。

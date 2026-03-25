@@ -430,7 +430,10 @@ class ResearchNeed:
 - 后续 skill 只能直接复制这个值，不要手写、缩写、翻译或重拼目录名
 - 如果用户未指定目录，`deck_dir` 使用 `query概述 + 时间戳` 自动创建
 - 不允许把工件散落写到 agent 根目录
+- `known_gaps` 保留“当前已知但尚未补齐的问题清单”角色，记录用户未提供的信息、待确认项和缺失材料
 - `content_gap_assessment` 负责显式记录当前内容缺什么、为什么缺、会阻塞什么
+- `content_gap_assessment` 负责更结构化的判断，用来解释这些缺口为什么会触发 research 或影响后续内容决策
+- 避免两个字段看起来重复：`known_gaps` 记录现象，`content_gap_assessment` 记录判断
 - `research_required` 由 `task-pack.json` 自己判断并显式记录
 - `research_needs` 负责把 research topic、reason、scope、priority 写成稳定输入
 - 不允许在 `task-pack` 之前做外部 research 决策

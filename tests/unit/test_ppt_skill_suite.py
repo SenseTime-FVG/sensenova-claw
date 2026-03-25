@@ -174,15 +174,50 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("content_gap_assessment", body)
         self.assertIn("research_required", body)
         self.assertIn("research_needs", body)
+        self.assertIn("class ResearchNeed", body)
+        self.assertIn("topic: str", body)
+        self.assertIn("reason: str", body)
+        self.assertIn("scope: list[str]", body)
+        self.assertIn("priority: str", body)
+
+    def test_ppt_task_pack_separates_known_gaps_from_content_gap_assessment(self):
+        skills = _load_workspace_skills()
+
+        skill_body = skills["ppt-task-pack"]
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        self.assertIn("`known_gaps`", skill_body)
+        self.assertIn("`content_gap_assessment`", skill_body)
+        self.assertIn("`known_gaps` 保留", skill_body)
+        self.assertIn("`content_gap_assessment` 负责", skill_body)
+        self.assertIn("避免两个字段看起来重复", skill_body)
+
+        self.assertIn("`known_gaps` 保留", design)
+        self.assertIn("`content_gap_assessment` 负责", design)
 
     def test_ppt_research_pack_defines_pageworthy_content_pool_contract(self):
         skills = _load_workspace_skills()
 
         body = skills["ppt-research-pack"]
 
+        self.assertIn("class ResearchPack", body)
         self.assertIn("claims", body)
         self.assertIn("evidence_points", body)
         self.assertIn("pageworthy_chunks", body)
+        self.assertIn("risks_or_uncertainties", body)
+
+    def test_ppt_research_pack_defines_structured_research_pack_fields(self):
+        skills = _load_workspace_skills()
+
+        body = skills["ppt-research-pack"]
+
+        self.assertIn("claims: list[Claim]", body)
+        self.assertIn("evidence_points: list[EvidencePoint]", body)
+        self.assertIn("pageworthy_chunks: list[PageworthyChunk]", body)
+        self.assertIn("risks_or_uncertainties: list[str]", body)
+        self.assertIn("`risks_or_uncertainties`", body)
+        self.assertIn("信息缺口", body)
+        self.assertIn("证据不确定性", body)
 
     def test_key_ppt_skills_define_user_feedback_hooks(self):
         skills = _load_workspace_skills()
