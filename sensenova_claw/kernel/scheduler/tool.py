@@ -26,18 +26,11 @@ def _resolve_cron_timezone() -> str | None:
     """从配置或系统时区解析 cron 使用的时区。
     配置值 "local" 表示读取系统本地时区，其他值直接作为 IANA 时区名。
     """
+    from sensenova_claw.kernel.scheduler.scheduler import get_local_timezone_name
+
     tz_cfg = config.get("cron.timezone", "local")
     if not tz_cfg or tz_cfg == "local":
-        import time as _time
-        import datetime as _dt
-        # 通过 datetime 获取系统本地时区的 IANA 名称
-        local_tz = _dt.datetime.now(_dt.timezone.utc).astimezone().tzinfo
-        tz_name = getattr(local_tz, "key", None)  # Python 3.9+ ZoneInfo
-        if tz_name:
-            return tz_name
-        # 回退：用 time.tzname 尝试获取
-        name = _time.tzname[0]
-        return name if name else None
+        return get_local_timezone_name()
     return tz_cfg
 
 

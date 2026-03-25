@@ -4,12 +4,13 @@ import { Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'rea
 import { useSearchParams } from 'next/navigation';
 import {
   Loader2, Bot, MessageSquare, Plus, Search, RefreshCw, Trash2,
+  ChevronDown, ChevronRight, GitBranch,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { useFilePanel } from '@/contexts/FilePanelContext';
-import { type SessionItem, type ContextFileRef, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
+import { type SessionItem, type ContextFileRef, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
 import { MessageList } from '@/components/chat/MessageBubble';
 import { TypingIndicator } from '@/components/chat/TypingIndicator';
 import { ChatInput } from '@/components/chat/ChatInput';
@@ -108,13 +109,14 @@ function AgentContactItem({
 /* ── Session 列表项（中栏） ── */
 
 function SessionListItem({
-  session, isActive, onClick, onDelete, index,
+  session, isActive, onClick, onDelete, index, indent,
 }: {
   session: SessionItem;
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
   index: number;
+  indent?: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -135,16 +137,24 @@ function SessionListItem({
       className={cn(
         'flex items-center gap-2.5 px-3 py-2.5 mx-2 rounded-xl cursor-pointer transition-all text-sm group relative',
         'animate-in fade-in slide-in-from-left-2 duration-200',
+        indent && 'ml-6 border-l-2 border-muted-foreground/10 rounded-l-none pl-2.5',
         isActive ? 'bg-blue-100 dark:bg-blue-900/40 text-foreground shadow-md' : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
       )}
       style={{ animationDelay: `${index * 30}ms`, animationFillMode: 'both' }}
     >
-      <MessageSquare className={cn(
-        'w-4 h-4 shrink-0',
-        isActive ? 'text-blue-500' : 'text-muted-foreground',
-      )} />
+      {indent ? (
+        <GitBranch className={cn(
+          'w-3.5 h-3.5 shrink-0',
+          isActive ? 'text-blue-400' : 'text-muted-foreground/40',
+        )} />
+      ) : (
+        <MessageSquare className={cn(
+          'w-4 h-4 shrink-0',
+          isActive ? 'text-blue-500' : 'text-muted-foreground',
+        )} />
+      )}
       <div className="flex-1 min-w-0">
-        <div className="truncate font-medium text-xs">{getTitle(session.meta)}</div>
+        <div className={cn('truncate font-medium', indent ? 'text-[11px]' : 'text-xs')}>{getTitle(session.meta)}</div>
         <div className="text-[10px] text-muted-foreground mt-0.5">{timeLabel(session.last_active)}</div>
       </div>
       <button
@@ -159,6 +169,83 @@ function SessionListItem({
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
+    </div>
+  );
+}
+
+/* ── 带子会话折叠的 Session 列表项 ── */
+
+function SessionListGroup({
+  session,
+  children: childSessions,
+  currentSessionId,
+  switchSession,
+  deleteSession,
+  index,
+}: {
+  session: SessionItem;
+  children: SessionItem[];
+  currentSessionId: string | null;
+  switchSession: (sid: string) => void;
+  deleteSession: (sid: string) => Promise<void>;
+  index: number;
+}) {
+  const hasActiveChild = childSessions.some(c => c.session_id === currentSessionId);
+  const [expanded, setExpanded] = useState(hasActiveChild);
+
+  useEffect(() => {
+    if (hasActiveChild && !expanded) setExpanded(true);
+  }, [hasActiveChild]);
+
+  const toggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpanded(prev => !prev);
+  };
+
+  return (
+    <div>
+      <div className="relative">
+        <SessionListItem
+          session={session}
+          isActive={currentSessionId === session.session_id}
+          onClick={() => switchSession(session.session_id)}
+          onDelete={() => deleteSession(session.session_id)}
+          index={index}
+        />
+        {childSessions.length > 0 && (
+          <button
+            onClick={toggleExpand}
+            className="absolute left-1 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-background border border-border/60 hover:bg-muted transition-colors z-10"
+            title={expanded ? '收起派生会话' : `展开 ${childSessions.length} 个派生会话`}
+          >
+            {expanded
+              ? <ChevronDown className="w-2.5 h-2.5 text-muted-foreground" />
+              : <ChevronRight className="w-2.5 h-2.5 text-muted-foreground" />
+            }
+          </button>
+        )}
+        {!expanded && childSessions.length > 0 && (
+          <span className="absolute right-10 top-1/2 -translate-y-1/2 flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-muted/60 text-[9px] text-muted-foreground/70">
+            <GitBranch className="w-2.5 h-2.5" />
+            {childSessions.length}
+          </span>
+        )}
+      </div>
+      {expanded && childSessions.length > 0 && (
+        <div className="space-y-0.5">
+          {childSessions.map((child, childIdx) => (
+            <SessionListItem
+              key={child.session_id}
+              session={child}
+              isActive={currentSessionId === child.session_id}
+              onClick={() => switchSession(child.session_id)}
+              onDelete={() => deleteSession(child.session_id)}
+              index={index + 1 + childIdx}
+              indent
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -302,9 +389,29 @@ function ChatContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAgentId]);
 
-  const selectedSessions = selectedAgentId
+  const allSelectedSessions = selectedAgentId
     ? (sessionsByAgent[selectedAgentId] || []).sort((a, b) => b.last_active - a.last_active)
     : [];
+
+  // 按父子关系分组：只在列表中显示根会话，子会话折叠在父会话下
+  const { rootSelectedSessions, selectedChildrenMap } = useMemo(() => {
+    const idSet = new Set(allSelectedSessions.map(s => s.session_id));
+    const cMap: Record<string, SessionItem[]> = {};
+    const roots: SessionItem[] = [];
+    for (const s of allSelectedSessions) {
+      const parentId = getParentSessionId(s.meta);
+      if (parentId && idSet.has(parentId)) {
+        if (!cMap[parentId]) cMap[parentId] = [];
+        cMap[parentId].push(s);
+      } else {
+        roots.push(s);
+      }
+    }
+    return { rootSelectedSessions: roots, selectedChildrenMap: cMap };
+  }, [allSelectedSessions]);
+
+  // 保持向后兼容：selectedSessions 仍指向所有会话（用于自动选择等逻辑）
+  const selectedSessions = allSelectedSessions;
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
   const currentSessionAgentId = useMemo(() => {
@@ -505,7 +612,7 @@ function ChatContent() {
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="animate-spin text-muted-foreground" size={16} />
                   </div>
-                ) : selectedSessions.length === 0 ? (
+                ) : rootSelectedSessions.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 text-center px-4">
                     <MessageSquare className="w-10 h-10 text-muted-foreground/20 mb-3" />
                     <p className="text-xs text-muted-foreground/60 mb-3">暂无会话</p>
@@ -518,16 +625,33 @@ function ChatContent() {
                   </div>
                 ) : (
                   <div key={selectedAgentId} className="space-y-0.5">
-                    {selectedSessions.map((session, idx) => (
-                      <SessionListItem
-                        key={session.session_id}
-                        session={session}
-                        isActive={currentSessionId === session.session_id}
-                        onClick={() => switchSession(session.session_id)}
-                        onDelete={() => deleteSession(session.session_id)}
-                        index={idx}
-                      />
-                    ))}
+                    {rootSelectedSessions.map((session, idx) => {
+                      const children = selectedChildrenMap[session.session_id] || [];
+                      if (children.length === 0) {
+                        return (
+                          <SessionListItem
+                            key={session.session_id}
+                            session={session}
+                            isActive={currentSessionId === session.session_id}
+                            onClick={() => switchSession(session.session_id)}
+                            onDelete={() => deleteSession(session.session_id)}
+                            index={idx}
+                          />
+                        );
+                      }
+                      return (
+                        <SessionListGroup
+                          key={session.session_id}
+                          session={session}
+                          currentSessionId={currentSessionId}
+                          switchSession={switchSession}
+                          deleteSession={deleteSession}
+                          index={idx}
+                        >
+                          {children}
+                        </SessionListGroup>
+                      );
+                    })}
                   </div>
                 )}
               </div>

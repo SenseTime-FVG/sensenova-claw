@@ -92,6 +92,18 @@ export interface ChatSessionContextValue {
 
   // 通知面板回答 ask_user 时同步解除阻塞
   resolveInteractionFromNotification?: (kind: 'question' | 'confirmation', interactionId: string) => void;
+
+  // 实时 proactive 推送结果
+  proactiveResults: ProactiveResultItem[];
+}
+
+/** 实时接收到的 proactive 推送结果 */
+export interface ProactiveResultItem {
+  jobId: string;
+  jobName: string;
+  sessionId: string;
+  result: string;
+  receivedAt: number;
 }
 
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
@@ -121,6 +133,9 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   // 全局 agent 活动追踪（跨会话）
   const [globalWorkingSessions, setGlobalWorkingSessions] = useState<Set<string>>(new Set());
   const [globalLastToolName, setGlobalLastToolName] = useState('');
+
+  // 实时 proactive 推送结果（最多保留 50 条，去重）
+  const [proactiveResults, setProactiveResults] = useState<ProactiveResultItem[]>([]);
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -682,12 +697,52 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           sessionId: sourceSessionId,
           interactionId: questionId,
           actions: questionCardActions,
+          questionData: {
+            question: String(payload.question || ''),
+            options: rawOptions || null,
+            multiSelect: Boolean(payload.multi_select),
+            interactionId: questionId,
+            sessionId: sourceSessionId,
+          },
+          allowsInput: !questionCardActions || questionCardActions.length === 0,
+          inputPlaceholder: '请输入回复',
         });
         break;
       }
       case 'user_question_answered_event': {
         const questionId = String(payload.question_id || '');
         if (questionId) resolveInteraction('question', questionId);
+        break;
+      }
+      case 'proactive_result': {
+        const jobId = String(payload.job_id || '');
+        const jobName = String(payload.job_name || '');
+        const resultText = String(payload.result || '');
+        const resultSessionId = String(payload.session_id || incomingSessionId || '');
+        if (resultText) {
+          setProactiveResults(prev => {
+            if (prev.some(r => r.jobId === jobId && r.sessionId === resultSessionId)) return prev;
+            const next = [{ jobId, jobName, sessionId: resultSessionId, result: resultText, receivedAt: Date.now() }, ...prev];
+            return next.slice(0, 50);
+          });
+          loadSessionList();
+          pushNotification({
+            title: `[主动推送] ${jobName || 'Proactive Agent'}`,
+            body: resultText.slice(0, 200),
+            level: 'info',
+            source: 'proactive',
+            createdAtMs: Date.now(),
+          }, { toast: true, browser: false });
+          pushCard({
+            kind: 'general',
+            title: `主动推送 — ${jobName || 'Proactive Agent'}`,
+            body: resultText.slice(0, 300),
+            level: 'info',
+            source: 'proactive',
+            sessionId: resultSessionId || undefined,
+            actions: resultSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined,
+          });
+        }
         break;
       }
     }
@@ -978,6 +1033,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       lastToolName: globalLastToolName,
     },
     wsSend,
+    resolveInteractionFromNotification: resolveInteraction,
+    proactiveResults,
   };
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;

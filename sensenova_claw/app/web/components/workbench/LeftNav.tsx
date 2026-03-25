@@ -4,11 +4,12 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Plus, RefreshCw,
   MessageSquare, Bot, Clock, Loader2, Trash2, Sparkles,
+  ChevronDown, ChevronRight, GitBranch,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authFetch, authGet, API_BASE } from '@/lib/authFetch';
 import { useChatSession } from '@/contexts/ChatSessionContext';
-import { type SessionItem, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
+import { type SessionItem, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
 import type { CronJob } from '@/hooks/useDashboardData';
 
 // ── 最近对话列表项 ──
@@ -19,12 +20,14 @@ function RecentChatItem({
   isActive,
   onClick,
   onDelete,
+  indent,
 }: {
   session: SessionItem;
   agentName: string;
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
+  indent?: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const title = getTitle(session.meta);
@@ -45,17 +48,25 @@ function RecentChatItem({
       onClick={onClick}
       className={cn(
         'flex items-start gap-2.5 px-3 py-3 rounded-xl cursor-pointer transition-all group',
+        indent && 'ml-4 border-l-2 border-muted-foreground/10 rounded-l-none pl-2.5',
         isActive
           ? 'bg-blue-100 text-foreground border border-blue-200 shadow-sm dark:bg-blue-900/40 dark:border-blue-800'
           : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
       )}
     >
-      <MessageSquare className={cn(
-        'w-3.5 h-3.5 shrink-0 mt-0.5',
-        isActive ? 'text-primary' : 'text-muted-foreground',
-      )} />
+      {indent ? (
+        <GitBranch className={cn(
+          'w-3 h-3 shrink-0 mt-0.5',
+          isActive ? 'text-primary/60' : 'text-muted-foreground/40',
+        )} />
+      ) : (
+        <MessageSquare className={cn(
+          'w-3.5 h-3.5 shrink-0 mt-0.5',
+          isActive ? 'text-primary' : 'text-muted-foreground',
+        )} />
+      )}
       <div className="flex-1 min-w-0">
-        <div className="truncate font-medium text-xs">{title}</div>
+        <div className={cn('truncate font-medium', indent ? 'text-[11px]' : 'text-xs')}>{title}</div>
         <div className="flex items-center gap-1.5 mt-0.5">
           <Bot className="w-2.5 h-2.5 text-muted-foreground/60 shrink-0" />
           <span className="text-[10px] text-muted-foreground truncate">{agentName}</span>
@@ -75,6 +86,86 @@ function RecentChatItem({
       >
         <Trash2 className="w-3 h-3" />
       </button>
+    </div>
+  );
+}
+
+// ── 可展开的主会话项（包含子会话下拉） ──
+
+function ParentSessionGroup({
+  session,
+  children: childSessions,
+  agentMap,
+  currentSessionId,
+  switchSession,
+  deleteSession,
+}: {
+  session: SessionItem;
+  children: SessionItem[];
+  agentMap: Record<string, string>;
+  currentSessionId: string | null;
+  switchSession: (sid: string) => void;
+  deleteSession: (sid: string) => Promise<void>;
+}) {
+  const hasActiveChild = childSessions.some(c => c.session_id === currentSessionId);
+  const [expanded, setExpanded] = useState(hasActiveChild);
+
+  useEffect(() => {
+    if (hasActiveChild && !expanded) setExpanded(true);
+  }, [hasActiveChild]);
+
+  const toggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpanded(prev => !prev);
+  };
+
+  return (
+    <div>
+      <div className="relative">
+        <RecentChatItem
+          session={session}
+          agentName={agentMap[getAgentId(session.meta)] || getAgentId(session.meta)}
+          isActive={currentSessionId === session.session_id}
+          onClick={() => switchSession(session.session_id)}
+          onDelete={() => deleteSession(session.session_id)}
+        />
+        {childSessions.length > 0 && (
+          <button
+            onClick={toggleExpand}
+            className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 p-0.5 rounded-full bg-background border border-border/60 hover:bg-muted transition-colors z-10"
+            title={expanded ? '收起派生会话' : `展开 ${childSessions.length} 个派生会话`}
+          >
+            {expanded
+              ? <ChevronDown className="w-2.5 h-2.5 text-muted-foreground" />
+              : <ChevronRight className="w-2.5 h-2.5 text-muted-foreground" />
+            }
+          </button>
+        )}
+        {!expanded && childSessions.length > 0 && (
+          <button
+            onClick={toggleExpand}
+            className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-muted/60 hover:bg-muted text-[9px] text-muted-foreground/70 transition-colors"
+          >
+            <GitBranch className="w-2.5 h-2.5" />
+            {childSessions.length}
+          </button>
+        )}
+      </div>
+      {expanded && childSessions.length > 0 && (
+        <div className="space-y-0.5 mt-0.5">
+          {childSessions.map(child => (
+            <RecentChatItem
+              key={child.session_id}
+              session={child}
+              agentName={agentMap[getAgentId(child.meta)] || getAgentId(child.meta)}
+              isActive={currentSessionId === child.session_id}
+              onClick={() => switchSession(child.session_id)}
+              onDelete={() => deleteSession(child.session_id)}
+              indent
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -114,9 +205,28 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
 
   useEffect(() => { loadAgents(); }, [loadAgents]);
 
-  const recentSessions = [...sessions]
-    .filter(s => !agentFilter || getAgentId(s.meta) === agentFilter)
-    .sort((a, b) => b.last_active - a.last_active);
+  // 将 sessions 按父子关系分组
+  const { rootSessions, childrenMap } = (() => {
+    const filtered = [...sessions]
+      .filter(s => !agentFilter || getAgentId(s.meta) === agentFilter)
+      .sort((a, b) => b.last_active - a.last_active);
+
+    const sessionIdSet = new Set(filtered.map(s => s.session_id));
+    const cMap: Record<string, SessionItem[]> = {};
+    const roots: SessionItem[] = [];
+
+    for (const s of filtered) {
+      const parentId = getParentSessionId(s.meta);
+      if (parentId && sessionIdSet.has(parentId)) {
+        if (!cMap[parentId]) cMap[parentId] = [];
+        cMap[parentId].push(s);
+      } else {
+        roots.push(s);
+      }
+    }
+
+    return { rootSessions: roots, childrenMap: cMap };
+  })();
 
   const handleNewChat = () => {
     startNewChat();
@@ -155,9 +265,9 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-2.5 py-2.5 space-y-1">
-        {loadingSessions && recentSessions.length === 0 ? (
+        {loadingSessions && rootSessions.length === 0 ? (
           <p className="text-xs text-muted-foreground/50 px-1 py-8 text-center">加载中...</p>
-        ) : recentSessions.length === 0 ? (
+        ) : rootSessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <Clock className="w-8 h-8 text-muted-foreground/20 mb-2" />
             <p className="text-xs text-muted-foreground/50 mb-2">暂无对话记录</p>
@@ -169,16 +279,33 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
             </button>
           </div>
         ) : (
-          recentSessions.map(session => (
-            <RecentChatItem
-              key={session.session_id}
-              session={session}
-              agentName={agentMap[getAgentId(session.meta)] || getAgentId(session.meta)}
-              isActive={currentSessionId === session.session_id}
-              onClick={() => switchSession(session.session_id)}
-              onDelete={() => deleteSession(session.session_id)}
-            />
-          ))
+          rootSessions.map(session => {
+            const children = childrenMap[session.session_id] || [];
+            if (children.length === 0) {
+              return (
+                <RecentChatItem
+                  key={session.session_id}
+                  session={session}
+                  agentName={agentMap[getAgentId(session.meta)] || getAgentId(session.meta)}
+                  isActive={currentSessionId === session.session_id}
+                  onClick={() => switchSession(session.session_id)}
+                  onDelete={() => deleteSession(session.session_id)}
+                />
+              );
+            }
+            return (
+              <ParentSessionGroup
+                key={session.session_id}
+                session={session}
+                agentMap={agentMap}
+                currentSessionId={currentSessionId}
+                switchSession={switchSession}
+                deleteSession={deleteSession}
+              >
+                {children}
+              </ParentSessionGroup>
+            );
+          })
         )}
       </div>
 

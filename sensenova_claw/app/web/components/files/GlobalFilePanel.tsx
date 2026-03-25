@@ -209,10 +209,13 @@ const FEATURE_ICONS: Record<string, React.ReactNode> = {
   '+ 创建': <Plus className="w-4 h-4" />,
 };
 
+const pptEntry = { path: '/ppt', label: 'PPT' };
+
 function AIWorkspace() {
   const { currentSessionId, taskProgress } = useChatSession();
   const featureNavItems = useFeatureNavItems();
   const mergedProgress = useMemo(() => mergeProgress(taskProgress), [taskProgress]);
+  const allItems = useMemo(() => [pptEntry, ...featureNavItems], [featureNavItems]);
 
   const isInConversation = Boolean(currentSessionId);
   const hasProgress = mergedProgress.length > 0;
@@ -265,7 +268,7 @@ function AIWorkspace() {
         ) : (
           /* ── 空闲：显示功能入口 ── */
           <div className="space-y-1.5 pt-2">
-            {featureNavItems.map((item) => (
+            {allItems.map((item) => (
               <Link
                 key={item.path}
                 href={item.path}
