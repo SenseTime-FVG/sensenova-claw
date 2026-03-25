@@ -210,6 +210,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前 Playwright 配置会联动启动整套 `npm run dev`，在受限环境下后端 watch 模式可能直接因为系统权限失败，导致前端 e2e 不是页面逻辑失败而是基础设施失败。
 - `next build` 在当前环境会因为 `next/font` 访问 Google Fonts 失败而中断；这种网络型失败不能误判为新页面或跳转逻辑本身有语法问题。
 
+### 2026-03-25 工具审批收口补充
+
+成功经验：
+- 对“用户点击”和“服务端最终裁决”分离的交互，最稳的协议是保留前端上行 `tool_confirmation_response`，新增后端下行 `tool_confirmation_resolved`，让前端只用 `resolved` 收口 UI，`tool_result` 只更新工具消息。
+- `/chat` 与 `/sessions/[id]` 并存时，修审批类 bug 必须同时检查“全局通知卡片/action toast”与“本地 InteractionDialog”两套状态机；只修其中一套很容易留下旧入口悬挂。
+- 对通知中心这类可操作 UI，给卡片和 toast 增加 `pending` 状态，比点击后立刻本地 `resolve` 更稳，能正确覆盖超时自动处理、跨窗口先处理和晚到点击被忽略的场景。
+
+失败/风险经验：
+- 当前环境运行 Playwright 仍缺 `libnspr4.so`，即使越权成功启动 webServer，也会在浏览器拉起阶段失败；前端浏览器级回归需要在具备系统库的环境执行，不能把这类环境错误误判为页面逻辑失败。
+- `npx tsc --noEmit` 目前会先撞上仓库既有类型错误（如 `app/settings/page.tsx`、`components/chat/MessageList.tsx` 等），验证本次前端改动时要明确区分“本次变更相关文件”与“仓库历史遗留错误”。
+
 ### 2026-03-18 Feishu 插件发现补充
 
 成功经验：
@@ -1257,3 +1268,23 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 成功经验：
 - 模态框如果既要保住外层圆角、又要让滚动条看起来属于同一个面板，最稳的结构是 `DialogContent` 自身 `overflow-hidden`，再放一个 `flex-1 overflow-y-auto` 的内部内容区；不要直接让 `DialogContent` 滚动。
+
+### 2026-03-25 Agent 委托禁用语义补充
+
+成功经验：
+- 对“设置页取消所有勾选应禁用功能”这类需求，不能只改前端文案；这次必须把“前端提交 `null`、后端允许持久化 `None`、运行时隐藏 `send_message`、工具执行再次校验”四层一起收口，行为才真正一致。
+- FastAPI + Pydantic v2 下，如果接口需要区分“字段未传”和“显式传 null”，最稳的写法是 `body.model_dump(exclude_unset=True)` 后再判断字段是否出现在 payload 里。
+- `ContextBuilder` 里断言某个工具名是否出现在 system prompt 时，测试夹具最好清空其它内置工具；否则像 `create_agent` 这类工具描述里的文案会把字符串断言污染成假失败。
+
+失败/风险经验：
+- `send_message` 的授权判断不能只看 `get_sendable()` 返回值是否为空；当白名单被禁用或白名单里的 agent 已失效时，空结果若不结合原始配置解释，工具会错误放行。 
+
+### 2026-03-25 Agent 工具禁用运行时补充
+
+成功经验：
+- “工具被禁用后聊天里也不能调用”这类需求必须做双层防线：一层在 `ContextBuilder/AgentSessionWorker` 过滤掉传给 LLM 的工具列表，另一层在 `ToolSessionWorker` 执行前再次校验；只做前者会被模型的陈旧 tool_call 或 provider 异常输出绕过。
+- Agent 页面和 Tools 页面最好拆成两层语义：顶层 `tools` 继续做全局开关，`agent_tools.<agent_id>` 做按 agent 覆盖；最终生效规则应是“全局禁用优先，其次 agent 级禁用”，避免 agent 配置把全局关闭的工具重新打开。
+- 这类回归最稳的组合是：API 单测验证偏好写入与详情回显，worker 单测验证 LLM 可见工具过滤和执行前拦截，再补一个进程内聊天 e2e 验证首轮 `LLM_CALL_REQUESTED.tools` 已不含禁用工具且工具本体未执行。
+
+失败/风险经验：
+- 进程内 e2e 若依赖“当前默认模型”为 mock，很容易被本机 `config.yml` 漂移污染；更稳的做法是显式注册一个 `model=\"mock\"` 的 default agent，而不是只改全局 `llm.default_model`。

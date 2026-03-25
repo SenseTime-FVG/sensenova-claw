@@ -115,12 +115,35 @@ def test_resolve_sensenova_claw_home_default():
         assert result == Path.home() / ".sensenova-claw"
 
 
+def test_resolve_sensenova_claw_home_ignores_config_value(tmp_path):
+    """不再读取 config 中的 system.sensenova_claw_home"""
+
+    class DummyConfig:
+        def get(self, key: str, default: str = "") -> str:
+            if key == "system.sensenova_claw_home":
+                return str(tmp_path / "from_config")
+            return default
+
+    with patch.dict(os.environ, {}, clear=True):
+        result = resolve_sensenova_claw_home(DummyConfig())
+        assert result == Path.home() / ".sensenova-claw"
+
+
 def test_resolve_sensenova_claw_home_from_env(tmp_path):
     """环境变量 SENSENOVA_CLAW_HOME 覆盖默认值"""
     custom = str(tmp_path / "custom_home")
     with patch.dict(os.environ, {"SENSENOVA_CLAW_HOME": custom}):
         result = resolve_sensenova_claw_home(None)
         assert str(result) == str(Path(custom).resolve())
+
+
+def test_resolve_sensenova_claw_home_windows_default(tmp_path):
+    """Windows 下默认回退到用户目录下的 .sensenova-claw"""
+    expected_home = tmp_path / "WindowsUser"
+    with patch("pathlib.Path.home", return_value=expected_home):
+        with patch.dict(os.environ, {}, clear=True):
+            result = resolve_sensenova_claw_home(None)
+    assert result == expected_home / ".sensenova-claw"
 
 
 # ── ensure_agent_workspace ──────────────────────────

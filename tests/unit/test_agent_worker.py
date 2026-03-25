@@ -11,6 +11,7 @@ import pytest_asyncio
 
 from sensenova_claw.adapters.storage.repository import Repository
 from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.tools.base import Tool
 from sensenova_claw.capabilities.tools.registry import ToolRegistry
 from sensenova_claw.kernel.events.bus import PublicEventBus, PrivateEventBus
 from sensenova_claw.kernel.events.envelope import EventEnvelope
@@ -48,6 +49,12 @@ class _SimpleAgentRuntime:
         self.memory_manager = memory_manager
         self.jsonl_writer = None
         self.context_compressor = None
+
+
+class _SendMessageTool(Tool):
+    name = "send_message"
+    description = "向其他 Agent 发送消息"
+    parameters = {"type": "object", "properties": {}}
 
 
 # ── Fixtures ─────────────────────────────────────────────
@@ -184,6 +191,28 @@ class TestConfigHelpers:
         tools = worker._get_filtered_tools()
         names = {t["name"] for t in tools}
         assert "bash_command" in names
+
+    def test_get_filtered_tools_hides_send_message_when_delegation_disabled(self, private_bus, runtime):
+        """禁用委托后，不应再向 LLM 暴露 send_message。"""
+        runtime.tool_registry.register(_SendMessageTool())
+        agent_cfg = AgentConfig(id="test", name="test", can_delegate_to=None)
+        worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
+        tools = worker._get_filtered_tools()
+        names = {t["name"] for t in tools}
+        assert "send_message" not in names
+
+    def test_get_filtered_tools_honors_disabled_tool_preferences(self, private_bus, runtime, tmp_path):
+        """Agent 工具偏好禁用后，不应再向 LLM 暴露该工具。"""
+        runtime.context_builder.sensenova_claw_home = str(tmp_path)
+        (tmp_path / ".agent_preferences.json").write_text(
+            '{"agent_tools": {"test": {"bash_command": false}}}',
+            encoding="utf-8",
+        )
+        agent_cfg = AgentConfig(id="test", name="test")
+        worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
+        tools = worker._get_filtered_tools()
+        names = {t["name"] for t in tools}
+        assert "bash_command" not in names
 
 
 # ── 事件路由测试 ──────────────────────────────────────────

@@ -19,6 +19,8 @@ from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["files"])
@@ -26,7 +28,7 @@ router = APIRouter(prefix="/api", tags=["files"])
 
 def _resolve_workspace_dir(request: Request) -> Path:
     """获取 workspace 根目录"""
-    home = getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw")
+    home = getattr(request.app.state, "sensenova_claw_home", "") or str(default_sensenova_claw_home())
     return Path(home)
 
 
@@ -522,7 +524,7 @@ def _resolve_agent_workdir(request: Request, agent_id: str) -> Path:
     # 防止路径穿越：仅允许字母、数字、-、_、.
     if not re.match(r'^[a-zA-Z0-9_.\-]+$', agent_id):
         agent_id = "default"
-    home = getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw")
+    home = getattr(request.app.state, "sensenova_claw_home", "") or str(default_sensenova_claw_home())
     return Path(home) / "workdir" / agent_id
 
 

@@ -13,6 +13,7 @@ import httpx
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 from sensenova_claw.platform.secrets.refs import is_secret_ref
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ TOOL_API_KEY_SPECS: dict[str, dict[str, Any]] = {
 
 
 def _prefs_path(request: Request) -> Path:
-    home = Path(getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw"))
+    home = Path(getattr(request.app.state, "sensenova_claw_home", "") or default_sensenova_claw_home())
     return home / ".agent_preferences.json"
 
 

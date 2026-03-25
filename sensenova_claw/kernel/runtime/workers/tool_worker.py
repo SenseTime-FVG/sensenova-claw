@@ -3,10 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from sensenova_claw.capabilities.agents.preferences import (
+    load_preferences,
+    resolve_tool_enabled_from_prefs,
+)
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.bus import PrivateEventBus
 from sensenova_claw.kernel.events.envelope import EventEnvelope
@@ -18,6 +23,7 @@ from sensenova_claw.kernel.events.types import (
     TOOL_CALL_STARTED,
     TOOL_CONFIRMATION_REQUESTED,
     TOOL_CONFIRMATION_RESPONSE,
+    TOOL_CONFIRMATION_RESOLVED,
     USER_QUESTION_ASKED,
     USER_QUESTION_ANSWERED,
 )
@@ -40,6 +46,8 @@ class ToolSessionWorker(SessionWorker):
         self._pending_confirmations: dict[str, asyncio.Event] = {}
         # 确认结果缓存：tool_call_id → bool
         self._confirmation_results: dict[str, bool] = {}
+        # 已完成裁决的确认：tool_call_id
+        self._resolved_confirmations: set[str] = set()
         # ask_user：question_id → asyncio.Future
         self._pending_questions: dict[str, asyncio.Future] = {}
 
@@ -97,6 +105,53 @@ class ToolSessionWorker(SessionWorker):
         auto_levels = config.get("tools.permission.auto_approve_levels", ["low"])
         return tool.risk_level.value not in auto_levels
 
+    def _tool_preferences_home(self) -> Path:
+        """解析工具偏好文件所在目录。"""
+        runtime_home = getattr(self.rt, "sensenova_claw_home", None)
+        if runtime_home:
+            return Path(runtime_home)
+        from sensenova_claw.platform.config.workspace import resolve_sensenova_claw_home
+        return resolve_sensenova_claw_home(config)
+
+    def _is_tool_enabled_for_agent(self, agent_id: str, tool_name: str) -> bool:
+        """按当前 agent 的有效偏好判断工具是否启用。"""
+        prefs = load_preferences(self._tool_preferences_home())
+        return resolve_tool_enabled_from_prefs(prefs, agent_id, tool_name, default=True)
+
+    async def _publish_confirmation_resolved(
+        self,
+        event: EventEnvelope,
+        *,
+        tool_name: str,
+        tool_call_id: str,
+        approved: bool,
+        reason: str,
+        resolved_by: str,
+    ) -> None:
+        """发布审批已完成裁决事件。"""
+        if tool_call_id in self._resolved_confirmations:
+            return
+
+        self._resolved_confirmations.add(tool_call_id)
+        await self.bus.publish(
+            EventEnvelope(
+                type=TOOL_CONFIRMATION_RESOLVED,
+                session_id=event.session_id,
+                turn_id=event.turn_id,
+                trace_id=tool_call_id,
+                source="tool",
+                payload={
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "approved": approved,
+                    "status": "approved" if approved else "rejected",
+                    "reason": reason,
+                    "resolved_by": resolved_by,
+                    "resolved_at_ms": int(time.time() * 1000),
+                },
+            )
+        )
+
     async def _request_confirmation(self, event: EventEnvelope, tool: Tool) -> bool:
         """发布确认请求并挂起等待，根据 timeout_action 决定超时行为。
 
@@ -108,6 +163,8 @@ class ToolSessionWorker(SessionWorker):
         tool_call_id = event.payload["tool_call_id"]
         wait_event = asyncio.Event()
         self._pending_confirmations[tool_call_id] = wait_event
+        timeout = float(config.get("tools.permission.confirmation_timeout", 60))
+        timeout_action = str(config.get("tools.permission.timeout_action", "reject")).lower()
 
         # 发布确认请求事件
         await self.bus.publish(
@@ -122,30 +179,58 @@ class ToolSessionWorker(SessionWorker):
                     "tool_name": tool.name,
                     "arguments": event.payload.get("arguments", {}),
                     "risk_level": tool.risk_level.value,
+                    "timeout": timeout,
+                    "timeout_action": timeout_action,
+                    "requested_at_ms": int(time.time() * 1000),
                     "message": f"工具 {tool.name} (风险等级: {tool.risk_level.value}) 请求执行，是否允许？",
                 },
             )
         )
-
-        timeout_action = str(config.get("tools.permission.timeout_action", "reject")).lower()
 
         try:
             if timeout_action == "block":
                 # 无限等待，直到用户响应或 worker 停止
                 await wait_event.wait()
             else:
-                timeout = float(config.get("tools.permission.confirmation_timeout", 60))
                 await asyncio.wait_for(wait_event.wait(), timeout=timeout)
-            return self._confirmation_results.pop(tool_call_id, False)
+            if tool_call_id not in self._confirmation_results:
+                return False
+            approved = self._confirmation_results.pop(tool_call_id)
+            await self._publish_confirmation_resolved(
+                event,
+                tool_name=tool.name,
+                tool_call_id=tool_call_id,
+                approved=approved,
+                reason="user_approved" if approved else "user_rejected",
+                resolved_by="user",
+            )
+            return approved
         except asyncio.TimeoutError:
             if timeout_action == "approve":
                 logger.warning("工具确认超时，自动批准: tool_call_id=%s", tool_call_id)
+                await self._publish_confirmation_resolved(
+                    event,
+                    tool_name=tool.name,
+                    tool_call_id=tool_call_id,
+                    approved=True,
+                    reason="timeout_approved",
+                    resolved_by="timeout",
+                )
                 return True
             else:
                 logger.warning("工具确认超时，自动拒绝: tool_call_id=%s", tool_call_id)
+                await self._publish_confirmation_resolved(
+                    event,
+                    tool_name=tool.name,
+                    tool_call_id=tool_call_id,
+                    approved=False,
+                    reason="timeout_rejected",
+                    resolved_by="timeout",
+                )
                 return False
         finally:
             self._pending_confirmations.pop(tool_call_id, None)
+            self._confirmation_results.pop(tool_call_id, None)
 
     # ── ask_user 支持 ──────────────────────────────────
 
@@ -207,6 +292,7 @@ class ToolSessionWorker(SessionWorker):
             wait_event.set()
         self._pending_confirmations.clear()
         self._confirmation_results.clear()
+        self._resolved_confirmations.clear()
         for future in self._pending_questions.values():
             if not future.done():
                 future.cancel()
@@ -218,10 +304,17 @@ class ToolSessionWorker(SessionWorker):
         tool_call_id = event.payload.get("tool_call_id")
         approved = event.payload.get("approved", False)
 
+        if tool_call_id in self._resolved_confirmations:
+            logger.debug("ignore late tool confirmation response: tool_call_id=%s", tool_call_id)
+            return
+
         self._confirmation_results[tool_call_id] = approved
         wait_event = self._pending_confirmations.get(tool_call_id)
         if wait_event:
             wait_event.set()  # 唤醒挂起的 _request_confirmation
+            return
+        self._confirmation_results.pop(tool_call_id, None)
+        logger.debug("ignore tool confirmation response without pending request: tool_call_id=%s", tool_call_id)
 
     async def _publish_tool_result(self, event: EventEnvelope, result: str, success: bool) -> None:
         """发布工具拒绝/失败结果"""
@@ -262,6 +355,7 @@ class ToolSessionWorker(SessionWorker):
         tool_call_id = event.payload.get("tool_call_id")
         tool_name = event.payload.get("tool_name")
         arguments = event.payload.get("arguments", {})
+        source_agent_id = str(event.payload.get("_source_agent_id") or event.agent_id or "").strip() or "default"
 
         if not tool_call_id:
             logger.error("Missing tool_call_id in event: %s", event)
@@ -320,6 +414,14 @@ class ToolSessionWorker(SessionWorker):
             )
             return
 
+        if not self._is_tool_enabled_for_agent(source_agent_id, str(tool_name)):
+            await self._publish_tool_result(
+                event,
+                result=f"工具已被当前 Agent 禁用: {tool_name}",
+                success=False,
+            )
+            return
+
         # 权限确认：高风险工具需要用户确认
         if self._needs_confirmation(tool):
             approved = await self._request_confirmation(event, tool)
@@ -352,7 +454,6 @@ class ToolSessionWorker(SessionWorker):
         agent_workdir = event.payload.get("_agent_workdir")
         if agent_workdir:
             exec_kwargs["_agent_workdir"] = agent_workdir
-        source_agent_id = str(event.payload.get("_source_agent_id") or event.agent_id or "").strip() or "default"
         exec_kwargs["_source_agent_id"] = source_agent_id
         if event.turn_id:
             exec_kwargs["_turn_id"] = event.turn_id
