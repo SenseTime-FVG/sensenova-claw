@@ -17,6 +17,36 @@ import { type PipelineStage, DEFAULT_STAGES } from '@/components/ppt/PipelinePro
 import type { SlideSet } from '@/components/ppt/PPTViewer';
 import type { ChatMessage } from '@/lib/chatTypes';
 
+export interface AssetSlot {
+  page_id: string;
+  page_title: string;
+  slot_id: string;
+  purpose: string;
+  source_caption: string;
+  query: string;
+  selected: boolean;
+  selected_image: {
+    title: string;
+    image_url: string;
+    local_path: string;
+    source_page: string;
+    source_domain: string;
+  } | null;
+  rejected_candidates: {
+    image_url: string;
+    rejection_stage: string;
+    reason: string;
+  }[];
+  status: string;
+  reason: string;
+}
+
+export interface AssetPlan {
+  schema_version: string;
+  deck_dir: string;
+  slots: AssetSlot[];
+}
+
 export interface DeckData {
   deckDir: string | null;
   storyboard: Storyboard | null;
@@ -24,6 +54,7 @@ export interface DeckData {
   review: ReviewReport | null;
   speakerNotes: SpeakerNote[] | null;
   slideSet: SlideSet | null;
+  assetPlan: AssetPlan | null;
   stages: PipelineStage[];
   loading: boolean;
   refresh: () => void;
@@ -98,20 +129,23 @@ function detectDeckDir(messages: ChatMessage[]): string | null {
   return null;
 }
 
-/** 从 workdir 获取幻灯片列表 */
+/** 从 workdir 获取幻灯片列表（先查顶层，再查 pages/ 子目录） */
 async function fetchSlideSet(deckDir: string): Promise<SlideSet | null> {
-  try {
-    const res = await authFetch(`${API_BASE}/api/files/workdir-list?dir=${encodeURIComponent(deckDir)}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const slides = (data.slides || []) as { name: string; path: string }[];
-    if (slides.length > 0) {
-      return { dir: deckDir, slides };
+  for (const suffix of ['', '/pages']) {
+    try {
+      const dir = deckDir + suffix;
+      const res = await authFetch(`${API_BASE}/api/files/workdir-list?dir=${encodeURIComponent(dir)}`);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const slides = (data.slides || []) as { name: string; path: string }[];
+      if (slides.length > 0) {
+        return { dir: deckDir, slides };
+      }
+    } catch {
+      // 继续尝试下一个
     }
-    return null;
-  } catch {
-    return null;
   }
+  return null;
 }
 
 /** 推断 pipeline 阶段 */
@@ -134,6 +168,17 @@ function inferStages(
   if (slideSet)     stages[5].status = 'done';
   if (review)       stages[6].status = 'done';
 
+  // 如果某个 pending 阶段后面已有 done 阶段，说明该阶段被跳过，也标记为 done
+  let lastDone = -1;
+  for (let i = stages.length - 1; i >= 0; i--) {
+    if (stages[i].status === 'done') { lastDone = i; break; }
+  }
+  if (lastDone > 0) {
+    for (let i = 0; i < lastDone; i++) {
+      if (stages[i].status === 'pending') stages[i].status = 'done';
+    }
+  }
+
   // 找第一个 pending 标记为 active
   const firstPending = stages.findIndex(s => s.status === 'pending');
   if (firstPending > 0 && stages[firstPending - 1].status === 'done') {
@@ -152,7 +197,7 @@ export function useDeckData(messages: ChatMessage[]): DeckData {
   const [slideSet, setSlideSet] = useState<SlideSet | null>(null);
   const [hasTaskPack, setHasTaskPack] = useState(false);
   const [hasResearch, setHasResearch] = useState(false);
-  const [hasAssetPlan, setHasAssetPlan] = useState(false);
+  const [assetPlan, setAssetPlan] = useState<AssetPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const lastMsgCount = useRef(0);
 
@@ -186,7 +231,7 @@ export function useDeckData(messages: ChatMessage[]): DeckData {
       setSlideSet(slides);
       setHasTaskPack(!!tp);
       setHasResearch(!!rp);
-      setHasAssetPlan(!!ap);
+      setAssetPlan(ap as AssetPlan | null);
     } catch {
       // 静默
     } finally {
@@ -207,7 +252,7 @@ export function useDeckData(messages: ChatMessage[]): DeckData {
     }
   }, [messages.length, deckDir, refresh]);
 
-  const stages = inferStages(storyboard, styleSpec, review, slideSet, hasTaskPack, hasResearch, hasAssetPlan);
+  const stages = inferStages(storyboard, styleSpec, review, slideSet, hasTaskPack, hasResearch, !!assetPlan);
 
   return {
     deckDir,
@@ -216,6 +261,7 @@ export function useDeckData(messages: ChatMessage[]): DeckData {
     review,
     speakerNotes,
     slideSet,
+    assetPlan,
     stages,
     loading,
     refresh,
