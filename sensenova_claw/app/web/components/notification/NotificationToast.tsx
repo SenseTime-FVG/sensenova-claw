@@ -172,12 +172,12 @@ export function ActionToastPanel({
                       className={cn(
                         'rounded-lg border px-4 py-1.5 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]',
                         action.value === 'approve' || action.value === 'accept'
-                          ? 'border-emerald-300 bg-emerald-500 text-white shadow-sm shadow-emerald-200 hover:bg-emerald-600'
+                          ? 'border-emerald-300 bg-emerald-500 text-white shadow-sm shadow-emerald-200 dark:shadow-emerald-900 hover:bg-emerald-600'
                           : action.value === 'deny' || action.value === 'reject'
-                            ? 'border-rose-200 bg-white text-rose-600 hover:bg-rose-50'
+                            ? 'border-rose-200 dark:border-rose-800 bg-background text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950'
                             : action.value === 'view_session'
-                              ? 'border-violet-300 bg-violet-500 text-white shadow-sm shadow-violet-200 hover:bg-violet-600'
-                              : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50',
+                              ? 'border-violet-300 bg-violet-500 text-white shadow-sm shadow-violet-200 dark:shadow-violet-900 hover:bg-violet-600'
+                              : 'border-neutral-200 dark:border-neutral-700 bg-background text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800',
                       )}
                     >
                       {action.label}
