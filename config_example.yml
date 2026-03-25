@@ -162,74 +162,88 @@ llm:
 # Agents 配置
 # ════════════════════════════════════════════════════
 # system_prompt 不在此文件配置，放在 .sensenova-claw/agents/<agent_id>/SYSTEM_PROMPT.md 中
+# 多 Agent 配置（dict 格式，key = agent id）
 agents:
   default:
     name: Default Agent
     description: 默认 AI Agent
-    temperature: 0.6
+    model: gemini_maas_pro_20260219
+    temperature: 0.2
     tools: []
     skills: []
-    # can_send_message_to: null    # null = 禁止向任何 Agent 发消息
-    # can_send_message_to: []      # [] = 可以向所有 Agent 发消息（默认）
-    # can_send_message_to:         # 仅限指定 Agent
-    #   - system-admin
-
-  system-admin:
-    name: 系统运维管理员
-    description: 系统运维管理员，负责 Sensenova-Claw 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作
-    temperature: 0.2
-    tools: [read_file, write_file, bash_command]
-    skills: [system-admin-skill]
-
-  office-main:
-    name: 办公主助手
-    description: 办公任务总调度，负责理解需求并委托给专业 agent
-    temperature: 0.2
-    tools: [send_message, ask_user]
-    skills: []
-    max_delegation_depth: 2
-
-  search-agent:
-    name: 搜索调研助手
-    description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
-    temperature: 0.2
-    tools: [serper_search, fetch_url, read_file, write_file, image_search, send_message, ask_user]
-    skills: [paddleocr-doc-parsing, mineru-document-extractor-choice, research-union, union-search-plus]
-
-  ppt-agent:
-    name: PPT 生成助手
-    description: 生成 PPT 演示文稿，支持一句话生成
-    temperature: 0.2
-    tools: [serper_search, fetch_url, read_file, write_file, bash_command, send_message, image_search, ask_user]
-    skills: [ppt-superpower, ppt-asset-plan, ppt-html-gen, ppt-image-selection, ppt-page-assets, ppt-page-html, ppt-page-plan, ppt-page-polish, ppt-research-pack, ppt-review, ppt-source-analysis, ppt-speaker-notes, ppt-story-refine, ppt-storyboard, ppt-style-refine, ppt-style-spec, ppt-task-pack, ppt-template-pack]
-
-  data-analyst:
-    name: 数据分析助手
-    description: 数据分析、可视化和报告生成
-    temperature: 0.6
-    tools: [read_file, write_file, bash_command, send_message, feishu_doc, ask_user]
-    skills: [excel-xlsx, python-dataviz, pdf, csv-pipeline, mineru-document-extractor, openai-whisper-api]
-
-  doc-organizer:
-    name: 文档整理助手
-    description: 处理多种来源的文档，支持格式转换和整理
-    temperature: 0.2
-    tools: [read_file, write_file, bash_command, send_message, feishu_doc, feishu-wiki, feishu-drive, ask_user]
-    skills: [markdown-converter, docx-cn, excel-xlsx, pdf, pdf-generator, mineru-document-extractor, openai-whisper-api, feishu-doc, feishu-wiki, feishu-drive]
-
-  email-agent:
-    name: 邮件助手
-    description: 邮件收发、管理和定时提醒
-    temperature: 0.2
-    tools: [bash_command, read_file, write_file, send_message, send_email, list_emails, read_email, download_attachment, mark_email, search_emails, ask_user]
-    skills: []
+    can_send_message_to: []
+    max_send_depth: 2
+    max_pingpong_turns: 10
+    enabled: true
 
   proactive-agent:
     name: Proactive Agent
     description: 自主执行定时任务和信息推送的 agent
+    model: gemini_maas_pro_20260219
     temperature: 0.2
-    tools: [send_message, fetch_url, read_file, serper_search, memory_search, list_proactive_jobs, create_proactive_job, manage_proactive_job]
+    tools: ["send_message", "fetch_url", "read_file", "write_file", "bash_command", "serper_search", "memory_search", "list_proactive_jobs", "create_proactive_job", "manage_proactive_job"]
     skills: []
+    max_send_depth: 2
+    max_pingpong_turns: 10
+    enabled: true
+
+  office-main:
+    name: 办公主助手
+    description: 办公任务总调度，负责理解需求并委托给专业 agent
+    model: gemini_maas_pro_20260219
+    temperature: 0.2
+    tools: []
+    skills: []
+    max_send_depth: 3
+    enabled: true
+
+  ppt-agent:
+    name: PPT 生成助手
+    description: 生成 PPT 演示文稿，支持一句话生成
+    model: gemini_maas_pro_20260219
+    temperature: 0.2
+    tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "send_message", "image_search", "ask_user", "memory_search"]
+    skills: ["ppt-superpower", "ppt-asset-plan", "ppt-html-gen", "ppt-image-selection", "ppt-page-assets", "ppt-page-html", "ppt-page-plan", "ppt-page-polish", "ppt-research-pack", "ppt-review", "ppt-source-analysis", "ppt-speaker-notes", "ppt-story-refine", "ppt-storyboard", "ppt-style-refine", "ppt-style-spec", "ppt-task-pack", "ppt-template-pack"]
+    max_send_depth: 2
+    enabled: true
+
+  data-analyst:
+    name: 数据分析助手
+    description: 数据分析、可视化和报告生成
+    model: gemini_maas_pro_20260219
+    temperature: 0.2
+    tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "ask_user", "memory_search"]
+    skills: ["excel-xlsx", "python-dataviz", "pdf", "csv-pipeline", "mineru-document-extractor", "openai-whisper-api"]
+    max_send_depth: 2
+    enabled: true
+
+  doc-organizer:
+    name: 文档整理助手
+    description: 处理多种来源的文档，支持格式转换和整理
+    model: gemini_maas_pro_20260219
+    temperature: 0.2
+    tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "feishu-drive", "ask_user", "memory_search"]
+    skills: ["markdown-converter", "docx-cn", "excel-xlsx", "pdf", "pdf-generator", "mineru-document-extractor", "openai-whisper-api", "feishu-doc", "feishu-wiki", "feishu-drive"]
+    max_send_depth: 2
+    enabled: true
+
+  email-agent:
+    name: 邮件助手
+    description: 邮件收发、管理和定时提醒
+    model: gemini_maas_pro_20260219
+    temperature: 0.2
+    tools: ["bash_command", "read_file", "write_file", "send_message", "send_email", "list_emails", "read_email", "download_attachment", "mark_email", "search_emails", "ask_user", "memory_search"]
+    skills: []
+    max_send_depth: 2
+    enabled: true
+
+  search-agent:
+    name: 搜索调研助手
+    description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
+    model: gemini_maas_pro_20260219
+    temperature: 0.2
+    tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search"]
+    skills: ["mineru-document-extractor", "research-union", "union-search-plus"]
     max_send_depth: 2
     enabled: true
 
@@ -237,24 +251,61 @@ agents:
 # Proactive Agent 配置
 # ════════════════════════════════════════════════════
 proactive:
-  enabled: false
+  enabled: true
   max_concurrent_runs: 3
   jobs:
-    # 示例：每日新闻简报
-    - name: "每日新闻简报"
+    - name: "偏好发现与推送管理"
       enabled: true
       agent_id: proactive-agent
       trigger:
         kind: time
-        cron: "0 8 * * *"            # 每天早上 8 点
+        cron: "0 12 * * *"
+        # every: "3m"
       task:
-        prompt: "搜索并汇总今日重要新闻，输出不超过 10 条的新闻摘要，每条包含标题、来源和一句话概要。"
-        use_memory: false
+        prompt: | 
+          你是每日信息推送助手。按以下步骤执行：
+
+          ## 步骤一：偏好发现
+          调用 memory_search 搜索用户的行为偏好。
+          分析结果，提取明确的、反复出现的兴趣主题（如"AI新闻"、"Python技术"、"股市"等）。
+          单次提及不算偏好，需要多次出现才确认。
+
+          ## 步骤二：内容搜索
+          根据步骤一的结果：
+          - 如果发现了明确偏好：针对每个偏好主题调用 serper_search 搜索今日相关内容
+          - 如果未发现偏好：执行以下默认搜索
+            1. 调用 serper_search(query="今日重要新闻 新华社 人民日报") 搜索当日新闻
+            2. 调用 memory_search(query="用户所在城市 位置 地点") 查找用户城市
+              - 找到城市 → 调用 serper_search(query="{城市}今日天气预报")
+              - 未找到 → 跳过天气
+
+          ## 步骤三：整理输出
+          将搜索结果整理为简洁的推送内容：
+          - 每条信息包含标题和一句话摘要
+          - 总条数不超过 10 条
+          - 如有天气信息，放在最前面
+        use_memory: true
       delivery:
         channels: ["web"]
       safety:
-        max_llm_calls: 10
-        max_duration_ms: 120000
+        max_llm_calls: 50
+        max_duration_ms: 2400000
+
+    # - name: "测试定时搜索"
+    #   enabled: true
+    #   agent_id: proactive-agent
+    #   trigger:
+    #     kind: time
+    #     every: "5m"
+    #   task:
+    #     prompt: "搜索今天的AI领域最新新闻，列出3条最重要的，每条包含标题和一句话摘要"
+    #     use_memory: false
+    #   delivery:
+    #     channels: ["web"]
+    #   safety:
+    #     allowed_tools: ["serper_search", "fetch_url"]
+    #     max_llm_calls: 50
+    #     max_duration_ms: 240000
 
 # ════════════════════════════════════════════════════
 # 工具配置
@@ -262,7 +313,7 @@ proactive:
 tools:
   permission:
     enabled: false
-    auto_approve_levels: ["low"]       # 自动批准的风险等级
+    auto_approve_levels: ["high"]       # 自动批准的风险等级
     confirmation_timeout: 60           # 确认超时（秒）
     timeout_action: reject             # 超时策略：reject（拒绝）| approve（批准）| block（无限等待）
 
