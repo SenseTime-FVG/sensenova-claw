@@ -166,8 +166,8 @@ async def setup_services(tmp_dir: Path, provider: str, model: str | None):
         config.data = _deep_merge(config.data, yml)
         logger.info("已加载 config.yml: %s", PROJECT_ROOT / "config.yml")
 
+    os.environ["SENSENOVA_CLAW_HOME"] = str(tmp_dir / ".sensenova-claw")
     config.data["system"]["database_path"] = str(db_path)
-    config.data["system"]["sensenova_claw_home"] = str(tmp_dir / ".sensenova-claw")
     config.data["system"]["workspace_dir"] = str(workspace)
     config.data["system"]["log_level"] = "DEBUG"
 

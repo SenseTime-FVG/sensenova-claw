@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -33,12 +34,13 @@ async def test_miniapp_interaction_end_to_end(tmp_path: Path) -> None:
     db_path = tmp_path / "sensenova-claw.db"
 
     original_config = copy.deepcopy(config.data)
+    previous_home = os.environ.get("SENSENOVA_CLAW_HOME")
+    os.environ["SENSENOVA_CLAW_HOME"] = str(sensenova_claw_home)
     config.data["llm"]["default_model"] = "mock"
     config.data["agents"]["default"]["model"] = "mock"
     for agent_cfg in config.data.get("agents", {}).values():
         if isinstance(agent_cfg, dict):
             agent_cfg.pop("system_prompt", None)
-    config.data["system"]["sensenova_claw_home"] = str(sensenova_claw_home)
     config.data["system"]["database_path"] = str(db_path)
     config.data["system"]["log_level"] = "DEBUG"
 
@@ -140,3 +142,7 @@ async def test_miniapp_interaction_end_to_end(tmp_path: Path) -> None:
         await bus_router.stop()
         await persister.stop()
         config.data = original_config
+        if previous_home is None:
+            os.environ.pop("SENSENOVA_CLAW_HOME", None)
+        else:
+            os.environ["SENSENOVA_CLAW_HOME"] = previous_home

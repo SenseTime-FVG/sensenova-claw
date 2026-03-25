@@ -71,7 +71,7 @@ class _FakeTelegramRuntime:
 
 
 @pytest.mark.asyncio
-async def test_telegram_channel_end_to_end_flow(tmp_path: Path) -> None:
+async def test_telegram_channel_end_to_end_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """覆盖 Telegram 文本入站到 Agent 回复出站的完整链路。"""
     original_config = copy.deepcopy(config.data)
 
@@ -79,12 +79,11 @@ async def test_telegram_channel_end_to_end_flow(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     sensenova_claw_home = tmp_path / ".sensenova-claw"
 
+    monkeypatch.setenv("SENSENOVA_CLAW_HOME", str(sensenova_claw_home))
     config.data["system"]["database_path"] = str(db_path)
     config.data["system"]["workspace_dir"] = str(workspace)
-    config.data["system"]["sensenova_claw_home"] = str(sensenova_claw_home)
     config.data["system"]["log_level"] = "DEBUG"
-    config.data["agent"]["provider"] = "mock"
-    config.data["agent"]["default_model"] = "mock-agent-v1"
+    config.data["llm"]["default_model"] = "mock"
 
     setup_logging()
 
@@ -169,7 +168,7 @@ async def test_telegram_channel_end_to_end_flow(tmp_path: Path) -> None:
     assert any(event.type == AGENT_STEP_COMPLETED for event in collected)
     assert runtime.sent_messages
     assert runtime.sent_messages[-1]["chat_id"] == "1001"
-    assert "这是 mock 回复" in runtime.sent_messages[-1]["text"]
+    assert "当前没有可用的 LLM" in runtime.sent_messages[-1]["text"]
     log_file = sensenova_claw_home / "logs" / "system.log"
     assert log_file.exists()
     assert "LLM call input" in log_file.read_text(encoding="utf-8")

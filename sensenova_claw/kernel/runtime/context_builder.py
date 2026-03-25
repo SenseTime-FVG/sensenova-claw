@@ -186,6 +186,6 @@ class ContextBuilder:
 
 def resolve_sensenova_claw_home_default() -> str:
     """快速获取 sensenova_claw_home 默认值（不依赖 config 对象）"""
-    import os
-    from pathlib import Path as _Path
-    return os.environ.get("SENSENOVA_CLAW_HOME", str(_Path.home() / ".sensenova-claw"))
+    from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
+    return str(default_sensenova_claw_home())

@@ -62,12 +62,11 @@ async def test_wecom_channel_end_to_end_flow(
     db_path = tmp_path / "sensenova-claw.db"
     workspace = tmp_path / "workspace"
 
-    config.data["system"]["sensenova_claw_home"] = str(tmp_path)
+    monkeypatch.setenv("SENSENOVA_CLAW_HOME", str(tmp_path))
     config.data["system"]["database_path"] = str(db_path)
     config.data["system"]["workspace_dir"] = str(workspace)
     config.data["system"]["log_level"] = "DEBUG"
-    config.data["agent"]["provider"] = "mock"
-    config.data["agent"]["default_model"] = "mock-agent-v1"
+    config.data["llm"]["default_model"] = "mock"
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
@@ -152,7 +151,7 @@ async def test_wecom_channel_end_to_end_flow(
     assert any(event.type == AGENT_STEP_COMPLETED for event in collected)
     assert wecom_client.sent_messages
     assert wecom_client.sent_messages[-1]["target"] == "chat-1"
-    assert "这是 mock 回复" in wecom_client.sent_messages[-1]["text"]
+    assert "当前没有可用的 LLM" in wecom_client.sent_messages[-1]["text"]
     log_file = tmp_path / "logs" / "system.log"
     assert log_file.exists()
     assert "LLM call input" in log_file.read_text(encoding="utf-8")

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -105,3 +106,22 @@ def test_legacy_openai_key_does_not_override_explicit_model(isolated_tmp: Path) 
 
     assert cfg.get("llm.default_model") == "mock"
     assert cfg.get("agent.model") == "mock"
+
+
+def test_config_uses_env_home_for_default_config_path(isolated_tmp: Path) -> None:
+    custom_home = isolated_tmp / "custom-home"
+    custom_home.mkdir(parents=True)
+    config_file = custom_home / "config.yml"
+    config_file.write_text("server:\n  port: 9001\n", encoding="utf-8")
+
+    previous_home = os.environ.get("SENSENOVA_CLAW_HOME")
+    os.environ["SENSENOVA_CLAW_HOME"] = str(custom_home)
+    try:
+        cfg = Config()
+    finally:
+        if previous_home is None:
+            os.environ.pop("SENSENOVA_CLAW_HOME", None)
+        else:
+            os.environ["SENSENOVA_CLAW_HOME"] = previous_home
+
+    assert cfg.get("server.port") == 9001

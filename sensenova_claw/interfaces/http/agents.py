@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from sensenova_claw.capabilities.agents.config import AgentConfig
 from sensenova_claw.capabilities.agents.registry import SYSTEM_PROMPT_FILENAME
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def _get_config_manager(request: Request):
 
 def _prefs_path(request: Request) -> Path:
     cfg = request.app.state.config
-    home = Path(getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw"))
+    home = Path(getattr(request.app.state, "sensenova_claw_home", "") or default_sensenova_claw_home())
     return home / ".agent_preferences.json"
 
 
@@ -61,7 +62,7 @@ def _save_prefs(request: Request, prefs: dict) -> None:
 
 
 def _sensenova_claw_home_path(request: Request) -> Path:
-    return Path(getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw"))
+    return Path(getattr(request.app.state, "sensenova_claw_home", "") or default_sensenova_claw_home())
 
 
 def _agent_prompt_path(request: Request, agent_id: str) -> Path:

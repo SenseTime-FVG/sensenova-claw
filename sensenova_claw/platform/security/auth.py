@@ -13,6 +13,8 @@ import secrets
 import stat
 from pathlib import Path
 
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
 logger = logging.getLogger(__name__)
 
 # Cookie 名称
@@ -66,7 +68,7 @@ class TokenAuthService:
 def read_token_file(sensenova_claw_home: str | Path | None = None) -> str | None:
     """从 {sensenova_claw_home}/token 读取 token（供 CLI 等客户端使用）"""
     if not sensenova_claw_home:
-        sensenova_claw_home = Path.home() / ".sensenova-claw"
+        sensenova_claw_home = default_sensenova_claw_home()
     token_file = Path(sensenova_claw_home) / TOKEN_FILENAME
     if token_file.exists():
         try:

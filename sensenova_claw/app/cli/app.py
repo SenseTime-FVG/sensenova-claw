@@ -385,7 +385,9 @@ class CLIApp:
             # 从后端获取 sensenova_claw_home 拼接 workdir 路径
             try:
                 from pathlib import Path
-                home = Path.home() / ".sensenova-claw"
+                from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
+                home = default_sensenova_claw_home()
                 workdir = str(home / "workdir" / agent_info["id"])
             except Exception:
                 pass
