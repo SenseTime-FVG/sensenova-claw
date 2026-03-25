@@ -24,7 +24,7 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
       llm: {
         providers: {
           mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
-          openai: { api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' }, base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
+          openai: { source_type: 'openai', api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' }, base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
         },
         models: {
           mock: { provider: 'mock', model_id: 'mock-agent-v1' },
@@ -77,6 +77,7 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
         (window as typeof window & { __providerPuts: unknown[] }).__providerPuts = providerPuts;
         state.llm.providers.openai = {
           ...state.llm.providers.openai,
+          source_type: body.source_type,
           base_url: body.base_url,
           timeout: body.timeout,
           max_retries: body.max_retries,
@@ -135,6 +136,7 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
   await expect(page.getByTestId('provider-base-url-input-openai')).toHaveValue('https://api.openai.com/v1');
 
   await page.getByTestId('provider-edit-openai').click();
+  await page.getByTestId('provider-source-type-select-openai').selectOption('openai-compatible');
   await page.getByTestId('provider-base-url-input-openai').fill('https://proxy.example.com/v1');
   await page.getByTestId('provider-save-openai').click();
   await expect.poll(async () => {
@@ -184,7 +186,7 @@ test('llms 页面新增 provider 后应支持单项编辑并保存', async ({ pa
       llm: {
         providers: {
           mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
-          openai: { api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' }, base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
+          openai: { source_type: 'openai', api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' }, base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
         },
         models: {
           mock: { provider: 'mock', model_id: 'mock-agent-v1' },
@@ -243,6 +245,7 @@ test('llms 页面新增 provider 后应支持单项编辑并保存', async ({ pa
   await expect(page.getByTestId('provider-base-url-input-deepseek')).toBeDisabled();
 
   await page.getByTestId('provider-edit-deepseek').click();
+  await page.getByTestId('provider-source-type-select-deepseek').selectOption('deepseek');
   await expect(page.getByTestId('provider-base-url-input-deepseek')).toBeEditable();
   await page.getByTestId('provider-base-url-input-deepseek').fill('https://api.deepseek.com/v1');
   await page.getByTestId('provider-save-deepseek').click();
@@ -261,10 +264,435 @@ test('llms 页面新增 provider 后应支持单项编辑并保存', async ({ pa
     url: 'http://localhost:8000/api/config/llm/providers/deepseek',
     body: {
       name: 'deepseek',
+      source_type: 'deepseek',
       base_url: 'https://api.deepseek.com/v1',
       timeout: 60,
       max_retries: 3,
       api_key: '',
     },
   });
+});
+
+test('llms 页面单项编辑时测试按钮应读取草稿并位于编辑按钮下方，结果区域不侵入编辑按钮左侧', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          mock: { source_type: 'mock', api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+      },
+    };
+
+    const testRequests: Array<Record<string, unknown>> = [];
+
+    Object.assign(window, {
+      __llmTestRequests: testRequests,
+    });
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/secret?path=llm.providers.openai.api_key') && method === 'GET') {
+        return new Response(JSON.stringify({ path: 'llm.providers.openai.api_key', value: 'sk-openai-real' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/api/config/test-llm') && method === 'POST') {
+        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
+        testRequests.push(body);
+        (window as typeof window & { __llmTestRequests: Array<Record<string, unknown>> }).__llmTestRequests = testRequests;
+        return new Response(JSON.stringify({ success: true, message: '连接成功' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.setViewportSize({ width: 1361, height: 900 });
+  await page.getByTestId('provider-toggle-openai').click();
+  await page.getByTestId('llm-edit-gpt-4o-mini').click();
+  await page.getByTestId('llm-model-id-input-gpt-4o-mini').fill('gpt-4.1-mini-draft');
+  await page.getByTestId('llm-test-gpt-4o-mini').click();
+
+  await expect.poll(async () => {
+    return page.evaluate(() => ((window as typeof window & {
+      __llmTestRequests?: Array<Record<string, unknown>>;
+    }).__llmTestRequests ?? []).length);
+  }).toBe(1);
+
+  await expect.poll(async () => {
+    return page.evaluate(() => ((window as typeof window & {
+      __llmTestRequests?: Array<Record<string, unknown>>;
+    }).__llmTestRequests ?? [])[0]);
+  }).toEqual({
+    provider: 'openai',
+    api_key: 'sk-openai-real',
+    base_url: 'https://api.openai.com/v1',
+    model_id: 'gpt-4.1-mini-draft',
+  });
+
+  const modelIdInput = page.getByTestId('llm-model-id-input-gpt-4o-mini');
+  const testButton = page.getByTestId('llm-test-gpt-4o-mini');
+  const saveButton = page.getByTestId('llm-save-gpt-4o-mini');
+  const testResult = page.getByTestId('llm-test-result-gpt-4o-mini');
+  const inputBox = await modelIdInput.boundingBox();
+  const buttonBox = await testButton.boundingBox();
+  const saveBox = await saveButton.boundingBox();
+  const resultBox = await testResult.boundingBox();
+
+  expect(inputBox).not.toBeNull();
+  expect(buttonBox).not.toBeNull();
+  expect(saveBox).not.toBeNull();
+  expect(resultBox).not.toBeNull();
+  expect(inputBox!.x + inputBox!.width).toBeLessThanOrEqual(buttonBox!.x);
+  expect(buttonBox!.y).toBeGreaterThan(saveBox!.y + saveBox!.height);
+  expect(resultBox!.x).toBeGreaterThanOrEqual(saveBox!.x);
+});
+
+test('llms 页面测试失败时应先显示连接失败状态框，点击后再展示错误浮层，并支持关闭', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          mock: { source_type: 'mock', api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/secret?path=llm.providers.openai.api_key') && method === 'GET') {
+        return new Response(JSON.stringify({ path: 'llm.providers.openai.api_key', value: 'sk-openai-real' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/api/config/test-llm') && method === 'POST') {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Error code: 401 - {"error":{"code":"401","message":"You are not authorized to access this resource."}}',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.getByTestId('provider-toggle-openai').click();
+  await page.getByTestId('llm-test-gpt-4o-mini').click();
+
+  const failedBadge = page.getByTestId('llm-test-result-gpt-4o-mini');
+  const failedPopover = page.getByTestId('llm-test-error-popover-gpt-4o-mini');
+
+  await expect(failedBadge).toContainText('连接失败');
+  await expect(page.getByText('You are not authorized to access this resource.')).toHaveCount(0);
+  await expect(failedPopover).toHaveCount(0);
+
+  await failedBadge.click();
+
+  await expect(failedPopover).toBeVisible();
+  await expect(failedPopover).toContainText('You are not authorized to access this resource.');
+
+  await page.getByTestId('llm-test-error-popover-close-gpt-4o-mini').click();
+  await expect(failedPopover).toHaveCount(0);
+
+  await failedBadge.click();
+  await expect(failedPopover).toBeVisible();
+  await page.mouse.click(20, 20);
+  await expect(failedPopover).toHaveCount(0);
+});
+
+test('llms 页面当 secret reveal 返回占位符时不应显示占位符 API Key', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          mock: { source_type: 'mock', api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••1234', source: 'secret' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/secret?path=llm.providers.openai.api_key') && method === 'GET') {
+        return new Response(JSON.stringify({
+          path: 'llm.providers.openai.api_key',
+          value: '${secret:sensenova_claw/llm.providers.openai.api_key}',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.getByTestId('provider-toggle-openai').click();
+  await page.getByTestId('provider-api-key-toggle-openai').click();
+
+  await expect(page.getByText('Secret store 中保存的是占位符，请重新填写真实 API Key')).toBeVisible();
+  await expect(page.getByTestId('provider-api-key-input-openai')).not.toHaveValue('${secret:sensenova_claw/llm.providers.openai.api_key}');
+});
+
+test('llms 页面普通模式新增 llm 后应立即进入编辑态', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          mock: { source_type: 'mock', api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: { source_type: 'openai', api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' }, base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.getByTestId('provider-toggle-openai').click();
+  await page.getByTestId('add-llm-button-openai').click();
+  await page.getByTestId('new-llm-name-input-openai').fill('gpt-4.1-mini');
+  await page.getByTestId('confirm-add-llm-button-openai').click();
+
+  await expect(page.getByTestId('llm-card-gpt-4.1-mini')).toBeVisible();
+  await expect(page.getByTestId('llm-model-id-input-gpt-4.1-mini')).toBeEditable();
+  await expect(page.getByTestId('llm-save-gpt-4.1-mini')).toBeVisible();
+});
+
+test('llms 页面新增重复 llm 名称时应给出提示', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          mock: { source_type: 'mock', api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: { source_type: 'openai', api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' }, base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
+          test: { source_type: 'openai-compatible', api_key: '', base_url: 'https://proxy.example.com/v1', timeout: 60, max_retries: 3 },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          'gpt-5.4': { provider: 'openai', model_id: 'gpt-5.4', timeout: 60, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-5.4',
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai', 'test'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.getByTestId('provider-toggle-test').click();
+  await page.getByTestId('add-llm-button-test').click();
+  await page.getByTestId('new-llm-name-input-test').fill('gpt-5.4');
+  await page.getByTestId('confirm-add-llm-button-test').click();
+
+  await expect(page.getByText('LLM 名称已存在: gpt-5.4')).toBeVisible();
 });

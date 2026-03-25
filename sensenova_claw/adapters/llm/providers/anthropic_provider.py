@@ -10,8 +10,10 @@ from sensenova_claw.adapters.llm.base import LLMProvider
 
 
 class AnthropicProvider(LLMProvider):
-    def __init__(self):
-        provider_cfg = config.get("llm.providers.anthropic", {})
+    def __init__(self, provider_id: str = "anthropic", source_type: str | None = None):
+        provider_cfg = config.get(f"llm.providers.{provider_id}", {})
+        self.provider_id = provider_id
+        self.source_type = source_type or str(provider_cfg.get("source_type", "anthropic") or "anthropic")
         self.client = AsyncAnthropic(
             api_key=provider_cfg.get("api_key"),
             base_url=provider_cfg.get("base_url") or None,

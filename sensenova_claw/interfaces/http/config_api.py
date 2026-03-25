@@ -36,6 +36,7 @@ class TestLLMBody(BaseModel):
 
 class ProviderUpdateBody(BaseModel):
     name: str | None = None
+    source_type: str = "openai"
     api_key: str | None = None
     base_url: str = ""
     timeout: int = 60
@@ -158,6 +159,7 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
 
     existing = providers.pop(provider_name, {})
     provider_payload: dict[str, Any] = {
+        "source_type": body.source_type or (existing.get("source_type") if isinstance(existing, dict) else "openai"),
         "base_url": body.base_url,
         "timeout": body.timeout,
         "max_retries": body.max_retries,
@@ -305,7 +307,7 @@ async def list_models(body: ListModelsBody):
     """通过 OpenAI 兼容的 GET /models 接口获取可用模型列表"""
     try:
         logger.debug("List models request: provider=%s base_url=%s", body.provider, body.base_url)
-        if body.provider == "anthropic":
+        if body.provider in ("anthropic", "anthropic-compatible"):
             models = await _list_models_anthropic(body.api_key, body.base_url)
         else:
             models = await _list_models_openai(body.api_key, body.base_url)
@@ -352,22 +354,25 @@ async def test_llm_connection(body: TestLLMBody):
     """用临时配置测试 LLM 连通性，发送一个简单请求验证 API key 和模型是否可用"""
     provider = body.provider
     try:
-        if provider in ("openai", "anthropic", "gemini"):
+        if provider in ("anthropic", "anthropic-compatible"):
+            result = await _test_anthropic(
+                api_key=body.api_key,
+                base_url=body.base_url,
+                model_id=body.model_id,
+            )
+            return {"success": True, **result}
+        if provider in ("gemini", "gemini-compatible"):
+            result = await _test_gemini(
+                api_key=body.api_key,
+                base_url=body.base_url,
+                model_id=body.model_id,
+            )
+            return {"success": True, **result}
+        if provider in ("openai", "openai-compatible"):
             result = await _test_openai_compatible(
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
-            ) if provider == "openai" else (
-                await _test_anthropic(
-                    api_key=body.api_key,
-                    base_url=body.base_url,
-                    model_id=body.model_id,
-                ) if provider == "anthropic" else
-                await _test_gemini(
-                    api_key=body.api_key,
-                    base_url=body.base_url,
-                    model_id=body.model_id,
-                )
             )
             return {"success": True, **result}
         else:

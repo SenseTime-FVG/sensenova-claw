@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle, ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, Save, Server, Trash2, XCircle, Zap } from 'lucide-react';
+import { CheckCircle, ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, Save, Server, Trash2, X, XCircle, Zap } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { authFetch, API_BASE } from '@/lib/authFetch';
@@ -14,6 +14,7 @@ interface SecretValueStatus {
 }
 
 interface ProviderConfig {
+  source_type: string;
   api_key: string;
   api_key_meta?: SecretValueStatus | null;
   api_key_touched?: boolean;
@@ -44,6 +45,31 @@ interface GlobalDraft {
   defaultModel: string;
 }
 
+interface ModelTestResult {
+  success: boolean;
+  message: string;
+  detail?: string;
+}
+
+const PROVIDER_SOURCE_TYPE_OPTIONS = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'qwen', label: 'Qwen' },
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'minimax', label: 'MiniMax' },
+  { value: 'glm', label: 'GLM' },
+  { value: 'kimi', label: 'Kimi' },
+  { value: 'step', label: 'Step' },
+  { value: 'openai-compatible', label: 'OpenAI Compatible' },
+  { value: 'anthropic-compatible', label: 'Anthropic Compatible' },
+  { value: 'gemini-compatible', label: 'Gemini Compatible' },
+] as const;
+
+function isSecretRefLike(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith('${secret:') && value.endsWith('}');
+}
+
 export default function LlmsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,7 +95,8 @@ export default function LlmsPage() {
   const [globalDraft, setGlobalDraft] = useState<GlobalDraft | null>(null);
   const [defaultModelDraft, setDefaultModelDraft] = useState('');
   const [testingModel, setTestingModel] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
+  const [testResults, setTestResults] = useState<Record<string, ModelTestResult>>({});
+  const [openTestErrorModel, setOpenTestErrorModel] = useState<string | null>(null);
 
   const loadConfig = () => {
     authFetch(`${API_BASE}/api/config/sections`)
@@ -94,6 +121,7 @@ export default function LlmsPage() {
         setModelDrafts({});
         setGlobalDraft(null);
         setDefaultModelDraft('');
+        setOpenTestErrorModel(null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -103,11 +131,33 @@ export default function LlmsPage() {
     loadConfig();
   }, []);
 
+  useEffect(() => {
+    if (!openTestErrorModel) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        setOpenTestErrorModel(null);
+        return;
+      }
+      if (target.closest('[data-llm-test-error-scope="true"]')) {
+        return;
+      }
+      setOpenTestErrorModel(null);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [openTestErrorModel]);
+
   const activeProviders = useMemo(() => {
     if (!editingAll || !globalDraft) return providers;
     return Object.fromEntries(Object.entries(globalDraft.providers).map(([key, draft]) => [
       key,
       {
+        source_type: draft.source_type,
         api_key: draft.api_key,
         api_key_meta: draft.api_key_meta,
         api_key_touched: draft.api_key_touched,
@@ -249,6 +299,7 @@ export default function LlmsPage() {
       return;
     }
     const nextProvider: ProviderDraft = {
+        source_type: 'openai',
         api_key: '',
         api_key_meta: null,
         api_key_touched: true,
@@ -364,7 +415,12 @@ export default function LlmsPage() {
   const addModel = (providerName: string) => {
     const nextName = (newModelDrafts[providerName] || '').trim();
     const modelSource = editingAll && globalDraft ? globalDraft.models : cloneModelsToDrafts(models);
-    if (!nextName || modelSource[nextName]) {
+    if (!nextName) {
+      setSaveMsg('LLM 名称不能为空');
+      return;
+    }
+    if (modelSource[nextName]) {
+      setSaveMsg(`LLM 名称已存在: ${nextName}`);
       return;
     }
     const nextModel: ModelDraft = {
@@ -385,6 +441,13 @@ export default function LlmsPage() {
       });
     } else {
       setModels((prev) => ({
+        ...prev,
+        [nextName]: nextModel,
+      }));
+      setEditingProvider(null);
+      setEditingDefaultModel(false);
+      setEditingModel(nextName);
+      setModelDrafts((prev) => ({
         ...prev,
         [nextName]: nextModel,
       }));
@@ -454,7 +517,11 @@ export default function LlmsPage() {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || '读取 secret 失败');
     }
-    return res.json() as Promise<{ path: string; value: string }>;
+    const payload = await res.json() as { path: string; value: string };
+    if (isSecretRefLike(payload.value)) {
+      throw new Error('Secret store 中保存的是占位符，请重新填写真实 API Key');
+    }
+    return payload;
   };
 
   const toggleProviderApiKey = async (providerName: string) => {
@@ -556,6 +623,7 @@ export default function LlmsPage() {
     setSaveMsg('');
     const payload: Record<string, unknown> = {
       name: draft.name,
+      source_type: draft.source_type,
       base_url: draft.base_url,
       timeout: draft.timeout,
       max_retries: draft.max_retries,
@@ -652,13 +720,22 @@ export default function LlmsPage() {
   };
 
   const testModel = async (modelName: string) => {
-    const model = activeModels[modelName];
+    const model = editingAll && globalDraft
+      ? activeModels[modelName]
+      : editingModel === modelName
+        ? getModelDraft(modelName)
+        : activeModels[modelName];
     if (!model) return;
     const providerName = model.provider;
-    const provider = activeProviders[providerName];
+    const provider = editingAll && globalDraft
+      ? activeProviders[providerName]
+      : editingProvider === providerName
+        ? getProviderDraft(providerName)
+        : activeProviders[providerName];
     if (!provider) return;
 
     setTestingModel(modelName);
+    setOpenTestErrorModel(null);
     setTestResults((prev) => {
       const next = { ...prev };
       delete next[modelName];
@@ -672,8 +749,22 @@ export default function LlmsPage() {
         const secret = await revealSecret(`llm.providers.${providerName}.api_key`);
         apiKey = secret.value || '';
       }
+      if (isSecretRefLike(apiKey)) {
+        setTestResults((prev) => ({
+          ...prev,
+          [modelName]: {
+            success: false,
+            message: '连接失败',
+            detail: 'Secret store 中保存的是占位符，请重新填写真实 API Key',
+          },
+        }));
+        return;
+      }
       if (!apiKey) {
-        setTestResults((prev) => ({ ...prev, [modelName]: { success: false, message: '未配置 API Key' } }));
+        setTestResults((prev) => ({
+          ...prev,
+          [modelName]: { success: false, message: '连接失败', detail: '未配置 API Key' },
+        }));
         return;
       }
 
@@ -681,7 +772,7 @@ export default function LlmsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: providerName,
+          provider: provider.source_type || 'openai',
           api_key: apiKey,
           base_url: provider.base_url || '',
           model_id: model.model_id || modelName,
@@ -691,12 +782,17 @@ export default function LlmsPage() {
       if (data.success) {
         setTestResults((prev) => ({ ...prev, [modelName]: { success: true, message: data.message || '连接成功' } }));
       } else {
-        setTestResults((prev) => ({ ...prev, [modelName]: { success: false, message: data.error || '测试失败' } }));
+        const detail = typeof data.error === 'string' && data.error.trim() ? data.error : '测试失败';
+        setTestResults((prev) => ({ ...prev, [modelName]: { success: false, message: '连接失败', detail } }));
       }
     } catch (error) {
       setTestResults((prev) => ({
         ...prev,
-        [modelName]: { success: false, message: error instanceof Error ? error.message : '测试失败' },
+        [modelName]: {
+          success: false,
+          message: '连接失败',
+          detail: error instanceof Error ? error.message : '测试失败',
+        },
       }));
     } finally {
       setTestingModel(null);
@@ -880,6 +976,9 @@ export default function LlmsPage() {
                         <span className="rounded-full border border-border/60 px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
                           {(groupedModels[providerName] || []).length} 个 llm
                         </span>
+                        <span className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                          {providers[providerName]?.source_type || 'openai'}
+                        </span>
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {providers[providerName]?.base_url || '未配置 Base URL'}
@@ -950,6 +1049,17 @@ export default function LlmsPage() {
                             [providerName]: { ...(prev[providerName] || { ...providers[providerName], name: providerName }), name: value },
                           }));
                         }}
+                      />
+                      <FieldSelect
+                        label="Provider 来源"
+                        value={getProviderDraft(providerName).source_type || 'openai'}
+                        dataTestId={`provider-source-type-select-${providerName}`}
+                        disabled={!isProviderEditable(providerName)}
+                        options={PROVIDER_SOURCE_TYPE_OPTIONS.map((option) => ({
+                          value: option.value,
+                          label: option.label,
+                        }))}
+                        onChange={(value) => updateProviderField(providerName, 'source_type', value)}
                       />
                       <div className="space-y-1.5">
                         <label className="text-xs font-semibold text-muted-foreground">API Key</label>
@@ -1046,9 +1156,9 @@ export default function LlmsPage() {
                           <div
                             key={modelName}
                             data-testid={`llm-card-${modelName}`}
-                            className="grid gap-4 rounded-2xl border border-border bg-background p-4 md:grid-cols-[1fr_1fr_140px]"
+                            className="grid gap-4 rounded-2xl border border-border bg-background p-4 md:grid-cols-[minmax(0,1fr)_auto]"
                           >
-                            <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
+                            <div className="grid min-w-0 gap-4 md:grid-cols-2">
                               <FieldInput
                                 label="LLM 名称"
                                 value={getModelDraft(modelName).name}
@@ -1103,22 +1213,8 @@ export default function LlmsPage() {
                                 onChange={(value) => updateModelField(modelName, 'max_output_tokens', parseInt(value, 10) || 16384)}
                               />
                             </div>
-                            <div className="flex flex-col items-end gap-2">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  data-testid={`llm-test-${modelName}`}
-                                  onClick={() => void testModel(modelName)}
-                                  disabled={testingModel === modelName}
-                                  className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 px-3 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
-                                >
-                                  {testingModel === modelName ? (
-                                    <Loader2 size={16} className="animate-spin" />
-                                  ) : (
-                                    <Zap size={16} />
-                                  )}
-                                  测试
-                                </button>
+                            <div className="flex min-w-0 flex-col items-end gap-2">
+                              <div className="flex flex-wrap items-center justify-end gap-2">
                                 {editingAll ? null : editingModel === modelName ? (
                                   <>
                                     <button
@@ -1158,21 +1254,64 @@ export default function LlmsPage() {
                                   <Trash2 size={16} />
                                 </button>
                               </div>
-                              {testResults[modelName] && (
-                                <div
-                                  data-testid={`llm-test-result-${modelName}`}
-                                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                                    testResults[modelName].success
-                                      ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                                      : 'bg-destructive/10 text-destructive'
-                                  }`}
+                              <div className="flex w-full justify-end">
+                                <button
+                                  type="button"
+                                  data-testid={`llm-test-${modelName}`}
+                                  onClick={() => void testModel(modelName)}
+                                  disabled={testingModel === modelName}
+                                  className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 px-3 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
                                 >
-                                  {testResults[modelName].success ? (
-                                    <CheckCircle size={14} />
+                                  {testingModel === modelName ? (
+                                    <Loader2 size={16} className="animate-spin" />
                                   ) : (
-                                    <XCircle size={14} />
+                                    <Zap size={16} />
                                   )}
-                                  {testResults[modelName].message}
+                                  测试
+                                </button>
+                              </div>
+                              {testResults[modelName] && (
+                                <div className="relative flex justify-end self-end" data-llm-test-error-scope="true">
+                                  {!testResults[modelName].success && openTestErrorModel === modelName && testResults[modelName].detail ? (
+                                    <div
+                                      data-testid={`llm-test-error-popover-${modelName}`}
+                                      className="absolute bottom-full right-0 z-20 mb-2 w-[280px] max-w-[min(280px,calc(100vw-2rem))] rounded-xl border border-destructive/20 bg-background/95 p-3 text-left text-xs text-foreground shadow-2xl backdrop-blur"
+                                    >
+                                      <div className="mb-2 flex items-start justify-between gap-3">
+                                        <div className="font-semibold text-destructive">错误信息</div>
+                                        <button
+                                          type="button"
+                                          data-testid={`llm-test-error-popover-close-${modelName}`}
+                                          onClick={() => setOpenTestErrorModel(null)}
+                                          className="rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                        >
+                                          <X size={14} />
+                                        </button>
+                                      </div>
+                                      <div className="whitespace-pre-wrap break-words text-muted-foreground">
+                                        {testResults[modelName].detail}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                  {testResults[modelName].success ? (
+                                    <div
+                                      data-testid={`llm-test-result-${modelName}`}
+                                      className="inline-flex max-w-[220px] items-center justify-end gap-1.5 rounded-lg bg-green-500/10 px-3 py-1.5 text-right text-xs font-semibold text-green-600 dark:text-green-400"
+                                    >
+                                      <CheckCircle size={14} />
+                                      {testResults[modelName].message}
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      data-testid={`llm-test-result-${modelName}`}
+                                      onClick={() => setOpenTestErrorModel((prev) => (prev === modelName ? null : modelName))}
+                                      className="inline-flex max-w-[220px] items-center justify-end gap-1.5 rounded-lg bg-destructive/10 px-3 py-1.5 text-right text-xs font-semibold text-destructive"
+                                    >
+                                      <XCircle size={14} />
+                                      {testResults[modelName].message}
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -1271,7 +1410,7 @@ function FieldInput({
   disabled?: boolean;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="min-w-0 space-y-1.5">
       <label className="text-xs font-semibold text-muted-foreground">{label}</label>
       <input
         type={type}
@@ -1280,8 +1419,41 @@ function FieldInput({
         placeholder={placeholder}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        className="min-w-0 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
       />
+    </div>
+  );
+}
+
+function FieldSelect({
+  label,
+  value,
+  onChange,
+  dataTestId,
+  disabled = false,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  dataTestId?: string;
+  disabled?: boolean;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-semibold text-muted-foreground">{label}</label>
+      <select
+        value={value}
+        data-testid={dataTestId}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -1295,6 +1467,7 @@ function normalizeProviders(input: Record<string, unknown>): Record<string, Prov
       return [
         name,
         {
+          source_type: String(provider.source_type || 'openai'),
           api_key: hasMeta ? '' : String(apiKeyValue || ''),
           api_key_meta: hasMeta ? apiKeyValue as SecretValueStatus : null,
           api_key_touched: false,
@@ -1329,6 +1502,7 @@ function buildProviderPayloads(providers: Record<string, ProviderConfig>): Recor
   return Object.fromEntries(
     Object.entries(providers).map(([name, provider]) => {
       const payload: Record<string, unknown> = {
+        source_type: provider.source_type || 'openai',
         base_url: provider.base_url,
         timeout: provider.timeout,
         max_retries: provider.max_retries,
@@ -1349,6 +1523,7 @@ function buildProviderPayloadsFromDrafts(providers: Record<string, ProviderDraft
       Object.entries(providers).map(([_, draft]) => [
         draft.name,
         {
+          source_type: draft.source_type,
           api_key: draft.api_key,
           api_key_meta: draft.api_key_meta,
           api_key_touched: draft.api_key_touched,
