@@ -207,6 +207,34 @@
 - 搜图下载、逐页 HTML、整套 review、导出 PPTX 这类明显耗时阶段，可以补 1 条进行中反馈，但不能刷屏。
 - 依赖缺失、路径不一致、下载失败、页面失败等异常要立即回显，不允许静默跳过。
 
+### 3.9 装饰层增强方案
+
+为解决“背景只剩纯色或渐变、插画感没有真正落地”的问题，当前记录三种可选方案：
+
+1. 强约束渲染契约
+2. 预置装饰模板库
+3. 后置抛光补层
+
+当前优先实现方案 1。
+
+### 3.10 正文页内容诊断维度
+
+为了区分“内容本身稀疏”和“版式承载不足”，后续实验需要统一使用下面这组审计词汇：
+
+- 论点密度
+- 证据密度
+- 结构密度
+- 视觉承载密度
+- 空白感
+
+其中：
+
+- 论点密度用于判断页面是否有明确主张、判断、结论或推进意图。
+- 证据密度用于判断页面是否给出了数据、事实、引用、链接或可核验线索。
+- 结构密度用于判断页面是否用标题、列表、表格、分组等方式组织信息。
+- 视觉承载密度用于判断页面的正文区域是否充分承接了内容，而不是只留下少量元素。
+- 空白感用于判断页面是否因为信息量过低或排版过散而显得“空”。
+
 ---
 
 ## 4. 新 Skill 体系
@@ -233,7 +261,7 @@
 
 #### `ppt-task-pack`
 
-负责统一记录任务目标、页数、受众、语言、限制、交付物、输出目录和推荐路径，产出 `task-pack.json`。
+负责统一记录任务目标、页数、受众、语言、限制、交付物、输出目录、推荐路径和 `风格意图`，产出 `task-pack.json`。
 
 #### `ppt-research-pack`
 
@@ -246,19 +274,41 @@
 #### `ppt-style-spec`
 
 负责 deck 级设计语言，产出 `style-spec.json`。默认必产。
+它必须优先理解用户需求，再把 `task-pack.json` 中的 `风格意图` 转成可执行的设计语法；只有在风格信号不足时，才允许退到 `商务` 或 `海报` 这两种兜底。
+这里的“可执行”不是多写几个形容词，而是要产出 variant 级页面壳子映射，例如 `variant_key`、`layout_shell`、`header_strategy`，不要只按 `page_type` 粗分。
+同时要给出 `svg_motif_library` 这类可直接绘制的装饰元素库，让背景和前景的插画感不是停留在文字描述。
+对装饰层的当前实现策略采用“强约束渲染契约”，不是只描述气质，而是给出可直接落地的 motif 配方。
+这里的 `插画感` 只影响装饰层与组件皮肤，不应被误用成“所有视觉都改成插画、无需真实图片”。
+正文 / 内容页不能把 `background_motif_recipe` 留空，也不要只给一个角落里的小图标；至少要有一个大面积或跨边缘的背景 motif 配方。真实图片也不能替代背景装饰配方。
 
 #### `ppt-storyboard`
 
 负责分页叙事和前端契约，产出 `storyboard.json`。默认必产。
+其中每页的 `style_variant` 必须直接引用 `style-spec.json` 中已声明的 variant 映射，不要把它写成宽泛形容词。
+`asset_requirements` 也不能只写模糊槽位名；要带上 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder` 这类类型提示。
+资产类型判断必须先看页面语义。如果页面要呈现人物、产品、空间、场景、活动现场、作品样张或环境氛围，默认应规划为 `real-photo`；`插画感` 只影响装饰语法，不要因为风格里有插画感，就把整套 deck 的图片需求都改成 `svg-illustration`。
 
 #### `ppt-asset-plan`
 
 负责图片与视觉资产规划，产出 `asset-plan.json`，必要时同时落地 `image_search_results.json`、`image_selection.json` 和 `images/`，并在下载前先创建 `deck_dir/images`。
+它只应为真实图片槽位走搜图与下载；可直接绘制的图标或插画应标记为 `draw-inline-svg`，不要强行走搜图下载。
+如果 `asset_requirements` 写得过轻，但 `visual_requirements` 或页面语义明显指向真实图片，资产规划阶段应补出对应的 `real-photo` 槽位，不要静默接受“整套都只有 SVG”。
 
 #### `ppt-page-html`
 
 负责按页生成 `pages/page_XX.html`。
 每个 `storyboard.json.pages[n]` 都必须对应一个单独的页面文件，不允许把整套 deck 拼成单个 HTML，同时必须忠实消费 `style-spec.json` 和已经下载成功的本地图片，并继续遵守 `1280x720` 固定画布、16:9 比例和页脚安全区约束。
+不要编写 Python 脚本来批量生成页面；必须逐页直接生成最终 HTML，不要先写生成器脚本再批量产出页面。
+页面实现时必须显式消费 `background_system`、`foreground_motifs`、`component_skins`、`density_rules`、`page_type_variants`；不要只做纯色背景 + 普通白卡片，除非 `style-spec` 明确要求极简。
+生成时应优先按 `style_variant` 映射页面壳子，不要把多个不同 `style_variant` 页面重新压成同一种安全模板。
+图标、装饰性元素、可直接绘制的插画应使用内联 SVG 落地；只有真实照片、二维码、用户专有素材缺失时才允许 placeholder。
+不要把图标画成 placeholder。
+可见标题必须放在 `#ct` 内，或放在单独的 `#header` 容器内；不要把 `.header` 当作 `#bg` 和 `#ct` 之间的裸兄弟节点，否则很容易被内容层盖住。
+非极简页面必须至少 1 层背景装饰，且至少 1 处前景装饰；如果只有纯色或渐变背景，应视为未完成。
+背景装饰层必须是用户可感知的视觉层，不能退化成极小角标或几乎不可见的弱纹理。
+正文 / 内容页即使有真实图片，也不能把照片当成背景装饰层的替代。
+根据 recipe 落地的背景 motif 元素必须带 `data-layer="bg-motif"`；前景 motif 元素必须带 `data-layer="fg-motif"`；每个 motif 还要带 `data-motif-key`，让 review 和导出前校验可以核对。真实图片或主视觉照片不能替代这些标记。
+同时，页面必须逐项消费 `storyboard.json.pages[n].asset_requirements`，不要用一个通用 motif 替代不同页面的具体资产要求；如果页面要求 `real-photo`，不要改画成 SVG 小图标。
 在生成前，消费前必须先确认 `task-pack.json`、`style-spec.json`、`storyboard.json` 以及相关 `asset-plan.json` 真实存在且可读；如果目标文件不存在、目录不一致或关键字段缺失，先补齐依赖，不要猜测。
 
 #### `ppt-speaker-notes`
@@ -268,6 +318,7 @@
 #### `ppt-review`
 
 负责整套结果审查，产出 `review.md` 或 `review.json`。
+review 不是口头总结，必须写回工件；并且必须写出 `review.md` 或 `review.json`，检查是否满足页级 `asset_requirements`、如果要求真实图片却只落了 SVG 或 placeholder、以及装饰层是否真的成立。审查时必须直接读取页面 HTML，不要只根据模型自述；如果 style-spec recipe 要求某个 motif，就要在页面里找到对应的 `data-motif-key`。同时必须核对标题元素是否放在 `#ct` 或 `#header`，不要把仅存在于源码但被层级盖住的标题判成通过；如果 `.header` 落在 `#ct` 外面，应视为标题不可见。没有 `review.md` 或 `review.json` 时，不得继续导出。
 
 ### 4.3 局部修复 skills
 
@@ -358,12 +409,23 @@ class TaskPack:
     constraints: list[str]
     known_gaps: list[str]
     available_sources: list[str]
+    style_intent: "StyleIntent"
     deck_dir: str
     output_policy: OutputPolicy
+
+
+class StyleIntent:
+    scenario: str
+    audience_signal: str
+    tone: list[str]
+    industry_context: str
+    explicit_style_preference: str | None
 ```
 
 要求：
 
+- `风格意图` 必须先从用户 query 中抽取，至少覆盖 `场景`、`气质`、`行业语境` 和显式风格偏好
+- 如果用户已经明确给出风格偏好、品牌语气、参考图或模板方向，必须在 `task-pack.json` 中显式记录，供后续 `style-spec` 优先消费
 - `deck_dir` 必须被显式记录，并作为后续 skill 的统一输出目录
 - 它是唯一可信的 canonical 输出根目录
 - 后续 skill 只能直接复制这个值，不要手写、缩写、翻译或重拼目录名
@@ -379,8 +441,16 @@ class StyleSpec:
     schema_version: str
     design_theme: str
     design_keywords: list[str]
+    visual_archetype: str
+    fallback_archetype: str
     color_roles: list["ColorRole"]
     typography: "TypographySpec"
+    background_system: list[str]
+    foreground_motifs: list[str]
+    svg_motif_library: list["SvgMotif"]
+    component_skins: list[str]
+    density_rules: list[str]
+    page_type_variants: list["PageTypeVariant"]
     page_type_principles: list["PageTypePrinciple"]
     component_tone: list[str]
     diversity_rules: list[str]
@@ -404,6 +474,33 @@ class PageTypePrinciple:
     page_type: str
     visual_goal: str
     allowed_variants: list[str]
+
+
+class PageTypeVariant:
+    variant_key: str
+    page_type: str
+    layout_shell: str
+    header_strategy: str
+    background_strategy: str
+    foreground_strategy: str
+    required_svg_motifs: list[str]
+    background_motif_recipe: list["MotifPlacement"]
+    foreground_motif_recipe: list["MotifPlacement"]
+    component_strategy: str
+
+
+class SvgMotif:
+    motif_key: str
+    usage_layer: str
+    drawing_hint: str
+    palette_binding: list[str]
+
+
+class MotifPlacement:
+    motif_key: str
+    placement_hint: str
+    density_hint: str
+    opacity_hint: str
 ```
 
 要求：
@@ -411,11 +508,33 @@ class PageTypePrinciple:
 - `style-spec.json` 为默认必产
 - 它是设计控制面
 - 必须先读取 `task-pack.json`
+- 必须优先理解用户需求，再决定具体风格方向
+- `visual_archetype` 表示根据用户需求推断出的主风格；只有在风格信号不足时，`fallback_archetype` 才允许取 `商务` 或 `海报`
 - 输出路径必须严格为 `${deck_dir}/style-spec.json`
 - 不要手写、缩写、翻译或重拼目录名
+- 必须包含 `background_system`、`foreground_motifs`、`component_skins`、`density_rules`、`page_type_variants`
 - 必须包含“页面类型视觉原则”
 - 必须包含“禁用项”或等价反模式
 - 后续 `ppt-storyboard` 与 `ppt-page-html` 必须显式消费它
+
+补充要求：
+
+- `background_system` 要明确背景层次、渐变、纹理、几何层、光晕或分区底纹，避免页面退回纯色底
+- `foreground_motifs` 要明确角标、编号块、导视线、强调框、标签等前景装饰语法
+- 背景和前景都要给出可绘制的装饰元素，不要只停留在文字描述
+- `svg_motif_library` 要列出可直接绘制的装饰元素或插画母题，供后续页面生成直接消费
+- `component_skins` 要明确卡片、数据面板、表格、引言块、图表容器的皮肤规则
+- `density_rules` 要明确哪些页面允许更浓、哪些页面必须更克制
+- `page_type_variants` 要明确封面页、分析页、结论页、风险页等页面如何变化而不失统一
+- `page_type_variants` 不要只按 `page_type` 粗分；要能覆盖 `style_variant`
+- 每个 variant 都应提供 `variant_key`、`layout_shell`、`header_strategy` 等可执行字段，避免只剩形容词风格
+- 每个 variant 都应带 `required_svg_motifs`
+- 每个 variant 还应带 `background_motif_recipe`、`foreground_motif_recipe`、`placement_hint`、`density_hint`
+- 正文 / 内容页不能把 `background_motif_recipe` 留空
+- 正文 / 内容页不要只给一个角落里的小图标
+- 正文 / 内容页至少要有一个大面积或跨边缘的背景 motif 配方
+- 真实图片也不能替代背景装饰配方
+- 不要只写“有叶片感”这类抽象描述
 
 ### 5.5 `storyboard.json`
 
@@ -470,6 +589,9 @@ class ContentBlock:
 - 内容语言必须默认与用户 query 保持一致
 - 允许前端稳定渲染页面列表
 - 允许后续 skill 基于 `page_id` 做局部重写
+- `style_variant` 必须直接引用 `style-spec.json` 中已声明的 variant 映射
+- `style_variant` 不要把它写成宽泛形容词；后续 `ppt-page-html` 可直接按 variant 落地
+- `asset_requirements` 不要只写模糊的槽位名，应带 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder` 这类类型提示
 - `presenter_intent` 只提供轻量讲述意图，不承担完整讲稿职责
 
 ### 5.6 `asset-plan.json`
@@ -488,6 +610,8 @@ class AssetSlot:
     page_title: str
     slot_id: str
     purpose: str
+    asset_kind: str
+    render_strategy: str
     source_caption: str
     query: str
     selected: bool
@@ -518,6 +642,10 @@ class RejectedCandidate:
 - 必须保留 `image_search_results.json`，记录 query 与原始候选
 - 必须保留 `image_selection.json`，记录最终选择与拒绝原因
 - 选图流程必须可审计，不能让“筛选过程”在重构后消失
+- `asset-plan.json` 中必须显式区分 `real-photo`、`svg-illustration`、`svg-icon`、`qr-placeholder`
+- `real-photo` 应走 `download-local`
+- 不要为可直接绘制的图标或插画走搜图下载
+- 如果 `asset_requirements` 写得过轻，但页面语义明显要求人物、产品、场景或活动现场图片，应补出对应的 `real-photo` 槽位
 - 必须先下载验证，再做最终选择
 - 优先落地本地图片
 - 本地文件不存在时必须显式标记 `unresolved`
@@ -557,8 +685,9 @@ class SpeakerNotePage:
 1. `ppt-task-pack`
 2. `ppt-style-spec`
 3. `ppt-storyboard`
-4. `ppt-page-html`
-5. `ppt-review`
+4. 如存在 `real-photo` 槽位，或页面语义明显需要人物 / 产品 / 场景图片，则先进入 `ppt-asset-plan`
+5. `ppt-page-html`
+6. `ppt-review`
 
 有上传文件时的常规路径：
 
@@ -566,8 +695,9 @@ class SpeakerNotePage:
 2. `ppt-task-pack`
 3. `ppt-style-spec`
 4. `ppt-storyboard`
-5. `ppt-page-html`
-6. `ppt-review`
+5. 如存在 `real-photo` 槽位，或页面语义明显需要人物 / 产品 / 场景图片，则先进入 `ppt-asset-plan`
+6. `ppt-page-html`
+7. `ppt-review`
 
 ### 6.2 按需插入
 
@@ -773,8 +903,9 @@ class StageFeedback:
 3. `ppt-superpower` 明确声明 `fast / guided / surgical` 与 `deck_dir`，并要求初始化 `pages/` / `images/`
 4. `ppt-style-spec` 明确声明默认必产、设计控制面、页面类型视觉原则、禁用项
 5. `ppt-storyboard` 明确包含固定 schema 字段
-6. `ppt-asset-plan` 明确保留搜图候选、筛选记录、本地下载结果，并在下载前先创建 `deck_dir/images`
-7. `ppt-page-html` 明确消费 `style-spec.json` 与本地图片，不退回通用默认样式，同时恢复严格的 `1280x720` / 页脚安全区约束
+6. `ppt-asset-plan` 明确保留搜图候选、筛选记录、本地下载结果，并在下载前先创建 `deck_dir/images`，同时区分 `real-photo` 与可直接绘制的 SVG 资产
+7. `ppt-page-html` 明确消费 `style-spec.json` 与本地图片，不退回通用默认样式，同时恢复严格的 `1280x720` / 页脚安全区约束，并禁止通过 Python 生成器脚本批量产出页面；优先按 `style_variant` 映射页面壳子，并用内联 SVG 落地图标与装饰性插画；非极简页面若只有纯色或渐变背景则视为未完成
+   并且按 recipe 落地的背景 / 前景 motif 必须带 `data-layer="bg-motif"`、`data-layer="fg-motif"` 与 `data-motif-key`，让 review 和导出前校验可以核对；真实图片或主视觉照片不能替代这些标记
 8. `ppt-speaker-notes` 明确标注可选交付物
 9. 设计文档中的术语与新 skill 体系一致
 10. `ppt-superpower` 与关键子 skill 明确声明阶段回显协议，避免长链路静默执行
@@ -862,6 +993,46 @@ class StageFeedback:
 
 - 生成 `speaker-notes.json` 或 `speaker-notes.md`
 - 不污染 `storyboard.json` 的前端契约
+
+### 11.3 设计优化回归 query 草案
+
+以下用例用于观察“是否先理解用户需求，再生成匹配风格”，以及页面是否真正具备更丰富的背景层、前景装饰和组件皮肤。这里先保留可直接修改的 query 草案，后续可按需要继续细化。
+
+#### 草案 1：高端珠宝限定系列发布
+
+Query：
+
+`帮我做一份“月光与潮汐”珠宝限定系列发布的PPT，给买手店和媒体看。希望高级、克制、精致，有一点戏剧感和材质感，但不要做成普通奢侈品商务介绍。需要有系列灵感、主打款式、材质工艺、目标客群、陈列建议、传播主视觉方向。`
+
+#### 草案 2：山野观察营·秋季亲子自然教育项目
+
+Query：
+
+`帮我做一份“山野观察营·秋季亲子自然教育项目”的PPT，给家长和学校合作方看。希望温暖、自然、有手作感和一点插画感，能吸引孩子，但不能幼稚。需要有课程亮点、导师介绍、每日节奏、安全机制、报名方式。`
+
+#### 草案 3：冷萃乌龙气泡茶新品发布
+
+Query：
+
+`帮我做一份“冷萃乌龙气泡茶新品发布”的PPT，给渠道商和媒体预热。希望年轻、明亮、有点包装设计感，页面要有活力，适合现场大屏展示。需要有品牌概念、新品卖点、目标人群、陈列建议、传播海报方向。`
+
+#### 草案 4：小米汽车城市巡展提案
+
+Query：
+
+`帮我做一份“小米汽车城市巡展提案”的PPT，给商场渠道和品牌合作方看。希望有速度感、科技感和高级感，但不要做成泛蓝色科技模板。需要有巡展主题、主打亮点、体验动线、场景布置、传播话题。`
+
+#### 草案 5：故宫夜游文化体验升级方案
+
+Query：
+
+`帮我做一份“故宫夜游文化体验升级方案”的PPT，给文旅合作方和策展团队看。希望有东方秩序、宫廷质感和当代设计感，不要做成普通旅游宣传册。需要有项目定位、体验章节、空间氛围、文创联动、传播建议。`
+
+#### 草案 6：多模态大模型能力介绍
+
+Query：
+
+`帮我做一份“多模态大模型能力介绍”的PPT，给产品经理和售前团队看。希望专业、现代、信息密度高，但页面不能枯燥。需要有模型定位、核心能力、典型场景、效果对比、部署方式。`
 
 ---
 
