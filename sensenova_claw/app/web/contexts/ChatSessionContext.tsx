@@ -570,8 +570,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         if (!questionId || !sourceSessionId) break;
         const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
         const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
-        // 不再弹出 InteractionDialog，改为通知卡片处理
-        setIsTyping(true);
+        // ask_user 进入“等待用户输入”，不应继续锁死底部聊天输入框
+        setIsTyping(false);
         const questionOptions = Array.isArray(payload.options)
           ? payload.options.map((o: unknown) => ({ label: String(o), value: String(o) }))
           : undefined;
@@ -585,6 +585,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           sessionId: sourceSessionId,
           interactionId: questionId,
           actions: questionOptions,
+          allowsInput: !questionOptions || questionOptions.length === 0,
+          inputPlaceholder: '请输入回复',
         });
         break;
       }

@@ -124,6 +124,22 @@ ACP 模式目前实现最小通道：
 
 通过 stdio JSON-RPC 与外部 coding agent 通信，并把通知事件落入 run logs。
 
+当前 ACP 运行时本身已经是通用的，真正决定“支持哪些 agent / 平台”的主要是：
+
+- `miniapps.acp.command`
+- `miniapps.acp.args`
+- `miniapps.acp.env`
+- 本机是否已经装好对应 agent / adapter
+
+现在内置的 ACP Wizard 会自动检测当前平台（Linux / macOS / Windows）并给出推荐配置、安装命令与缺失项状态。内置预设包括：
+
+- `Codex CLI` + `codex-acp`
+- `Claude Agent / Claude Code` + `claude-agent-acp`
+- `Gemini CLI` 原生 ACP（`--experimental-acp`）
+- `Kimi CLI` 原生 ACP（`kimi acp`）
+- `OpenCode` 原生 ACP（`opencode acp`）
+- 仓库内置 `Codex ACP Bridge` 兜底方案
+
 配置入口：
 
 ```yaml
@@ -138,6 +154,12 @@ miniapps:
 ```
 
 也可以直接在前端设置页 `/acp` 中编辑 `miniapps.default_builder` 和 `miniapps.acp.*`，包括 `enabled`、`command`、`args`、`env` 与两类 timeout。
+推荐优先使用设置页里的 ACP Wizard：
+
+- 自动检测 PATH 中已有的 ACP agent / adapter
+- 根据当前平台生成推荐 `command` / `args`
+- 对缺失项执行安装
+- 将推荐配置一键回填到表单，再由用户统一保存
 
 如果要自动使用本机 `codex`，优先推荐使用官方 `codex-acp` 适配器：
 
@@ -162,8 +184,8 @@ miniapps:
 说明：
 
 - `codex-acp` 是 Zed 团队维护的 Codex 官方 ACP 适配器仓库：`zed-industries/codex-acp`
-- 当前本机通过 `npx -y -p @zed-industries/codex-acp -p @zed-industries/codex-acp-linux-x64 codex-acp --help` 可以正常启动
-- 如果你已经把 `codex-acp` 安装到 `PATH`，也可以改成更直接的配置：
+- 现在更推荐在 ACP Wizard 中直接安装 `@openai/codex` 与 `@zed-industries/codex-acp`，然后使用 `command: "codex-acp"`
+- 如果你已经把 `codex-acp` 装到 `PATH`，也可以改成更直接的配置：
 
 ```yaml
 miniapps:
@@ -172,7 +194,40 @@ miniapps:
     args: []
 ```
 
-如果你不想依赖 `npx` 或官方 adapter 仍有环境兼容问题，仓库里也保留了备用 bridge：
+其他常见 agent 的命令示例：
+
+```yaml
+miniapps:
+  acp:
+    command: "claude-agent-acp"
+    args: []
+```
+
+```yaml
+miniapps:
+  acp:
+    command: "gemini"
+    args:
+      - "--experimental-acp"
+```
+
+```yaml
+miniapps:
+  acp:
+    command: "kimi"
+    args:
+      - "acp"
+```
+
+```yaml
+miniapps:
+  acp:
+    command: "opencode"
+    args:
+      - "acp"
+```
+
+如果你不想依赖外部 ACP adapter，或者某个平台上官方 adapter 仍有环境兼容问题，仓库里也保留了备用 bridge：
 
 ```yaml
 miniapps:

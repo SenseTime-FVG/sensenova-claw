@@ -6,6 +6,8 @@ import { useDrop } from 'react-dnd';
 import { TargetSelector } from './TargetSelector';
 import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
 import { type ContextFileRef } from '@/lib/chatTypes';
+import { singleFileFlow, dirUploadFlow, type ProgressCallback } from '@/lib/fileUpload';
+import { UploadProgress, type UploadProgressItem } from './UploadProgress';
 
 interface ChatInputProps {
   defaultAgentId: string;
@@ -38,6 +40,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 }, ref) {
   const [inputValue, setInputValue] = useState('');
   const [showUploadMenu, setShowUploadMenu] = useState(false);
+  const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -99,33 +102,77 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }),
   }), [insertAtRef]);
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = e.target.files;
     if (!selectedFiles || selectedFiles.length === 0) return;
 
-    // 本地应用无需真正上传，直接插入文件名引用
-    const inserted = new Set<string>();
-    for (let i = 0; i < selectedFiles.length; i++) {
-      const f = selectedFiles[i];
-      const relPath = (f as File & { webkitRelativePath?: string }).webkitRelativePath;
-      if (relPath) {
-        // webkitdirectory 模式：取顶层文件夹名（只插入一次）
-        const topFolder = relPath.split('/')[0];
-        if (!inserted.has(topFolder)) {
-          inserted.add(topFolder);
-          insertAtRef(topFolder);
-        }
-      } else {
-        if (!inserted.has(f.name)) {
-          inserted.add(f.name);
-          insertAtRef(f.name);
+    const fileList = Array.from(selectedFiles);
+    const firstFile = fileList[0];
+    const relPath = (firstFile as File & { webkitRelativePath?: string }).webkitRelativePath;
+    const isFolder = Boolean(relPath);
+
+    if (isFolder) {
+      // 文件夹上传
+      const topFolder = relPath!.split('/')[0];
+      const itemId = `upload_${Date.now()}`;
+      const totalSize = fileList.reduce((sum, f) => sum + f.size, 0);
+      const showProgress = totalSize > 1024 * 1024;
+
+      setUploadItems(prev => [...prev, {
+        id: itemId, name: topFolder,
+        percent: showProgress ? 0 : null,
+        status: 'checking',
+      }]);
+
+      try {
+        const onProgress: ProgressCallback | undefined = showProgress
+          ? (loaded, total) => setUploadItems(prev =>
+              prev.map(it => it.id === itemId ? { ...it, percent: Math.round(loaded / total * 100), status: 'uploading' } : it))
+          : undefined;
+
+        const result = await dirUploadFlow(topFolder, fileList, selectedAgent, onProgress);
+        insertAtRef(result.path);
+        setUploadItems(prev => prev.map(it => it.id === itemId ? { ...it, status: 'done', percent: 100 } : it));
+      } catch (err) {
+        setUploadItems(prev => prev.map(it => it.id === itemId
+          ? { ...it, status: 'error', error: err instanceof Error ? err.message : '上传失败' } : it));
+      }
+    } else {
+      // 单文件或多文件上传
+      for (const file of fileList) {
+        const itemId = `upload_${Date.now()}_${file.name}`;
+        const showProgress = file.size > 1024 * 1024;
+
+        setUploadItems(prev => [...prev, {
+          id: itemId, name: file.name,
+          percent: showProgress ? 0 : null,
+          status: 'checking',
+        }]);
+
+        try {
+          const onProgress: ProgressCallback | undefined = showProgress
+            ? (loaded, total) => setUploadItems(prev =>
+                prev.map(it => it.id === itemId ? { ...it, percent: Math.round(loaded / total * 100), status: 'uploading' } : it))
+            : undefined;
+
+          const result = await singleFileFlow(file, selectedAgent, onProgress);
+          insertAtRef(result.path);
+          setUploadItems(prev => prev.map(it => it.id === itemId ? { ...it, status: 'done', percent: 100 } : it));
+        } catch (err) {
+          setUploadItems(prev => prev.map(it => it.id === itemId
+            ? { ...it, status: 'error', error: err instanceof Error ? err.message : '上传失败' } : it));
         }
       }
     }
 
+    // 3秒后清除已完成的进度项
+    setTimeout(() => {
+      setUploadItems(prev => prev.filter(it => it.status !== 'done'));
+    }, 3000);
+
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (folderInputRef.current) folderInputRef.current.value = '';
-  }, [insertAtRef]);
+  }, [selectedAgent, insertAtRef]);
 
   const parseAtRefs = useCallback((content: string): ContextFileRef[] => {
     const refs: ContextFileRef[] = [];
@@ -228,6 +275,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           </div>
 
           <div className="flex-1">
+            <UploadProgress items={uploadItems} />
             <SlashCommandMenu inputValue={inputValue} onSelect={handleSlashSelect} visible={showMenu} />
             <textarea
               data-testid="chat-input"

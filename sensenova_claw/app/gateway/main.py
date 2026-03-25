@@ -46,7 +46,7 @@ from sensenova_claw.platform.config.workspace import (
     ensure_agent_workspace,
     resolve_sensenova_claw_home,
 )
-from sensenova_claw.platform.secrets.store import KeyringSecretStore
+from sensenova_claw.platform.secrets.store import build_default_secret_store, describe_secret_store_status
 from sensenova_claw.interfaces.http import agents, tools, gateway, skills, workspace, config_api, sessions
 from sensenova_claw.interfaces.http import cron_api, notification_api, proactive_api
 
@@ -83,8 +83,13 @@ class Services:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    secret_store = getattr(config, "_secret_store", None) or KeyringSecretStore()
+    secret_store = getattr(config, "_secret_store", None) or build_default_secret_store()
     config._secret_store = secret_store
+    keyring_available, secret_store_message = describe_secret_store_status(secret_store)
+    if keyring_available:
+        logger.info(secret_store_message)
+    else:
+        logger.warning(secret_store_message)
 
     # 解析 SENSENOVA_CLAW_HOME（默认 ~/.sensenova-claw）
     from sensenova_claw.platform.config.config import PROJECT_ROOT
@@ -260,6 +265,8 @@ async def lifespan(app: FastAPI):
             coordinator=agent_message_coordinator,
             timeout=float(config.get("delegation.default_timeout", 300)),
             default_max_retries=int(config.get("delegation.retry.max_retries", 0)),
+            max_tool_calls=int(config.get("delegation.max_tool_calls", 30)),
+            max_llm_calls=int(config.get("delegation.max_llm_calls", 15)),
         )
         tool_registry.register(send_message_tool)
 

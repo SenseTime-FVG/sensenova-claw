@@ -491,7 +491,8 @@ export default function SessionDetailPage() {
               timeout: Number(payload.timeout || 300),
               createdAt: Date.now(),
             });
-            setIsTyping(true);
+            // ask_user 需要用户继续输入，不能把聊天输入框禁用
+            setIsTyping(false);
             break;
           }
           case 'user_question_answered_event': {

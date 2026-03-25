@@ -98,3 +98,19 @@ class TestWhatsAppConfigFromPluginApi:
         assert cfg.bridge.entry.endswith(
             "sensenova_claw/adapters/plugins/whatsapp/bridge/src/index.mjs"
         )
+
+    def test_from_plugin_api_remaps_hyphenated_repo_bridge_entry_to_plugins_path(self):
+        api = self._make_api(
+            {
+                "bridge": {
+                    "command": "node",
+                    "entry": "sensenova-claw/adapters/plugins/whatsapp/bridge/src/index.mjs",
+                    "startup_timeout_seconds": 30,
+                    "send_timeout_seconds": 15,
+                }
+            }
+        )
+        cfg = WhatsAppConfig.from_plugin_api(api)
+        assert cfg.bridge.entry.endswith(
+            "sensenova_claw/adapters/plugins/whatsapp/bridge/src/index.mjs"
+        )

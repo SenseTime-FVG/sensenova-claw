@@ -1,18 +1,22 @@
 """通用文件列表 API - 浏览服务端文件系统目录 & 文件上传 & 文件下载"""
 from __future__ import annotations
 
+import asyncio
 import base64
+import hashlib
 import logging
 import mimetypes
 import os
 import platform
+import re
 import string
 import time
 from pathlib import Path
 from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File as FastAPIFile
+from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -132,18 +136,36 @@ def _uploads_dir(request: Request) -> Path:
     return uploads
 
 
+def _next_available_path(target: Path) -> Path:
+    """数字递增查找可用文件名: file.txt -> file_1.txt -> file_2.txt"""
+    if not target.exists():
+        return target
+    stem = target.stem
+    suffix = target.suffix
+    parent = target.parent
+    counter = 1
+    while True:
+        candidate = parent / f"{stem}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
 @router.post("/files/upload")
 async def upload_files(
     request: Request,
     files: list[UploadFile] = FastAPIFile(...),
+    agent_id: str = Form("default"),
 ):
     """接收文件上传，支持单文件、多文件和文件夹（webkitdirectory）。
 
+    文件保存到 workdir/{agent_id}/ 目录，同名文件使用数字递增后缀。
     文件夹上传时 filename 包含相对路径（如 ``mydir/sub/file.txt``），
-    服务端会在 uploads 目录下保留对应的目录结构。
+    服务端会在 workdir 目录下保留对应的目录结构。
     """
-    logger.info("收到上传请求: %d 个文件", len(files))
-    uploads = _uploads_dir(request)
+    logger.info("收到上传请求: %d 个文件, agent_id=%s", len(files), agent_id)
+    workdir = _resolve_agent_workdir(request, agent_id)
+    workdir.mkdir(parents=True, exist_ok=True)
     results = []
 
     for file in files:
@@ -159,16 +181,13 @@ async def upload_files(
             continue
 
         # 构建目标路径（保留目录结构）
-        target = uploads / Path(*parts)
+        target = workdir / Path(*parts)
 
         # 确保父目录存在
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        # 同名文件加时间戳后缀
-        if target.exists():
-            stem = target.stem
-            suffix = target.suffix
-            target = target.parent / f"{stem}_{int(time.time() * 1000)}{suffix}"
+        # 同名文件使用数字递增后缀
+        target = _next_available_path(target)
 
         try:
             content = await file.read()
@@ -400,3 +419,151 @@ async def delete_upload(request: Request, filename: str):
         raise HTTPException(403, "路径非法")
     target.unlink()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# 文件存在性检查
+# ---------------------------------------------------------------------------
+
+def _sanitize_path_parts(raw_path: str) -> list[str]:
+    """将相对路径字符串拆分为安全的路径组件列表，过滤空段和 '..'"""
+    return [p for p in raw_path.replace("\\", "/").split("/") if p and p != ".."]
+
+
+def _resolve_agent_workdir(request: Request, agent_id: str) -> Path:
+    """获取指定 agent 的 workdir 绝对路径"""
+    # 防止路径穿越：仅允许字母、数字、-、_、.
+    if not re.match(r'^[a-zA-Z0-9_.\-]+$', agent_id):
+        agent_id = "default"
+    home = getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw")
+    return Path(home) / "workdir" / agent_id
+
+
+def _sha256_file(filepath: Path) -> str:
+    """计算文件的 SHA-256 哈希"""
+    h = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class FileCheckRequest(BaseModel):
+    name: str
+    size: int
+    hash: str | None = None
+    agent_id: str = "default"
+
+
+class FileCheckResponse(BaseModel):
+    exists: bool
+    path: str = ""
+    need_hash: bool = False
+
+
+@router.post("/files/check")
+async def check_file(request: Request, body: FileCheckRequest) -> FileCheckResponse:
+    """检查文件是否已存在于 agent workdir 中。
+
+    比对策略：先比文件名+大小，匹配后再比 SHA-256 哈希。
+    """
+    workdir = _resolve_agent_workdir(request, body.agent_id)
+    # 防止路径穿越
+    parts = _sanitize_path_parts(body.name)
+    if not parts:
+        return FileCheckResponse(exists=False)
+    target = workdir / Path(*parts)
+
+    if not target.exists() or not target.is_file():
+        return FileCheckResponse(exists=False)
+
+    try:
+        file_size = target.stat().st_size
+    except OSError:
+        return FileCheckResponse(exists=False)
+
+    if file_size != body.size:
+        return FileCheckResponse(exists=False)
+
+    # name + size 匹配，需要 hash 精确比对
+    if not body.hash:
+        return FileCheckResponse(exists=False, need_hash=True)
+
+    file_hash = await asyncio.to_thread(_sha256_file, target)
+    if file_hash == body.hash:
+        return FileCheckResponse(exists=True, path=str(target.resolve()))
+    return FileCheckResponse(exists=False)
+
+
+class DirFileItem(BaseModel):
+    rel_path: str
+    size: int
+    hash: str | None = None
+
+
+class DirCheckRequest(BaseModel):
+    folder_name: str
+    files: list[DirFileItem]
+    agent_id: str = "default"
+
+
+class DirCheckResponse(BaseModel):
+    exists: bool
+    path: str = ""
+    need_hash: bool = False
+
+
+@router.post("/files/check-dir")
+async def check_dir(request: Request, body: DirCheckRequest) -> DirCheckResponse:
+    """检查文件夹是否已完整存在于 agent workdir 中。
+
+    全量匹配策略：所有文件的 name+size+hash 必须全部匹配才返回 exists=True。
+    """
+    workdir = _resolve_agent_workdir(request, body.agent_id)
+    # 空文件列表视为不匹配
+    if not body.files:
+        return DirCheckResponse(exists=False)
+    # 防止路径穿越
+    folder_parts = _sanitize_path_parts(body.folder_name)
+    if not folder_parts:
+        return DirCheckResponse(exists=False)
+    folder = workdir / Path(*folder_parts)
+
+    if not folder.exists() or not folder.is_dir():
+        return DirCheckResponse(exists=False)
+
+    # 逐个检查文件
+    all_size_match = True
+    for file_item in body.files:
+        parts = _sanitize_path_parts(file_item.rel_path)
+        if not parts:
+            return DirCheckResponse(exists=False)
+        target = folder / Path(*parts)
+
+        if not target.exists() or not target.is_file():
+            return DirCheckResponse(exists=False)
+
+        try:
+            if target.stat().st_size != file_item.size:
+                all_size_match = False
+                break
+        except OSError:
+            return DirCheckResponse(exists=False)
+
+    if not all_size_match:
+        return DirCheckResponse(exists=False)
+
+    # name+size 全部匹配，检查是否需要 hash
+    has_all_hashes = all(f.hash for f in body.files)
+    if not has_all_hashes:
+        return DirCheckResponse(exists=False, need_hash=True)
+
+    # 逐个比对 hash
+    for file_item in body.files:
+        parts = _sanitize_path_parts(file_item.rel_path)
+        target = folder / Path(*parts)
+        file_hash = await asyncio.to_thread(_sha256_file, target)
+        if file_hash != file_item.hash:
+            return DirCheckResponse(exists=False)
+
+    return DirCheckResponse(exists=True, path=str(folder.resolve()))
