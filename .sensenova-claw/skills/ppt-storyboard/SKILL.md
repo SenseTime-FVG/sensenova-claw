@@ -76,7 +76,10 @@ class ContentBlock:
 - 不允许只拿 research 主题词重新写一遍；必须把 research 中可上页的 claim、evidence 和未解决缺口落到页面级对象。
 - 每页必须能说明主 claim 和 evidence 从哪里来。
 - 每个 `content_blocks[n]` 都必须显式填写 `source_claim_ids` 与 `source_evidence_ids`，引用 `research-pack` 中实际存在的条目，而不是写模糊主题词。
+- 未触发 `research-pack` 时，`source_claim_ids` 与 `source_evidence_ids` 应保留为空列表；这是合法状态，不要伪造引用。
 - 缺证据时要显式记录 `unresolved_gaps`，不要假装内容已经闭环。
+- `unresolved_gaps` 只承接块级内容 / 证据 / claim 缺口。
+- `unresolved_issues` 只承接页级问题，例如布局、资产、待确认页级约束。
 - `style_variant` 必须直接引用 `style-spec.json` 中已声明的 variant 映射，不要重新发明一套名字。
 - `style_variant` 不要把它写成宽泛形容词；它必须是后续 `ppt-page-html` 可直接按 variant 落地的键。
 - `asset_requirements` 不要只写模糊的槽位名；要用能指导后续分流的提示，例如 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder`。

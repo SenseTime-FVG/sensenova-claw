@@ -219,6 +219,23 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("信息缺口", body)
         self.assertIn("证据不确定性", body)
 
+    def test_ppt_research_pack_declares_stable_traceback_ids(self):
+        skills = _load_workspace_skills()
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        body = skills["ppt-research-pack"]
+
+        self.assertIn("claim_id: str", body)
+        self.assertIn("evidence_id: str", body)
+        self.assertIn("chunk_id: str", body)
+        self.assertIn("稳定 ID", body)
+        self.assertIn("供 storyboard 的 `source_claim_ids` / `source_evidence_ids` 回指", body)
+
+        self.assertIn("claim_id", design)
+        self.assertIn("evidence_id", design)
+        self.assertIn("chunk_id", design)
+        self.assertIn("供 storyboard 的 `source_claim_ids` / `source_evidence_ids` 回指", design)
+
     def test_ppt_storyboard_declares_research_traceback_fields(self):
         skills = _load_workspace_skills()
 
@@ -231,6 +248,35 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("不允许只拿 research 主题词重新写一遍", body)
         self.assertIn("每页必须能说明主 claim 和 evidence 从哪里来", body)
         self.assertIn("缺证据时要显式记录 `unresolved_gaps`", body)
+
+    def test_ppt_storyboard_allows_empty_traceback_lists_without_research(self):
+        skills = _load_workspace_skills()
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        body = skills["ppt-storyboard"]
+
+        self.assertIn("未触发 `research-pack` 时", body)
+        self.assertIn("`source_claim_ids` 与 `source_evidence_ids` 应保留为空列表", body)
+        self.assertIn("这是合法状态", body)
+
+        self.assertIn("未触发 `research-pack` 时", design)
+        self.assertIn("`source_claim_ids` 与 `source_evidence_ids` 应保留为空列表", design)
+        self.assertIn("这是合法状态", design)
+
+    def test_ppt_storyboard_separates_block_gaps_from_page_issues(self):
+        skills = _load_workspace_skills()
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        body = skills["ppt-storyboard"]
+
+        self.assertIn("`unresolved_gaps` 只承接块级内容 / 证据 / claim 缺口", body)
+        self.assertIn("`unresolved_issues` 只承接页级问题", body)
+        self.assertIn("布局", body)
+        self.assertIn("资产", body)
+        self.assertIn("页级约束", body)
+
+        self.assertIn("`unresolved_gaps` 只承接块级内容 / 证据 / claim 缺口", design)
+        self.assertIn("`unresolved_issues` 只承接页级问题", design)
 
     def test_ppt_design_doc_declares_storyboard_as_research_consumer(self):
         content = DESIGN_DOC.read_text(encoding="utf-8")

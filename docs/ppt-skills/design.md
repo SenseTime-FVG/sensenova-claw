@@ -255,6 +255,38 @@
 上传报告、事实数据案例、长文档这些输入都要先交给 `ppt-task-pack` 消化，它们只是 `research_required` 的信号，不是绕过 `task-pack` 的独立入口。
 research 不是摘要，而是“可上页内容池”。
 pageworthy chunks 是 storyboard 的上游输入。
+同时 research 条目必须带稳定 ID，至少覆盖 `claim_id`、`evidence_id`、`chunk_id`，供 storyboard 的 `source_claim_ids` / `source_evidence_ids` 回指。
+
+建议最小结构：
+
+```python
+class Claim:
+    claim_id: str
+    claim: str
+    importance: str
+    evidence_ids: list[str]
+
+
+class EvidencePoint:
+    evidence_id: str
+    evidence: str
+    source: str
+    supports_claim_ids: list[str]
+
+
+class PageworthyChunk:
+    chunk_id: str
+    chunk: str
+    why_pageworthy: str
+    related_claim_ids: list[str]
+
+
+class ResearchPack:
+    claims: list[Claim]
+    evidence_points: list[EvidencePoint]
+    pageworthy_chunks: list[PageworthyChunk]
+    risks_or_uncertainties: list[str]
+```
 
 #### `ppt-template-pack`
 
@@ -275,6 +307,8 @@ pageworthy chunks 是 storyboard 的上游输入。
 负责分页叙事和前端契约，产出 `storyboard.json`。默认必产。
 storyboard 是 research 的消费层，不允许只把 research 主题词重新改写成页面摘要；每页必须能说明主 claim 和 evidence 从哪里来。
 如果 research 里存在缺口、证据不足或待确认项，必须在页面级 `content_blocks[].unresolved_gaps` 或页级未解决项里显式保留，不要静默吞掉。
+未触发 `research-pack` 时，`source_claim_ids` 与 `source_evidence_ids` 保留为空列表即可；这是合法状态，不要伪造 research 回指。
+其中 `unresolved_gaps` 只承接块级内容 / 证据 / claim 缺口，`unresolved_issues` 只承接页级问题，例如布局、资产、待确认页级约束。
 其中每页的 `style_variant` 必须直接引用 `style-spec.json` 中已声明的 variant 映射，不要把它写成宽泛形容词。
 `asset_requirements` 也不能只写模糊槽位名；要带上 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder` 这类类型提示。
 资产类型判断必须先看页面语义。如果页面要呈现人物、产品、空间、场景、活动现场、作品样张或环境氛围，默认应规划为 `real-photo`；`插画感` 只影响装饰语法，不要因为风格里有插画感，就把整套 deck 的图片需求都改成 `svg-illustration`。
@@ -604,7 +638,10 @@ class ContentBlock:
 - 不允许只拿 research 主题词重新写一遍
 - 每页必须能说明主 claim 和 evidence 从哪里来
 - 每个 `ContentBlock` 都必须显式记录 `source_claim_ids` 与 `source_evidence_ids`
+- 未触发 `research-pack` 时，`source_claim_ids` 与 `source_evidence_ids` 应保留为空列表；这是合法状态
 - 缺证据时要显式记录 `unresolved_gaps`
+- `unresolved_gaps` 只承接块级内容 / 证据 / claim 缺口
+- `unresolved_issues` 只承接页级问题，例如布局、资产、待确认页级约束
 - `style_variant` 必须直接引用 `style-spec.json` 中已声明的 variant 映射
 - `style_variant` 不要把它写成宽泛形容词；后续 `ppt-page-html` 可直接按 variant 落地
 - `asset_requirements` 不要只写模糊的槽位名，应带 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder` 这类类型提示

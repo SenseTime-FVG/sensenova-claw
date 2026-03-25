@@ -38,21 +38,24 @@ research 不是摘要，而是“可上页内容池”。
 
 ```python
 class Claim:
+    claim_id: str
     claim: str
     importance: str
-    evidence_refs: list[str]
+    evidence_ids: list[str]
 
 
 class EvidencePoint:
+    evidence_id: str
     evidence: str
     source: str
-    supports: list[str]
+    supports_claim_ids: list[str]
 
 
 class PageworthyChunk:
+    chunk_id: str
     chunk: str
     why_pageworthy: str
-    related_claims: list[str]
+    related_claim_ids: list[str]
 
 
 class ResearchPack:
@@ -72,6 +75,8 @@ class ResearchPack:
 - 研究包是内容依据，不是页面大纲。
 - research 不是摘要，而是“可上页内容池”。
 - `pageworthy_chunks` 是 storyboard 的上游输入。
+- `Claim`、`EvidencePoint`、`PageworthyChunk` 必须拥有稳定 ID，例如 `claim_id`、`evidence_id`、`chunk_id`。
+- 这些稳定 ID 供 storyboard 的 `source_claim_ids` / `source_evidence_ids` 回指，不允许只靠自然语言主题词做弱关联。
 - `risks_or_uncertainties` 统一承接信息缺口与证据不确定性，不再额外拆成另一套“已知信息缺口”字段语义。
 - 不要在研究阶段先决定最终页面布局。
 - 不要虚构事实、数据或案例。
