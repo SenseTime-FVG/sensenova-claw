@@ -18,6 +18,8 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/todolist", tags=["todolist"])
@@ -70,9 +72,7 @@ class TodoReorderBody(BaseModel):
 
 def _todolist_dir(request: Request) -> Path:
     """返回 todolist 目录，不存在则创建。"""
-    home = getattr(request.app.state, "sensenova_claw_home", "") or str(
-        Path.home() / ".sensenova-claw"
-    )
+    home = getattr(request.app.state, "sensenova_claw_home", "") or str(default_sensenova_claw_home())
     d = Path(home) / "todolist"
     d.mkdir(parents=True, exist_ok=True)
     return d

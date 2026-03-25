@@ -6,6 +6,8 @@ import yaml
 from pathlib import Path
 from typing import Any
 
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
 
 class Skill:
     def __init__(self, name: str, description: str, body: str, path: Path):
@@ -52,7 +54,7 @@ class SkillRegistry:
     ):
         self._skills: dict[str, Skill] = {}
         self._workspace_dir = workspace_dir
-        self._user_dir = user_dir or Path.home() / ".sensenova-claw" / "skills"
+        self._user_dir = user_dir or default_sensenova_claw_home() / "skills"
         self._state_file = state_file
         self._builtin_dir = builtin_dir
 

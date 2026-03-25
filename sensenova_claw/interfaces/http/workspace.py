@@ -9,6 +9,8 @@ from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
@@ -19,7 +21,7 @@ ALLOWED_EXTENSION = ".md"
 
 def _workspace_dir(request: Request) -> Path:
     cfg = request.app.state.config
-    home = getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw")
+    home = getattr(request.app.state, "sensenova_claw_home", "") or str(default_sensenova_claw_home())
     return Path(home)
 
 

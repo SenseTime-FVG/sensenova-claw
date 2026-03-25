@@ -101,3 +101,33 @@ class TestConfig:
         assert cfg.get_model_extra_body("claude-thinking") == {
             "thinking": {"type": "adaptive"}
         }
+
+    def test_load_config_adds_source_type_for_known_legacy_provider(self, tmp_path):
+        yml = tmp_path / "config.yml"
+        yml.write_text(
+            "llm:\n"
+            "  providers:\n"
+            "    qwen:\n"
+            "      api_key: sk-qwen\n"
+            "      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1\n",
+            encoding="utf-8",
+        )
+
+        cfg = Config(config_path=yml)
+
+        assert cfg.get("llm.providers.qwen.source_type") == "qwen"
+
+    def test_load_config_adds_openai_compatible_source_type_for_unknown_legacy_provider(self, tmp_path):
+        yml = tmp_path / "config.yml"
+        yml.write_text(
+            "llm:\n"
+            "  providers:\n"
+            "    corp-proxy:\n"
+            "      api_key: sk-proxy\n"
+            "      base_url: https://proxy.example.com/v1\n",
+            encoding="utf-8",
+        )
+
+        cfg = Config(config_path=yml)
+
+        assert cfg.get("llm.providers.corp-proxy.source_type") == "openai-compatible"

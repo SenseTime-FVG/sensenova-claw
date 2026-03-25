@@ -17,7 +17,14 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
 from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.agents.preferences import (
+    load_preferences,
+    resolve_tool_enabled_from_prefs,
+    save_agent_tool_preferences,
+    save_preferences,
+)
 from sensenova_claw.capabilities.agents.registry import SYSTEM_PROMPT_FILENAME
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
 logger = logging.getLogger(__name__)
 
@@ -41,27 +48,8 @@ def _get_config_manager(request: Request):
     return getattr(request.app.state, "config_manager", None)
 
 
-def _prefs_path(request: Request) -> Path:
-    cfg = request.app.state.config
-    home = Path(getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw"))
-    return home / ".agent_preferences.json"
-
-
-def _load_prefs(request: Request) -> dict:
-    p = _prefs_path(request)
-    if p.exists():
-        return json.loads(p.read_text(encoding="utf-8"))
-    return {}
-
-
-def _save_prefs(request: Request, prefs: dict) -> None:
-    p = _prefs_path(request)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(prefs, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
 def _sensenova_claw_home_path(request: Request) -> Path:
-    return Path(getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw"))
+    return Path(getattr(request.app.state, "sensenova_claw_home", "") or default_sensenova_claw_home())
 
 
 def _agent_prompt_path(request: Request, agent_id: str) -> Path:
@@ -77,7 +65,7 @@ def _serialize_agent_for_config(agent: AgentConfig) -> dict[str, Any]:
         "tools": list(agent.tools),
         "skills": list(agent.skills),
         "workdir": agent.workdir,
-        "can_delegate_to": list(agent.can_delegate_to),
+        "can_delegate_to": list(agent.can_delegate_to) if agent.can_delegate_to is not None else None,
         "max_delegation_depth": agent.max_delegation_depth,
         "max_pingpong_turns": agent.max_pingpong_turns,
         "enabled": agent.enabled,
@@ -123,18 +111,17 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
     tool_registry = request.app.state.tool_registry
     skill_registry = request.app.state.skill_registry
 
-    prefs = _load_prefs(request)
-    tool_prefs = prefs.get("tools", {})
+    prefs = load_preferences(_sensenova_claw_home_path(request))
     skill_prefs = prefs.get("skills", {})
 
     tools_detail = []
     for name, tool in tool_registry._tools.items():
-        # 显示所有工具，根据 Agent 配置决定 enabled 状态
-        if agent_cfg.tools:
-            enabled = name in agent_cfg.tools
-        else:
-            # 未配置工具列表时，使用全局偏好（向后兼容）
-            enabled = tool_prefs.get(name, True)
+        if name == "send_message" and agent_cfg.can_delegate_to is None:
+            continue
+        # 如果 Agent 配置了 tools 列表，过滤展示
+        if agent_cfg.tools and name not in agent_cfg.tools:
+            continue
+        enabled = resolve_tool_enabled_from_prefs(prefs, agent_cfg.id, name, default=True)
         tools_detail.append({
             "name": name,
             "description": tool.description or "",
@@ -346,6 +333,7 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
     if not agent_cfg:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
+    provided_fields = body.model_dump(exclude_unset=True)
     updates: dict[str, Any] = {}
     if body.name is not None:
         updates["name"] = body.name
@@ -363,7 +351,7 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
         updates["tools"] = body.tools
     if body.skills is not None:
         updates["skills"] = body.skills
-    if body.can_delegate_to is not None:
+    if "can_delegate_to" in provided_fields:
         updates["can_delegate_to"] = body.can_delegate_to
     if body.max_delegation_depth is not None:
         updates["max_delegation_depth"] = body.max_delegation_depth
@@ -401,13 +389,14 @@ async def update_agent_preferences(agent_id: str, body: AgentPreferences, reques
     if not registry.get(agent_id):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    prefs = _load_prefs(request)
+    home = _sensenova_claw_home_path(request)
+    prefs = load_preferences(home)
 
     if body.tools is not None:
-        prefs["tools"] = {**prefs.get("tools", {}), **body.tools}
+        prefs = save_agent_tool_preferences(home, agent_id, body.tools)
     if body.skills is not None:
         prefs["skills"] = {**prefs.get("skills", {}), **body.skills}
+        save_preferences(home, prefs)
 
-    _save_prefs(request, prefs)
     logger.info("Agent preferences updated: tools=%s, skills=%s", body.tools, body.skills)
     return {"status": "saved"}

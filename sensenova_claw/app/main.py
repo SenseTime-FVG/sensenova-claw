@@ -18,7 +18,8 @@ import sys
 import time
 from pathlib import Path
 
-from sensenova_claw.platform.config.config import Config, DEFAULT_CONFIG_PATH
+from sensenova_claw.platform.config.config import Config, get_default_config_path
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 from sensenova_claw.platform.secrets.migration import migrate_plaintext_secrets
 from sensenova_claw.platform.secrets.store import build_default_secret_store
 
@@ -30,8 +31,7 @@ def _resolve_web_dir(project_root: Path) -> Path:
     if (web_dir / "node_modules").exists():
         return web_dir
     # 回退到 SENSENOVA_CLAW_HOME/app 下的前端（install.sh 安装场景）
-    sensenova_claw_home = os.environ.get("SENSENOVA_CLAW_HOME", str(Path.home() / ".sensenova-claw"))
-    installed_web = Path(sensenova_claw_home) / "app" / "sensenova_claw" / "app" / "web"
+    installed_web = default_sensenova_claw_home() / "app" / "sensenova_claw" / "app" / "web"
     if (installed_web / "node_modules").exists():
         return installed_web
     return web_dir
@@ -284,7 +284,7 @@ def _default_config_path() -> Path:
     local = Path.cwd() / "config.yml"
     if local.exists():
         return local
-    return DEFAULT_CONFIG_PATH
+    return get_default_config_path()
 
 
 # ── 主入口 ───────────────────────────────────────────

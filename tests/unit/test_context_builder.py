@@ -1,10 +1,24 @@
 """B08: ContextBuilder"""
-from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+from pathlib import Path
+
 from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.tools.base import Tool
 from sensenova_claw.capabilities.tools.registry import ToolRegistry
 from sensenova_claw.capabilities.skills.registry import SkillRegistry, Skill
 from sensenova_claw.capabilities.agents.registry import AgentRegistry
-from pathlib import Path
+from sensenova_claw.kernel.runtime.context_builder import ContextBuilder
+
+
+class _SendMessageTool(Tool):
+    name = "send_message"
+    description = "向其他 Agent 发送消息"
+    parameters = {"type": "object", "properties": {}}
+
+
+class _MockTool(Tool):
+    name = "mock_tool"
+    description = "测试工具"
+    parameters = {"type": "object", "properties": {}}
 
 
 class TestContextBuilder:
@@ -63,6 +77,45 @@ class TestContextBuilder:
         msgs = cb.build_messages("test", agent_config=agent)
         sys_prompt = msgs[0]["content"]
         assert "helper" in sys_prompt
+
+    def test_build_messages_hides_send_message_when_delegation_disabled(self):
+        tr = ToolRegistry()
+        tr._tools = {"send_message": _SendMessageTool()}
+        agent = AgentConfig(id="lim", name="L", can_delegate_to=None)
+        cb = ContextBuilder(tool_registry=tr)
+        msgs = cb.build_messages("hi", agent_config=agent)
+        sys_prompt = msgs[0]["content"]
+        assert "send_message" not in sys_prompt
+
+    def test_build_messages_hides_disabled_tool_from_agent_preferences(self, tmp_path):
+        tr = ToolRegistry()
+        tr._tools = {"mock_tool": _MockTool()}
+        (tmp_path / ".agent_preferences.json").write_text(
+            '{"agent_tools": {"lim": {"mock_tool": false}}}',
+            encoding="utf-8",
+        )
+        agent = AgentConfig(id="lim", name="L")
+        cb = ContextBuilder(tool_registry=tr, sensenova_claw_home=str(tmp_path))
+        msgs = cb.build_messages("hi", agent_config=agent)
+        sys_prompt = msgs[0]["content"]
+        assert "mock_tool" not in sys_prompt
+
+    def test_delegation_prompt_hidden_when_send_message_disabled_by_preferences(self, tmp_path):
+        tr = ToolRegistry()
+        tr._tools = {"send_message": _SendMessageTool()}
+        (tmp_path / ".agent_preferences.json").write_text(
+            '{"agent_tools": {"main": {"send_message": false}}}',
+            encoding="utf-8",
+        )
+        ar = AgentRegistry()
+        ar.register(AgentConfig.create(id="main", name="Main"))
+        ar.register(AgentConfig.create(id="helper", name="Helper", description="帮助工具"))
+        agent = ar.get("main")
+        cb = ContextBuilder(tool_registry=tr, agent_registry=ar, sensenova_claw_home=str(tmp_path))
+        msgs = cb.build_messages("test", agent_config=agent)
+        sys_prompt = msgs[0]["content"]
+        assert "<available_agents>" not in sys_prompt
+        assert "send_message 工具向以上 Agent" not in sys_prompt
 
     def test_skills_section_injected(self, tmp_path):
         sr = SkillRegistry()

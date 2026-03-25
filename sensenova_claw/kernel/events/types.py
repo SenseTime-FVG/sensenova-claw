@@ -27,6 +27,7 @@ TOOL_CALL_COMPLETED = "tool.call_completed"
 # Tool 权限确认事件
 TOOL_CONFIRMATION_REQUESTED = "tool.confirmation_requested"
 TOOL_CONFIRMATION_RESPONSE = "tool.confirmation_response"
+TOOL_CONFIRMATION_RESOLVED = "tool.confirmation_resolved"
 
 # 错误事件
 ERROR_RAISED = "error.raised"

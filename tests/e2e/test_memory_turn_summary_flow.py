@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import os
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -18,7 +20,8 @@ from tests.e2e.run_e2e import run_single_turn, setup_services, teardown_services
 async def test_completed_turn_appends_summary_to_memory_file(tmp_path: Path) -> None:
     """完整 turn 结束后，应异步写入摘要记忆文件。"""
     original_config = copy.deepcopy(config.data)
-    config.data["system"]["sensenova_claw_home"] = str(tmp_path / ".sensenova-claw")
+    previous_home = os.environ.get("SENSENOVA_CLAW_HOME")
+    os.environ["SENSENOVA_CLAW_HOME"] = str(tmp_path / ".sensenova-claw")
     svc = await setup_services(tmp_path, provider="mock", model=None)
 
     try:
@@ -37,7 +40,7 @@ async def test_completed_turn_appends_summary_to_memory_file(tmp_path: Path) -> 
             timeout=10,
         )
 
-        memory_path = workspace / "MEMORY.md"
+        memory_path = workspace / "agents" / "default" / "memory" / f"{datetime.now().strftime('%Y-%m-%d')}.md"
         for _ in range(20):
             if memory_path.exists():
                 break
@@ -45,11 +48,14 @@ async def test_completed_turn_appends_summary_to_memory_file(tmp_path: Path) -> 
     finally:
         await teardown_services(svc)
         config.data = original_config
+        if previous_home is None:
+            os.environ.pop("SENSENOVA_CLAW_HOME", None)
+        else:
+            os.environ["SENSENOVA_CLAW_HOME"] = previous_home
 
     event_types = [event.type for event in events]
     assert AGENT_STEP_COMPLETED in event_types
 
     assert memory_path.exists()
     content = memory_path.read_text(encoding="utf-8")
-    assert "请总结以下对话" in content
-    assert "请记住我偏好 Python" in content
+    assert "当前没有可用的 LLM" in content

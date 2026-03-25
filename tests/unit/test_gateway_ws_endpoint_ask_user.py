@@ -13,6 +13,7 @@ from sensenova_claw.adapters.channels.websocket_channel import WebSocketChannel
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
     TOOL_CONFIRMATION_REQUESTED,
+    TOOL_CONFIRMATION_RESOLVED,
     USER_INPUT,
     USER_QUESTION_ANSWERED,
     USER_QUESTION_ASKED,
@@ -325,3 +326,62 @@ async def test_tool_confirmation_requested_broadcasts_to_all_connections(ws_env)
     assert ws2.sent_json[0]["type"] == "tool_confirmation_requested"
     assert ws1.sent_json[0]["payload"]["tool_call_id"] == "tc_child_1"
     assert ws2.sent_json[0]["payload"]["tool_call_id"] == "tc_child_1"
+
+
+@pytest.mark.asyncio
+async def test_tool_confirmation_requested_includes_timeout_fields(ws_env):
+    ws = _FakeWebSocket(messages=[])
+    await ws_env.ws_channel.connect(ws)
+
+    event = EventEnvelope(
+        type=TOOL_CONFIRMATION_REQUESTED,
+        session_id="sess_child_confirm",
+        source="test",
+        payload={
+            "tool_call_id": "tc_child_timeout",
+            "tool_name": "bash_command",
+            "arguments": {"command": "ls"},
+            "risk_level": "high",
+            "timeout": 60,
+            "timeout_action": "approve",
+            "requested_at_ms": 1700000000000,
+        },
+    )
+    await ws_env.ws_channel.send_event(event)
+
+    assert len(ws.sent_json) == 1
+    assert ws.sent_json[0]["type"] == "tool_confirmation_requested"
+    assert ws.sent_json[0]["payload"]["timeout"] == 60
+    assert ws.sent_json[0]["payload"]["timeout_action"] == "approve"
+    assert ws.sent_json[0]["payload"]["requested_at_ms"] == 1700000000000
+
+
+@pytest.mark.asyncio
+async def test_tool_confirmation_resolved_broadcasts_to_all_connections(ws_env):
+    ws1 = _FakeWebSocket(messages=[])
+    ws2 = _FakeWebSocket(messages=[])
+    await ws_env.ws_channel.connect(ws1)
+    await ws_env.ws_channel.connect(ws2)
+
+    event = EventEnvelope(
+        type=TOOL_CONFIRMATION_RESOLVED,
+        session_id="sess_child_confirm",
+        source="test",
+        payload={
+            "tool_call_id": "tc_child_2",
+            "tool_name": "bash_command",
+            "approved": True,
+            "status": "approved",
+            "reason": "timeout_approved",
+            "resolved_by": "timeout",
+            "resolved_at_ms": 1700000001234,
+        },
+    )
+    await ws_env.ws_channel.send_event(event)
+
+    assert len(ws1.sent_json) == 1
+    assert len(ws2.sent_json) == 1
+    assert ws1.sent_json[0]["type"] == "tool_confirmation_resolved"
+    assert ws2.sent_json[0]["type"] == "tool_confirmation_resolved"
+    assert ws1.sent_json[0]["payload"]["reason"] == "timeout_approved"
+    assert ws2.sent_json[0]["payload"]["tool_call_id"] == "tc_child_2"
