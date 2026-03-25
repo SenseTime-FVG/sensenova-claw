@@ -104,6 +104,41 @@ class TestPptSkillSuite(unittest.TestCase):
         self.assertIn("行业语境", body)
         self.assertIn("如果用户已经明确给出风格偏好", body)
 
+    def test_ppt_task_pack_defines_content_density_profile_contract(self):
+        skills = _load_workspace_skills()
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        body = skills["ppt-task-pack"]
+
+        self.assertIn('ContentDensityProfile = Literal["analysis-heavy", "balanced", "showcase-light"]', body)
+        self.assertIn("content_density_profile: ContentDensityProfile", body)
+        self.assertIn("根据主题/场景选择默认 profile", body)
+        self.assertIn("允许用户偏好覆盖", body)
+        self.assertIn("analysis-heavy", body)
+        self.assertIn("balanced", body)
+        self.assertIn("showcase-light", body)
+
+        self.assertIn("content_density_profile", design)
+        self.assertIn("analysis-heavy", design)
+        self.assertIn("balanced", design)
+        self.assertIn("showcase-light", design)
+
+    def test_ppt_task_pack_maps_theme_to_default_density_profile(self):
+        skills = _load_workspace_skills()
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        body = skills["ppt-task-pack"]
+
+        self.assertIn("分析 / 汇报 / 评估类主题", body)
+        self.assertIn("普通汇报 / 培训 / 项目介绍", body)
+        self.assertIn("品牌 / 展示 / 活动 / 发布类主题", body)
+        self.assertIn("用户明确要求更满或更克制时，可覆盖默认 profile", body)
+
+        self.assertIn("分析 / 汇报 / 评估类主题", design)
+        self.assertIn("普通汇报 / 培训 / 项目介绍", design)
+        self.assertIn("品牌 / 展示 / 活动 / 发布类主题", design)
+        self.assertIn("用户明确要求更满或更克制时，可覆盖默认 profile", design)
+
     def test_ppt_superpower_maps_outline_review_requests_to_guided_mode(self):
         skills = _load_workspace_skills()
 
@@ -348,6 +383,24 @@ class TestPptSkillSuite(unittest.TestCase):
 
         self.assertIn("research 不是摘要，而是“可上页内容池”", content)
         self.assertIn("pageworthy chunks 是 storyboard 的上游输入", content)
+
+    def test_ppt_style_spec_explains_density_profile_as_capacity_strategy(self):
+        skills = _load_workspace_skills()
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+
+        body = skills["ppt-style-spec"]
+
+        self.assertIn("content_density_profile", body)
+        self.assertIn("承载策略", body)
+        self.assertIn("不是单纯视觉风格切换", body)
+        self.assertIn("analysis-heavy", body)
+        self.assertIn("balanced", body)
+        self.assertIn("showcase-light", body)
+        self.assertNotIn("payload_budget", body)
+
+        self.assertIn("承载策略", design)
+        self.assertIn("不是单纯视觉风格切换", design)
+        self.assertNotIn("payload_budget", design)
 
 
 if __name__ == "__main__":

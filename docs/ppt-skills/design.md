@@ -246,8 +246,9 @@
 
 #### `ppt-task-pack`
 
-负责统一记录任务目标、页数、受众、语言、限制、交付物、输出目录、推荐路径、`research_required`、`content_gap_assessment`、`research_needs` 和 `风格意图`，产出 `task-pack.json`。
+负责统一记录任务目标、页数、受众、语言、限制、交付物、输出目录、推荐路径、`research_required`、`content_gap_assessment`、`research_needs`、`风格意图` 和 `content_density_profile`，产出 `task-pack.json`。
 在实验 1 中，`ppt-task-pack` 不只是任务收敛层，也是内容控制面：要先把内容缺口评估清楚，再决定 research 是否值得执行。
+`content_density_profile` 用来表达正文页承载策略：`analysis-heavy` 适合分析 / 汇报 / 评估类主题，`balanced` 适合普通汇报 / 培训 / 项目介绍，`showcase-light` 适合品牌 / 展示 / 活动 / 发布类主题；如果用户明确要求更满或更克制，可覆盖默认 profile。
 
 #### `ppt-research-pack`
 
@@ -296,6 +297,7 @@ class ResearchPack:
 
 负责 deck 级设计语言，产出 `style-spec.json`。默认必产。
 它必须优先理解用户需求，再把 `task-pack.json` 中的 `风格意图` 转成可执行的设计语法；只有在风格信号不足时，才允许退到 `商务` 或 `海报` 这两种兜底。
+同时必须读取 `task-pack.json.content_density_profile`，把它解释成正文页的承载策略，而不是单纯视觉风格切换。
 这里的“可执行”不是多写几个形容词，而是要产出 variant 级页面壳子映射，例如 `variant_key`、`layout_shell`、`header_strategy`，不要只按 `page_type` 粗分。
 同时要给出 `svg_motif_library` 这类可直接绘制的装饰元素库，让背景和前景的插画感不是停留在文字描述。
 对装饰层的当前实现策略采用“强约束渲染契约”，不是只描述气质，而是给出可直接落地的 motif 配方。
@@ -421,6 +423,7 @@ from typing import Literal
 
 Mode = Literal["fast", "guided", "surgical"]
 OutputPolicy = Literal["user-provided", "reuse-existing", "auto-generated"]
+ContentDensityProfile = Literal["analysis-heavy", "balanced", "showcase-light"]
 
 class TaskPack:
     schema_version: str
@@ -439,6 +442,7 @@ class TaskPack:
     research_needs: list["ResearchNeed"]
     available_sources: list[str]
     style_intent: "StyleIntent"
+    content_density_profile: ContentDensityProfile
     deck_dir: str
     output_policy: OutputPolicy
 
@@ -462,6 +466,12 @@ class ResearchNeed:
 
 - `风格意图` 必须先从用户 query 中抽取，至少覆盖 `场景`、`气质`、`行业语境` 和显式风格偏好
 - 如果用户已经明确给出风格偏好、品牌语气、参考图或模板方向，必须在 `task-pack.json` 中显式记录，供后续 `style-spec` 优先消费
+- `content_density_profile` 是正文页内容的承载策略，不是单纯视觉风格切换
+- `ppt-task-pack` 负责根据主题/场景选择默认 profile，并允许用户偏好覆盖
+- `analysis-heavy` 适合分析 / 汇报 / 评估类主题
+- `balanced` 适合普通汇报 / 培训 / 项目介绍
+- `showcase-light` 适合品牌 / 展示 / 活动 / 发布类主题
+- 用户明确要求更满或更克制时，可覆盖默认 profile
 - `deck_dir` 必须被显式记录，并作为后续 skill 的统一输出目录
 - 它是唯一可信的 canonical 输出根目录
 - 后续 skill 只能直接复制这个值，不要手写、缩写、翻译或重拼目录名
@@ -551,8 +561,10 @@ class MotifPlacement:
 - `style-spec.json` 为默认必产
 - 它是设计控制面
 - 必须先读取 `task-pack.json`
+- 必须读取 `task-pack.json.content_density_profile`
 - 必须优先理解用户需求，再决定具体风格方向
 - `visual_archetype` 表示根据用户需求推断出的主风格；只有在风格信号不足时，`fallback_archetype` 才允许取 `商务` 或 `海报`
+- `content_density_profile` 是正文页承载策略，不是单纯视觉风格切换
 - 输出路径必须严格为 `${deck_dir}/style-spec.json`
 - 不要手写、缩写、翻译或重拼目录名
 - 必须包含 `background_system`、`foreground_motifs`、`component_skins`、`density_rules`、`page_type_variants`
@@ -567,7 +579,7 @@ class MotifPlacement:
 - 背景和前景都要给出可绘制的装饰元素，不要只停留在文字描述
 - `svg_motif_library` 要列出可直接绘制的装饰元素或插画母题，供后续页面生成直接消费
 - `component_skins` 要明确卡片、数据面板、表格、引言块、图表容器的皮肤规则
-- `density_rules` 要明确哪些页面允许更浓、哪些页面必须更克制
+- `density_rules` 要明确哪些页面允许更浓、哪些页面必须更克制，并且与 `analysis-heavy`、`balanced`、`showcase-light` 的承载语义一致
 - `page_type_variants` 要明确封面页、分析页、结论页、风险页等页面如何变化而不失统一
 - `page_type_variants` 不要只按 `page_type` 粗分；要能覆盖 `style_variant`
 - 每个 variant 都应提供 `variant_key`、`layout_shell`、`header_strategy` 等可执行字段，避免只剩形容词风格
