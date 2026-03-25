@@ -650,3 +650,209 @@ class WriteFileTool(Tool):
 
         return {"success": True, "file_path": str(file_path), "size": len(content), "mode": mode}
 
+
+# ── Todolist 专用工具 ──────────────────────────────────────────
+
+
+def _todolist_dir_from_config() -> Path:
+    """获取 todolist 目录，不存在则创建。"""
+    from sensenova_claw.platform.config.workspace import resolve_sensenova_claw_home
+    home = resolve_sensenova_claw_home(config)
+    d = home / "todolist"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _todolist_file(directory: Path, date_str: str) -> Path:
+    return directory / f"todolist_{date_str}.json"
+
+
+def _load_todolist_day(directory: Path, date_str: str) -> dict:
+    fp = _todolist_file(directory, date_str)
+    if fp.exists():
+        with open(fp, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"date": date_str, "items": []}
+
+
+def _save_todolist_day(directory: Path, date_str: str, data: dict) -> None:
+    fp = _todolist_file(directory, date_str)
+    with open(fp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+async def _publish_todolist_event(event_bus: Any, date_str: str, action: str) -> None:
+    """向事件总线发布 todolist 变更事件"""
+    if not event_bus:
+        return
+    from sensenova_claw.kernel.events.envelope import EventEnvelope
+    from sensenova_claw.kernel.events.types import TODOLIST_UPDATED, SYSTEM_SESSION_ID
+    await event_bus.publish(EventEnvelope(
+        type=TODOLIST_UPDATED,
+        session_id=SYSTEM_SESSION_ID,
+        source="tool",
+        payload={"date": date_str, "action": action},
+    ))
+
+
+class ManageTodolistTool(Tool):
+    name = "manage_todolist"
+    description = (
+        "管理个人待办事项。支持 add(新增)、complete(完成/标记已完成)、update(更新)、"
+        "toggle(切换完成/未完成状态)、delete(永久删除)、list(列出) 操作。"
+        "注意：用户说「完成」「做完了」时应使用 complete，不要使用 delete。"
+        "delete 仅用于用户明确要求「删除」「移除」待办时。"
+    )
+    risk_level = ToolRiskLevel.LOW
+    parameters = {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["add", "complete", "update", "toggle", "delete", "list"],
+                "description": (
+                    "操作类型：add=新增, complete=标记为已完成(设置status=done), "
+                    "update=更新属性, toggle=切换完成/未完成, delete=永久删除, list=列出"
+                ),
+            },
+            "date": {
+                "type": "string",
+                "description": "日期 YYYY-MM-DD，默认今天",
+            },
+            "title": {
+                "type": "string",
+                "description": "待办标题（add 必填）",
+            },
+            "item_id": {
+                "type": "string",
+                "description": "待办 ID（update/toggle/delete 时需要）",
+            },
+            "priority": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+                "description": "优先级，默认 medium",
+            },
+            "due_date": {
+                "type": "string",
+                "description": "截止日期 YYYY-MM-DD",
+            },
+            "status": {
+                "type": "string",
+                "enum": ["todo", "done"],
+                "description": "状态（update 时可指定）",
+            },
+        },
+        "required": ["action"],
+    }
+
+    async def execute(self, **kwargs: Any) -> Any:
+        import uuid
+        from datetime import datetime, date as date_mod
+
+        event_bus = kwargs.pop("_event_bus", None)
+        kwargs.pop("_agent_workdir", None)
+        kwargs.pop("_path_policy", None)
+        kwargs.pop("_session_id", None)
+        kwargs.pop("_agent_registry", None)
+        kwargs.pop("_ask_user_handler", None)
+        kwargs.pop("_source_agent_id", None)
+        kwargs.pop("_turn_id", None)
+        kwargs.pop("_tool_call_id", None)
+
+        action = str(kwargs.get("action", ""))
+        date_str = str(kwargs.get("date", "")) or date_mod.today().isoformat()
+
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return {"success": False, "error": f"日期格式错误，需要 YYYY-MM-DD，收到: {date_str}"}
+
+        d = _todolist_dir_from_config()
+        data = _load_todolist_day(d, date_str)
+
+        if action == "list":
+            data["items"].sort(key=lambda x: int(x.get("order", 0)))
+            return {"success": True, "date": date_str, "items": data["items"]}
+
+        if action == "add":
+            title = str(kwargs.get("title", "")).strip()
+            if not title:
+                return {"success": False, "error": "add 操作需要 title"}
+            item = {
+                "id": str(uuid.uuid4()),
+                "title": title,
+                "priority": str(kwargs.get("priority", "medium")),
+                "due_date": kwargs.get("due_date"),
+                "status": "todo",
+                "order": len(data["items"]),
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "completed_at": None,
+            }
+            data["items"].append(item)
+            _save_todolist_day(d, date_str, data)
+            await _publish_todolist_event(event_bus, date_str, "add")
+            return {"success": True, "item": item}
+
+        if action == "complete":
+            item_id = str(kwargs.get("item_id", ""))
+            for item in data["items"]:
+                if item["id"] == item_id:
+                    if item["status"] != "done":
+                        item["status"] = "done"
+                        item["completed_at"] = datetime.now().isoformat(timespec="seconds")
+                        _save_todolist_day(d, date_str, data)
+                        await _publish_todolist_event(event_bus, date_str, "complete")
+                    return {"success": True, "item": item}
+            return {"success": False, "error": f"待办项 '{item_id}' 不存在"}
+
+        if action == "toggle":
+            item_id = str(kwargs.get("item_id", ""))
+            for item in data["items"]:
+                if item["id"] == item_id:
+                    old_status = item["status"]
+                    item["status"] = "done" if old_status == "todo" else "todo"
+                    if item["status"] == "done":
+                        item["completed_at"] = datetime.now().isoformat(timespec="seconds")
+                    else:
+                        item["completed_at"] = None
+                    _save_todolist_day(d, date_str, data)
+                    await _publish_todolist_event(event_bus, date_str, "toggle")
+                    return {"success": True, "item": item}
+            return {"success": False, "error": f"待办项 '{item_id}' 不存在"}
+
+        if action == "update":
+            item_id = str(kwargs.get("item_id", ""))
+            for item in data["items"]:
+                if item["id"] == item_id:
+                    if kwargs.get("title"):
+                        item["title"] = str(kwargs["title"])
+                    if kwargs.get("priority"):
+                        item["priority"] = str(kwargs["priority"])
+                    if "due_date" in kwargs:
+                        item["due_date"] = kwargs["due_date"]
+                    if kwargs.get("status"):
+                        old_status = item["status"]
+                        item["status"] = str(kwargs["status"])
+                        if item["status"] == "done" and old_status != "done":
+                            item["completed_at"] = datetime.now().isoformat(timespec="seconds")
+                        elif item["status"] == "todo":
+                            item["completed_at"] = None
+                    _save_todolist_day(d, date_str, data)
+                    await _publish_todolist_event(event_bus, date_str, "update")
+                    return {"success": True, "item": item}
+            return {"success": False, "error": f"待办项 '{item_id}' 不存在"}
+
+        if action == "delete":
+            item_id = str(kwargs.get("item_id", ""))
+            original_len = len(data["items"])
+            data["items"] = [i for i in data["items"] if i["id"] != item_id]
+            if len(data["items"]) == original_len:
+                return {"success": False, "error": f"待办项 '{item_id}' 不存在"}
+            for idx, item in enumerate(data["items"]):
+                item["order"] = idx
+            _save_todolist_day(d, date_str, data)
+            await _publish_todolist_event(event_bus, date_str, "delete")
+            return {"success": True, "deleted": item_id}
+
+        return {"success": False, "error": f"未知操作: {action}"}
+

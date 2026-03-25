@@ -2,10 +2,12 @@
 
 数据以 JSON 文件存储在 ~/.sensenova-claw/todolist/todolist_YYYY-MM-DD.json，
 方便 Agent 直接读写文件进行推送和标记。
+写入操作完成后会通过 EventBus 广播 todolist.updated 事件，前端实时刷新。
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -19,6 +21,27 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/todolist", tags=["todolist"])
+
+
+async def _publish_todolist_event(request: Request, date_str: str, action: str) -> None:
+    """通过 EventBus 广播 todolist 变更事件"""
+    services = getattr(request.app.state, "services", None)
+    if not services:
+        return
+    bus = getattr(services, "bus", None)
+    if not bus:
+        return
+    from sensenova_claw.kernel.events.envelope import EventEnvelope
+    from sensenova_claw.kernel.events.types import TODOLIST_UPDATED, SYSTEM_SESSION_ID
+    try:
+        await bus.publish(EventEnvelope(
+            type=TODOLIST_UPDATED,
+            session_id=SYSTEM_SESSION_ID,
+            source="api",
+            payload={"date": date_str, "action": action},
+        ))
+    except Exception:
+        logger.debug("Failed to publish todolist event", exc_info=True)
 
 
 # ── Pydantic 模型 ──────────────────────────────────────────────
@@ -59,11 +82,26 @@ def _file_path(directory: Path, date_str: str) -> Path:
     return directory / f"todolist_{date_str}.json"
 
 
+def _normalize_item(item: dict) -> dict:
+    """规范化 Agent 手动写入的待办项（字段类型可能不一致）"""
+    if "order" in item:
+        try:
+            item["order"] = int(item["order"])
+        except (ValueError, TypeError):
+            item["order"] = 0
+    if item.get("completed_at") == "":
+        item["completed_at"] = None
+    return item
+
+
 def _load_day(directory: Path, date_str: str) -> dict:
     fp = _file_path(directory, date_str)
     if fp.exists():
         with open(fp, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        for item in data.get("items", []):
+            _normalize_item(item)
+        return data
     return {"date": date_str, "items": []}
 
 
@@ -91,7 +129,7 @@ async def get_day_todos(date_str: str, request: Request):
     d = _todolist_dir(request)
     data = _load_day(d, date_str)
     # 按 order 排序
-    data["items"].sort(key=lambda x: x.get("order", 0))
+    data["items"].sort(key=lambda x: int(x.get("order", 0)))
     return data
 
 
@@ -114,6 +152,7 @@ async def create_todo_item(date_str: str, body: TodoItemCreate, request: Request
     }
     data["items"].append(item)
     _save_day(d, date_str, data)
+    await _publish_todolist_event(request, date_str, "add")
     return item
 
 
@@ -146,6 +185,7 @@ async def update_todo_item(
                 elif body.status == "todo":
                     item["completed_at"] = None
             _save_day(d, date_str, data)
+            await _publish_todolist_event(request, date_str, "update")
             return item
 
     raise HTTPException(404, f"待办项 '{item_id}' 不存在")
@@ -168,6 +208,7 @@ async def delete_todo_item(date_str: str, item_id: str, request: Request):
         item["order"] = idx
 
     _save_day(d, date_str, data)
+    await _publish_todolist_event(request, date_str, "delete")
     return {"status": "deleted"}
 
 
@@ -194,6 +235,7 @@ async def reorder_todo_items(
 
     data["items"] = reordered
     _save_day(d, date_str, data)
+    await _publish_todolist_event(request, date_str, "reorder")
     return data
 
 

@@ -5,6 +5,7 @@ import logging
 from sensenova_claw.kernel.events.bus import PrivateEventBus
 from sensenova_claw.kernel.events.router import BusRouter
 from sensenova_claw.adapters.llm.factory import LLMFactory
+from sensenova_claw.kernel.runtime.state import SessionStateStore
 from sensenova_claw.kernel.runtime.workers.llm_worker import LLMSessionWorker
 
 logger = logging.getLogger(__name__)
@@ -13,9 +14,15 @@ logger = logging.getLogger(__name__)
 class LLMRuntime:
     """全局单例管理者：持有 LLMFactory，管理 LLMSessionWorker 生命周期"""
 
-    def __init__(self, bus_router: BusRouter, factory: LLMFactory):
+    def __init__(
+        self,
+        bus_router: BusRouter,
+        factory: LLMFactory,
+        state_store: SessionStateStore | None = None,
+    ):
         self.bus_router = bus_router
         self.factory = factory
+        self.state_store = state_store
         self._workers: dict[str, LLMSessionWorker] = {}
 
     async def start(self) -> None:
