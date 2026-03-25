@@ -6,7 +6,11 @@ from typing import Any, AsyncIterator
 from openai import AsyncOpenAI
 
 from sensenova_claw.platform.config.config import config
-from sensenova_claw.adapters.llm.base import LLMProvider
+from sensenova_claw.adapters.llm.base import (
+    DEFAULT_LLM_TEMPERATURE,
+    LLMProvider,
+    merge_sampling_extra_body,
+)
 
 
 class OpenAIProvider(LLMProvider):
@@ -25,11 +29,12 @@ class OpenAIProvider(LLMProvider):
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_messages = self._normalize_messages(messages)
+        merged_extra_body = merge_sampling_extra_body(extra_body)
         req: dict[str, Any] = {
             "model": model,
             "messages": normalized_messages,
@@ -39,8 +44,8 @@ class OpenAIProvider(LLMProvider):
             req["tools"] = [{"type": "function", "function": t} for t in tools]
         if max_tokens:
             req["max_tokens"] = max_tokens
-        if extra_body:
-            req["extra_body"] = extra_body
+        if merged_extra_body:
+            req["extra_body"] = merged_extra_body
 
         response = await self.client.chat.completions.create(**req)
         choice = response.choices[0]
@@ -78,11 +83,12 @@ class OpenAIProvider(LLMProvider):
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         normalized_messages = self._normalize_messages(messages)
+        merged_extra_body = merge_sampling_extra_body(extra_body)
         req: dict[str, Any] = {
             "model": model,
             "messages": normalized_messages,
@@ -94,8 +100,8 @@ class OpenAIProvider(LLMProvider):
             req["tools"] = [{"type": "function", "function": t} for t in tools]
         if max_tokens:
             req["max_tokens"] = max_tokens
-        if extra_body:
-            req["extra_body"] = extra_body
+        if merged_extra_body:
+            req["extra_body"] = merged_extra_body
 
         stream = await self.client.chat.completions.create(**req)
         tool_calls_acc: dict[int, dict[str, Any]] = {}

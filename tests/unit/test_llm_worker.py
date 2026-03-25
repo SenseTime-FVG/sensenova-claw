@@ -238,6 +238,25 @@ class TestLLMWorkerHandle:
         worker = LLMSessionWorker("s1", private_bus, runtime)
         event = EventEnvelope(type="other.event", session_id="s1")
         await worker._handle(event)
+
+    async def test_applies_default_sampling_when_event_omits_it(self, private_bus, runtime, monkeypatch):
+        provider = _SuccessProvider("ok")
+        runtime.factory.get_provider = lambda provider_name="mock": provider
+        worker = LLMSessionWorker("s1", private_bus, runtime)
+        event = _make_llm_event("mock", "mock-agent-v1", [{"role": "user", "content": "hi"}])
+
+        original_temperature = config.get("agent.temperature")
+        original_extra_body = config.get("agent.extra_body")
+        config.set("agent.temperature", 1.0)
+        config.set("agent.extra_body", {"top_p": 0.95, "top_k": 20})
+        try:
+            await worker._handle_llm_requested(event)
+        finally:
+            config.set("agent.temperature", original_temperature)
+            config.set("agent.extra_body", original_extra_body)
+
+        assert provider.calls[0]["temperature"] == 1.0
+        assert provider.calls[0]["extra_body"] == {"top_p": 0.95, "top_k": 20}
         # 不抛异常即可
 
     @pytest.mark.parametrize("provider_name", ["mock", "gemini"])

@@ -28,7 +28,7 @@ class AgentConfig:
 
     # LLM 配置
     model: str = "gpt-4o-mini"                        # 模型名称（引用 llm.models 中的 key，provider 由 resolve_model 动态解析）
-    temperature: float = 0.2                          # 温度参数
+    temperature: float = 1.0                          # 温度参数
     max_tokens: int | None = None                     # 最大 token 数
     extra_body: dict[str, Any] = field(default_factory=dict)  # 透传给 LLM API 的额外参数
 
@@ -78,7 +78,7 @@ class AgentConfig:
             name=data.get("name", data["id"]),
             description=data.get("description", ""),
             model=data.get("model", "gpt-4o-mini"),
-            temperature=data.get("temperature", 0.2),
+            temperature=data.get("temperature", 1.0),
             max_tokens=data.get("max_tokens"),
             extra_body=dict(data.get("extra_body", {})),
             system_prompt=data.get("system_prompt", ""),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sensenova_claw.adapters.llm.base import LLMProvider
+from sensenova_claw.adapters.llm.base import DEFAULT_LLM_TEMPERATURE, LLMProvider
 
 
 class MockProvider(LLMProvider):
@@ -11,7 +11,7 @@ class MockProvider(LLMProvider):
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:

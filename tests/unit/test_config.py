@@ -54,7 +54,12 @@ class TestConfig:
         # 用户覆盖的值
         assert cfg.get("agent.model") == "gpt-5.4"
         # 默认值保留
-        assert cfg.get("agent.temperature") == 0.2
+        assert cfg.get("agent.temperature") == 1.0
+
+    def test_default_agent_sampling_defaults(self, tmp_path):
+        cfg = Config(config_path=tmp_path / "nonexist.yml")
+        assert cfg.get("agent.temperature") == 1.0
+        assert cfg.get("agent.extra_body") == {"top_p": 0.95, "top_k": 20}
 
     def test_set_runtime(self, tmp_path):
         cfg = Config(config_path=tmp_path / "nonexist.yml")

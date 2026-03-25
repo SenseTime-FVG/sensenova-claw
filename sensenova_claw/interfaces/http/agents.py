@@ -306,7 +306,7 @@ async def create_agent(body: AgentCreate, request: Request):
         name=body.name,
         description=body.description,
         model=body.model or (default.model if default else "gpt-4o-mini"),
-        temperature=body.temperature if body.temperature is not None else (default.temperature if default else 0.2),
+        temperature=body.temperature if body.temperature is not None else (default.temperature if default else 1.0),
         max_tokens=body.max_tokens,
         system_prompt=body.system_prompt,
         tools=body.tools,

@@ -8,7 +8,11 @@ from typing import Any, AsyncIterator
 from openai import AsyncOpenAI
 
 from sensenova_claw.platform.config.config import config
-from sensenova_claw.adapters.llm.base import LLMProvider
+from sensenova_claw.adapters.llm.base import (
+    DEFAULT_LLM_TEMPERATURE,
+    LLMProvider,
+    merge_sampling_extra_body,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +90,7 @@ class GeminiProvider(LLMProvider):
         可以绕过 SDK 的 TypedDict 序列化，保留所有字段。
         """
         merged = dict(extra_body) if extra_body else {}
+        merged = merge_sampling_extra_body(merged)
         merged["messages"] = normalized_messages
         return merged
 
@@ -94,7 +99,7 @@ class GeminiProvider(LLMProvider):
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -186,7 +191,7 @@ class GeminiProvider(LLMProvider):
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:

@@ -82,7 +82,7 @@ export default function AgentDetailPage() {
         setEditName(data.name || '');
         setEditDesc(data.description || '');
         setEditModel(data.model || '');
-        setEditTemp(String(data.temperature ?? 0.2));
+        setEditTemp(String(data.temperature ?? 1.0));
         setEditPrompt(data.systemPrompt || '');
         setEditDelegateTo(Array.isArray(data.canDelegateTo) ? data.canDelegateTo : []);
         setEditMaxDepth(String(data.maxDelegationDepth ?? 3));
@@ -128,7 +128,7 @@ export default function AgentDetailPage() {
         name: editName,
         description: editDesc,
         model: editModel || undefined,
-        temperature: parseFloat(editTemp) || 0.2,
+        temperature: parseFloat(editTemp) || 1.0,
         systemPrompt: editPrompt,
         can_delegate_to: editDelegateTo.length > 0 ? editDelegateTo : null,
         max_delegation_depth: parseInt(editMaxDepth) || 3,
