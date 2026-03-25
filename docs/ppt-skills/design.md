@@ -250,6 +250,7 @@
 #### `ppt-research-pack`
 
 负责内容研究和内容补充。它必须先读取 `task-pack.json`，并且只在 `task-pack.json.research_required` 为真时才执行，产出 `research-pack.md` 或 `research-pack.json`。
+上传报告、事实数据案例、长文档这些输入都要先交给 `ppt-task-pack` 消化，它们只是 `research_required` 的信号，不是绕过 `task-pack` 的独立入口。
 
 #### `ppt-template-pack`
 
@@ -781,6 +782,8 @@ class StageFeedback:
 
 - 提供事实、论点、章节信息
 - 先进入 `ppt-task-pack`，由 `task-pack.json.research_required` 决定是否进入 `ppt-research-pack`
+- 上传报告、主题涉及事实 / 数据 / 案例、长文档整理等都只是 `task-pack` 判断 `research_required` 的信号
+- 上传报告、事实数据案例和长文档只是 `task-pack` 计算 `research_required` 的信号
 
 ### 7.2 风格参考
 
@@ -922,7 +925,8 @@ class StageFeedback:
 期望：
 
 - 在 `source-map.json` 中识别为 `content_source`
-- 进入 `ppt-research-pack`
+- 先进入 `ppt-task-pack`
+- 由 `task-pack.json.research_required` 决定是否进入 `ppt-research-pack`
 
 #### 用例 3：上传参考图作为风格参考
 
