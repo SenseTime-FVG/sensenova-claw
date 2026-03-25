@@ -9,15 +9,22 @@ from typing import Any
 Json = dict[str, Any]
 
 _STRUCTURE_BLOCK_TAGS = ("p", "ul", "ol", "table", "blockquote", "pre", "figure")
+_DIV_STRUCTURE_PATTERN = re.compile(
+    r"<div\b(?=[^>]*(?:class=|role=|aria-label=|data-))",
+    flags=re.IGNORECASE,
+)
 _CLAIM_HINTS = ("因为", "因此", "所以", "表明", "说明", "显示", "证明", "结论", "建议", "必须")
 _EVIDENCE_HINTS = (
-    r"\d+",
     r"https?://",
     r"\b\w+@\w+\.\w+\b",
     r"图\s*\d+",
     r"表\s*\d+",
     r"（\d+）",
     r"\[\d+\]",
+    r"\d{1,2}[:：]\d{2}",
+    r"\d+(?:\.\d+)?%",
+    r"\d+(?:\.\d+)?(?:万|亿|元|人|次|页|天|小时|分钟|条|款)",
+    r"\d{4}[-/]\d{1,2}([-/]\d{1,2})?",
 )
 
 
@@ -31,6 +38,7 @@ def _count_structure_blocks(html_text: str) -> int:
     count = 0
     for tag in _STRUCTURE_BLOCK_TAGS:
         count += len(re.findall(fr"<{tag}\b", html_text, flags=re.IGNORECASE))
+    count += len(_DIV_STRUCTURE_PATTERN.findall(html_text))
     return count
 
 
