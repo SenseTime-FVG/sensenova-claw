@@ -253,6 +253,25 @@ def test_update_single_provider_and_rename_models(client, app):
     assert written["llm"]["models"]["gpt-4o-mini"]["provider"] == "openai-compatible"
 
 
+def test_create_single_provider_when_missing(client, app):
+    """单项保存新 provider 时，后端应按 upsert 方式创建而不是返回 404。"""
+    resp = client.put("/api/config/llm/providers/deepseek", json={
+        "name": "deepseek",
+        "base_url": "https://api.deepseek.com/v1",
+        "timeout": 60,
+        "max_retries": 3,
+        "api_key": "sk-deepseek",
+    })
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["providers"]["deepseek"]["base_url"] == "https://api.deepseek.com/v1"
+    assert written["llm"]["providers"]["deepseek"]["timeout"] == 60
+    assert written["llm"]["providers"]["deepseek"]["max_retries"] == 3
+    assert written["llm"]["providers"]["deepseek"]["api_key"] == "${secret:sensenova_claw/llm.providers.deepseek.api_key}"
+    assert app.state.secret_store.get("sensenova_claw/llm.providers.deepseek.api_key") == "sk-deepseek"
+
+
 def test_update_single_model_and_rename_default_model(client, app):
     """单项更新 llm 时允许改名，并联动 default_model。"""
     raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
@@ -280,6 +299,28 @@ def test_update_single_model_and_rename_default_model(client, app):
     assert "gpt-4o-mini" not in written["llm"]["models"]
     assert written["llm"]["models"]["gpt-4.1-mini"]["model_id"] == "gpt-4.1-mini"
     assert written["llm"]["default_model"] == "gpt-4.1-mini"
+
+
+def test_create_single_model_when_missing(client, app):
+    """单项保存新 llm 时，后端应按 upsert 方式创建而不是返回 404。"""
+    resp = client.put("/api/config/llm/models/deepseek-chat", json={
+        "name": "deepseek-chat",
+        "provider": "openai",
+        "model_id": "deepseek-chat",
+        "timeout": 45,
+        "max_tokens": 64000,
+        "max_output_tokens": 8192,
+    })
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["models"]["deepseek-chat"] == {
+        "provider": "openai",
+        "model_id": "deepseek-chat",
+        "timeout": 45,
+        "max_tokens": 64000,
+        "max_output_tokens": 8192,
+    }
 
 
 def test_update_default_model_only(client, app):
