@@ -8,7 +8,7 @@ import { useChatSession } from '@/contexts/ChatSessionContext';
 import { SmartStack } from './SmartStack';
 import { RecentOutputs } from './RecentOutputs';
 import { ScheduledTasks } from './ScheduledTasks';
-import { ProactiveOutputs } from './ProactiveOutputs';
+import { ProactiveAgentPanel } from './ProactiveAgentPanel';
 import { KanbanBoard } from './KanbanBoard';
 import { TodoList } from './TodoList';
 
@@ -17,35 +17,35 @@ const ResponsiveGrid = ResponsiveGridLayout;
 
 // ── 布局持久化 ──────────────────────────────────────────────
 
-const LAYOUT_STORAGE_KEY = 'sensenova-claw-dashboard-layout-v2';
+const LAYOUT_STORAGE_KEY = 'sensenova-claw-dashboard-layout-v3';
 const ZOOM_STORAGE_KEY = 'sensenova-claw-dashboard-zoom';
 const ZOOM_STEPS = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2] as const;
 const DEFAULT_ZOOM = 1.0;
 
 const DEFAULT_LAYOUTS: Layouts = {
   lg: [
-    { i: 'smartstack',  x: 0, y: 0, w: 12, h: 5, minW: 4, minH: 5, maxH: 5 },
-    { i: 'kanban',      x: 0, y: 5, w: 7, h: 3, minW: 3, minH: 2 },
-    { i: 'todo',        x: 7, y: 5, w: 5, h: 5, minW: 3, minH: 4 },
-    { i: 'outputs',     x: 0, y: 8, w: 5, h: 6, minW: 3, minH: 4 },
-    { i: 'scheduled',   x: 5, y: 8, w: 4, h: 6, minW: 2, minH: 4 },
-    { i: 'proactive',   x: 9, y: 8, w: 3, h: 6, minW: 3, minH: 3 },
+    { i: 'smartstack',  x: 0, y: 0, w: 6,  h: 5, minW: 4, minH: 5, maxH: 5 },
+    { i: 'todo',        x: 6, y: 0, w: 6,  h: 5, minW: 3, minH: 4 },
+    { i: 'kanban',      x: 0, y: 5, w: 6,  h: 6, minW: 3, minH: 4 },
+    { i: 'outputs',     x: 6, y: 5, w: 6,  h: 6, minW: 3, minH: 4 },
+    { i: 'scheduled',   x: 0, y: 11, w: 6, h: 4, minW: 2, minH: 3 },
+    { i: 'proactive',   x: 6, y: 11, w: 6, h: 4, minW: 3, minH: 3 },
   ],
   md: [
-    { i: 'smartstack',  x: 0, y: 0, w: 10, h: 5, minW: 3, minH: 5, maxH: 5 },
-    { i: 'kanban',      x: 0, y: 5, w: 6, h: 3, minW: 3, minH: 2 },
-    { i: 'todo',        x: 6, y: 5, w: 4, h: 5, minW: 3, minH: 4 },
-    { i: 'outputs',     x: 0, y: 8, w: 5, h: 6, minW: 3, minH: 4 },
-    { i: 'scheduled',   x: 5, y: 8, w: 5, h: 5, minW: 2, minH: 3 },
-    { i: 'proactive',   x: 0, y: 13, w: 10, h: 5, minW: 3, minH: 3 },
+    { i: 'smartstack',  x: 0, y: 0, w: 5,  h: 5, minW: 3, minH: 5, maxH: 5 },
+    { i: 'todo',        x: 5, y: 0, w: 5,  h: 5, minW: 3, minH: 4 },
+    { i: 'kanban',      x: 0, y: 5, w: 5,  h: 6, minW: 3, minH: 4 },
+    { i: 'outputs',     x: 5, y: 5, w: 5,  h: 6, minW: 3, minH: 4 },
+    { i: 'scheduled',   x: 0, y: 11, w: 5, h: 4, minW: 2, minH: 3 },
+    { i: 'proactive',   x: 5, y: 11, w: 5, h: 4, minW: 3, minH: 3 },
   ],
   sm: [
-    { i: 'smartstack',  x: 0, y: 0, w: 6, h: 5, minW: 3, minH: 5, maxH: 5 },
-    { i: 'kanban',      x: 0, y: 5, w: 6, h: 3, minW: 3, minH: 2 },
-    { i: 'todo',        x: 0, y: 8, w: 6, h: 6, minW: 3, minH: 4 },
-    { i: 'outputs',     x: 0, y: 14, w: 6, h: 5, minW: 3, minH: 4 },
-    { i: 'scheduled',   x: 0, y: 19, w: 6, h: 5, minW: 2, minH: 3 },
-    { i: 'proactive',   x: 0, y: 24, w: 6, h: 5, minW: 3, minH: 3 },
+    { i: 'smartstack',  x: 0, y: 0, w: 6,  h: 5, minW: 3, minH: 5, maxH: 5 },
+    { i: 'todo',        x: 0, y: 5, w: 6,  h: 5, minW: 3, minH: 4 },
+    { i: 'kanban',      x: 0, y: 10, w: 6, h: 5, minW: 3, minH: 3 },
+    { i: 'outputs',     x: 0, y: 15, w: 6, h: 5, minW: 3, minH: 4 },
+    { i: 'scheduled',   x: 0, y: 20, w: 6, h: 4, minW: 2, minH: 3 },
+    { i: 'proactive',   x: 0, y: 24, w: 6, h: 4, minW: 3, minH: 3 },
   ],
 };
 
@@ -114,7 +114,7 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
     cronJobs,
     kanbanColumns,
     recentOutputs,
-    proactiveItems,
+    proactiveOutputs,
     loading,
   } = useDashboardData();
 
@@ -184,12 +184,9 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
     setIsCustomized(false);
   }, []);
 
-  // 没有 proactive 内容时隐藏该 widget
   const visibleWidgets = useMemo(() => {
-    const widgets = ['smartstack', 'kanban', 'todo', 'outputs', 'scheduled'];
-    if (proactiveItems.length > 0) widgets.push('proactive');
-    return new Set(widgets);
-  }, [proactiveItems]);
+    return new Set(['smartstack', 'kanban', 'todo', 'outputs', 'scheduled', 'proactive']);
+  }, []);
 
   const filteredLayouts = useMemo(() => {
     const result: Layouts = {};
@@ -321,11 +318,11 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
             </div>
           )}
 
-          {/* 主动建议 */}
+          {/* Proactive Agent 产出 */}
           {visibleWidgets.has('proactive') && (
             <div key="proactive">
               <WidgetCard>
-                <ProactiveOutputs items={proactiveItems} />
+                <ProactiveAgentPanel items={proactiveOutputs} onItemClick={handleOutputClick} />
               </WidgetCard>
             </div>
           )}

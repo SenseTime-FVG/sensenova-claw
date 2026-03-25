@@ -75,7 +75,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           {/* 品牌标识 */}
           <Link href="/" className="flex items-center gap-2.5 mr-2 group">
             <div className="w-8 h-8 bg-primary text-primary-foreground rounded-[10px] flex items-center justify-center font-bold text-xs tracking-tight shadow-sm group-hover:shadow-md transition-shadow">
-              AO
+              SC
             </div>
             <span className="text-[15px] font-bold tracking-[-0.02em] text-foreground">
               Sensenova-Claw

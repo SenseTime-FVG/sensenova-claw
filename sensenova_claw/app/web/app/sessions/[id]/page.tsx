@@ -3,11 +3,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send, ChevronRight, Brain } from 'lucide-react';
+import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send, Square, ChevronRight, Brain } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { InteractionDialog, type PendingInteraction } from '@/components/chat/QuestionDialog';
+import { type PendingInteraction } from '@/components/chat/QuestionDialog';
 import { MarkdownContent } from '@/components/chat/MarkdownContent';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
@@ -374,6 +374,7 @@ export default function SessionDetailPage() {
         const incomingSessionId = typeof data.session_id === 'string' ? data.session_id : null;
         const payload = (data.payload || {}) as Record<string, unknown>;
         const isInteractionEvent = eventType === 'tool_confirmation_requested'
+          || eventType === 'tool_confirmation_resolved'
           || eventType === 'user_question_asked'
           || eventType === 'user_question_answered_event';
         if (incomingSessionId && incomingSessionId !== sessionId && !isInteractionEvent) {
@@ -383,10 +384,42 @@ export default function SessionDetailPage() {
           case 'agent_thinking':
             setIsTyping(true);
             break;
+          case 'llm_delta': {
+            const contentDelta = String(payload.content_delta || '');
+            const contentSnapshot = String(payload.content_snapshot || '');
+            if (contentDelta || contentSnapshot) {
+              setIsTyping(true);
+              setMessages((prev) => {
+                for (let i = prev.length - 1; i >= 0; i--) {
+                  if (prev[i].role === 'assistant') {
+                    const next = [...prev];
+                    next[i] = {
+                      ...next[i],
+                      content: contentSnapshot || ((next[i].content || '') + contentDelta),
+                    };
+                    return next;
+                  }
+                  if (prev[i].role === 'tool') break;
+                }
+                return [...prev, { role: 'assistant', content: contentSnapshot || contentDelta }];
+              });
+            }
+            break;
+          }
           case 'llm_result': {
             const content = String(payload.content || '');
             if (content) {
-              setMessages((prev) => [...prev, { role: 'assistant', content }]);
+              setMessages((prev) => {
+                for (let i = prev.length - 1; i >= 0; i--) {
+                  if (prev[i].role === 'assistant') {
+                    const next = [...prev];
+                    next[i] = { ...next[i], content };
+                    return next;
+                  }
+                  if (prev[i].role === 'tool') break;
+                }
+                return [...prev, { role: 'assistant', content }];
+              });
             }
             break;
           }
@@ -465,12 +498,19 @@ export default function SessionDetailPage() {
               interactionId: toolCallId,
               sourceSessionId,
               timeout: Number(payload.timeout || 300),
-              createdAt: Date.now(),
+              createdAt: Number(payload.requested_at_ms || Date.now()),
+              timeoutAction: String(payload.timeout_action || 'reject'),
               toolName: String(payload.tool_name || ''),
               riskLevel: String(payload.risk_level || 'high'),
               arguments: (payload.arguments || {}) as Record<string, unknown>,
             });
             setIsTyping(true);
+            break;
+          }
+          case 'tool_confirmation_resolved': {
+            const toolCallId = String(payload.tool_call_id || '');
+            if (!toolCallId) break;
+            resolveInteraction('confirmation', toolCallId);
             break;
           }
           case 'user_question_asked': {
@@ -561,6 +601,16 @@ export default function SessionDetailPage() {
     }
   }, [activeInteraction, inputValue, interactionSubmitting, sessionId]);
 
+  const cancelTurn = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({
+      type: 'cancel_turn',
+      session_id: sessionId,
+      timestamp: Date.now() / 1000,
+    }));
+    setIsTyping(false);
+  }, [sessionId]);
+
   const sendQuestionAnswer = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     if (!activeInteraction || activeInteraction.kind !== 'question') return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -595,14 +645,14 @@ export default function SessionDetailPage() {
       },
       timestamp: Date.now() / 1000,
     }));
-    resolveInteraction('confirmation', activeInteraction.interactionId);
-  }, [activeInteraction, resolveInteraction]);
+  }, [activeInteraction]);
 
   const handleInteractionTimeout = useCallback(() => {
     if (!activeInteraction) return;
     if (activeInteraction.kind === 'confirmation') {
-      setMessages((prev) => [...prev, { role: 'assistant', content: '工具审批已超时，系统将按后端策略拒绝。' }]);
-      resolveInteraction('confirmation', activeInteraction.interactionId);
+      if (activeInteraction.timeoutAction !== 'block') {
+        setMessages((prev) => [...prev, { role: 'assistant', content: '工具审批等待已到期，正在等待服务端确认最终处理结果。' }]);
+      }
       return;
     }
     setMessages((prev) => [...prev, { role: 'assistant', content: '问题已超时，已取消等待。' }]);
@@ -718,14 +768,25 @@ export default function SessionDetailPage() {
                   style={{ minHeight: '48px', maxHeight: '160px' }}
                 />
               </div>
-              <button
-                data-testid="send-button"
-                onClick={sendMessage}
-                disabled={!inputValue.trim() || !wsConnected || isTyping || !!activeInteraction || interactionSubmitting}
-                className="p-3 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shadow-lg active:scale-95 shrink-0"
-              >
-                <Send size={20} />
-              </button>
+              {isTyping ? (
+                <button
+                  data-testid="stop-button"
+                  onClick={cancelTurn}
+                  className="p-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all flex items-center justify-center shadow-lg active:scale-95 shrink-0"
+                  title="停止生成"
+                >
+                  <Square size={16} fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  data-testid="send-button"
+                  onClick={sendMessage}
+                  disabled={!inputValue.trim() || !wsConnected || !!activeInteraction || interactionSubmitting}
+                  className="p-3 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shadow-lg active:scale-95 shrink-0"
+                >
+                  <Send size={20} />
+                </button>
+              )}
             </div>
             <div className="mt-3 text-center">
               <p className="text-[11px] text-muted-foreground/60 font-medium">
@@ -735,16 +796,6 @@ export default function SessionDetailPage() {
           </div>
         </div>
       </div>
-      <InteractionDialog
-        open={!!activeInteraction}
-        interaction={activeInteraction}
-        submitting={interactionSubmitting}
-        wsConnected={wsConnected}
-        onQuestionSubmit={(answer) => sendQuestionAnswer(answer, false)}
-        onQuestionCancel={() => sendQuestionAnswer(null, true)}
-        onConfirmationSubmit={sendConfirmationResponse}
-        onTimeout={handleInteractionTimeout}
-      />
     </DashboardLayout>
   );
 }

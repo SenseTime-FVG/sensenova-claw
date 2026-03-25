@@ -207,15 +207,23 @@ export default function AgentDetailPage() {
     } catch { /* ignore */ }
   };
 
-  // 保存 tools/skills 偏好
+  // 保存 tools/skills 配置（更新 agent 的工具/技能列表）
   const savePreferences = async () => {
     setSaving(true); setSaveMsg('');
     try {
-      await authFetch(`${API_BASE}/api/agents/${agentId}/preferences`, {
+      const enabledTools = Object.entries(toolStates).filter(([, v]) => v).map(([k]) => k);
+      const enabledSkills = Object.entries(skillStates).filter(([, v]) => v).map(([k]) => k);
+      const res = await authFetch(`${API_BASE}/api/agents/${agentId}/config`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tools: toolStates, skills: skillStates }),
+        body: JSON.stringify({ tools: enabledTools, skills: enabledSkills }),
       });
-      setSaveMsg('已保存');
+      if (res.ok) {
+        setSaveMsg('已保存');
+        loadAgent();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setSaveMsg(err.detail || '保存失败');
+      }
     } catch { setSaveMsg('保存失败'); }
     finally { setSaving(false); setTimeout(() => setSaveMsg(''), 2000); }
   };
@@ -270,7 +278,7 @@ export default function AgentDetailPage() {
               <Wrench className="h-5 w-5 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-4xl font-black">{enabledToolCount}<span className="text-lg font-bold text-muted-foreground">/{agent.toolCount}</span></div>
+              <div className="text-4xl font-black">{enabledToolCount}<span className="text-lg font-bold text-muted-foreground">/{agent.toolsDetail?.length || 0}</span></div>
               <p className="text-sm font-medium text-muted-foreground mt-2">Enabled tool bindings</p>
             </CardContent>
           </Card>
@@ -280,7 +288,7 @@ export default function AgentDetailPage() {
               <Bot className="h-5 w-5 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-4xl font-black">{enabledSkillCount}<span className="text-lg font-bold text-muted-foreground">/{agent.skillCount}</span></div>
+              <div className="text-4xl font-black">{enabledSkillCount}<span className="text-lg font-bold text-muted-foreground">/{agent.skillsDetail?.length || 0}</span></div>
               <p className="text-sm font-medium text-muted-foreground mt-2">Loaded procedural skills</p>
             </CardContent>
           </Card>
