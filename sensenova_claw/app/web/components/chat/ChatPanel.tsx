@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Bot, ChevronLeft } from 'lucide-react';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { useFilePanel } from '@/contexts/FilePanelContext';
@@ -42,7 +42,11 @@ interface ChatPanelProps {
   returnToMainLabel?: string;
 }
 
-export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockAgent, returnToMainLabel }: ChatPanelProps) {
+export interface ChatPanelHandle {
+  fillInput: (text: string) => void;
+}
+
+export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockAgent, returnToMainLabel }, ref) {
   const {
     wsConnected,
     currentSessionId,
@@ -171,6 +175,8 @@ export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockA
     chatInputRef.current?.setInput(text);
   }, []);
 
+  useImperativeHandle(ref, () => ({ fillInput }), [fillInput]);
+
   const defaultEmptyState = (
     <div className="flex flex-col items-center justify-center h-full gap-5 text-muted-foreground max-w-md mx-auto text-center">
       <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2 shadow-sm">
@@ -261,4 +267,4 @@ export function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockA
 
     </div>
   );
-}
+});

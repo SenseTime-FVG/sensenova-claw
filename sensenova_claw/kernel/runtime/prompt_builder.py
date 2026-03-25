@@ -88,7 +88,11 @@ def _build_identity(base_prompt: str) -> list[str]:
 
 
 def _build_workspace(workspace_dir: str | None) -> list[str]:
-    """Section 2: Workspace 路径提示（有 workspace 时）"""
+    """Section 2: Workspace 路径提示（有 workspace 时）
+    
+    路径规则和文件链接格式等固定指令已迁移到 .sensenova-claw/agents/AGENTS.md，
+    这里只注入动态的工作目录路径。
+    """
     if not workspace_dir:
         return []
 
@@ -96,16 +100,6 @@ def _build_workspace(workspace_dir: str | None) -> list[str]:
         "",
         "## Workspace",
         f"Your working directory is: `{workspace_dir}`",
-        "",
-        "**路径规则（必须遵守）：**",
-        f"- 调用 read_file / write_file 等工具时，相对路径会自动基于 `{workspace_dir}` 解析",
-        "- **在回复用户时，所有文件路径必须使用绝对路径**",
-        "- 访问工作目录外的文件需使用绝对路径",
-        "",
-        "**文件链接格式（必须遵守）：**",
-        "在回复中提及文件或目录时，必须使用标准 markdown 链接格式",
-        "`[显示名称](#sensenova-claw-file:绝对路径)`",
-        "- 这样用户可以直接点击链接定位和打开文件",
         "",
     ]
 

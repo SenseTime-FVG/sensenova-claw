@@ -303,6 +303,8 @@ export default function SessionDetailPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
+  const cancelledTurnIdsRef = useRef<Set<string>>(new Set());
+  const lastStreamingTurnIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     activeInteractionRef.current = activeInteraction;
@@ -358,6 +360,11 @@ export default function SessionDetailPage() {
     setInteractionSubmitting(false);
   }, []);
 
+  const resetTurnTracking = useCallback(() => {
+    cancelledTurnIdsRef.current.clear();
+    lastStreamingTurnIdRef.current = null;
+  }, []);
+
   // WebSocket 连接
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
@@ -385,9 +392,16 @@ export default function SessionDetailPage() {
             setIsTyping(true);
             break;
           case 'llm_delta': {
+            const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : null;
+            if (turnId && cancelledTurnIdsRef.current.has(turnId)) {
+              break;
+            }
             const contentDelta = String(payload.content_delta || '');
             const contentSnapshot = String(payload.content_snapshot || '');
             if (contentDelta || contentSnapshot) {
+              if (turnId) {
+                lastStreamingTurnIdRef.current = turnId;
+              }
               setIsTyping(true);
               setMessages((prev) => {
                 for (let i = prev.length - 1; i >= 0; i--) {
@@ -407,8 +421,15 @@ export default function SessionDetailPage() {
             break;
           }
           case 'llm_result': {
+            const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : null;
+            if (turnId && cancelledTurnIdsRef.current.has(turnId)) {
+              break;
+            }
             const content = String(payload.content || '');
             if (content) {
+              if (turnId) {
+                lastStreamingTurnIdRef.current = turnId;
+              }
               setMessages((prev) => {
                 for (let i = prev.length - 1; i >= 0; i--) {
                   if (prev[i].role === 'assistant') {
@@ -467,6 +488,13 @@ export default function SessionDetailPage() {
             break;
           }
           case 'turn_completed': {
+            const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : null;
+            if (turnId) {
+              cancelledTurnIdsRef.current.delete(turnId);
+              if (lastStreamingTurnIdRef.current === turnId) {
+                lastStreamingTurnIdRef.current = null;
+              }
+            }
             const finalResponse = String(payload.final_response || '');
             if (finalResponse) {
               setMessages((prev) => [...prev, { role: 'assistant', content: finalResponse }]);
@@ -475,10 +503,18 @@ export default function SessionDetailPage() {
             setIsTyping(false);
             break;
           }
-          case 'turn_cancelled':
+          case 'turn_cancelled': {
+            const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : null;
+            if (turnId) {
+              cancelledTurnIdsRef.current.add(turnId);
+              if (lastStreamingTurnIdRef.current === turnId) {
+                lastStreamingTurnIdRef.current = null;
+              }
+            }
             clearInteractions();
             setIsTyping(false);
             break;
+          }
           case 'error': {
             setMessages((prev) => [
               ...prev,
@@ -548,14 +584,16 @@ export default function SessionDetailPage() {
 
     return () => {
       clearInteractions();
+      resetTurnTracking();
       ws.close();
     };
-  }, [clearInteractions, enqueueInteraction, resolveInteraction, sessionId]);
+  }, [clearInteractions, enqueueInteraction, resetTurnTracking, resolveInteraction, sessionId]);
 
   // 加载历史消息
   useEffect(() => {
     const fetchData = async () => {
       try {
+        resetTurnTracking();
         const [sessRes, msgRes] = await Promise.all([
           authFetch(`${API_BASE}/api/sessions`),
           authFetch(`${API_BASE}/api/sessions/${sessionId}/messages`),
@@ -575,7 +613,7 @@ export default function SessionDetailPage() {
       }
     };
     fetchData();
-  }, [sessionId]);
+  }, [resetTurnTracking, sessionId]);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -586,6 +624,7 @@ export default function SessionDetailPage() {
     const content = inputValue.trim();
     if (!content || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || activeInteraction || interactionSubmitting) return;
 
+    resetTurnTracking();
     setMessages((prev) => [...prev, { role: 'user', content }]);
     wsRef.current.send(JSON.stringify({
       type: 'user_input',
@@ -599,10 +638,13 @@ export default function SessionDetailPage() {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [activeInteraction, inputValue, interactionSubmitting, sessionId]);
+  }, [activeInteraction, inputValue, interactionSubmitting, resetTurnTracking, sessionId]);
 
   const cancelTurn = useCallback(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (lastStreamingTurnIdRef.current) {
+      cancelledTurnIdsRef.current.add(lastStreamingTurnIdRef.current);
+    }
     wsRef.current.send(JSON.stringify({
       type: 'cancel_turn',
       session_id: sessionId,

@@ -92,6 +92,18 @@ export interface ChatSessionContextValue {
 
   // 通知面板回答 ask_user 时同步解除阻塞
   resolveInteractionFromNotification?: (kind: 'question' | 'confirmation', interactionId: string) => void;
+
+  // 实时 proactive 推送结果
+  proactiveResults: ProactiveResultItem[];
+}
+
+/** 实时接收到的 proactive 推送结果 */
+export interface ProactiveResultItem {
+  jobId: string;
+  jobName: string;
+  sessionId: string;
+  result: string;
+  receivedAt: number;
 }
 
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
@@ -122,6 +134,9 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const [globalWorkingSessions, setGlobalWorkingSessions] = useState<Set<string>>(new Set());
   const [globalLastToolName, setGlobalLastToolName] = useState('');
 
+  // 实时 proactive 推送结果（最多保留 50 条，去重）
+  const [proactiveResults, setProactiveResults] = useState<ProactiveResultItem[]>([]);
+
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -129,6 +144,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const shouldReconnectRef = useRef(true);
   const sessionIdRef = useRef<string | null>(null);
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
+  const cancelledTurnIdsRef = useRef<Set<string>>(new Set());
+  const lastStreamingTurnIdRef = useRef<string | null>(null);
   const pendingInputRef = useRef<{ content: string; contextFiles?: string[] } | null>(null);
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
@@ -215,6 +232,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     wsSend({ type: 'load_session', payload: { session_id: sid }, timestamp: Date.now() / 1000 });
   }, [wsSend]);
 
+  const resetTurnTracking = useCallback(() => {
+    cancelledTurnIdsRef.current.clear();
+    lastStreamingTurnIdRef.current = null;
+  }, []);
+
   // ── Session 管理 ──
 
   const loadSessionList = useCallback(async () => {
@@ -239,6 +261,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     setSessionId(sid);
     setMessages([]);
     setIsTyping(false);
+    resetTurnTracking();
     toolCallMapRef.current.clear();
 
     if (shouldBind) {
@@ -260,7 +283,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       setRightTaskProgress([]);
       toolStepMapRef.current.clear();
     }
-  }, [bindSessionToCurrentSocket, shouldActivate]);
+  }, [bindSessionToCurrentSocket, resetTurnTracking, shouldActivate]);
 
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
 
@@ -371,6 +394,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const sid = typeof data.session_id === 'string' ? data.session_id : null;
         const events = Array.isArray(payload.events) ? payload.events as Record<string, unknown>[] : [];
         if (sid) {
+          resetTurnTracking();
           setSessionId(sid);
           setMessages(rebuildMessagesFromEvents(events));
           setIsTyping(false);
@@ -382,11 +406,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         break;
       case 'llm_delta': {
         const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
+        if (turnId && cancelledTurnIdsRef.current.has(turnId)) {
+          break;
+        }
         const contentDelta = String(payload.content_delta || '');
         const reasoningDelta = String(payload.reasoning_delta || '');
         const contentSnapshot = String(payload.content_snapshot || '');
 
         if (contentDelta || reasoningDelta || contentSnapshot) {
+          if (turnId) {
+            lastStreamingTurnIdRef.current = turnId;
+          }
           setIsTyping(true);
           setMessages((prev) => {
             if (turnId) {
@@ -448,9 +478,15 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       case 'llm_result': {
         const content = String(payload.content || '');
         const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
+        if (turnId && cancelledTurnIdsRef.current.has(turnId)) {
+          break;
+        }
         const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
         const hasToolCalls = Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0;
         if (content || thinkingContent || hasToolCalls) {
+          if (turnId) {
+            lastStreamingTurnIdRef.current = turnId;
+          }
           upsertAssistantMessage({
             turnId,
             content,
@@ -510,6 +546,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       }
       case 'turn_completed': {
         const final = String(payload.final_response || '');
+        const completedTurnId = typeof payload.turn_id === 'string' ? payload.turn_id : null;
+        if (completedTurnId) {
+          cancelledTurnIdsRef.current.delete(completedTurnId);
+          if (lastStreamingTurnIdRef.current === completedTurnId) {
+            lastStreamingTurnIdRef.current = null;
+          }
+        }
         setMessages((prev) => {
           // 从后往前找最后一条 assistant 消息
           for (let i = prev.length - 1; i >= 0; i--) {
@@ -550,10 +593,18 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         }
         break;
       }
-      case 'turn_cancelled':
+      case 'turn_cancelled': {
+        const cancelledTurnId = typeof payload.turn_id === 'string' ? payload.turn_id : null;
+        if (cancelledTurnId) {
+          cancelledTurnIdsRef.current.add(cancelledTurnId);
+          if (lastStreamingTurnIdRef.current === cancelledTurnId) {
+            lastStreamingTurnIdRef.current = null;
+          }
+        }
         setIsTyping(false);
         clearInteractions();
         break;
+      }
       case 'title_updated': {
         const sid = data.session_id as string;
         const title = (payload.title || '') as string;
@@ -620,18 +671,21 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const toolCallId = String(payload.tool_call_id || '');
         const sourceSessionId = incomingSessionId || '';
         if (!toolCallId || !sourceSessionId) break;
-        setIsTyping(true);
-        enqueueInteraction({
-          kind: 'confirmation',
-          interactionId: toolCallId,
-          sourceSessionId,
-          timeout: Number(payload.timeout || 300),
-          createdAt: Date.now(),
-          toolName: String(payload.tool_name || ''),
-          riskLevel: String(payload.risk_level || 'medium'),
-          arguments: (typeof payload.arguments === 'object' && payload.arguments !== null
-            ? payload.arguments : {}) as Record<string, unknown>,
-        });
+        const isCurrentSession = sourceSessionId === sessionIdRef.current;
+        if (isCurrentSession) {
+          setIsTyping(true);
+          enqueueInteraction({
+            kind: 'confirmation',
+            interactionId: toolCallId,
+            sourceSessionId,
+            timeout: Number(payload.timeout || 300),
+            createdAt: Date.now(),
+            toolName: String(payload.tool_name || ''),
+            riskLevel: String(payload.risk_level || 'medium'),
+            arguments: (typeof payload.arguments === 'object' && payload.arguments !== null
+              ? payload.arguments : {}) as Record<string, unknown>,
+          });
+        }
         pushCard({
           id: `confirm_${toolCallId}`,
           kind: 'tool_confirmation',
@@ -661,22 +715,25 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         if (!questionId || !sourceSessionId) break;
         const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
         const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
-        setIsTyping(false);
+        const isCurrentSession = sourceSessionId === sessionIdRef.current;
         const rawOptions = Array.isArray(payload.options)
           ? payload.options.map((o: unknown) => String(o))
           : null;
-        enqueueInteraction({
-          kind: 'question',
-          interactionId: questionId,
-          sourceSessionId,
-          timeout: Number(payload.timeout || 300),
-          createdAt: Date.now(),
-          sourceAgentId,
-          sourceAgentName,
-          question: String(payload.question || ''),
-          options: rawOptions,
-          multiSelect: Boolean(payload.multi_select),
-        });
+        if (isCurrentSession) {
+          setIsTyping(false);
+          enqueueInteraction({
+            kind: 'question',
+            interactionId: questionId,
+            sourceSessionId,
+            timeout: Number(payload.timeout || 300),
+            createdAt: Date.now(),
+            sourceAgentId,
+            sourceAgentName,
+            question: String(payload.question || ''),
+            options: rawOptions,
+            multiSelect: Boolean(payload.multi_select),
+          });
+        }
         const questionCardActions = rawOptions
           ? rawOptions.map((o) => ({ label: o, value: o }))
           : undefined;
@@ -690,6 +747,15 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           sessionId: sourceSessionId,
           interactionId: questionId,
           actions: questionCardActions,
+          questionData: {
+            question: String(payload.question || ''),
+            options: rawOptions || null,
+            multiSelect: Boolean(payload.multi_select),
+            interactionId: questionId,
+            sessionId: sourceSessionId,
+          },
+          allowsInput: !questionCardActions || questionCardActions.length === 0,
+          inputPlaceholder: '请输入回复',
         });
         break;
       }
@@ -698,6 +764,37 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         if (questionId) {
           resolveInteraction('question', questionId);
           resolveCard(`question_${questionId}`, 'answered');
+        }
+        break;
+      }
+      case 'proactive_result': {
+        const jobId = String(payload.job_id || '');
+        const jobName = String(payload.job_name || '');
+        const resultText = String(payload.result || '');
+        const resultSessionId = String(payload.session_id || incomingSessionId || '');
+        if (resultText) {
+          setProactiveResults(prev => {
+            if (prev.some(r => r.jobId === jobId && r.sessionId === resultSessionId)) return prev;
+            const next = [{ jobId, jobName, sessionId: resultSessionId, result: resultText, receivedAt: Date.now() }, ...prev];
+            return next.slice(0, 50);
+          });
+          loadSessionList();
+          pushNotification({
+            title: `[主动推送] ${jobName || 'Proactive Agent'}`,
+            body: resultText.slice(0, 200),
+            level: 'info',
+            source: 'proactive',
+            createdAtMs: Date.now(),
+          }, { toast: true, browser: false });
+          pushCard({
+            kind: 'general',
+            title: `主动推送 — ${jobName || 'Proactive Agent'}`,
+            body: resultText.slice(0, 300),
+            level: 'info',
+            source: 'proactive',
+            sessionId: resultSessionId || undefined,
+            actions: resultSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined,
+          });
         }
         break;
       }
@@ -825,12 +922,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     sessionIdRef.current = null;
     setMessages([]);
     setIsTyping(false);
+    resetTurnTracking();
     toolCallMapRef.current.clear();
     pendingInputRef.current = null;
     setRightSteps([]);
     setRightTaskProgress([]);
     toolStepMapRef.current.clear();
-  }, [doCleanupEmptySession]);
+  }, [doCleanupEmptySession, resetTurnTracking]);
 
   const deleteSession = useCallback(async (sid: string) => {
     try {
@@ -864,6 +962,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     }
 
     emptySessionIdRef.current = null;
+    resetTurnTracking();
     addMsg('user', content);
 
     const filePaths = contextFiles?.map(f => f.path) || [];
@@ -885,7 +984,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       });
     }
     setIsTyping(true);
-  }, [getCurrentSessionAgentId, startNewChat, wsConnected, wsSend]);
+  }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsConnected, wsSend]);
 
   const sendQuestionAnswerFn = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     const interaction = activeInteractionRef.current;
@@ -947,6 +1046,9 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
   const cancelTurn = useCallback(() => {
     if (!sessionIdRef.current) return;
+    if (lastStreamingTurnIdRef.current) {
+      cancelledTurnIdsRef.current.add(lastStreamingTurnIdRef.current);
+    }
     wsSend({
       type: 'cancel_turn',
       session_id: sessionIdRef.current,
@@ -989,6 +1091,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       lastToolName: globalLastToolName,
     },
     wsSend,
+    resolveInteractionFromNotification: resolveInteraction,
+    proactiveResults,
   };
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;

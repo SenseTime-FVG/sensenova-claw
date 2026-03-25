@@ -103,6 +103,10 @@ export function getAgentId(meta: string): string {
   try { return JSON.parse(meta).agent_id || 'default'; } catch { return 'default'; }
 }
 
+export function getParentSessionId(meta: string): string | null {
+  try { return JSON.parse(meta).parent_session_id || null; } catch { return null; }
+}
+
 export function getTaskId(meta: string): string | null {
   try { return JSON.parse(meta).task_id || null; } catch { return null; }
 }
