@@ -1132,9 +1132,11 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前后端 secret 读取与写入不是同一个接口：读取走 `GET /api/config/secret?path=...`，写入应走 `PUT /api/config/sections`，由 `ConfigManager` 自动写入 keyring / fallback secret store 并将 `config.yml` 改写为 `${secret:...}`。
 - 适合作为通用桥接 skill 的敏感路径范围，应严格对齐 `platform/secrets/registry.py` 里的注册模式，尤其是 `tools.*.api_key` 与 `llm.providers.*.api_key`，这样像 Brave Search 这类 skill 才能稳定复用。
 - 如果希望 skill 自身保留“它依赖哪个 secret 标识”的可追踪信息，最轻量的约定是在目标 skill 目录下维护 `secret.yml`，只写映射不写明文，例如 `OPENAI_API_KEY: secret:openai-whisper-api:OPENAI_API_KEY`；读取时优先查这个文件，写入成功后同步创建或更新它。
+- 如果用户要求 skill 不经过 HTTP，而是直接调用项目内能力，最稳的做法是在 skill 目录下放脚本，通过 stdin JSON 契约驱动，并在脚本内部直接复用 `Config`、`ConfigManager` 与 `SecretStore`；这样行为可测、文档也不会再漂移回接口说明。
 
 失败/风险经验：
 - 如果把 secret skill 设计成“任意 path 都可读写”的通用管理器，很容易和后端 `is_secret_path()` 的约束冲突，最终在运行时直接返回 400；文档必须明确只支持已注册敏感路径。
+- 测试这类脚本时不能直接依赖宿主机 keyring；需要显式加一个仅测试用的“禁用 keyring”分支，把写入强制落到指定 fallback `secret.yml`，否则结果会被本机已有 keyring 状态污染。
 
 ### 2026-03-24 ask_user 提示框溢出补充
 
