@@ -154,10 +154,10 @@ function ActionToastItem({
         <div className={cn(
           'mt-0.5 rounded-xl p-2.5',
           toast.level === 'warning'
-            ? 'bg-amber-500/10 text-amber-600'
+            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
             : toast.level === 'info'
-              ? 'bg-sky-500/10 text-sky-600'
-              : 'bg-neutral-500/10 text-neutral-600',
+              ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400'
+              : 'bg-neutral-500/10 text-neutral-600 dark:text-neutral-400',
         )}>
           <Icon size={18} />
         </div>
@@ -184,7 +184,7 @@ function ActionToastItem({
                 onChange={(event) => setInputValue(event.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={toast.inputPlaceholder || '请输入回复'}
-                className="min-h-[88px] w-full resize-none rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-sky-400"
+                className="min-h-[88px] w-full resize-none rounded-lg border border-neutral-200 dark:border-neutral-700 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-sky-400 dark:focus:border-sky-500"
                 rows={3}
               />
               <div className="flex items-center justify-between gap-2">
@@ -212,12 +212,12 @@ function ActionToastItem({
                   className={cn(
                     'max-w-full rounded-lg border px-4 py-1.5 text-left text-xs font-semibold leading-relaxed whitespace-normal break-all transition-all hover:scale-[1.02] active:scale-[0.98]',
                     action.value === 'approve' || action.value === 'accept'
-                      ? 'border-emerald-300 bg-emerald-500 text-white shadow-sm shadow-emerald-200 hover:bg-emerald-600'
+                      ? 'border-emerald-300 bg-emerald-500 text-white shadow-sm shadow-emerald-200 dark:shadow-emerald-900 hover:bg-emerald-600'
                       : action.value === 'deny' || action.value === 'reject'
-                        ? 'border-rose-200 bg-white text-rose-600 hover:bg-rose-50'
+                        ? 'border-rose-200 dark:border-rose-800 bg-background text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950'
                         : action.value === 'view_session'
-                          ? 'border-violet-300 bg-violet-500 text-white shadow-sm shadow-violet-200 hover:bg-violet-600'
-                          : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50',
+                          ? 'border-violet-300 bg-violet-500 text-white shadow-sm shadow-violet-200 dark:shadow-violet-900 hover:bg-violet-600'
+                          : 'border-neutral-200 dark:border-neutral-700 bg-background text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800',
                   )}
                 >
                   {action.label}

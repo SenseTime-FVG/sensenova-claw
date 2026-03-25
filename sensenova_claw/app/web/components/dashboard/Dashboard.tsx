@@ -82,9 +82,9 @@ function saveLayouts(layouts: Layouts) {
 
 function DragHandle() {
   return (
-    <div className="dashboard-drag-handle absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 rounded-full bg-white/80 border border-black/[0.04] px-2.5 py-1 shadow-sm opacity-0 group-hover/widget:opacity-100 transition-opacity duration-200">
-      <GripHorizontal className="h-3.5 w-3.5 text-neutral-400" />
-      <span className="text-[10px] font-medium text-neutral-400 tracking-wide">拖拽</span>
+    <div className="dashboard-drag-handle absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 rounded-full bg-[var(--glass-bg-heavy)] border border-black/[0.04] dark:border-white/[0.06] px-2.5 py-1 shadow-sm opacity-0 group-hover/widget:opacity-100 transition-opacity duration-200">
+      <GripHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+      <span className="text-[10px] font-medium text-muted-foreground tracking-wide">拖拽</span>
     </div>
   );
 }
@@ -93,7 +93,7 @@ function DragHandle() {
 
 function WidgetCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`group/widget relative h-full rounded-[24px] border border-white/70 bg-white/80 shadow-[0_4px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl transition-shadow duration-300 hover:shadow-[0_8px_40px_rgba(15,23,42,0.10)] ${className}`}>
+    <div className={`group/widget relative h-full rounded-[24px] border border-[var(--glass-border)] bg-[var(--glass-bg-heavy)] shadow-[0_4px_32px_rgba(15,23,42,0.06)] dark:shadow-[0_4px_32px_rgba(0,0,0,0.25)] backdrop-blur-2xl transition-shadow duration-300 hover:shadow-[0_8px_40px_rgba(15,23,42,0.10)] dark:hover:shadow-[0_8px_40px_rgba(0,0,0,0.35)] ${className}`}>
       <DragHandle />
       <div className="h-full overflow-auto thin-scrollbar p-0">
         {children}
@@ -203,8 +203,8 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 rounded-full border-2 border-violet-200 border-t-violet-500 animate-spin" />
-          <div className="text-sm text-neutral-400 font-medium">加载中...</div>
+          <div className="h-8 w-8 rounded-full border-2 border-violet-200 dark:border-violet-800 border-t-violet-500 animate-spin" />
+          <div className="text-sm text-muted-foreground font-medium">加载中...</div>
         </div>
       </div>
     );
@@ -216,31 +216,31 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
         {/* 顶部工具栏 */}
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold text-neutral-800 tracking-tight" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+            <h1 className="text-lg font-bold text-[var(--glass-text)] tracking-tight" style={{ fontFamily: "'DM Sans', sans-serif" }}>
               工作台
             </h1>
-            <p className="text-xs text-neutral-400 mt-0.5">拖拽卡片自定义布局</p>
+            <p className="text-xs text-muted-foreground mt-0.5">拖拽卡片自定义布局</p>
           </div>
           <div className="flex items-center gap-2">
             {/* 缩放控制 */}
-            <div className="flex items-center gap-0.5 rounded-full border border-neutral-200 bg-white/80 shadow-sm backdrop-blur-xl">
+            <div className="flex items-center gap-0.5 rounded-full border border-border bg-[var(--glass-bg-heavy)] shadow-sm backdrop-blur-xl">
               <button
                 type="button"
                 onClick={zoomOut}
                 disabled={zoom <= ZOOM_STEPS[0]}
-                className="flex items-center justify-center w-7 h-7 rounded-full text-neutral-500 transition-all hover:text-neutral-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="flex items-center justify-center w-7 h-7 rounded-full text-muted-foreground transition-all hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
                 title="缩小"
               >
                 <ZoomOut className="h-3.5 w-3.5" />
               </button>
-              <span className="text-[10px] font-semibold text-neutral-500 min-w-[32px] text-center tabular-nums">
+              <span className="text-[10px] font-semibold text-muted-foreground min-w-[32px] text-center tabular-nums">
                 {Math.round(zoom * 100)}%
               </span>
               <button
                 type="button"
                 onClick={zoomIn}
                 disabled={zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
-                className="flex items-center justify-center w-7 h-7 rounded-full text-neutral-500 transition-all hover:text-neutral-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="flex items-center justify-center w-7 h-7 rounded-full text-muted-foreground transition-all hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
                 title="放大"
               >
                 <ZoomIn className="h-3.5 w-3.5" />
@@ -251,7 +251,7 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
               <button
                 type="button"
                 onClick={resetLayout}
-                className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white/80 px-3 py-1.5 text-xs font-medium text-neutral-500 shadow-sm transition-all hover:bg-white hover:text-neutral-700 hover:shadow-md backdrop-blur-xl"
+                className="flex items-center gap-1.5 rounded-full border border-border bg-[var(--glass-bg-heavy)] px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-all hover:bg-[var(--glass-bg)] hover:text-foreground hover:shadow-md backdrop-blur-xl"
               >
                 <RotateCcw className="h-3 w-3" />
                 重置布局
