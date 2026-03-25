@@ -64,8 +64,10 @@ def has_thought_signature(message: dict[str, Any]) -> bool:
 class GeminiProvider(LLMProvider):
     """Gemini via Cloudsway（OpenAI 兼容网关），支持 thought signature 透传"""
 
-    def __init__(self):
-        provider_cfg = config.get("llm.providers.gemini", {})
+    def __init__(self, provider_id: str = "gemini", source_type: str | None = None):
+        provider_cfg = config.get(f"llm.providers.{provider_id}", {})
+        self.provider_id = provider_id
+        self.source_type = source_type or str(provider_cfg.get("source_type", "gemini") or "gemini")
         self.client = AsyncOpenAI(
             api_key=provider_cfg.get("api_key"),
             base_url=provider_cfg.get("base_url") or None,

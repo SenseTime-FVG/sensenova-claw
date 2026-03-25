@@ -374,6 +374,7 @@ export default function SessionDetailPage() {
         const incomingSessionId = typeof data.session_id === 'string' ? data.session_id : null;
         const payload = (data.payload || {}) as Record<string, unknown>;
         const isInteractionEvent = eventType === 'tool_confirmation_requested'
+          || eventType === 'tool_confirmation_resolved'
           || eventType === 'user_question_asked'
           || eventType === 'user_question_answered_event';
         if (incomingSessionId && incomingSessionId !== sessionId && !isInteractionEvent) {
@@ -497,12 +498,19 @@ export default function SessionDetailPage() {
               interactionId: toolCallId,
               sourceSessionId,
               timeout: Number(payload.timeout || 300),
-              createdAt: Date.now(),
+              createdAt: Number(payload.requested_at_ms || Date.now()),
+              timeoutAction: String(payload.timeout_action || 'reject'),
               toolName: String(payload.tool_name || ''),
               riskLevel: String(payload.risk_level || 'high'),
               arguments: (payload.arguments || {}) as Record<string, unknown>,
             });
             setIsTyping(true);
+            break;
+          }
+          case 'tool_confirmation_resolved': {
+            const toolCallId = String(payload.tool_call_id || '');
+            if (!toolCallId) break;
+            resolveInteraction('confirmation', toolCallId);
             break;
           }
           case 'user_question_asked': {
@@ -637,14 +645,14 @@ export default function SessionDetailPage() {
       },
       timestamp: Date.now() / 1000,
     }));
-    resolveInteraction('confirmation', activeInteraction.interactionId);
-  }, [activeInteraction, resolveInteraction]);
+  }, [activeInteraction]);
 
   const handleInteractionTimeout = useCallback(() => {
     if (!activeInteraction) return;
     if (activeInteraction.kind === 'confirmation') {
-      setMessages((prev) => [...prev, { role: 'assistant', content: '工具审批已超时，系统将按后端策略拒绝。' }]);
-      resolveInteraction('confirmation', activeInteraction.interactionId);
+      if (activeInteraction.timeoutAction !== 'block') {
+        setMessages((prev) => [...prev, { role: 'assistant', content: '工具审批等待已到期，正在等待服务端确认最终处理结果。' }]);
+      }
       return;
     }
     setMessages((prev) => [...prev, { role: 'assistant', content: '问题已超时，已取消等待。' }]);

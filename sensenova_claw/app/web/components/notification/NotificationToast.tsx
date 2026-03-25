@@ -39,6 +39,8 @@ export interface ActionToast {
   inputPlaceholder?: string;
   // 关联的通知卡片 ID
   cardId: string;
+  pending?: boolean;
+  pendingAction?: string;
   // ask_user 富交互数据
   questionData?: QuestionData;
 }
@@ -268,9 +270,10 @@ function ActionToastItem({
   const Icon = actionKindIcon[toast.source] || levelIcon[toast.level] || Bell;
   const [inputValue, setInputValue] = useState('');
   const trimmedInput = inputValue.trim();
+  const isPending = Boolean(toast.pending);
 
   const submitInput = () => {
-    if (!trimmedInput) return;
+    if (!trimmedInput || isPending) return;
     onAction(toast.id, toast.cardId, trimmedInput, trimmedInput);
   };
 
@@ -324,7 +327,12 @@ function ActionToastItem({
           <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/70 line-clamp-2">
             {toast.body}
           </p>
-          {toast.allowsInput && (
+          {isPending && (
+            <div className="mt-3 rounded-lg border border-amber-300/60 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              已提交，等待服务端确认最终结果。
+            </div>
+          )}
+          {toast.allowsInput && !isPending && (
             <div className="mt-3 space-y-2">
               <textarea
                 data-testid="action-toast-input"
@@ -349,7 +357,7 @@ function ActionToastItem({
               </div>
             </div>
           )}
-          {toast.actions && toast.actions.length > 0 && (
+          {toast.actions && toast.actions.length > 0 && !isPending && (
             <div className="mt-3 flex flex-wrap gap-2">
               {toast.actions.map((action) => (
                 <button

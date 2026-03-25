@@ -63,6 +63,7 @@ def test_get_sections(client):
     assert data["agent"]["model"] == "gpt-5.4"
     assert data["llm"]["providers"]["openai"]["api_key"]["configured"] is True
     assert data["llm"]["providers"]["openai"]["api_key"]["source"] == "plain"
+    assert data["llm"]["_meta"]["explicit_provider_names"] == ["openai"]
     assert data["miniapps"]["default_builder"] == "builtin"
     assert data["miniapps"]["acp"]["request_timeout_seconds"] == 180
 
@@ -217,6 +218,20 @@ def test_get_secret_reveals_sensitive_value(client):
     assert resp.json() == {"path": "llm.providers.openai.api_key", "value": "sk-xxx"}
 
 
+def test_get_secret_reveals_secret_store_value_when_raw_yaml_uses_secret_ref(client, app):
+    """当 config.yml 中保存的是 `${secret:...}` 时，reveal API 仍应返回 secret store 中的明文。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["providers"]["openai"]["api_key"] = "${secret:sensenova_claw/llm.providers.openai.api_key}"
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.secret_store.set("sensenova_claw/llm.providers.openai.api_key", "sk-from-store")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.get("/api/config/secret", params={"path": "llm.providers.openai.api_key"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"path": "llm.providers.openai.api_key", "value": "sk-from-store"}
+
+
 def test_get_secret_rejects_non_secret_path(client):
     """非敏感路径不能通过 reveal API 读取。"""
     resp = client.get("/api/config/secret", params={"path": "agent.model"})
@@ -229,6 +244,7 @@ def test_update_single_provider_and_rename_models(client, app):
     raw["llm"]["providers"]["openai"]["base_url"] = "https://api.openai.com/v1"
     raw["llm"]["providers"]["openai"]["timeout"] = 60
     raw["llm"]["providers"]["openai"]["max_retries"] = 3
+    raw["llm"]["providers"]["openai"]["source_type"] = "openai"
     raw["llm"]["models"]["gpt-4o-mini"] = {
         "provider": "openai",
         "model_id": "gpt-4o-mini",
@@ -240,6 +256,7 @@ def test_update_single_provider_and_rename_models(client, app):
 
     resp = client.put("/api/config/llm/providers/openai", json={
         "name": "openai-compatible",
+        "source_type": "openai-compatible",
         "base_url": "https://proxy.example.com/v1",
         "timeout": 90,
         "max_retries": 5,
@@ -249,14 +266,43 @@ def test_update_single_provider_and_rename_models(client, app):
     written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
     assert "openai-compatible" in written["llm"]["providers"]
     assert "openai" not in written["llm"]["providers"]
+    assert written["llm"]["providers"]["openai-compatible"]["source_type"] == "openai-compatible"
     assert written["llm"]["providers"]["openai-compatible"]["base_url"] == "https://proxy.example.com/v1"
     assert written["llm"]["models"]["gpt-4o-mini"]["provider"] == "openai-compatible"
+
+
+def test_update_single_provider_does_not_persist_secret_ref_placeholder_as_api_key(client, app):
+    """前端误传 `${secret:...}` 占位符时，后端不应把占位符写入 secret store。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["providers"]["openai"]["api_key"] = "${secret:sensenova_claw/llm.providers.openai.api_key}"
+    raw["llm"]["providers"]["openai"]["base_url"] = "https://api.openai.com/v1"
+    raw["llm"]["providers"]["openai"]["timeout"] = 60
+    raw["llm"]["providers"]["openai"]["max_retries"] = 3
+    raw["llm"]["providers"]["openai"]["source_type"] = "openai"
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.secret_store.set("sensenova_claw/llm.providers.openai.api_key", "sk-real")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.put("/api/config/llm/providers/openai", json={
+        "name": "openai",
+        "source_type": "openai",
+        "api_key": "${secret:sensenova_claw/llm.providers.openai.api_key}",
+        "base_url": "https://api.openai.com/v1",
+        "timeout": 60,
+        "max_retries": 3,
+    })
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["providers"]["openai"]["api_key"] == "${secret:sensenova_claw/llm.providers.openai.api_key}"
+    assert app.state.secret_store.get("sensenova_claw/llm.providers.openai.api_key") == "sk-real"
 
 
 def test_create_single_provider_when_missing(client, app):
     """单项保存新 provider 时，后端应按 upsert 方式创建而不是返回 404。"""
     resp = client.put("/api/config/llm/providers/deepseek", json={
         "name": "deepseek",
+        "source_type": "deepseek",
         "base_url": "https://api.deepseek.com/v1",
         "timeout": 60,
         "max_retries": 3,
@@ -265,6 +311,7 @@ def test_create_single_provider_when_missing(client, app):
 
     assert resp.status_code == 200
     written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["providers"]["deepseek"]["source_type"] == "deepseek"
     assert written["llm"]["providers"]["deepseek"]["base_url"] == "https://api.deepseek.com/v1"
     assert written["llm"]["providers"]["deepseek"]["timeout"] == 60
     assert written["llm"]["providers"]["deepseek"]["max_retries"] == 3
