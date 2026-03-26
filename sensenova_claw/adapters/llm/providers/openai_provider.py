@@ -38,8 +38,9 @@ class OpenAIProvider(LLMProvider):
         req: dict[str, Any] = {
             "model": model,
             "messages": normalized_messages,
-            "temperature": temperature,
         }
+        if temperature is not None:
+            req["temperature"] = temperature
         if tools:
             req["tools"] = [{"type": "function", "function": t} for t in tools]
         if max_tokens:
@@ -92,10 +93,11 @@ class OpenAIProvider(LLMProvider):
         req: dict[str, Any] = {
             "model": model,
             "messages": normalized_messages,
-            "temperature": temperature,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if temperature is not None:
+            req["temperature"] = temperature
         if tools:
             req["tools"] = [{"type": "function", "function": t} for t in tools]
         if max_tokens:

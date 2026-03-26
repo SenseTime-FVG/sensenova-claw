@@ -542,7 +542,7 @@ function ChatContent() {
 
   const handleNewChat = () => {
     if (!selectedAgentId) return;
-    creatingSessionForAgent.current = null;
+    creatingSessionForAgent.current = selectedAgentId;
     startNewChat();
     createSession(selectedAgentId);
   };

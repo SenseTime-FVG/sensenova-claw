@@ -9,7 +9,7 @@ from copy import deepcopy
 from typing import Any
 
 from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from sensenova_claw.capabilities.miniapps.acp_wizard import ACPWizardInstallError, ACPWizardService
 from sensenova_claw.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
@@ -32,6 +32,8 @@ class TestLLMBody(BaseModel):
     api_key: str
     base_url: str = ""
     model_id: str
+    max_tokens: int = 128000
+    max_output_tokens: int = 16384
 
 
 class ProviderUpdateBody(BaseModel):
@@ -44,9 +46,12 @@ class ProviderUpdateBody(BaseModel):
 
 
 class ModelUpdateBody(BaseModel):
+    model_config = {"populate_by_name": True}
+
     name: str | None = None
     provider: str
     model_id: str
+    model_type: str = Field(default="chat", alias="type")  # "chat" | "embedding"
     timeout: int = 60
     max_tokens: int = 128000
     max_output_tokens: int = 16384
@@ -54,6 +59,10 @@ class ModelUpdateBody(BaseModel):
 
 class DefaultModelUpdateBody(BaseModel):
     default_model: str = ""
+
+
+class DefaultEmbeddingModelUpdateBody(BaseModel):
+    default_embedding_model: str = ""
 
 
 class ACPWizardInstallBody(BaseModel):
@@ -221,6 +230,7 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     models[next_name] = {
         "provider": body.provider,
         "model_id": body.model_id,
+        "type": body.model_type,
         "timeout": body.timeout,
         "max_tokens": body.max_tokens,
         "max_output_tokens": body.max_output_tokens,
@@ -228,6 +238,8 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     llm_section["models"] = models
     if model_exists and llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
+    if model_exists and llm_section.get("default_embedding_model") == model_name:
+        llm_section["default_embedding_model"] = next_name
 
     try:
         updated_llm = await config_manager.replace("llm", llm_section)
@@ -262,6 +274,31 @@ async def update_llm_default_model(body: DefaultModelUpdateBody, request: Reques
         "status": "saved",
         "default_model": updated_llm.get("default_model", ""),
     }
+
+
+@router.put("/llm/default-embedding-model")
+async def update_llm_default_embedding_model(body: DefaultEmbeddingModelUpdateBody, request: Request):
+    """更新默认 embedding 模型"""
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    models = deepcopy(llm_section.get("models", {}))
+
+    if body.default_embedding_model and body.default_embedding_model not in models:
+        raise HTTPException(400, f"Model 不存在: {body.default_embedding_model}")
+
+    llm_section["default_embedding_model"] = body.default_embedding_model
+
+    try:
+        updated_llm = await config_manager.replace("llm", llm_section)
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
+
+    return {
+        "status": "saved",
+        "default_embedding_model": updated_llm.get("default_embedding_model", ""),
+    }
+
 
 @router.get("/llm-status")
 async def get_llm_status(request: Request):
@@ -372,6 +409,8 @@ async def test_llm_connection(body: TestLLMBody):
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
         if provider in ("gemini", "gemini-compatible"):
@@ -379,6 +418,8 @@ async def test_llm_connection(body: TestLLMBody):
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
         if provider in ("openai", "openai-compatible"):
@@ -386,6 +427,8 @@ async def test_llm_connection(body: TestLLMBody):
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
         else:
@@ -394,6 +437,8 @@ async def test_llm_connection(body: TestLLMBody):
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
     except Exception as e:
@@ -401,7 +446,13 @@ async def test_llm_connection(body: TestLLMBody):
         return {"success": False, "error": str(e)}
 
 
-async def _test_openai_compatible(api_key: str, base_url: str, model_id: str) -> dict:
+async def _test_openai_compatible(
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    max_tokens: int,
+    max_output_tokens: int,
+) -> dict:
     """通过 OpenAI SDK 测试连通性"""
     from openai import AsyncOpenAI
     client = AsyncOpenAI(
@@ -411,14 +462,22 @@ async def _test_openai_compatible(api_key: str, base_url: str, model_id: str) ->
     )
     response = await client.chat.completions.create(
         model=model_id,
-        messages=[{"role": "user", "content": "Hi"}],
-        max_tokens=5,
+        messages=[{"role": "user", "content": "连接测试，回复我'hi'，不要多余的文字"}],
+        max_tokens=max_tokens,
+        extra_body={"max_output_tokens": max_output_tokens},
     )
     return {"model": response.model, "message": "连接成功"}
 
 
-async def _test_anthropic(api_key: str, base_url: str, model_id: str) -> dict:
+async def _test_anthropic(
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    max_tokens: int,
+    max_output_tokens: int,
+) -> dict:
     """通过 Anthropic SDK 测试连通性"""
+    _ = max_output_tokens
     import anthropic
     client = anthropic.AsyncAnthropic(
         api_key=api_key,
@@ -427,13 +486,19 @@ async def _test_anthropic(api_key: str, base_url: str, model_id: str) -> dict:
     )
     response = await client.messages.create(
         model=model_id,
-        messages=[{"role": "user", "content": "Hi"}],
-        max_tokens=5,
+        messages=[{"role": "user", "content": "连接测试，回复我'hi'，不要多余的文字"}],
+        max_tokens=max_tokens,
     )
     return {"model": response.model, "message": "连接成功"}
 
 
-async def _test_gemini(api_key: str, base_url: str, model_id: str) -> dict:
+async def _test_gemini(
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    max_tokens: int,
+    max_output_tokens: int,
+) -> dict:
     """通过 OpenAI 兼容方式测试 Gemini"""
     from openai import AsyncOpenAI
     gemini_base = base_url or "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -444,7 +509,8 @@ async def _test_gemini(api_key: str, base_url: str, model_id: str) -> dict:
     )
     response = await client.chat.completions.create(
         model=model_id,
-        messages=[{"role": "user", "content": "Hi"}],
-        max_tokens=5,
+        messages=[{"role": "user", "content": "连接测试，回复我'hi'，不要多余的文字"}],
+        max_tokens=max_tokens,
+        extra_body={"max_output_tokens": max_output_tokens},
     )
     return {"model": response.model, "message": "连接成功"}
