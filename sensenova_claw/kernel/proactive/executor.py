@@ -78,6 +78,11 @@ class ProactiveExecutor:
         self._running_jobs.discard(job_id)
 
     async def _do_execute(self, job: ProactiveJob, trigger_event: EventEnvelope | None = None) -> tuple[str, str | None]:
+        # 注入模式：在源会话中插入推荐请求
+        if trigger_event and job.delivery.recommendation_type:
+            return await self._do_execute_inject(job, trigger_event)
+
+        # 独立会话模式（现有逻辑不变）
         session_id = f"proactive_{job.id}_{uuid.uuid4().hex[:8]}"
         run_id = f"pr_{uuid.uuid4().hex[:12]}"
         start_ms = int(time.time() * 1000)
@@ -154,6 +159,101 @@ class ProactiveExecutor:
             self._running_jobs.discard(job.id)
             await self._persist_job_state(job)
         return (session_id, result_text)
+
+    async def _do_execute_inject(self, job: ProactiveJob, trigger_event: EventEnvelope) -> tuple[str, str | None]:
+        """注入模式：在源会话中插入 user 消息生成推荐。"""
+        source_session_id = trigger_event.session_id
+        run_id = f"pr_{uuid.uuid4().hex[:12]}"
+        start_ms = int(time.time() * 1000)
+        self._running_jobs.add(job.id)
+        job.state.last_triggered_at_ms = start_ms
+        job.state.last_status = "running"
+
+        await self._repo.create_proactive_run({
+            "id": run_id, "job_id": job.id,
+            "session_id": source_session_id,
+            "status": "running", "triggered_by": "event",
+            "started_at_ms": start_ms,
+        })
+
+        try:
+            turn_id = await self._agent_runtime.send_user_input(
+                session_id=source_session_id,
+                user_input=job.task.prompt,
+                extra_payload={"meta": {"source": "recommendation"}},
+            )
+
+            timeout_ms = job.safety.max_duration_ms
+            result_text = await self._wait_for_completion_by_turn(
+                source_session_id, turn_id, timeout_ms,
+            )
+
+            if result_text is None:
+                end_ms = int(time.time() * 1000)
+                await self._handle_failure(
+                    job, run_id, source_session_id,
+                    f"执行超时（{timeout_ms}ms）", end_ms, status="timeout",
+                )
+                return (source_session_id, None)
+
+            end_ms = int(time.time() * 1000)
+            job.state.last_status = "ok"
+            job.state.last_completed_at_ms = end_ms
+            job.state.consecutive_errors = 0
+            job.state.total_runs += 1
+            await self._repo.update_proactive_run(run_id, {
+                "status": "ok", "ended_at_ms": end_ms, "result_text": result_text[:2000],
+            })
+            await self._persist_job_state(job)
+            return (source_session_id, result_text)
+
+        except Exception as e:
+            end_ms = int(time.time() * 1000)
+            await self._handle_failure(job, run_id, source_session_id, str(e), end_ms)
+            return (source_session_id, None)
+        finally:
+            self._running_jobs.discard(job.id)
+
+    async def _wait_for_completion_by_turn(
+        self, session_id: str, turn_id: str, timeout_ms: float,
+    ) -> str | None:
+        """等待指定 turn 的 agent.step_completed 事件。"""
+        timeout_s = timeout_ms / 1000.0
+        heartbeat_timeout_s = timeout_s / 3.0
+        queue = self._bus.subscribe_queue()
+        try:
+            deadline = time.monotonic() + timeout_s
+            last_event_time = time.monotonic()
+
+            while True:
+                now = time.monotonic()
+                remaining = deadline - now
+                if remaining <= 0:
+                    return None
+
+                # 心跳超时：长时间无任何事件
+                if (now - last_event_time) >= heartbeat_timeout_s:
+                    logger.warning(
+                        "推荐 turn %s 心跳超时（%.1fs 无事件）",
+                        turn_id, heartbeat_timeout_s,
+                    )
+                    return None
+
+                # 等待下一个事件，最多等到心跳超时
+                wait_s = min(remaining, heartbeat_timeout_s - (now - last_event_time))
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=max(wait_s, 0.01))
+                except asyncio.TimeoutError:
+                    continue
+
+                last_event_time = time.monotonic()
+
+                if (event.type == AGENT_STEP_COMPLETED
+                        and event.session_id == session_id
+                        and event.turn_id == turn_id):
+                    return event.payload.get("result", {}).get("content", "")
+        finally:
+            self._bus.unsubscribe_queue(queue)
 
     async def _handle_failure(
         self,
