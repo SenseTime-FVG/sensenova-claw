@@ -124,6 +124,8 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
   // 监听 session 切换 — 重建消息和步骤
   const { currentSessionId } = useSession();
+  const currentSessionIdRef = useRef<string | null>(null);
+  currentSessionIdRef.current = currentSessionId;
   useEffect(() => {
     if (!currentSessionId) {
       setMessages([]);
@@ -305,12 +307,12 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           addMsg('system', event.payload.user_message || event.payload.message || event.payload.error_type || 'Unknown Error');
           setIsTyping(false);
           break;
-        // 交互事件的 typing 状态（重构前在单体 handler 中处理）
+        // 交互事件的 typing 状态（仅当前 session，重构前在单体 handler 中 isCurrentSession 守卫内处理）
         case 'tool_confirmation_requested':
-          setIsTyping(true);
+          if (!event.session_id || event.session_id === currentSessionIdRef.current) setIsTyping(true);
           break;
         case 'user_question_asked':
-          setIsTyping(false);
+          if (!event.session_id || event.session_id === currentSessionIdRef.current) setIsTyping(false);
           break;
       }
     });
