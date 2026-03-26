@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useNotification } from '@/hooks/useNotification';
@@ -20,6 +20,8 @@ import {
   rebuildMessagesFromEvents,
   rebuildStepsFromEvents,
   groupSessionsToTasks,
+  findLatestAssistantTurnMessage,
+  upsertAssistantTurnMessage,
 } from '@/lib/chatTypes';
 import { extractThinkContentFromReasoningDetails } from '@/lib/assistantThink';
 
@@ -272,6 +274,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
   const pendingCreateMeta = useRef<Record<string, string> | null>(null);
+  // 关联 create_session 请求与 session_created 响应，防止快速切换时乱序覆盖
+  const pendingCreateIdRef = useRef<string | null>(null);
   // 追踪新建但未发消息的空会话，切换离开时自动删除
   const emptySessionIdRef = useRef<string | null>(null);
   const skipNextResetRef = useRef(false);
@@ -298,41 +302,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     const { turnId, content, thinkingContent, thinkingState } = message;
     setMessages((prev) => {
       if (turnId) {
-        // 从末尾搜索：优先找到最新的流式 assistant，避免命中旧的同 turnId assistant
-        let existingIndex = -1;
-        for (let i = prev.length - 1; i >= 0; i--) {
-          if (prev[i].role === 'assistant' && prev[i].turnId === turnId) {
-            existingIndex = i;
-            break;
-          }
-        }
-        if (existingIndex !== -1) {
-          const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
-          if (hasToolAfter) {
-            // 旧 assistant 后面有 tool 消息 → 追加新气泡（保持原始 turnId）
-            return [
-              ...prev,
-              {
-                id: makeId(),
-                role: 'assistant' as const,
-                content,
-                timestamp: Date.now(),
-                turnId,
-                thinkingContent,
-                thinkingState,
-              },
-            ];
-          }
-          // 同一轮 LLM 调用的流式更新，原地更新
-          const next = [...prev];
-          next[existingIndex] = {
-            ...next[existingIndex],
-            content,
-            thinkingContent,
-            thinkingState,
-          };
-          return next;
-        }
+        return upsertAssistantTurnMessage(prev, turnId, {
+          content,
+          thinkingContent,
+          thinkingState,
+        });
       }
       return [
         ...prev,
@@ -417,6 +391,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const reloadSessionHistory = useCallback(async (sid: string, shouldBind = true) => {
     if (!shouldActivate) return;
     setSessionId(sid);
+    sessionIdRef.current = sid;
     setMessages([]);
     setIsTyping(false);
     resetTurnTracking();
@@ -429,6 +404,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     try {
       const res = await authFetch(`${API_BASE}/api/sessions/${sid}/events`);
       const d = await res.json();
+      // 竞态保护：异步请求返回时，用户可能已切换到其他 session，丢弃过时结果
+      if (sessionIdRef.current !== sid) return;
       const events = (d.events || []) as Record<string, unknown>[];
       setMessages(rebuildMessagesFromEvents(events));
 
@@ -437,6 +414,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       setRightTaskProgress(taskProgress);
       toolStepMapRef.current = toolStepMap;
     } catch {
+      if (sessionIdRef.current !== sid) return;
       setRightSteps([]);
       setRightTaskProgress([]);
       toolStepMapRef.current.clear();
@@ -465,7 +443,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     interactionQueueRef.current = [...queue, interaction];
   };
 
-  const resolveInteraction = (kind: PendingInteraction['kind'], interactionId: string) => {
+  // useCallback 包裹：通过 ref 操作队列，state setter 稳定，无外部依赖
+  const resolveInteraction = useCallback((kind: PendingInteraction['kind'], interactionId: string) => {
     const active = activeInteractionRef.current;
     const queue = interactionQueueRef.current;
     if (active && active.kind === kind && active.interactionId === interactionId) {
@@ -485,7 +464,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     if (filtered.length !== queue.length) {
       interactionQueueRef.current = filtered;
     }
-  };
+  }, []);
 
   const clearInteractions = () => {
     interactionQueueRef.current = [];
@@ -532,7 +511,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     switch (eventType) {
       case 'session_created': {
         const newSid = data.session_id as string;
+        const requestId = typeof payload.request_id === 'string' ? payload.request_id : null;
+        // 归属校验：如果存在 pendingCreateId 且响应中携带 request_id，
+        // 只接受与最近一次创建请求匹配的 session_created
+        if (pendingCreateIdRef.current && requestId && requestId !== pendingCreateIdRef.current) {
+          // 不匹配的 session_created（来自旧请求），忽略并清理远端空 session
+          authFetch(`${API_BASE}/api/sessions/${newSid}`, { method: 'DELETE' }).catch(() => {});
+          break;
+        }
+        pendingCreateIdRef.current = null;
         setSessionId(newSid);
+        sessionIdRef.current = newSid;
         loadSessionList();
         if (pendingInputRef.current) {
           const { content, contextFiles, meta } = pendingInputRef.current;
@@ -557,7 +546,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       case 'session_loaded': {
         const sid = typeof data.session_id === 'string' ? data.session_id : null;
         const events = Array.isArray(payload.events) ? payload.events as Record<string, unknown>[] : [];
-        if (sid) {
+        // 竞态保护：忽略非当前 session 的 session_loaded 响应（快速切换时可能乱序到达）
+        if (sid && sid === sessionIdRef.current) {
           resetTurnTracking();
           setSessionId(sid);
           setMessages(rebuildMessagesFromEvents(events));
@@ -584,44 +574,14 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           setIsTyping(true);
           setMessages((prev) => {
             if (turnId) {
-              // 从末尾搜索：优先找到最新的流式 assistant 消息，
-              // 避免命中旧的（触发工具调用的）同 turnId assistant
-              let existingIndex = -1;
-              for (let i = prev.length - 1; i >= 0; i--) {
-                if (prev[i].role === 'assistant' && prev[i].turnId === turnId) {
-                  existingIndex = i;
-                  break;
-                }
-              }
-              if (existingIndex !== -1) {
-                const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
-                if (hasToolAfter) {
-                  // 旧 assistant 后面有 tool 消息 → 追加新的流式气泡（保持原始 turnId）
-                  return [
-                    ...prev,
-                    {
-                      id: makeId(),
-                      role: 'assistant' as const,
-                      content: contentSnapshot || contentDelta,
-                      timestamp: Date.now(),
-                      turnId,
-                      thinkingContent: reasoningDelta || undefined,
-                      thinkingState: reasoningDelta ? 'streaming' as const : undefined,
-                    },
-                  ];
-                }
-                const existing = prev[existingIndex];
-                const next = [...prev];
-                next[existingIndex] = {
-                  ...existing,
-                  content: contentSnapshot || ((existing.content || '') + contentDelta),
-                  thinkingContent: reasoningDelta
-                    ? (existing.thinkingContent || '') + reasoningDelta
-                    : existing.thinkingContent,
-                  thinkingState: reasoningDelta ? 'streaming' as const : existing.thinkingState,
-                };
-                return next;
-              }
+              const existing = findLatestAssistantTurnMessage(prev, turnId);
+              return upsertAssistantTurnMessage(prev, turnId, {
+                content: contentSnapshot || ((existing?.content || '') + contentDelta),
+                thinkingContent: reasoningDelta
+                  ? (existing?.thinkingContent || '') + reasoningDelta
+                  : existing?.thinkingContent,
+                thinkingState: reasoningDelta ? 'streaming' as const : existing?.thinkingState,
+              });
             }
             return [
               ...prev,
@@ -646,8 +606,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           break;
         }
         const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
-        const hasToolCalls = Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0;
-        if (content || thinkingContent || hasToolCalls) {
+        if (content || thinkingContent) {
           if (turnId) {
             lastStreamingTurnIdRef.current = turnId;
           }
@@ -721,6 +680,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           }
         }
         setMessages((prev) => {
+          if (completedTurnId) {
+            return upsertAssistantTurnMessage(prev, completedTurnId, {
+              content: final,
+              thinkingState: 'collapsed',
+              keepExistingContentWhenEmpty: true,
+            });
+          }
           // 从后往前找最后一条 assistant 消息
           for (let i = prev.length - 1; i >= 0; i--) {
             if (prev[i].role === 'assistant') {
@@ -1098,9 +1064,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     const meta: Record<string, string> = { title: '新对话' };
     if (taskId) meta.task_id = taskId;
     pendingCreateMeta.current = meta;
+    const requestId = makeId();
+    pendingCreateIdRef.current = requestId;
     wsSend({
       type: 'create_session',
-      payload: { agent_id: agentId || 'default', meta },
+      payload: { agent_id: agentId || 'default', meta, request_id: requestId },
       timestamp: Date.now() / 1000,
     });
   }, [wsSend]);
@@ -1150,6 +1118,27 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   ) => {
     if (!content.trim() || !wsConnected) return;
 
+    const interaction = activeInteractionRef.current;
+    if (interaction?.kind === 'question') {
+      if (!interaction.sourceSessionId) {
+        addMsg('system', 'Question source session not found, cannot submit answer.');
+        return;
+      }
+      setInteractionSubmitting(true);
+      wsSend({
+        type: 'user_question_answered',
+        session_id: interaction.sourceSessionId,
+        payload: { question_id: interaction.interactionId, answer: content.trim(), cancelled: false },
+        timestamp: Date.now() / 1000,
+      });
+      resolveCard(`question_${interaction.interactionId}`, 'answered');
+      resolveInteraction('question', interaction.interactionId);
+      return;
+    }
+
+    // 防止在 session 创建中重复发送：如果已有 pending input 且正在等待 session_created，忽略
+    if (pendingInputRef.current && !sessionIdRef.current) return;
+
     const targetAgentId = agentId || 'default';
     const currentSessionAgentId = getCurrentSessionAgentId();
     if (sessionIdRef.current && currentSessionAgentId && currentSessionAgentId !== targetAgentId) {
@@ -1177,9 +1166,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         ...(recommendationMeta ? { meta: recommendationMeta } : {}),
       };
       const meta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
+      const requestId = makeId();
+      pendingCreateIdRef.current = requestId;
       wsSend({
         type: 'create_session',
-        payload: { agent_id: targetAgentId, meta },
+        payload: { agent_id: targetAgentId, meta, request_id: requestId },
         timestamp: Date.now() / 1000,
       });
     } else {
@@ -1203,7 +1194,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       ));
     }
     setIsTyping(true);
-  }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsConnected, wsSend]);
+  }, [getCurrentSessionAgentId, resetTurnTracking, resolveCard, startNewChat, wsConnected, wsSend]);
 
   const sendQuestionAnswerFn = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     const interaction = activeInteractionRef.current;
@@ -1277,9 +1268,15 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   }, [wsSend]);
 
   // 计算任务分组
-  const taskGroups = groupSessionsToTasks(sessions);
+  const taskGroups = useMemo(() => groupSessionsToTasks(sessions), [sessions]);
 
-  const value: ChatSessionContextValue = {
+  const globalActivity = useMemo<GlobalAgentActivity>(() => ({
+    anyWorking: globalWorkingSessions.size > 0,
+    workingSessionIds: globalWorkingSessions,
+    lastToolName: globalLastToolName,
+  }), [globalWorkingSessions, globalLastToolName]);
+
+  const value: ChatSessionContextValue = useMemo(() => ({
     wsConnected,
     currentSessionId: sessionId,
     switchSession,
@@ -1304,18 +1301,22 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     handleInteractionTimeout: handleInteractionTimeoutFn,
     handleSkillInvoke,
     cancelTurn,
-    globalActivity: {
-      anyWorking: globalWorkingSessions.size > 0,
-      workingSessionIds: globalWorkingSessions,
-      lastToolName: globalLastToolName,
-    },
+    globalActivity,
     wsSend,
     resolveInteractionFromNotification: resolveInteraction,
     proactiveResults,
     pendingPrefill,
     prefillInput,
     clearPendingPrefill,
-  };
+  }), [
+    wsConnected, sessionId, switchSession, createSession, deleteSession,
+    startNewChat, resetIfNeeded, doCleanupEmptySession, messages, isTyping,
+    sendMessage, sessions, taskGroups, loadSessionList, loadingSessions,
+    rightSteps, rightTaskProgress, activeInteraction, interactionSubmitting,
+    sendQuestionAnswerFn, sendConfirmationResponseFn, handleInteractionTimeoutFn,
+    handleSkillInvoke, cancelTurn, globalActivity, wsSend, resolveInteraction,
+    proactiveResults, pendingPrefill, prefillInput, clearPendingPrefill,
+  ]);
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;
 }

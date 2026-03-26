@@ -13,6 +13,13 @@ description: 当需要根据 style-spec、storyboard 和 asset-plan 逐页生成
 
 如果 `task-pack.json` 已记录 `deck_dir`，则所有 HTML 也必须写回该目录下的 `pages/`。
 
+## 用户回显要求
+
+- `开始反馈`：说明当前要生成哪些页面、会写入哪个 `pages/` 目录。
+- `进行中反馈`：如果需要连续生成多页，可补 1 条进度更新，说明已完成页数或当前页范围。
+- `完成反馈`：总结已生成的页面文件数量、是否保留了占位或未解决项，以及 `下一步`。
+- 如果某页因为依赖缺失、资产缺失或布局冲突无法完成，必须立即告诉用户具体页码和卡点，不要静默跳过。
+
 ## 前置检查
 
 - 消费前必须先确认 `task-pack.json`、`style-spec.json`、`storyboard.json` 以及要用到的 `asset-plan.json` 真实存在且可读。
@@ -25,6 +32,12 @@ description: 当需要根据 style-spec、storyboard 和 asset-plan 逐页生成
 - 用户可见文本默认与用户 query 语言保持一致
 - 每页必须单独输出为一个 HTML 文件
 - 不要输出单个包含整套 deck 的 HTML
+- 不要编写 Python 脚本来批量生成页面
+- 必须逐页直接生成最终 HTML
+- 不要先写生成器脚本再批量产出页面
+- 每一页都要直接参考对应的 `storyboard.json.pages[n]` 与同一份 `style-spec.json` 落地成最终 HTML 文件
+- 必须按 `storyboard.json.pages[n].payload_budget` 落地，不要把内容密度只停留在控制面
+- `claim_count`、`evidence_count`、`structure_block_count`、`require_comparison_or_summary` 都属于必须消费的执行预算
 
 ### 固定画布
 
@@ -68,13 +81,50 @@ HTML 必须保留这些层级：
 - 必须先读取并忠实消费 `style-spec.json` 的真实字段，不要只抓几个宽泛关键词后重新发明一套样式。
 - 如果局部字段不完整，应从已有 `style-spec.json` 中做兼容推导，不要退回通用默认样式。
 - 必须延续 deck 级的配色、字体、背景层次、卡片语法和装饰方向，不能因为实现方便把页面做成另一套模板。
+- 必须显式消费 `background_system`、`foreground_motifs`、`component_skins`、`density_rules`、`page_type_variants` 这些风格控制字段。
+- 优先按 `style_variant` 映射页面壳子；只有缺少 variant 映射时，才允许退回 `page_type` 层级。
+- `style-spec.json` 里的 `variant_key`、`layout_shell`、`header_strategy` 必须被具体落地，不要只把它们当参考文字。
+- 可见标题必须放在 `#ct` 内，或放在单独的 `#header` 容器内。
+- 不要把 `.header` 当作 `#bg` 和 `#ct` 之间的裸兄弟节点，否则很容易被内容层盖住。
+- 必须显式消费 `svg_motif_library` 与 variant 的 `required_svg_motifs`。
+- 非极简页面必须至少 1 层背景装饰，且至少 1 处前景装饰。
+- 如果页面只有纯色或渐变背景，而没有按 recipe 落地 motif，应视为未完成。
+- 背景装饰层必须是用户可感知的视觉层，不能退化成几乎看不见的微小角标、单个噪点或没有存在感的极淡纹理。
+- 正文 / 内容页即使包含真实图片，也不能把主视觉照片当成背景装饰层的替代；照片存在时，背景 recipe 仍要落地。
+- 根据 recipe 落地的背景 motif 元素，必须带 `data-layer="bg-motif"`。
+- 根据 recipe 落地的前景 motif 元素，必须带 `data-layer="fg-motif"`。
+- 每个按 recipe 落地的 motif 都必须写上 `data-motif-key="<motif_key>"`。
+- 这些标记是为了让 review 和导出前校验可以核对，不要省略。
+- 真实图片或主视觉照片不能替代这些标记。
+- 不要只做纯色背景 + 普通白卡片，除非 `style-spec` 明确要求极简。
+- 每页至少要有可感知的背景系统和前景装饰层，组件也要体现对应皮肤，而不是只改文字颜色或边框粗细。
+- 同一套 deck 内，封面页、分析页、结论页、风险页等要按 `page_type_variants` 拉开差异，不能所有页面共用一张安全模板。
+- 不能把多个不同 `style_variant` 页面落成同一种安全模板。
+- 不要让大多数正文页都复用同一套左竖线标题 + 毛玻璃卡片。
 - 局部重做页面时，也必须与同 deck 其他页面保持同一视觉系统。
+
+## 内容预算执行规则
+
+- 必须按 `payload_budget` 落地，不允许把应承载 3 块内容的页面退回成“一个标题 + 一张大卡片”。
+- `structure_block_count` 表示页面上至少要有对应数量的可感知内容结构块，例如对比区、数据卡、摘要块、步骤块、图文块或表格区。
+- `claim_count` 表示页面上要有足够数量的独立论点承载位，不要把多个 claim 压成一段无法区分的长文。
+- `evidence_count` 表示页面上要落地对应数量的证据承载位，例如数据点、指标、来源说明、案例事实、图表标注或对照信息。
+- `require_comparison_or_summary=True` 时，页面必须显式出现对比结构或摘要结构；不能只有零散内容块而没有收束。
+- 如果预算要求对比，应优先使用双列 / 多列 / before-after / 指标对照等结构。
+- 如果预算要求摘要，应提供明确的结论块、takeaway 区或 recap 区，而不是只靠标题暗示。
+- 视觉张力不能成为删减预算的理由；如果空间紧张，应该调布局、组件尺寸和层级，而不是静默降低承载。
 
 ## 资源规则
 
 - 如果 `asset-plan.json` 中某个槽位 `selected=False`，需要保留明确占位或替代方案。
 - 如果 `local_path` 存在，应优先引用本地相对路径。
 - 如果 `asset-plan.json` 已经给出成功下载的本地图片，最终 HTML 必须显式消费该槽位，不能静默忽略。
+- 必须逐项消费 `storyboard.json.pages[n].asset_requirements`，不要用一个通用 motif 替代不同页面的具体资产要求。
+- 如果页面要求 `real-photo`，应优先消费对应本地图片；若图片缺失，只能保留与该槽位语义一致的明确 placeholder，不要改画成 SVG 小图标。
+- 如果页面要求某个具体 `svg-icon` 或 `svg-illustration`，就要画出对应元素，不要偷换成另一个更通用的 motif。
+- 图标、装饰性元素、可直接绘制的插画必须优先用内联 SVG 落地。
+- 不要把图标画成 placeholder，也不要把 generic 插画留成一个虚线框。
+- 只有真实照片、二维码、用户专有素材在缺失时，才允许保留 placeholder。
 - 如果图片还未就绪，必须保留明确占位，并把预期视觉与页面语义对应起来。
 - 图片、图表、表格应与 `storyboard.json` 的页面意图一致。
 

@@ -1,4 +1,7 @@
 /** @type {import('next').NextConfig} */
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 const nextConfig = {
   reactStrictMode: true,
   async redirects() {
@@ -7,6 +10,19 @@ const nextConfig = {
         source: '/settings',
         destination: '/acp',
         permanent: false,
+      },
+    ];
+  },
+  // 代理 /api/* 和 /ws 到后端，解决 Cursor 端口转发问题
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${API_URL}/api/:path*`,
+      },
+      {
+        source: '/health',
+        destination: `${API_URL}/health`,
       },
     ];
   },

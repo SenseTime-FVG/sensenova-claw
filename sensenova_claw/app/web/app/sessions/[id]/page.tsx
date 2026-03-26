@@ -622,7 +622,30 @@ export default function SessionDetailPage() {
 
   const sendMessage = useCallback(() => {
     const content = inputValue.trim();
-    if (!content || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || activeInteraction || interactionSubmitting) return;
+    if (!content || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || interactionSubmitting) return;
+
+    if (activeInteraction?.kind === 'confirmation') return;
+
+    if (activeInteraction?.kind === 'question') {
+      if (!activeInteraction.sourceSessionId) return;
+      setInteractionSubmitting(true);
+      wsRef.current.send(JSON.stringify({
+        type: 'user_question_answered',
+        session_id: activeInteraction.sourceSessionId,
+        payload: {
+          question_id: activeInteraction.interactionId,
+          answer: content,
+          cancelled: false,
+        },
+        timestamp: Date.now() / 1000,
+      }));
+      setInputValue('');
+      resolveInteraction('question', activeInteraction.interactionId);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      return;
+    }
 
     resetTurnTracking();
     setMessages((prev) => [...prev, { role: 'user', content }]);
@@ -804,7 +827,7 @@ export default function SessionDetailPage() {
                   onCompositionStart={() => { isComposingRef.current = true; }}
                   onCompositionEnd={() => { isComposingRef.current = false; }}
                   placeholder={wsConnected ? 'Type a message... (Enter to send, Shift+Enter for newline)' : 'Waiting for connection...'}
-                  disabled={!wsConnected || isTyping || !!activeInteraction || interactionSubmitting}
+                  disabled={!wsConnected || interactionSubmitting || activeInteraction?.kind === 'confirmation' || (isTyping && activeInteraction?.kind !== 'question')}
                   rows={1}
                   className="w-full bg-transparent border-none focus:ring-0 px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/60 resize-none disabled:opacity-50 disabled:cursor-not-allowed selection:bg-primary/20"
                   style={{ minHeight: '48px', maxHeight: '160px' }}
@@ -823,7 +846,7 @@ export default function SessionDetailPage() {
                 <button
                   data-testid="send-button"
                   onClick={sendMessage}
-                  disabled={!inputValue.trim() || !wsConnected || !!activeInteraction || interactionSubmitting}
+                  disabled={!inputValue.trim() || !wsConnected || interactionSubmitting || activeInteraction?.kind === 'confirmation' || (isTyping && activeInteraction?.kind !== 'question')}
                   className="p-3 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shadow-lg active:scale-95 shrink-0"
                 >
                   <Send size={20} />

@@ -83,6 +83,26 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 每次你执行完成任务之后，需要总结成功和失败的经验，并选择会对后续任务有帮助的内容保存在这里
 
+### 2026-03-26 OpenAI 兼容 top_k 修复补充
+
+成功经验：
+- `agent.extra_body` 的全局默认采样参数不能直接假设所有 OpenAI 兼容网关都支持；对 `OpenAIProvider` 按 `source_type` 做请求级过滤，是修复 `Unknown parameter: 'top_k'` 这类报错的最小改动。
+- 这类问题要同时覆盖 `call` 和 `stream_call` 两条路径；工作台聊天默认走流式，只测非流式很容易漏回归。
+- 用伪造 `client.chat.completions.create` 捕获最终请求体的单测最直接，能精确断言 `extra_body` 到底发了什么，不依赖真实 API。
+
+失败/风险经验：
+- 当前 `tests/unit/test_llm_worker.py` 在本仓库环境下存在既有失败，且会混入与本次修复无关的 `llm.call_delta/notification` 断言差异；验证 provider 参数透传问题时，应优先跑更聚焦的 provider 单测，避免被无关失败干扰判断。
+
+### 2026-03-26 Unknown Parameter 自动重试补充
+
+成功经验：
+- 当用户明确要求“保留 provider 原始透传行为”时，把兼容性修复放在 `LLMSessionWorker._execute_request_block()` 的同目标重试层，比在 provider 里静态过滤更符合预期，也不会误伤其他支持扩展参数的网关。
+- “未知参数”重试应直接基于错误文本提取参数名，并一次移除同一条错误里识别出的全部参数再重试；这样比每次只移除一个参数更贴近真实网关返回，也能减少无效重试次数。
+- 将 `max_tokens` 自动收敛和 `unsupported_parameters` 自动剔除统一放进同一个请求块循环后，只要保留独立计数和通知文案，就能兼容两类自动修复策略。
+
+失败/风险经验：
+- `agent.extra_body` 会在 worker 层与默认 `top_p` 合并，写断言时不能只看测试显式传入的字段；否则很容易把默认值误判成实现缺陷。
+
 ### 2026-03-05 任务复盘
 
 成功经验：
@@ -308,6 +328,33 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 邮件工具虽然注册后会暴露给运行时，但真实可用性仍依赖 `tools.email.enabled` 及 SMTP/IMAP 凭据；仅单元测试通过不能代表邮件链路已完成真实回归。
+
+### 2026-03-26 Skills 管理页禁用显示修复补充
+
+成功经验：
+- Skills 管理页需要区分“发现到的所有 skill”和“运行时已启用并注入的 skill”；前者用于 `/api/skills` 管理展示，后者继续由 `SkillRegistry.get_all()` 供 agent/runtime 使用，边界清晰后修复很小。
+- 对这类“禁用后消失”的回归，直接把 API 单测期望改成“仍返回该项但 `enabled=false`”最有效，能精确锁定问题落在后端列表源数据而不是前端渲染。
+
+失败/风险经验：
+- 如果继续让 `/api/skills` 直接遍历 `get_all()`，任何通过 `set_enabled(False)` 从内存移除的 skill 都会从管理页消失，用户无法直观看到已禁用项；以后不要把“管理视图”建立在“运行时启用集合”上。
+
+### 2026-03-26 Skills 详情弹窗 disabled 回归补充
+
+成功经验：
+- 本地 skill 详情接口不能只依赖 `SkillRegistry.get()`；disabled skill 已从运行时注册表移除，管理页详情应改为从 `discover_all_skills()` 回查落盘 skill，再读取 `SKILL.md` 和文件列表。
+- 前端详情弹窗对接口响应做 `res.ok` 检查和字段归一化（`files` 默认 `[]`）很有必要，能避免后端偶发返回错误结构时直接触发 `undefined.length`。
+
+失败/风险经验：
+- `/skills` 这类后台页的 Playwright 鉴权比 `/chat` 更脆，单靠 `page.route()` 不一定能稳定覆盖 `AuthProvider/ProtectedRoute` 初始化；更稳的方式是在 `addInitScript` 里直接接管 `window.fetch` 返回认证与页面所需数据。
+
+### 2026-03-26 LLM 连接测试 token 参数补充
+
+成功经验：
+- `/llms` 页面单项 `测试` 按钮若要读取“未保存草稿”配置，最关键的回归断言是直接抓 `/api/config/test-llm` 请求体，确认 `model_id/max_tokens/max_output_tokens` 都来自当前 draft，而不是已保存配置。
+- 对 provider 探活这类轻量接口，单测直接 mock SDK client 并断言最终 `create(...)` 参数最有效，能同时锁住提示词、`max_tokens` 和 `extra_body.max_output_tokens` 的透传行为。
+
+失败/风险经验：
+- 当前环境下 Playwright 即使能拉起 `next dev` 和 headless Chromium，也可能长时间卡住不返回最终结果；浏览器级回归要和进程内/单元测试分层看，不能把这类环境挂起误判成业务失败。
 
 ### 2026-03-18 前端重连恢复补充
 
@@ -1144,6 +1191,9 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 适合作为通用桥接 skill 的敏感路径范围，应严格对齐 `platform/secrets/registry.py` 里的注册模式，尤其是 `tools.*.api_key` 与 `llm.providers.*.api_key`，这样像 Brave Search 这类 skill 才能稳定复用。
 - 如果希望 skill 自身保留“它依赖哪个 secret 标识”的可追踪信息，最轻量的约定是在目标 skill 目录下维护 `secret.yml`，只写映射不写明文，例如 `OPENAI_API_KEY: secret:openai-whisper-api:OPENAI_API_KEY`；读取时优先查这个文件，写入成功后同步创建或更新它。
 - 如果用户要求 skill 不经过 HTTP，而是直接调用项目内能力，最稳的做法是在 skill 目录下放脚本，通过 stdin JSON 契约驱动，并在脚本内部直接复用 `Config`、`ConfigManager` 与 `SecretStore`；这样行为可测、文档也不会再漂移回接口说明。
+- 用 `Skill Creator` 重写 `SKILL.md` 时，最有效的收敛方式是把正文压到“何时触发、唯一入口、输入输出契约、禁止事项”四块，其余实现细节交给 `scripts/`；这样既保住触发质量，也不会让 skill body 过长。
+- 对 `secret-config-bridge` 这类底层桥接 skill，如果用户只要“按路径读写 secret store”，就不要再耦合 `config.yml`、`ConfigManager` 或 skill 目录下的 `secret.yml`；直接把协议收敛成 `read(path)` / `write(path, value)` 最稳，`secret:` 仅作为 path 归一化的语法糖。
+- 当某个 skill 目录里的脚本已经变成“通用底层能力”时，下一步应把逻辑迁到 `sensenova_claw/capabilities/tools/` 做成正式 tool，并让 skill 只负责触发说明；这样模型能直接调用、测试也能直接覆盖 `ToolRegistry` 暴露行为。
 
 失败/风险经验：
 - 如果把 secret skill 设计成“任意 path 都可读写”的通用管理器，很容易和后端 `is_secret_path()` 的约束冲突，最终在运行时直接返回 400；文档必须明确只支持已注册敏感路径。
@@ -1237,6 +1287,37 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅靠前端 mock 成功响应的 Playwright 用例，可能掩盖真实后端“不支持新建”的语义缺口；如果问题涉及接口契约，必须至少补一层真实后端测试。
+
+### 2026-03-25 LLM 批量测试弹窗补充
+
+成功经验：
+- `/llms` 页的批量连通性测试适合直接复用现有单个 `test-llm` 链路；把“读取当前 draft、reveal secret、统一映射 success/error”收敛成一个 helper 后，单项测试和批量测试都能共用，避免两套逻辑漂移。
+- 前端实现“最大并发 10”时，用固定 worker 数量消费共享游标就足够稳定；这类功能的高价值断言应是 `maxActiveRequests === 10`，而不只是“最终都测完了”。
+
+失败/风险经验：
+- Playwright 若通过手动阻塞 mock 请求来验证限流，放行首批请求后还要继续放行后续波次；否则最后几个模型会一直停在“连接中”，这是测试夹具问题，不是页面并发队列问题。
+
+### 2026-03-25 LLM 批量测试按钮态补充
+
+成功经验：
+- `/llms` 页这种“首次动作后入口切换”的需求，最简单稳妥的状态是单独维护 `hasBulkTestResults`：首次未测试显示 `测试全部`，一旦产生过结果就切成纵向 `重新测试全部 + 测试结果`，弹窗开关仍独立管理。
+
+失败/风险经验：
+- 当前环境下 Playwright 跑 `/llms` 相关用例偶发会在 `page.goto('/llms')` 直接报 `net::ERR_ABORTED; maybe frame was detached?` 并耗尽 60 秒超时；这类失败发生在页面加载前，不能直接归因到本次按钮态改动。
+
+### 2026-03-25 Dialog 层级补充
+
+成功经验：
+- 当弹窗“看起来被导航栏挡住”时，先直接比较真实计算后的 `z-index` 最有效；这次通过 Playwright 断言拿到 `header=200, dialog=50`，快速锁定为全局 `Dialog` 组件层级过低，而不是 `/llms` 页面局部布局问题。
+- 对这类全站弹窗层级问题，优先修 `components/ui/dialog.tsx` 的 overlay/content `z-index`，比在单页弹窗上单独加类名更稳，也更不容易留下别的页面继续被顶栏压住。
+
+失败/风险经验：
+- 如果用户明确要求“只修当前浮窗，不改其他层级”，就不能顺手调整全局 `Dialog`；应把局部 `z-index` 直接加在目标页面的 `DialogContent` 上，并保留专门的层级回归测试锁定该页面。
+
+### 2026-03-25 Dialog 内部滚动补充
+
+成功经验：
+- 模态框如果既要保住外层圆角、又要让滚动条看起来属于同一个面板，最稳的结构是 `DialogContent` 自身 `overflow-hidden`，再放一个 `flex-1 overflow-y-auto` 的内部内容区；不要直接让 `DialogContent` 滚动。
 
 ### 2026-03-25 Agent 委托禁用语义补充
 

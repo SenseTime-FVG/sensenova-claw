@@ -26,7 +26,7 @@ metadata:
 1. 先检查 `mineru-open-api` 是否存在
 2. 若不存在，执行官方安装命令
 3. 安装后执行 `mineru-open-api version`
-4. 自动检测 `MINERU_TOKEN` 环境变量或 `~/.mineru/config.yaml`：
+4. 使用`get_secret` tool 读取`MINERU_TOKEN`, 若读取不到则自动检测 `MINERU_TOKEN` 环境变量或 `~/.mineru/config.yaml`：
    - 若已配置 Token → 默认使用 `extract`（完整模式）
    - 若未配置 → 用 `ask_user` 询问用户选择免费或 Token 模式
 5. 统一输出到 `<workspace>/mineru_skill/<name>_<hash>/`
@@ -61,8 +61,9 @@ mineru-open-api version
 ### 自动检测逻辑
 
 按以下顺序检查 Token 是否存在：
-1. 环境变量 `MINERU_TOKEN`
-2. 配置文件 `~/.mineru/config.yaml`
+1. 使用`get_secret` tool 读取 `MINERU_TOKEN`
+2. 环境变量 `MINERU_TOKEN`
+3. 配置文件 `~/.mineru/config.yaml`
 
 检测命令：
 ```bash

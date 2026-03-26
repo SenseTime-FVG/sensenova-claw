@@ -74,6 +74,13 @@ llm:
       timeout: 180
       max_retries: 3
       source_type: step
+    
+    qwen-embedding:
+      api_key: ${QWEN_EMBEDDING_API_KEY}
+      base_url: https://dl.yunstorm.com/v1
+      timeout: 180
+      max_retries: 3
+      source_type: qwen-embedding
 
   models:
     # ── Anthropic ──
@@ -155,7 +162,15 @@ llm:
       max_tokens: 256000
       max_output_tokens: 16384
 
+    # ── Embedding 模型 ──
+    qwen-embedding:
+      provider: qwen-embedding
+      model_id: text-embedding-v4
+      type: embedding
+      timeout: 180
+
   default_model: null
+  default_embedding_model: qwen-embedding
 
 # ════════════════════════════════════════════════════
 # Agents 配置
@@ -178,7 +193,7 @@ agents:
     name: 系统运维管理员
     description: 系统运维管理员，负责 Sensenova-Claw 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作
     temperature: 1.0
-    tools: ["read_file", "write_file", "bash_command"]
+    tools: ["read_file", "write_file", "bash_command", "get_secret", "write_secret"]
     skills: ["system-admin-skill"]
     max_send_depth: 2
     max_pingpong_turns: 10
@@ -216,7 +231,7 @@ agents:
     name: 数据分析助手
     description: 数据分析、可视化和报告生成
     temperature: 1.0
-    tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "ask_user", "memory_search"]
+    tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "ask_user", "memory_search", "get_secret", "write_secret"]
     skills: ["excel-xlsx", "python-dataviz", "pdf", "csv-pipeline", "mineru-document-extractor", "openai-whisper-api"]
     max_send_depth: 2
     enabled: true
@@ -225,7 +240,7 @@ agents:
     name: 文档整理助手
     description: 处理多种来源的文档，支持格式转换和整理
     temperature: 1.0
-    tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "feishu-drive", "ask_user", "memory_search"]
+    tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "feishu-drive", "ask_user", "memory_search", "get_secret", "write_secret"]
     skills: ["markdown-converter", "docx-cn", "excel-xlsx", "pdf", "pdf-generator", "mineru-document-extractor", "openai-whisper-api", "feishu-doc", "feishu-wiki", "feishu-drive"]
     max_send_depth: 2
     enabled: true
@@ -243,7 +258,7 @@ agents:
     name: 搜索调研助手
     description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
     temperature: 1.0
-    tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search"]
+    tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search", "get_secret", "write_secret"]
     skills: ["mineru-document-extractor", "research-union", "union-search-plus"]
     max_send_depth: 2
     enabled: true
@@ -397,3 +412,8 @@ plugins:
       entry: "sensenova_claw/adapters/plugins/whatsapp/bridge/src/index.mjs"
       startup_timeout_seconds: 30
       send_timeout_seconds: 15
+
+memory:
+  enabled: true
+  search:
+    enabled: true
