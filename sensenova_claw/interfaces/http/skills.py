@@ -52,8 +52,10 @@ def _parse_skill_metadata(skill) -> dict:
 
 @router.get("")
 async def list_skills(request: Request):
-    """获取所有已加载的 Skills（含分类、依赖状态）"""
+    """获取所有已加载的 Skills（含分类、依赖状态），自动发现新增 skill"""
     skill_registry = request.app.state.skill_registry
+    config = request.app.state.config.data if hasattr(request.app.state.config, 'data') else {}
+    skill_registry.rescan(config)
     skills = []
     for skill in skill_registry.get_all():
         category = _classify_skill(skill)
