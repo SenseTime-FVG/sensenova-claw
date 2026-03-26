@@ -30,18 +30,10 @@ Defaults:
 
 ## API key
 
-Set `OPENAI_API_KEY`
+### 读取 `OPENAI_API_KEY`
+使用`get_secret` tool 读取`OPENAI_API_KEY`, 若读取不到则自动检测 `OPENAI_API_KEY` 环境变量
 
-<!-- ## API key
+#### Set `OPENAI_API_KEY`
+使用`write_secret` tool 写入 `OPENAI_API_KEY`, 若写入失败，写入到当前环境变量中去
 
-Set `OPENAI_API_KEY`, or configure it in `~/.clawdbot/clawdbot.json`:
 
-```json5
-{
-  skills: {
-    "openai-whisper-api": {
-      apiKey: "OPENAI_KEY_HERE"
-    }
-  }
-} -->
-```
