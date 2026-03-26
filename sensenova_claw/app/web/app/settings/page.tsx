@@ -933,7 +933,7 @@ function normalizeWizardState(input: any): ACPWizardState | null {
     },
     installers: Object.fromEntries(
       Object.entries(input.installers && typeof input.installers === 'object' ? input.installers : {}).map(([key, value]) => {
-        const installer = value && typeof value === 'object' ? value : {};
+        const installer = value && typeof value === 'object' ? value as Record<string, unknown> : {};
         return [
           key,
           {
@@ -946,8 +946,10 @@ function normalizeWizardState(input: any): ACPWizardState | null {
         ];
       }),
     ),
-    agents: agents.map((item): ACPWizardAgent => {
-      const agent = item && typeof item === 'object' ? item : {};
+    agents: agents.map((item: unknown): ACPWizardAgent => {
+      const agent = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+      const runtime = agent.runtime && typeof agent.runtime === 'object' ? agent.runtime as Record<string, unknown> : {};
+      const recommendedConfig = agent.recommended_config && typeof agent.recommended_config === 'object' ? agent.recommended_config as Record<string, unknown> : {};
       return {
         id: String(agent.id || ''),
         name: String(agent.name || ''),
@@ -968,25 +970,25 @@ function normalizeWizardState(input: any): ACPWizardState | null {
             }))
           : [],
         runtime: {
-          id: String(agent.runtime?.id || ''),
-          label: String(agent.runtime?.label || ''),
-          found: Boolean(agent.runtime?.found),
-          path: String(agent.runtime?.path || ''),
-          candidate: String(agent.runtime?.candidate || ''),
+          id: String(runtime.id || ''),
+          label: String(runtime.label || ''),
+          found: Boolean(runtime.found),
+          path: String(runtime.path || ''),
+          candidate: String(runtime.candidate || ''),
         },
         missing_components: Array.isArray(agent.missing_components)
           ? agent.missing_components.map((part: unknown) => String(part))
           : [],
         recommended_config: {
-          enabled: Boolean(agent.recommended_config?.enabled),
-          command: String(agent.recommended_config?.command || ''),
-          args: Array.isArray(agent.recommended_config?.args) ? agent.recommended_config.args.map((part: unknown) => String(part)) : [],
+          enabled: Boolean(recommendedConfig.enabled),
+          command: String(recommendedConfig.command || ''),
+          args: Array.isArray(recommendedConfig.args) ? recommendedConfig.args.map((part: unknown) => String(part)) : [],
           env: Object.fromEntries(
-            Object.entries(agent.recommended_config?.env && typeof agent.recommended_config.env === 'object' ? agent.recommended_config.env : {}).map(([key, value]) => [String(key), String(value)])
+            Object.entries(recommendedConfig.env && typeof recommendedConfig.env === 'object' ? recommendedConfig.env : {}).map(([key, value]) => [String(key), String(value)])
           ),
-          startup_timeout_seconds: Number(agent.recommended_config?.startup_timeout_seconds || 20),
-          request_timeout_seconds: Number(agent.recommended_config?.request_timeout_seconds || 180),
-          default_builder: agent.recommended_config?.default_builder === 'acp' ? 'acp' : 'builtin',
+          startup_timeout_seconds: Number(recommendedConfig.startup_timeout_seconds || 20),
+          request_timeout_seconds: Number(recommendedConfig.request_timeout_seconds || 180),
+          default_builder: recommendedConfig.default_builder === 'acp' ? 'acp' : 'builtin',
         },
         install_steps: Array.isArray(agent.install_steps)
           ? agent.install_steps.map((step: any) => ({
@@ -1043,7 +1045,7 @@ function normalizeMiniAppsConfig(input: Record<string, any>): MiniAppsConfig {
     acp: {
       enabled: Boolean(acp.enabled),
       command: String(acp.command || ''),
-      args: Array.isArray(acp.args) ? acp.args.map(item => String(item)) : [],
+      args: Array.isArray(acp.args) ? acp.args.map((item: unknown) => String(item)) : [],
       env: Object.fromEntries(
         Object.entries(acp.env && typeof acp.env === 'object' ? acp.env : {}).map(([key, value]) => [key, String(value)])
       ),

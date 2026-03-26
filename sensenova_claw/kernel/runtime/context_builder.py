@@ -85,10 +85,8 @@ class ContextBuilder:
         # 构建多 Agent 通信信息
         delegation_prompt = self._build_agent_to_agent_prompt(agent_config)
 
-        # 合并 extra_system_prompt
+        # 独立读取 extra_system_prompt（不混入 delegation）
         extra = config.get("agent.extra_system_prompt")
-        if delegation_prompt:
-            extra = f"{extra}\n\n{delegation_prompt}" if extra else delegation_prompt
 
         # 解析 per-agent workdir 注入 system prompt
         from sensenova_claw.platform.config.workspace import resolve_agent_workdir
@@ -99,6 +97,7 @@ class ContextBuilder:
             tool_names=tool_names,
             tool_summaries=tool_summaries,
             skills_prompt=self._build_skills_section(agent_config),
+            delegation_prompt=delegation_prompt,
             memory_context=memory_context,
             context_files=context_files or [],
             extra_system_prompt=extra,

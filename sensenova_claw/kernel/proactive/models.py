@@ -42,6 +42,7 @@ class EventTrigger:
     event_type: str = ""
     filter: dict | None = None
     debounce_ms: int = 5000
+    exclude_payload: dict | None = None  # 排除匹配：payload 中含有这些字段时不触发（用于防止自触发）
 
 
 Trigger = TimeTrigger | EventTrigger
@@ -67,6 +68,7 @@ class DeliveryConfig:
     channels: list[str] = field(default_factory=list)
     feishu_target: str | None = None
     summary_prompt: str | None = None
+    recommendation_type: str | None = None  # 推荐类型，如 "turn_end"；前端据此渲染推荐卡片
 
 
 # ---------- Safety ----------
@@ -132,6 +134,7 @@ def trigger_to_json(trigger: Trigger) -> str:
             "event_type": trigger.event_type,
             "filter": trigger.filter,
             "debounce_ms": trigger.debounce_ms,
+            "exclude_payload": trigger.exclude_payload,
         })
     raise ValueError(f"未知 trigger 类型: {type(trigger)}")
 
@@ -150,6 +153,7 @@ def trigger_from_json(raw: str) -> Trigger:
             event_type=d.get("event_type", ""),
             filter=d.get("filter"),
             debounce_ms=d.get("debounce_ms", 5000),
+            exclude_payload=d.get("exclude_payload"),
         )
     raise ValueError(f"Unknown trigger kind: {kind}")
 
@@ -175,6 +179,7 @@ def _delivery_to_dict(delivery: DeliveryConfig) -> dict:
         "channels": delivery.channels,
         "feishu_target": delivery.feishu_target,
         "summary_prompt": delivery.summary_prompt,
+        "recommendation_type": delivery.recommendation_type,
     }
 
 
@@ -183,6 +188,7 @@ def _delivery_from_dict(d: dict) -> DeliveryConfig:
         channels=d.get("channels", []),
         feishu_target=d.get("feishu_target"),
         summary_prompt=d.get("summary_prompt"),
+        recommendation_type=d.get("recommendation_type"),
     )
 
 
@@ -237,7 +243,7 @@ def job_to_db_row(job: ProactiveJob) -> dict[str, Any]:
         "name": job.name,
         "agent_id": job.agent_id,
         "enabled": 1 if job.enabled else 0,
-        "trigger_json": trigger_to_json(job.trigger),
+        "trigger_json": trigger_to_json(job.trigger) if job.trigger else json.dumps({"kind": "manual"}),
         "task_json": json.dumps(_task_to_dict(job.task)),
         "delivery_json": json.dumps(_delivery_to_dict(job.delivery)),
         "safety_json": json.dumps(_safety_to_dict(job.safety)),

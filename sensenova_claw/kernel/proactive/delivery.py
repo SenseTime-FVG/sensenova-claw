@@ -19,20 +19,40 @@ class ProactiveDelivery:
         self._bus = bus
         self._notification_service = notification_service
 
-    async def deliver(self, job: ProactiveJob, session_id: str, result: str):
+    async def deliver(
+        self, job: ProactiveJob, session_id: str, result: str,
+        *,
+        source_session_id: str | None = None,
+        scratch_session_id: str | None = None,
+        items: list[dict] | None = None,
+    ):
         """投递 proactive 执行结果：发布事件 + 发送通知。"""
+        payload = {
+            "job_id": job.id,
+            "job_name": job.name,
+            "result": result,
+            "session_id": session_id,
+        }
+        if source_session_id:
+            payload["source_session_id"] = source_session_id
+        if scratch_session_id:
+            payload["scratch_session_id"] = scratch_session_id
+        if job.delivery.recommendation_type:
+            payload["recommendation_type"] = job.delivery.recommendation_type
+        if items:
+            payload["items"] = items
+
         await self._bus.publish(EventEnvelope(
             type=PROACTIVE_RESULT,
             session_id=session_id,
             agent_id=job.agent_id,
-            payload={
-                "job_id": job.id,
-                "job_name": job.name,
-                "result": result,
-                "session_id": session_id,
-            },
+            payload=payload,
             source="proactive",
         ))
+
+        # 推荐类型只通过 PROACTIVE_RESULT 事件投递到前端看板，不发通知
+        if job.delivery.recommendation_type:
+            return
 
         body = await self._build_body(job, result)
 

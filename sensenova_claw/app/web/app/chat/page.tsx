@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 import { useFilePanel } from '@/contexts/FilePanelContext';
 import { type SessionItem, type ContextFileRef, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
 import { MessageList } from '@/components/chat/MessageBubble';
@@ -547,12 +547,16 @@ function ChatContent() {
     createSession(selectedAgentId);
   };
 
-  const handleSend = useCallback((content: string, contextFiles?: ContextFileRef[]) => {
+  const handleSend = useCallback((
+    content: string,
+    contextFiles?: ContextFileRef[],
+    recommendation?: RecommendationSendMeta | null,
+  ) => {
     if (activeInteraction?.kind === 'question') {
       sendQuestionAnswer(content, false);
       return;
     }
-    sendMessage(content, contextFiles, selectedAgentId || 'default');
+    sendMessage(content, contextFiles, selectedAgentId || 'default', recommendation);
   }, [activeInteraction, sendMessage, sendQuestionAnswer, selectedAgentId]);
 
   const handleSlashSubmit = useCallback(() => false, []);

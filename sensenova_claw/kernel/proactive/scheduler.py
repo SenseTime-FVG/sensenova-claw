@@ -12,6 +12,7 @@ import time
 from typing import Callable, Awaitable
 
 from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.proactive.models import (
     EventTrigger,
     ProactiveJob,
@@ -36,7 +37,7 @@ class ProactiveScheduler:
         jobs: dict[str, ProactiveJob],
         running_jobs: set[str],
         max_concurrent: int,
-        on_trigger: Callable[[ProactiveJob], Awaitable[bool]],
+        on_trigger: Callable[[ProactiveJob, "EventEnvelope | None"], Awaitable[bool]],
     ) -> None:
         self._bus = bus
         self._jobs = jobs
@@ -124,7 +125,7 @@ class ProactiveScheduler:
                 if next_ms is not None and next_ms <= now_ms:
                     if len(self._running_jobs) >= self._max_concurrent:
                         break
-                    await self._on_trigger(job)
+                    await self._on_trigger(job, None)
         except Exception:
             logger.exception("ProactiveScheduler._on_timer error")
         finally:
@@ -147,13 +148,14 @@ class ProactiveScheduler:
                             continue
                         if not is_event_match(job.trigger, event.type, event.payload):
                             continue
-                        if should_debounce(job.id, job.trigger.debounce_ms, self._last_event_fires):
+                        debounce_key = f"{job.id}:{event.session_id}"
+                        if should_debounce(debounce_key, job.trigger.debounce_ms, self._last_event_fires):
                             continue
-                        self._last_event_fires[job.id] = int(time.time() * 1000)
+                        self._last_event_fires[debounce_key] = int(time.time() * 1000)
                         if len(self._running_jobs) >= self._max_concurrent:
                             logger.warning("达到最大并发数，跳过事件触发: %s", job.id)
                             continue
-                        await self._on_trigger(job)
+                        await self._on_trigger(job, event)
                 except Exception:
                     logger.exception("ProactiveScheduler event_loop handler error")
         except asyncio.CancelledError:
