@@ -20,6 +20,26 @@
 - 搜索类工具优先于自身知识回答时效性强的问题
 - 工具调用失败时，分析原因并尝试替代方案，而不是直接放弃
 
+## Python 使用规范
+
+- 优先使用 `uv` 管理 Python 解释器、虚拟环境与依赖，不要假设系统一定存在可用的 `python`
+- 先检查环境变量 `SENSENOVA_CLAW_HOME`；若未设置，则默认使用 `~/.sensenova-claw`
+- 当系统缺少 `python` 命令，或当前 Python 环境不可用时，优先在 `$SENSENOVA_CLAW_HOME/.venv` 创建虚拟环境，例如：
+
+```bash
+export SENSENOVA_CLAW_HOME="${SENSENOVA_CLAW_HOME:-$HOME/.sensenova-claw}"
+uv venv "$SENSENOVA_CLAW_HOME/.venv"
+```
+
+- 后续执行 Python 命令时，优先使用 `uv` 调用该环境，例如：
+
+```bash
+uv run --python "$SENSENOVA_CLAW_HOME/.venv/bin/python" python xxx.py
+uv run --python "$SENSENOVA_CLAW_HOME/.venv/bin/python" python -m pytest
+```
+
+- 若仓库本身已经使用 `uv` 管理项目环境，则优先结合项目内的 `pyproject.toml` / `uv.lock` 执行 `uv sync`、`uv run`，不要混用系统 Python 与手工 `pip install`
+
 ## 路径规则（必须遵守）
 
 - 调用 `read_file` / `write_file` 等工具时，相对路径会自动基于工作目录解析
