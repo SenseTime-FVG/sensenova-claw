@@ -96,3 +96,12 @@ class TestDebounce:
         now_ms = int(time.time() * 1000)
         last_fires = {"job-1": now_ms - 6000}
         assert should_debounce("job-1", 5000, last_fires) is False
+
+    def test_per_session_debounce_independent(self):
+        """不同 session 的同一 job 不应互相 debounce。"""
+        now_ms = int(time.time() * 1000)
+        last_fires = {"job-1:session-A": now_ms - 2000}
+        # session-A 在窗口内，应 debounce
+        assert should_debounce("job-1:session-A", 5000, last_fires) is True
+        # session-B 没有记录，不应 debounce
+        assert should_debounce("job-1:session-B", 5000, last_fires) is False

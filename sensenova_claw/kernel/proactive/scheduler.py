@@ -147,9 +147,10 @@ class ProactiveScheduler:
                             continue
                         if not is_event_match(job.trigger, event.type, event.payload):
                             continue
-                        if should_debounce(job.id, job.trigger.debounce_ms, self._last_event_fires):
+                        debounce_key = f"{job.id}:{event.session_id}"
+                        if should_debounce(debounce_key, job.trigger.debounce_ms, self._last_event_fires):
                             continue
-                        self._last_event_fires[job.id] = int(time.time() * 1000)
+                        self._last_event_fires[debounce_key] = int(time.time() * 1000)
                         if len(self._running_jobs) >= self._max_concurrent:
                             logger.warning("达到最大并发数，跳过事件触发: %s", job.id)
                             continue
