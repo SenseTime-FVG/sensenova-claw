@@ -84,7 +84,7 @@ export function InteractionDialog({
     if (interaction.kind === 'confirmation') return;
     if (remainingSeconds > 0) return;
     const timeoutKey = `${interaction.kind}:${interaction.interactionId}`;
-    if (timeoutNotifiedRef.current == timeoutKey) return;
+    if (timeoutNotifiedRef.current === timeoutKey) return;
     timeoutNotifiedRef.current = timeoutKey;
     onTimeout();
   }, [open, interaction, remainingSeconds, onTimeout]);
