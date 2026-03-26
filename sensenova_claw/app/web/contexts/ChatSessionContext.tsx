@@ -95,6 +95,11 @@ export interface ChatSessionContextValue {
 
   // 实时 proactive 推送结果
   proactiveResults: ProactiveResultItem[];
+
+  // 推荐卡片预填输入
+  pendingInput: string;
+  prefillInput: (text: string) => void;
+  setPendingInput: (text: string) => void;
 }
 
 /** 实时接收到的 proactive 推送结果 */
@@ -104,6 +109,14 @@ export interface ProactiveResultItem {
   sessionId: string;
   result: string;
   receivedAt: number;
+  sourceSessionId?: string;
+  recommendationType?: string;
+  items?: Array<{
+    id: string;
+    title: string;
+    prompt: string;
+    category?: string;
+  }>;
 }
 
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
@@ -136,6 +149,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
   // 实时 proactive 推送结果（最多保留 50 条，去重）
   const [proactiveResults, setProactiveResults] = useState<ProactiveResultItem[]>([]);
+
+  // 推荐卡片预填输入
+  const [pendingInput, setPendingInput] = useState<string>('');
+
+  const prefillInput = useCallback((text: string) => {
+    setPendingInput(text);
+  }, []);
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -545,6 +565,9 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         break;
       }
       case 'turn_completed': {
+        if (payload.source === 'recommendation') {
+          break;
+        }
         const final = String(payload.final_response || '');
         const completedTurnId = typeof payload.turn_id === 'string' ? payload.turn_id : null;
         if (completedTurnId) {
@@ -772,11 +795,23 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const jobName = String(payload.job_name || '');
         const resultText = String(payload.result || '');
         const resultSessionId = String(payload.session_id || incomingSessionId || '');
+        const sourceSessionId = payload.source_session_id ? String(payload.source_session_id) : undefined;
+        const recommendationType = payload.recommendation_type ? String(payload.recommendation_type) : undefined;
+        const items = Array.isArray(payload.items) ? payload.items : undefined;
+
+        const newItem: ProactiveResultItem = {
+          jobId, jobName, result: resultText,
+          sessionId: resultSessionId,
+          receivedAt: Date.now(),
+          sourceSessionId,
+          recommendationType,
+          items,
+        };
+
         if (resultText) {
           setProactiveResults(prev => {
-            if (prev.some(r => r.jobId === jobId && r.sessionId === resultSessionId)) return prev;
-            const next = [{ jobId, jobName, sessionId: resultSessionId, result: resultText, receivedAt: Date.now() }, ...prev];
-            return next.slice(0, 50);
+            const deduped = prev.filter(r => !(r.jobId === jobId && r.sessionId === resultSessionId));
+            return [newItem, ...deduped].slice(0, 50);
           });
           loadSessionList();
           pushNotification({
@@ -1093,6 +1128,9 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     wsSend,
     resolveInteractionFromNotification: resolveInteraction,
     proactiveResults,
+    pendingInput,
+    prefillInput,
+    setPendingInput,
   };
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;
