@@ -205,6 +205,8 @@ skills:
     root_folder: "Knowledge"
     auto_load_profile: true
     auto_save: true
+    index_on_start: true      # 会话开始时生成知识库索引
+    index_limit: 30           # 索引笔记数上限（按修改时间排序）
 ```
 
 自动检测位置: `~/Documents/Obsidian`, `~/Obsidian`, macOS iCloud 等
