@@ -23,12 +23,12 @@ function mockAuthAndWebSocket() {
     constructor(url: string | URL, protocols?: string | string[]) {
       const resolvedUrl = String(url);
       if (!resolvedUrl.includes('localhost:8000/ws')) {
-        return new NativeWebSocket(url, protocols);
+        return new (NativeWebSocket as any)(url, protocols);
       }
 
       window.setTimeout(() => {
         const event = new Event('open');
-        this.onopen?.(event);
+        (this as any).onopen?.(event);
         (this.listeners.open || []).forEach((listener) => listener(event));
       }, 0);
     }

@@ -87,7 +87,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       case 'tool_execution': {
         const toolName = String(lastMessage.payload.tool_name || '');
         const toolCallId = String(lastMessage.payload.tool_call_id || '');
-        const args = lastMessage.payload.arguments || {};
+        const args = (typeof lastMessage.payload.arguments === 'object' && lastMessage.payload.arguments !== null
+          ? lastMessage.payload.arguments
+          : {}) as Record<string, unknown>;
 
         const toolInfo: ToolInfo = {
           name: toolName,

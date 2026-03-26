@@ -1,4 +1,5 @@
 import { extractThinkContentFromReasoningDetails } from './assistantThink';
+import { detectLocale, formatRelativeTime, translate, type Locale } from './i18n';
 
 export interface ToolInfo {
   name: string;
@@ -118,11 +119,12 @@ export function makeId(): string {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-export function getTitle(meta: string): string {
+export function getTitle(meta: string, locale: Locale = detectLocale()): string {
   try {
-    return JSON.parse(meta).title || '未命名会话';
+    const title = JSON.parse(meta).title;
+    return typeof title === 'string' && title.trim() ? title : translate(locale, 'chat.untitledSession');
   } catch {
-    return '未命名会话';
+    return translate(locale, 'chat.untitledSession');
   }
 }
 
@@ -150,12 +152,9 @@ export function getTaskId(meta: string): string | null {
   }
 }
 
-export function timeLabel(ts: number): string {
-  const diff = Date.now() / 1000 - ts;
-  if (diff < 60) return '刚刚';
-  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
-  return `${Math.floor(diff / 86400)}天前`;
+export function timeLabel(ts: number | null | undefined, locale: Locale = detectLocale()): string {
+  if (typeof ts !== 'number' || !Number.isFinite(ts)) return '';
+  return formatRelativeTime(locale, ts);
 }
 
 export function truncateResult(result: unknown, max = 50000): unknown {

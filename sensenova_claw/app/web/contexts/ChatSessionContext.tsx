@@ -29,7 +29,7 @@ import { extractThinkContentFromReasoningDetails } from '@/lib/assistantThink';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 const WS_RECONNECT_INTERVAL_MS = 1000;
-const WS_MAX_RECONNECT_ATTEMPTS = 10;
+const WS_MAX_RECONNECT_ATTEMPTS = 50;
 const BYPASS_PATHS = ['/login', '/setup'];
 const MAX_PROACTIVE_RESULTS = 50;
 
@@ -116,6 +116,9 @@ export interface ChatSessionContextValue {
   pendingPrefill: PrefillInputPayload | null;
   prefillInput: (value: string | PrefillInputPayload) => void;
   clearPendingPrefill: () => void;
+
+  /** 手动触发 WebSocket 重连 */
+  reconnect: () => void;
 }
 
 export interface RecommendationSendMeta {
@@ -234,6 +237,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [activeInteraction, setActiveInteraction] = useState<PendingInteraction | null>(null);
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
+  const [connectionNonce, setConnectionNonce] = useState(0);
 
   // 右侧面板
   const [rightSteps, setRightSteps] = useState<StepItem[]>([]);
@@ -287,6 +291,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   // 追踪新建但未发消息的空会话，切换离开时自动删除
   const emptySessionIdRef = useRef<string | null>(null);
   const skipNextResetRef = useRef(false);
+  const reloadSequenceRef = useRef(0);
   const shouldActivate = !isLoading && isAuthenticated && !BYPASS_PATHS.includes(pathname || '');
 
   // ── helpers ──
@@ -398,6 +403,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
   const reloadSessionHistory = useCallback(async (sid: string, shouldBind = true) => {
     if (!shouldActivate) return;
+
+    const seq = ++reloadSequenceRef.current;
     setSessionId(sid);
     sessionIdRef.current = sid;
     setMessages([]);
@@ -411,6 +418,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
     try {
       const res = await authFetch(`${API_BASE}/api/sessions/${sid}/events`);
+      if (seq !== reloadSequenceRef.current) return;
+
       const d = await res.json();
       // 竞态保护：异步请求返回时，用户可能已切换到其他 session，丢弃过时结果
       if (sessionIdRef.current !== sid) return;
@@ -423,6 +432,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       toolStepMapRef.current = toolStepMap;
     } catch {
       if (sessionIdRef.current !== sid) return;
+      if (seq !== reloadSequenceRef.current) return;
       setRightSteps([]);
       setRightTaskProgress([]);
       toolStepMapRef.current.clear();
@@ -1044,7 +1054,24 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         activeSocket.close();
       }
     };
-  }, [bindSessionToCurrentSocket, loadSessionList, shouldActivate]);
+  }, [bindSessionToCurrentSocket, connectionNonce, loadSessionList, shouldActivate]);
+
+  const reconnect = useCallback(() => {
+    reconnectAttemptsRef.current = 0;
+    shouldReconnectRef.current = true;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    // 强制关闭旧连接以触发逻辑
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    // 通过 nonce 强制重跑连接 effect，确保断线后手动重连一定会重新发起连接
+    setWsConnected(false);
+    setConnectionNonce((prev) => prev + 1);
+  }, []);
 
   // 初始加载 session 列表
   useEffect(() => {
@@ -1064,7 +1091,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     if (emptyId && emptyId !== excludeSid) {
       emptySessionIdRef.current = null;
       setSessions(prev => prev.filter(s => s.session_id !== emptyId));
-      authFetch(`${API_BASE}/api/sessions/${emptyId}`, { method: 'DELETE' }).catch(() => {});
+      authFetch(`${API_BASE}/api/sessions/${emptyId}`, { method: 'DELETE' }).catch(() => { });
     }
   }, []);
 
@@ -1345,6 +1372,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     pendingPrefill,
     prefillInput,
     clearPendingPrefill,
+    reconnect,
   }), [
     wsConnected, sessionId, switchSession, createSession, deleteSession,
     startNewChat, resetIfNeeded, doCleanupEmptySession, messages, isTyping,
@@ -1352,7 +1380,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     rightSteps, rightTaskProgress, activeInteraction, interactionSubmitting,
     sendQuestionAnswerFn, sendConfirmationResponseFn, handleInteractionTimeoutFn,
     handleSkillInvoke, cancelTurn, globalActivity, wsSend, resolveInteraction,
-    proactiveResults, pendingPrefill, prefillInput, clearPendingPrefill,
+    proactiveResults, pendingPrefill, prefillInput, clearPendingPrefill, reconnect,
   ]);
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;
