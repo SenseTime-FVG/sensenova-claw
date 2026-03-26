@@ -353,4 +353,147 @@ test.describe('chat markdown rendering（mock websocket）', () => {
     await expect(page.locator('input[type="checkbox"]')).toBeChecked();
     await expect(page.getByTestId('session-evil-html')).toHaveCount(0);
   });
+
+  test('chat 页面应只保留同一 turn 的最终 assistant 输出', async ({ page }) => {
+    await page.goto('/chat');
+    await page.waitForFunction(() => Boolean((window as unknown as MockWindow).__mockWs));
+
+    await page.evaluate(() => {
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'session_created',
+        session_id: 'sess_md_dedup_live',
+        payload: { created_at: Date.now() / 1000 },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'llm_result',
+        session_id: 'sess_md_dedup_live',
+        payload: {
+          turn_id: 'turn_dedup_live',
+          content: '工具前草稿',
+          tool_calls: [{ id: 'tc_live_1', name: 'serper_search', arguments: { q: 'multi agent' } }],
+        },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'tool_execution',
+        session_id: 'sess_md_dedup_live',
+        payload: {
+          turn_id: 'turn_dedup_live',
+          tool_call_id: 'tc_live_1',
+          tool_name: 'serper_search',
+          arguments: { q: 'multi agent' },
+        },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'tool_result',
+        session_id: 'sess_md_dedup_live',
+        payload: {
+          turn_id: 'turn_dedup_live',
+          tool_call_id: 'tc_live_1',
+          tool_name: 'serper_search',
+          result: { items: [{ title: 'A' }] },
+          success: true,
+        },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'llm_result',
+        session_id: 'sess_md_dedup_live',
+        payload: {
+          turn_id: 'turn_dedup_live',
+          content: '最终答案只显示一次',
+        },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'turn_completed',
+        session_id: 'sess_md_dedup_live',
+        payload: {
+          turn_id: 'turn_dedup_live',
+          final_response: '最终答案只显示一次',
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByText('最终答案只显示一次', { exact: true })).toHaveCount(1);
+    await expect(page.getByText('工具前草稿', { exact: true })).toHaveCount(0);
+  });
+
+  test('chat 页面历史重建时不应把同一 turn 的草稿和最终答案同时渲染', async ({ page }) => {
+    await page.goto('/chat');
+    await page.waitForFunction(() => Boolean((window as unknown as MockWindow).__mockWs));
+
+    await page.evaluate(() => {
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'session_loaded',
+        session_id: 'sess_md_history',
+        payload: {
+          events: [
+            {
+              event_type: 'user.input',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({ content: '帮我查资料' }),
+            },
+            {
+              event_type: 'llm.call_result',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({
+                response: {
+                  content: '历史草稿',
+                  tool_calls: [{ id: 'tc_history_1', name: 'serper_search', arguments: { q: 'multi agent' } }],
+                },
+              }),
+            },
+            {
+              event_type: 'tool.call_requested',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({
+                tool_call_id: 'tc_history_1',
+                tool_name: 'serper_search',
+                arguments: { q: 'multi agent' },
+              }),
+            },
+            {
+              event_type: 'tool.call_result',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({
+                tool_call_id: 'tc_history_1',
+                tool_name: 'serper_search',
+                result: { items: [{ title: 'A' }] },
+                success: true,
+              }),
+            },
+            {
+              event_type: 'llm.call_result',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({
+                response: {
+                  content: '历史最终答案',
+                },
+              }),
+            },
+            {
+              event_type: 'agent.step_completed',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({
+                result: { content: '历史最终答案' },
+              }),
+            },
+          ],
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByText('历史最终答案', { exact: true })).toHaveCount(1);
+    await expect(page.getByText('历史草稿', { exact: true })).toHaveCount(0);
+  });
 });
