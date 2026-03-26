@@ -347,6 +347,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `/skills` 这类后台页的 Playwright 鉴权比 `/chat` 更脆，单靠 `page.route()` 不一定能稳定覆盖 `AuthProvider/ProtectedRoute` 初始化；更稳的方式是在 `addInitScript` 里直接接管 `window.fetch` 返回认证与页面所需数据。
 
+### 2026-03-26 LLM 连接测试 token 参数补充
+
+成功经验：
+- `/llms` 页面单项 `测试` 按钮若要读取“未保存草稿”配置，最关键的回归断言是直接抓 `/api/config/test-llm` 请求体，确认 `model_id/max_tokens/max_output_tokens` 都来自当前 draft，而不是已保存配置。
+- 对 provider 探活这类轻量接口，单测直接 mock SDK client 并断言最终 `create(...)` 参数最有效，能同时锁住提示词、`max_tokens` 和 `extra_body.max_output_tokens` 的透传行为。
+
+失败/风险经验：
+- 当前环境下 Playwright 即使能拉起 `next dev` 和 headless Chromium，也可能长时间卡住不返回最终结果；浏览器级回归要和进程内/单元测试分层看，不能把这类环境挂起误判成业务失败。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：

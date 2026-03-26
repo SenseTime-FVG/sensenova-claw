@@ -28,7 +28,7 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
         },
         models: {
           mock: { provider: 'mock', model_id: 'mock-agent-v1' },
-          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_output_tokens: 8192 },
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_tokens: 128000, max_output_tokens: 8192 },
         },
         default_model: 'gpt-4o-mini',
       },
@@ -427,6 +427,8 @@ test('llms 页面单项编辑时测试按钮应读取草稿并位于编辑按钮
   await page.getByTestId('provider-toggle-openai').click();
   await page.getByTestId('llm-edit-gpt-4o-mini').click();
   await page.getByTestId('llm-model-id-input-gpt-4o-mini').fill('gpt-4.1-mini-draft');
+  await page.getByTestId('llm-max-tokens-input-gpt-4o-mini').fill('4096');
+  await page.getByTestId('llm-max-output-tokens-input-gpt-4o-mini').fill('1024');
   await page.getByTestId('llm-test-gpt-4o-mini').click();
 
   await expect.poll(async () => {
@@ -444,6 +446,8 @@ test('llms 页面单项编辑时测试按钮应读取草稿并位于编辑按钮
     api_key: 'sk-openai-real',
     base_url: 'https://api.openai.com/v1',
     model_id: 'gpt-4.1-mini-draft',
+    max_tokens: 4096,
+    max_output_tokens: 1024,
   });
 
   const modelIdInput = page.getByTestId('llm-model-id-input-gpt-4o-mini');
@@ -462,6 +466,139 @@ test('llms 页面单项编辑时测试按钮应读取草稿并位于编辑按钮
   expect(inputBox!.x + inputBox!.width).toBeLessThanOrEqual(buttonBox!.x);
   expect(buttonBox!.y).toBeGreaterThan(saveBox!.y + saveBox!.height);
   expect(resultBox!.x).toBeGreaterThanOrEqual(saveBox!.x);
+});
+
+test('llms 页面测试按钮悬停 3 秒后应显示 token 消耗提示', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_tokens: 128000, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.setViewportSize({ width: 1361, height: 900 });
+  await page.getByTestId('provider-toggle-openai').click();
+  const testButton = page.getByTestId('llm-test-gpt-4o-mini');
+  await testButton.hover();
+  await page.waitForTimeout(3100);
+
+  await expect(page.getByTestId('llm-test-tooltip-gpt-4o-mini')).toHaveText('连接测试会消耗少量token');
+});
+
+test('llms 页面测试全部按钮悬停 1 秒后应显示 token 消耗提示', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_tokens: 128000, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.setViewportSize({ width: 1361, height: 900 });
+  const testAllButton = page.getByTestId('test-all-llms');
+  await testAllButton.hover();
+  await page.waitForTimeout(1100);
+
+  await expect(page.getByTestId('bulk-llm-test-tooltip')).toHaveText('连接测试会消耗少量token');
 });
 
 test('llms 页面测试失败时应先显示连接失败状态框，点击后再展示错误浮层，并支持关闭', async ({ page }) => {

@@ -61,6 +61,8 @@ interface BulkModelTestState extends ModelTestResult {
 }
 
 const MAX_BULK_TEST_CONCURRENCY = 10;
+const TEST_TOOLTIP_DELAY_MS = 1000;
+const TEST_TOOLTIP_MESSAGE = '连接测试会消耗少量token';
 
 const PROVIDER_SOURCE_TYPE_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
@@ -113,6 +115,10 @@ export default function LlmsPage() {
   const [bulkTestResults, setBulkTestResults] = useState<Record<string, BulkModelTestState>>({});
   const [openBulkTestErrorModel, setOpenBulkTestErrorModel] = useState<string | null>(null);
   const [hasBulkTestResults, setHasBulkTestResults] = useState(false);
+  const [hoveredTestModel, setHoveredTestModel] = useState<string | null>(null);
+  const [visibleTestTooltipModel, setVisibleTestTooltipModel] = useState<string | null>(null);
+  const [hoveringBulkTestButton, setHoveringBulkTestButton] = useState(false);
+  const [showBulkTestTooltip, setShowBulkTestTooltip] = useState(false);
 
   const loadConfig = () => {
     authFetch(`${API_BASE}/api/config/sections`)
@@ -181,6 +187,36 @@ export default function LlmsPage() {
       document.removeEventListener('pointerdown', handlePointerDown);
     };
   }, [openTestErrorModel]);
+
+  useEffect(() => {
+    if (!hoveredTestModel) {
+      setVisibleTestTooltipModel(null);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setVisibleTestTooltipModel(hoveredTestModel);
+    }, TEST_TOOLTIP_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [hoveredTestModel]);
+
+  useEffect(() => {
+    if (!hoveringBulkTestButton) {
+      setShowBulkTestTooltip(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowBulkTestTooltip(true);
+    }, TEST_TOOLTIP_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [hoveringBulkTestButton]);
 
   const activeProviders = useMemo(() => {
     if (!editingAll || !globalDraft) return providers;
@@ -704,6 +740,8 @@ export default function LlmsPage() {
           api_key: apiKey,
           base_url: provider.base_url || '',
           model_id: model.model_id || modelName,
+          max_tokens: model.max_tokens || 128000,
+          max_output_tokens: model.max_output_tokens || 16384,
         }),
       });
       const data = await res.json();
@@ -1072,16 +1110,36 @@ export default function LlmsPage() {
               </div>
               {hasBulkTestResults ? (
                 <div className="flex flex-col items-stretch gap-2">
-                  <button
-                    type="button"
-                    data-testid="retest-all-llms"
-                    onClick={() => void testAllModels()}
-                    disabled={bulkTesting || Boolean(editingProvider || editingModel || editingDefaultModel)}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-500/30 px-4 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
-                  >
-                    {bulkTesting ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
-                    {bulkTesting ? '测试中...' : '重新测试全部'}
-                  </button>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      data-testid="retest-all-llms"
+                      onClick={() => void testAllModels()}
+                      onMouseEnter={() => setHoveringBulkTestButton(true)}
+                      onMouseLeave={() => {
+                        setHoveringBulkTestButton(false);
+                        setShowBulkTestTooltip(false);
+                      }}
+                      onFocus={() => setHoveringBulkTestButton(true)}
+                      onBlur={() => {
+                        setHoveringBulkTestButton(false);
+                        setShowBulkTestTooltip(false);
+                      }}
+                      disabled={bulkTesting || Boolean(editingProvider || editingModel || editingDefaultModel)}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-500/30 px-4 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+                    >
+                      {bulkTesting ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                      {bulkTesting ? '测试中...' : '重新测试全部'}
+                    </button>
+                    {showBulkTestTooltip ? (
+                      <div
+                        data-testid="bulk-llm-test-tooltip"
+                        className="absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground shadow-lg"
+                      >
+                        {TEST_TOOLTIP_MESSAGE}
+                      </div>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     data-testid="show-all-llms-test-results"
@@ -1092,16 +1150,36 @@ export default function LlmsPage() {
                   </button>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  data-testid="test-all-llms"
-                  onClick={() => void testAllModels()}
-                  disabled={bulkTesting || Boolean(editingProvider || editingModel || editingDefaultModel)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-amber-500/30 px-4 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
-                >
-                  {bulkTesting ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
-                  {bulkTesting ? '测试中...' : '测试全部'}
-                </button>
+                <div className="relative">
+                  <button
+                    type="button"
+                    data-testid="test-all-llms"
+                    onClick={() => void testAllModels()}
+                    onMouseEnter={() => setHoveringBulkTestButton(true)}
+                    onMouseLeave={() => {
+                      setHoveringBulkTestButton(false);
+                      setShowBulkTestTooltip(false);
+                    }}
+                    onFocus={() => setHoveringBulkTestButton(true)}
+                    onBlur={() => {
+                      setHoveringBulkTestButton(false);
+                      setShowBulkTestTooltip(false);
+                    }}
+                    disabled={bulkTesting || Boolean(editingProvider || editingModel || editingDefaultModel)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-amber-500/30 px-4 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+                  >
+                    {bulkTesting ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                    {bulkTesting ? '测试中...' : '测试全部'}
+                  </button>
+                  {showBulkTestTooltip ? (
+                    <div
+                      data-testid="bulk-llm-test-tooltip"
+                      className="absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground shadow-lg"
+                    >
+                      {TEST_TOOLTIP_MESSAGE}
+                    </div>
+                  ) : null}
+                </div>
               )}
             </div>
           </CardHeader>
@@ -1409,20 +1487,40 @@ export default function LlmsPage() {
                                 </button>
                               </div>
                               <div className="flex w-full justify-end">
-                                <button
-                                  type="button"
-                                  data-testid={`llm-test-${modelName}`}
-                                  onClick={() => void testModel(modelName)}
-                                  disabled={testingModel === modelName}
-                                  className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 px-3 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
-                                >
-                                  {testingModel === modelName ? (
-                                    <Loader2 size={16} className="animate-spin" />
-                                  ) : (
-                                    <Zap size={16} />
-                                  )}
-                                  测试
-                                </button>
+                                <div className="relative">
+                                  <button
+                                    type="button"
+                                    data-testid={`llm-test-${modelName}`}
+                                    onClick={() => void testModel(modelName)}
+                                    onMouseEnter={() => setHoveredTestModel(modelName)}
+                                    onMouseLeave={() => {
+                                      setHoveredTestModel((prev) => (prev === modelName ? null : prev));
+                                      setVisibleTestTooltipModel((prev) => (prev === modelName ? null : prev));
+                                    }}
+                                    onFocus={() => setHoveredTestModel(modelName)}
+                                    onBlur={() => {
+                                      setHoveredTestModel((prev) => (prev === modelName ? null : prev));
+                                      setVisibleTestTooltipModel((prev) => (prev === modelName ? null : prev));
+                                    }}
+                                    disabled={testingModel === modelName}
+                                    className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 px-3 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+                                  >
+                                    {testingModel === modelName ? (
+                                      <Loader2 size={16} className="animate-spin" />
+                                    ) : (
+                                      <Zap size={16} />
+                                    )}
+                                    测试
+                                  </button>
+                                  {visibleTestTooltipModel === modelName ? (
+                                    <div
+                                      data-testid={`llm-test-tooltip-${modelName}`}
+                                      className="absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground shadow-lg"
+                                    >
+                                      {TEST_TOOLTIP_MESSAGE}
+                                    </div>
+                                  ) : null}
+                                </div>
                               </div>
                               {testResults[modelName] && (
                                 <div className="relative flex justify-end self-end" data-llm-test-error-scope="true">
