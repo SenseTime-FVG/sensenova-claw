@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from sensenova_claw.adapters.llm.base import LLMProvider
+from sensenova_claw.adapters.llm.base import LLMProvider, merge_sampling_extra_body
 
 
 async def test_call_raises_not_implemented() -> None:
@@ -36,3 +36,9 @@ def test_base_class_can_be_subclassed() -> None:
 
     provider = MyProvider()
     assert isinstance(provider, LLMProvider)
+
+
+def test_merge_sampling_extra_body_allows_explicit_key_removal() -> None:
+    merged = merge_sampling_extra_body({"top_k": None, "reasoning_effort": "medium"})
+
+    assert merged == {"top_p": 0.95, "reasoning_effort": "medium"}

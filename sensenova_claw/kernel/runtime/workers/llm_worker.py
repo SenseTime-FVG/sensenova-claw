@@ -54,15 +54,92 @@ def _normalize_llm_error(provider_name: str, model: str, error_message: str) -> 
 
     match = re.search(r"Range of max_tokens should be \[(\d+),\s*(\d+)\]", error_message)
     alt_match = re.search(r"does not support max tokens >\s*(\d+)", error_message)
-    if match or alt_match:
-        limit = int(match.group(2)) if match else int(alt_match.group(1))
+    cloudsway_match = re.search(r"supports at most\s*(\d+)\s*completion tokens", error_message, flags=re.IGNORECASE)
+    gemini_range_match = re.search(
+        r"supported range is from\s*(\d+)\s*\(inclusive\)\s*to\s*(\d+)\s*\(exclusive\)",
+        error_message,
+        flags=re.IGNORECASE,
+    )
+    if match or alt_match or cloudsway_match or gemini_range_match:
+        if match:
+            limit = int(match.group(2))
+        elif alt_match:
+            limit = int(alt_match.group(1))
+        elif gemini_range_match:
+            limit = int(gemini_range_match.group(2)) - 1
+        else:
+            limit = int(cloudsway_match.group(1))
         context["limit"] = limit
         normalized["error_code"] = "max_tokens_out_of_range"
         normalized["user_message"] = (
             f"当前模型允许的最大输出长度超限，最大不能超过 {limit}。"
             "请调小 max_tokens 或模型输出长度配置后重试。"
         )
+
+    unsupported_params = _extract_unsupported_parameters(error_message)
+    if unsupported_params:
+        context["unsupported_params"] = unsupported_params
+        normalized["error_code"] = "unsupported_parameters"
+        normalized["user_message"] = (
+            "当前模型或网关不支持以下请求参数："
+            f"{', '.join(unsupported_params)}。"
+            "系统会尝试自动移除后重试。"
+        )
+
+    conflicting_params = _extract_conflicting_parameters(error_message)
+    if conflicting_params:
+        context["conflicting_params"] = conflicting_params
+        normalized["error_code"] = "conflicting_parameters"
+        normalized["user_message"] = (
+            "当前模型或网关不允许同时指定以下参数："
+            f"{', '.join(conflicting_params)}。"
+            "系统会尝试仅保留第一个参数后重试。"
+        )
     return normalized
+
+
+def _extract_unsupported_parameters(error_message: str) -> list[str]:
+    """从错误消息中提取不支持的参数名。"""
+    normalized_message = error_message.replace("\\'", "'").replace('\\"', '"')
+    candidates: list[str] = []
+
+    single_patterns = [
+        r"Unknown parameter:\s*['\"]([^'\"]+)['\"]",
+        r"Unsupported parameter:\s*['\"]([^'\"]+)['\"]",
+    ]
+    for pattern in single_patterns:
+        candidates.extend(re.findall(pattern, normalized_message, flags=re.IGNORECASE))
+
+    list_patterns = [
+        r"Unknown parameters:\s*\[([^\]]+)\]",
+        r"Unsupported parameters:\s*\[([^\]]+)\]",
+    ]
+    for pattern in list_patterns:
+        for raw_group in re.findall(pattern, normalized_message, flags=re.IGNORECASE):
+            candidates.extend(re.findall(r"['\"]([^'\"]+)['\"]", raw_group))
+
+    if re.search(r'"code"\s*:\s*"unknown_parameter"', normalized_message, flags=re.IGNORECASE):
+        candidates.extend(re.findall(r'"param"\s*:\s*"([^"]+)"', normalized_message, flags=re.IGNORECASE))
+
+    unique_params: list[str] = []
+    for name in candidates:
+        param = str(name).strip()
+        if param and param not in unique_params:
+            unique_params.append(param)
+    return unique_params
+
+
+def _extract_conflicting_parameters(error_message: str) -> list[str]:
+    """从错误消息中提取互斥参数名，保留原始顺序。"""
+    normalized_message = error_message.replace("\\'", "'").replace('\\"', '"')
+    match = re.search(
+        r"[`'\"]?([a-zA-Z_][a-zA-Z0-9_]*)[`'\"]?\s+and\s+[`'\"]?([a-zA-Z_][a-zA-Z0-9_]*)[`'\"]?\s+cannot both be specified",
+        normalized_message,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return []
+    return [match.group(1), match.group(2)]
 
 
 async def _call_llm_provider(
@@ -535,7 +612,12 @@ class LLMSessionWorker(SessionWorker):
     ) -> _RequestBlockSuccess | _RequestBlockFailure:
         """执行单个 provider:model 的完整请求块，内部可做同目标重试。"""
         attempt_max_tokens = max_tokens
+        attempt_temperature = temperature
+        attempt_extra_body = dict(extra_body) if extra_body else None
         retried_for_max_tokens = False
+        unsupported_retry_count = 0
+        conflicting_retry_count = 0
+        retry_actions: list[dict[str, Any]] = []
 
         while True:
             t0 = time.monotonic()
@@ -553,9 +635,9 @@ class LLMSessionWorker(SessionWorker):
                         model=model,
                         messages=messages,
                         tools=tools,
-                        temperature=temperature,
+                        temperature=attempt_temperature,
                         max_tokens=attempt_max_tokens,
-                        extra_body=extra_body,
+                        extra_body=attempt_extra_body,
                         should_stop=should_stop,
                     )
                 else:
@@ -564,9 +646,9 @@ class LLMSessionWorker(SessionWorker):
                         model=model,
                         messages=messages,
                         tools=tools,
-                        temperature=temperature,
+                        temperature=attempt_temperature,
                         max_tokens=attempt_max_tokens,
-                        extra_body=extra_body,
+                        extra_body=attempt_extra_body,
                     )
                 duration_ms = int((time.monotonic() - t0) * 1000)
 
@@ -575,12 +657,10 @@ class LLMSessionWorker(SessionWorker):
                     success_input["provider"] = provider_name
                     success_input["model"] = model
                     success_input["max_tokens"] = attempt_max_tokens
-                    if retried_for_max_tokens:
-                        success_input["auto_retry"] = {
-                            "reason": "max_tokens_out_of_range",
-                            "original_max_tokens": max_tokens,
-                            "retry_max_tokens": attempt_max_tokens,
-                        }
+                    success_input["temperature"] = attempt_temperature
+                    success_input["extra_body"] = attempt_extra_body
+                    if retry_actions:
+                        success_input["auto_retry"] = list(retry_actions)
                     _save_llm_debug(
                         session_id=event.session_id,
                         llm_call_id=llm_call_id,
@@ -611,6 +691,13 @@ class LLMSessionWorker(SessionWorker):
                     and isinstance(attempt_max_tokens, int)
                     and attempt_max_tokens > limit
                 ):
+                    retry_actions.append(
+                        {
+                            "reason": "max_tokens_out_of_range",
+                            "original_max_tokens": max_tokens,
+                            "retry_max_tokens": limit,
+                        }
+                    )
                     retried_for_max_tokens = True
                     logger.warning(
                         "llm call max_tokens out of range, retry with capped value provider=%s model=%s requested=%s limit=%s",
@@ -633,6 +720,98 @@ class LLMSessionWorker(SessionWorker):
                     attempt_max_tokens = limit
                     continue
 
+                unsupported_params = normalized_error["context"].get("unsupported_params") or []
+                removable_params = [
+                    param for param in unsupported_params
+                    if isinstance(attempt_extra_body, dict) and param in attempt_extra_body
+                ]
+                if (
+                    normalized_error["error_code"] == "unsupported_parameters"
+                    and removable_params
+                    and unsupported_retry_count < 3
+                ):
+                    unsupported_retry_count += 1
+                    logger.warning(
+                        "llm call has unsupported parameters, retry without params provider=%s model=%s params=%s attempt=%s",
+                        provider_name,
+                        model,
+                        removable_params,
+                        unsupported_retry_count,
+                    )
+                    await _publish_session_notification(
+                        self.bus,
+                        session_id=event.session_id,
+                        turn_id=event.turn_id,
+                        trace_id=llm_call_id,
+                        title="LLM 参数调整",
+                        body=(
+                            f"{_format_target(provider_name, model)} 不支持参数 "
+                            f"{', '.join(removable_params)}，已自动移除后重试。"
+                        ),
+                    )
+                    retry_actions.append(
+                        {
+                            "reason": "unsupported_parameters",
+                            "removed_params": list(removable_params),
+                            "retry_round": unsupported_retry_count,
+                        }
+                    )
+                    next_extra_body = dict(attempt_extra_body)
+                    for param in removable_params:
+                        next_extra_body[param] = None
+                    attempt_extra_body = next_extra_body
+                    continue
+
+                conflicting_params = normalized_error["context"].get("conflicting_params") or []
+                removable_conflicting_params = list(conflicting_params[1:]) if len(conflicting_params) > 1 else []
+                if (
+                    normalized_error["error_code"] == "conflicting_parameters"
+                    and removable_conflicting_params
+                    and conflicting_retry_count < 3
+                ):
+                    conflicting_retry_count += 1
+                    removed_params: list[str] = []
+                    next_extra_body = dict(attempt_extra_body) if attempt_extra_body else {}
+                    for param in removable_conflicting_params:
+                        if param == "temperature":
+                            attempt_temperature = None
+                            removed_params.append(param)
+                            continue
+                        if param in next_extra_body:
+                            next_extra_body[param] = None
+                            removed_params.append(param)
+
+                    if removed_params:
+                        logger.warning(
+                            "llm call has conflicting parameters, retry keeping first param provider=%s model=%s params=%s kept=%s attempt=%s",
+                            provider_name,
+                            model,
+                            removed_params,
+                            conflicting_params[0],
+                            conflicting_retry_count,
+                        )
+                        await _publish_session_notification(
+                            self.bus,
+                            session_id=event.session_id,
+                            turn_id=event.turn_id,
+                            trace_id=llm_call_id,
+                            title="LLM 参数调整",
+                            body=(
+                                f"{_format_target(provider_name, model)} 的参数 "
+                                f"{', '.join(conflicting_params)} 互斥，已仅保留 {conflicting_params[0]} 后重试。"
+                            ),
+                        )
+                        retry_actions.append(
+                            {
+                                "reason": "conflicting_parameters",
+                                "kept_param": conflicting_params[0],
+                                "removed_params": list(removed_params),
+                                "retry_round": conflicting_retry_count,
+                            }
+                        )
+                        attempt_extra_body = next_extra_body or None
+                        continue
+
                 duration_ms = int((time.monotonic() - t0) * 1000)
                 logger.exception(
                     "llm call failed provider=%s model=%s",
@@ -645,12 +824,10 @@ class LLMSessionWorker(SessionWorker):
                     failed_input["provider"] = provider_name
                     failed_input["model"] = model
                     failed_input["max_tokens"] = attempt_max_tokens
-                    if retried_for_max_tokens:
-                        failed_input["auto_retry"] = {
-                            "reason": "max_tokens_out_of_range",
-                            "original_max_tokens": max_tokens,
-                            "retry_max_tokens": attempt_max_tokens,
-                        }
+                    failed_input["temperature"] = attempt_temperature
+                    failed_input["extra_body"] = attempt_extra_body
+                    if retry_actions:
+                        failed_input["auto_retry"] = list(retry_actions)
                     _save_llm_debug(
                         session_id=event.session_id,
                         llm_call_id=llm_call_id,

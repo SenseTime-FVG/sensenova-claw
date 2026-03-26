@@ -110,10 +110,11 @@ def test_toggle_enabled(client):
     assert resp.status_code == 200
     assert resp.json()["enabled"] is False
 
-    # 禁用后列表中不应出现
+    # 禁用后列表中仍应出现，但状态为 disabled
     resp = client.get("/api/skills")
-    names = [s["name"] for s in resp.json()]
-    assert "test-skill" not in names
+    items = {s["name"]: s for s in resp.json()}
+    assert "test-skill" in items
+    assert items["test-skill"]["enabled"] is False
 
     # 重新启用
     resp = client.patch("/api/skills/test-skill", json={"enabled": True})
