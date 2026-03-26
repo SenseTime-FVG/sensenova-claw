@@ -64,7 +64,9 @@ def secret_ref_from_path(path: str) -> str:
 
 class GetSecretTool(Tool):
     name = "get_secret"
-    description = "每次调用skill/tool/plugin需要secret(如api_key,api_secret)时必须调用，从 secret store 读取 skills/tools/plugins 的 secret"
+    description = ("从 secret store 读取 skills/tools/plugins 的 secret。"
+                   "每次调用skill/tool/plugin需要secret(如api_key,api_secret)时必须调用。"
+                   "每次需要从环境变量/config文件获取skill/tool/plugin的secret(如api_key,api_secret) 时必须调用")
     risk_level = ToolRiskLevel.MEDIUM
     parameters = {
         "type": "object",
@@ -97,7 +99,9 @@ class GetSecretTool(Tool):
 
 class WriteSecretTool(Tool):
     name = "write_secret"
-    description = "将 skills/tools/plugins 的 secret(如api_key,api_secret) 写入 secret store。每次用户给出 skills/tools/plugins 的 secret必须调用。如果是`get_secret` tool获取的secret不需要调用该工具写入。"
+    description = ("将 skills/tools/plugins 的 secret(如api_key,api_secret) 写入 secret store。"
+                   "每次用户给出 skills/tools/plugins 的 secret必须调用。"
+                   "如果是`get_secret` tool获取的secret不需要调用该工具写入。")
     risk_level = ToolRiskLevel.MEDIUM
     parameters = {
         "type": "object",
