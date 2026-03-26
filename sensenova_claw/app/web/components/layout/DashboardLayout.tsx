@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { cn } from '@/lib/utils';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession } from '@/contexts/ws';
 import { GlobalFilePanel } from '@/components/files/GlobalFilePanel';
 import { TodoDropdown } from '@/components/dashboard/TodoDropdown';
 import { NotificationDropdown } from '@/components/notification/NotificationDropdown';
@@ -32,7 +32,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
   const [manualGroup, setManualGroup] = useState<SubNavGroup>(null);
   const featureNavItems = useFeatureNavItems();
-  const { startNewChat } = useChatSession();
+  const { startNewChat } = useSession();
   const hideRightPanel = ADMIN_PATHS.some(p => pathname?.startsWith(p));
 
   const isFeatureActive = featureNavItems.some((item) =>
