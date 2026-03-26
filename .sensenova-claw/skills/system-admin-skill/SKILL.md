@@ -258,6 +258,36 @@ mkdir -p {SENSENOVA_CLAW_HOME}/skills/{skill-name}
 
 写入 `SKILL.md`（需包含 YAML frontmatter `name` + `description`）。
 
+### Skill 环境配置检测
+
+检测 Skills 所需的环境配置
+
+**你必须严格按照以下流程进行，不要自己猜**
+#### 执行流程:
+1. 列出所有的skill，写一个检测的todolist，必须包括所有的skill 
+
+```todolist
+- 检测 <skill1_name> [未检测]
+- 检测 <skill2_name> [未检测]
+...
+```  
+
+2. 按`todolist`串行(不要并发读取多个SKILL，一个一个检测)依次对每一个`[未检测]`skill执行以下操作(不要自己猜测哪些可能需要检查，检查所有的skill):  
+   - (1) 使用`read_file` tool 读取`SKILL.md`，列出使用该skill所需的所有环境变量，例如:`MINERU_TOKEN`,`OPENAI_API_KEY`  
+   - (2) 判断该环境变量是否已配置，严格按以下顺序执行判断: (i)使用`get_secret`获取对应key；(ii)检查当前环境是否配置该变量；(iii)检查SKILL.md是否有其他路径存储该变量  
+   - (3) 记录未配置的环境变量  
+   - (4) 将 该skill 状态改为 `[finish]`
+类似
+```todolist
+- 检测 <skill1_name> [finish] - [未配置环境变量: None]
+- 检测 <skill1_name> [finish] - [未配置环境变量: <API_KEY1>, <API_KEY2>, ...]
+- 检测 <skill2_name> [未检测]
+...
+``` 
+3. 汇总所有未配置的环境变量(空字符串视为未配置)
+4. 如果用户给出一些环境变量的配置，使用`write_secret`写入，若写入失败，尝试写入当前环境
+
+> 当前环境常用的路径`{SENSENOVA_CLAW_HOME}/.env` or `{PROJECT_ROOT}/.env`。`{SENSENOVA_CLAW_HOME}/.env`优先
 ---
 
 ## 6. Plugin 管理
