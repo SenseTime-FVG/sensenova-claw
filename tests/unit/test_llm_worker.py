@@ -147,6 +147,28 @@ class _RetryableGeminiCloudswayMaxTokensProvider(LLMProvider):
         }
 
 
+class _RetryableConflictingSamplingProvider(LLMProvider):
+    """首次报 temperature/top_p 互斥，第二次成功。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def call(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            raise RuntimeError(
+                'Error code: 400 - {\'error\': {\'code\': \'400\', \'message\': '
+                '\'{"message":"temperature and top_p cannot both be specified for this model. '
+                'Please use only one."}\'}}'
+            )
+        return {
+            "content": "冲突参数重试成功",
+            "tool_calls": [],
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+
 class _RetryableMaxTokensProvider(LLMProvider):
     """首次报 max_tokens 越界，第二次成功。"""
 
@@ -748,6 +770,44 @@ class TestLLMWorkerError:
         assert provider.calls[0]["max_tokens"] == 8192000
         assert provider.calls[1]["max_tokens"] == 65536
 
+    async def test_conflicting_sampling_parameters_retry_keeps_first_parameter(self, private_bus, public_bus):
+        provider = _RetryableConflictingSamplingProvider()
+        factory = LLMFactory()
+        factory._providers["anthropic-cloudsway"] = provider
+        runtime = _SimpleLLMRuntime(factory)
+        worker = LLMSessionWorker("s1", private_bus, runtime)
+
+        collected, done, task = await _collect_from_bus(public_bus, 4)
+
+        event = EventEnvelope(
+            type=LLM_CALL_REQUESTED,
+            session_id="s1",
+            turn_id="t1",
+            payload={
+                "llm_call_id": "llm_retry_conflicting_sampling",
+                "provider": "anthropic-cloudsway",
+                "model": "MaaS_Cl_Sonnet_4.6_20260217",
+                "messages": [{"role": "user", "content": "你好"}],
+                "extra_body": {"top_p": 0.95},
+                "stream": False,
+            },
+        )
+        await worker._handle(event)
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        types = [e.type for e in collected]
+        assert ERROR_RAISED not in types
+        notification = [e for e in collected if e.type == NOTIFICATION_SESSION][0]
+        assert "temperature, top_p 互斥" in notification.payload["body"]
+        assert "仅保留 temperature" in notification.payload["body"]
+        result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+        assert result.payload["response"]["content"] == "冲突参数重试成功"
+        assert provider.calls[0]["temperature"] == 1.0
+        assert provider.calls[0]["extra_body"] == {"top_p": 0.95, "top_k": 20}
+        assert provider.calls[1]["temperature"] == 1.0
+        assert provider.calls[1]["extra_body"] == {"top_p": None, "top_k": 20}
+
     async def test_unknown_parameters_are_removed_in_one_retry(self, private_bus, public_bus):
         provider = _RetryableUnknownParamsProvider()
         factory = LLMFactory()
@@ -836,6 +896,18 @@ def test_extract_unsupported_parameters_from_openai_nested_error_message():
     )
 
     assert _extract_unsupported_parameters(message) == ["top_k"]
+
+
+def test_extract_conflicting_parameters_with_backticks():
+    message = (
+        'Error code: 400 - {\'error\': {\'code\': \'400\', \'message\': '
+        '\'{"message":"`temperature` and `top_p` cannot both be specified for this model. '
+        'Please use only one."}\'}}'
+    )
+
+    from sensenova_claw.kernel.runtime.workers.llm_worker import _extract_conflicting_parameters
+
+    assert _extract_conflicting_parameters(message) == ["temperature", "top_p"]
 
     async def test_provider_failure_falls_back_to_default_model_with_notification(self, private_bus, public_bus):
         original = deepcopy(config.data)

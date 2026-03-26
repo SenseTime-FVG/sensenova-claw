@@ -85,6 +85,16 @@ def _normalize_llm_error(provider_name: str, model: str, error_message: str) -> 
             f"{', '.join(unsupported_params)}。"
             "系统会尝试自动移除后重试。"
         )
+
+    conflicting_params = _extract_conflicting_parameters(error_message)
+    if conflicting_params:
+        context["conflicting_params"] = conflicting_params
+        normalized["error_code"] = "conflicting_parameters"
+        normalized["user_message"] = (
+            "当前模型或网关不允许同时指定以下参数："
+            f"{', '.join(conflicting_params)}。"
+            "系统会尝试仅保留第一个参数后重试。"
+        )
     return normalized
 
 
@@ -117,6 +127,19 @@ def _extract_unsupported_parameters(error_message: str) -> list[str]:
         if param and param not in unique_params:
             unique_params.append(param)
     return unique_params
+
+
+def _extract_conflicting_parameters(error_message: str) -> list[str]:
+    """从错误消息中提取互斥参数名，保留原始顺序。"""
+    normalized_message = error_message.replace("\\'", "'").replace('\\"', '"')
+    match = re.search(
+        r"[`'\"]?([a-zA-Z_][a-zA-Z0-9_]*)[`'\"]?\s+and\s+[`'\"]?([a-zA-Z_][a-zA-Z0-9_]*)[`'\"]?\s+cannot both be specified",
+        normalized_message,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return []
+    return [match.group(1), match.group(2)]
 
 
 async def _call_llm_provider(
@@ -589,9 +612,11 @@ class LLMSessionWorker(SessionWorker):
     ) -> _RequestBlockSuccess | _RequestBlockFailure:
         """执行单个 provider:model 的完整请求块，内部可做同目标重试。"""
         attempt_max_tokens = max_tokens
+        attempt_temperature = temperature
         attempt_extra_body = dict(extra_body) if extra_body else None
         retried_for_max_tokens = False
         unsupported_retry_count = 0
+        conflicting_retry_count = 0
         retry_actions: list[dict[str, Any]] = []
 
         while True:
@@ -610,7 +635,7 @@ class LLMSessionWorker(SessionWorker):
                         model=model,
                         messages=messages,
                         tools=tools,
-                        temperature=temperature,
+                        temperature=attempt_temperature,
                         max_tokens=attempt_max_tokens,
                         extra_body=attempt_extra_body,
                         should_stop=should_stop,
@@ -621,7 +646,7 @@ class LLMSessionWorker(SessionWorker):
                         model=model,
                         messages=messages,
                         tools=tools,
-                        temperature=temperature,
+                        temperature=attempt_temperature,
                         max_tokens=attempt_max_tokens,
                         extra_body=attempt_extra_body,
                     )
@@ -632,6 +657,7 @@ class LLMSessionWorker(SessionWorker):
                     success_input["provider"] = provider_name
                     success_input["model"] = model
                     success_input["max_tokens"] = attempt_max_tokens
+                    success_input["temperature"] = attempt_temperature
                     success_input["extra_body"] = attempt_extra_body
                     if retry_actions:
                         success_input["auto_retry"] = list(retry_actions)
@@ -736,6 +762,56 @@ class LLMSessionWorker(SessionWorker):
                     attempt_extra_body = next_extra_body
                     continue
 
+                conflicting_params = normalized_error["context"].get("conflicting_params") or []
+                removable_conflicting_params = list(conflicting_params[1:]) if len(conflicting_params) > 1 else []
+                if (
+                    normalized_error["error_code"] == "conflicting_parameters"
+                    and removable_conflicting_params
+                    and conflicting_retry_count < 3
+                ):
+                    conflicting_retry_count += 1
+                    removed_params: list[str] = []
+                    next_extra_body = dict(attempt_extra_body) if attempt_extra_body else {}
+                    for param in removable_conflicting_params:
+                        if param == "temperature":
+                            attempt_temperature = None
+                            removed_params.append(param)
+                            continue
+                        if param in next_extra_body:
+                            next_extra_body[param] = None
+                            removed_params.append(param)
+
+                    if removed_params:
+                        logger.warning(
+                            "llm call has conflicting parameters, retry keeping first param provider=%s model=%s params=%s kept=%s attempt=%s",
+                            provider_name,
+                            model,
+                            removed_params,
+                            conflicting_params[0],
+                            conflicting_retry_count,
+                        )
+                        await _publish_session_notification(
+                            self.bus,
+                            session_id=event.session_id,
+                            turn_id=event.turn_id,
+                            trace_id=llm_call_id,
+                            title="LLM 参数调整",
+                            body=(
+                                f"{_format_target(provider_name, model)} 的参数 "
+                                f"{', '.join(conflicting_params)} 互斥，已仅保留 {conflicting_params[0]} 后重试。"
+                            ),
+                        )
+                        retry_actions.append(
+                            {
+                                "reason": "conflicting_parameters",
+                                "kept_param": conflicting_params[0],
+                                "removed_params": list(removed_params),
+                                "retry_round": conflicting_retry_count,
+                            }
+                        )
+                        attempt_extra_body = next_extra_body or None
+                        continue
+
                 duration_ms = int((time.monotonic() - t0) * 1000)
                 logger.exception(
                     "llm call failed provider=%s model=%s",
@@ -748,6 +824,7 @@ class LLMSessionWorker(SessionWorker):
                     failed_input["provider"] = provider_name
                     failed_input["model"] = model
                     failed_input["max_tokens"] = attempt_max_tokens
+                    failed_input["temperature"] = attempt_temperature
                     failed_input["extra_body"] = attempt_extra_body
                     if retry_actions:
                         failed_input["auto_retry"] = list(retry_actions)

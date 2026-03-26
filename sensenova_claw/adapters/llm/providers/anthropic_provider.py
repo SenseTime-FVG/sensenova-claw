@@ -43,9 +43,10 @@ class AnthropicProvider(LLMProvider):
         req: dict[str, Any] = {
             "model": model,
             "messages": normalized_messages,
-            "temperature": temperature,
             "max_tokens": max_tokens or 4096,
         }
+        if temperature is not None:
+            req["temperature"] = temperature
 
         if system_prompt:
             req["system"] = system_prompt
@@ -99,9 +100,10 @@ class AnthropicProvider(LLMProvider):
         req: dict[str, Any] = {
             "model": model,
             "messages": normalized_messages,
-            "temperature": temperature,
             "max_tokens": max_tokens or 4096,
         }
+        if temperature is not None:
+            req["temperature"] = temperature
         if system_prompt:
             req["system"] = system_prompt
         if tools:
