@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+# 确保同目录模块可导入
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from search_fusion import assess_insufficiency
 

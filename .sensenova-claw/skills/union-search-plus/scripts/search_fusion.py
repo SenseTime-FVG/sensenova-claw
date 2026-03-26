@@ -117,7 +117,19 @@ def _source_name(item: dict[str, Any]) -> str:
 
 
 def _tokenize(text: str) -> list[str]:
-    return [t for t in re.split(r"[^a-zA-Z0-9\u4e00-\u9fff]+", text.lower()) if t]
+    """分词：英文按空白/标点拆分，中文按 bigram 拆分以保留语义。"""
+    tokens: list[str] = []
+    # 先提取英文/数字 token
+    tokens.extend(re.findall(r"[a-zA-Z0-9]+", text.lower()))
+    # 中文部分用 bigram（二元组）保留短语语义
+    cjk_chars = re.findall(r"[\u4e00-\u9fff]+", text)
+    for segment in cjk_chars:
+        if len(segment) == 1:
+            tokens.append(segment)
+        else:
+            for i in range(len(segment) - 1):
+                tokens.append(segment[i : i + 2])
+    return [t for t in tokens if t]
 
 
 
@@ -230,11 +242,18 @@ def assess_insufficiency(
     min_valid_evidence: int,
 ) -> dict[str, Any]:
     """判定主链结果是否不足。"""
-    sources = {
-        _source_name(item)
-        for item in items
-        if isinstance(item, dict) and (_source_name(item) != "unknown" or extract_link(item))
-    }
+    # 用 (来源名, 域名) 作为去重键，避免多个 unknown 来源被合并成一个
+    source_keys: set[tuple[str, str]] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = _source_name(item)
+        link = extract_link(item)
+        if name == "unknown" and not link:
+            continue
+        # unknown 来源按域名区分
+        domain = urlparse(link).netloc.casefold() if link else ""
+        source_keys.add((name, domain) if name == "unknown" else (name, ""))
     valid_evidence = [
         item
         for item in items
@@ -242,7 +261,7 @@ def assess_insufficiency(
     ]
 
     metrics = CoverageMetrics(
-        source_count=len(sources),
+        source_count=len(source_keys),
         topic_coverage=_topic_coverage(valid_evidence, query),
         valid_evidence_count=len(valid_evidence),
     )
