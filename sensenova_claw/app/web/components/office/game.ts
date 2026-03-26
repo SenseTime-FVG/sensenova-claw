@@ -31,8 +31,8 @@ export class OfficeScene extends Phaser.Scene {
     // 背景
     this.load.image('office_bg', `${base}/office_bg_small.webp`);
     // 主角
-    this.load.spritesheet('star_idle', `${base}/icon.png`, { frameWidth: 256, frameHeight: 256 });
-    this.load.spritesheet('star_working', `${base}/icon.png`, { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('star_idle', `${base}/icon.png`, { frameWidth: 128, frameHeight: 128 });
+    this.load.spritesheet('star_working', `${base}/icon.png`, { frameWidth: 128, frameHeight: 128 });
     // 家具
     this.load.image('sofa_idle', `${base}/sofa-idle-v3.png`);
     this.load.image('desk', `${base}/desk-v3.webp`);
