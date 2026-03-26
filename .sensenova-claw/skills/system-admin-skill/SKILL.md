@@ -13,9 +13,11 @@ description: Sensenova-Claw 系统运维管理技能，涵盖 LLM 配置、Agent
 
 ```
 {SENSENOVA_CLAW_HOME}/
+├── config.yml                  # 主配置文件
 ├── agents/{id}/
-│   └── SYSTEM_PROMPT.md        # Agent 系统提示词（必须放此文件）
-├── skills/{skill-name}/
+│   └── AGENTS.md               # Agent role prompt
+├── workdir/{id}/               # 运行时工作区
+├── skills/{skill-name}/        # 用户 skill
 │   └── SKILL.md
 ├── skills_state.json           # Skill 启用/禁用状态
 └── .agent_preferences.json     # Agent 工具/技能偏好
@@ -25,9 +27,12 @@ description: Sensenova-Claw 系统运维管理技能，涵盖 LLM 配置、Agent
 
 ```
 {PROJECT_ROOT}/
-├── config.yml                  # 主配置文件
-├── var/                        # 运行时数据（数据库等）
-└── workspace/                  # 运行时工作区
+└─.sensenova-claw/                  # 运行时工作区
+      ├── skills/{skill-name}/      # 内置 skill
+      │      └── SKILL.md
+      └── agents/{id}/              # 内置 Agent 
+             ├── AGENTS.md         
+             └── SYSTEM_PROMPT.md   # Agent 系统提示词（必须放此文件）
 ```
 
 ---
