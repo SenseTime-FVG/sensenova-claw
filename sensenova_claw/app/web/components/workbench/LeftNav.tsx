@@ -51,33 +51,33 @@ function RecentChatItem({
         {/* 树形连线 */}
         <div className="w-6 shrink-0 flex flex-col items-center">
           <div className={cn(
-            'w-px flex-1 bg-indigo-300/40 dark:bg-indigo-500/30',
+            'w-px flex-1 bg-indigo-300/40 dark:bg-indigo-400/30',
             isLast && 'max-h-[50%]',
           )} />
           {isLast && <div className="flex-1" />}
         </div>
         <div className="flex items-center -ml-[3px]">
-          <div className="w-3 h-px bg-indigo-300/40 dark:bg-indigo-500/30" />
+          <div className="w-3 h-px bg-indigo-300/40 dark:bg-indigo-400/30" />
         </div>
         <div
           onClick={onClick}
           className={cn(
             'flex items-center gap-2 flex-1 min-w-0 px-2.5 py-2 rounded-lg cursor-pointer transition-all group',
             isActive
-              ? 'bg-indigo-100/80 text-foreground shadow-sm dark:bg-indigo-900/30'
-              : 'hover:bg-indigo-50/60 text-foreground/70 dark:hover:bg-indigo-900/10',
+              ? 'bg-indigo-100/80 text-indigo-900 shadow-sm dark:bg-indigo-800/40 dark:text-indigo-100'
+              : 'hover:bg-indigo-50/60 text-foreground/70 dark:hover:bg-indigo-800/20 dark:text-foreground/80',
           )}
         >
           <div className={cn(
             'w-1.5 h-1.5 rounded-full shrink-0',
-            isActive ? 'bg-indigo-500' : 'bg-indigo-300/60 dark:bg-indigo-500/40',
+            isActive ? 'bg-indigo-500 dark:bg-indigo-400' : 'bg-indigo-300/60 dark:bg-indigo-400/50',
           )} />
           <div className="flex-1 min-w-0">
             <div className="truncate text-[11px] font-medium">{title}</div>
             <div className="flex items-center gap-1 mt-0.5">
-              <span className="text-[9px] text-muted-foreground/60 truncate">{agentName}</span>
-              <span className="text-[9px] text-muted-foreground/30">·</span>
-              <span className="text-[9px] text-muted-foreground/50 shrink-0">{timeLabel(session.last_active)}</span>
+              <span className="text-[9px] text-muted-foreground/60 dark:text-muted-foreground/70 truncate">{agentName}</span>
+              <span className="text-[9px] text-muted-foreground/30 dark:text-muted-foreground/40">·</span>
+              <span className="text-[9px] text-muted-foreground/50 dark:text-muted-foreground/60 shrink-0">{timeLabel(session.last_active)}</span>
             </div>
           </div>
           <button
@@ -103,8 +103,8 @@ function RecentChatItem({
       className={cn(
         'flex items-start gap-2.5 px-3 py-3 rounded-xl cursor-pointer transition-all group',
         isActive
-          ? 'bg-blue-100 text-foreground border border-blue-200 shadow-sm dark:bg-blue-900/40 dark:border-blue-800'
-          : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
+          ? 'bg-blue-100 text-blue-900 border border-blue-200 shadow-sm dark:bg-blue-800/40 dark:text-blue-100 dark:border-blue-700/50'
+          : 'hover:bg-muted/60 text-foreground/80 border border-transparent dark:text-foreground/90',
       )}
     >
       <MessageSquare className={cn(
@@ -168,7 +168,7 @@ function ParentSessionGroup({
   return (
     <div className={cn(
       'rounded-xl transition-colors',
-      expanded && 'bg-indigo-50/40 dark:bg-indigo-950/20 pb-1.5',
+      expanded && 'bg-indigo-50/40 dark:bg-indigo-900/25 pb-1.5',
     )}>
       {/* 主会话 */}
       <RecentChatItem
@@ -186,8 +186,8 @@ function ParentSessionGroup({
           'flex items-center gap-1.5 w-full pl-6 pr-3 py-1 transition-colors',
           'text-[10px] font-medium',
           expanded
-            ? 'text-indigo-500 dark:text-indigo-400'
-            : 'text-muted-foreground/50 hover:text-indigo-500 dark:hover:text-indigo-400',
+            ? 'text-indigo-600 dark:text-indigo-300'
+            : 'text-muted-foreground/50 hover:text-indigo-600 dark:text-muted-foreground/60 dark:hover:text-indigo-300',
         )}
       >
         <div className="flex items-center gap-1">
@@ -419,13 +419,13 @@ function CronSidebarPanel() {
         {cronJobs.map(job => (
           <div
             key={job.id}
-            className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-muted/30 hover:bg-muted/60 transition-colors"
+            className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-muted/30 hover:bg-muted/60 dark:bg-muted/20 dark:hover:bg-muted/40 transition-colors"
           >
             <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', cronStatusDot(job))} />
-            <span className="text-[11px] font-medium text-foreground/80 truncate flex-1">
+            <span className="text-[11px] font-medium text-foreground/80 dark:text-foreground/90 truncate flex-1">
               {job.name || job.text}
             </span>
-            <span className="text-[10px] text-muted-foreground/60 shrink-0 tabular-nums">
+            <span className="text-[10px] text-muted-foreground/60 dark:text-muted-foreground/70 shrink-0 tabular-nums">
               {cronNextText(job)}
             </span>
           </div>
@@ -483,12 +483,12 @@ function ProactiveSidebarPanel() {
               key={s.session_id}
               type="button"
               onClick={() => switchSession(s.session_id)}
-              className="flex items-start gap-2 w-full px-2.5 py-2 rounded-lg bg-violet-50/50 hover:bg-violet-100/60 dark:bg-violet-900/10 dark:hover:bg-violet-900/20 transition-colors text-left"
+              className="flex items-start gap-2 w-full px-2.5 py-2 rounded-lg bg-violet-50/50 hover:bg-violet-100/60 dark:bg-violet-800/20 dark:hover:bg-violet-800/30 transition-colors text-left"
             >
-              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0 mt-1.5" />
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-500 dark:bg-violet-400 shrink-0 mt-1.5" />
               <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-medium text-foreground/80 truncate">{title}</div>
-                <div className="text-[10px] text-muted-foreground/50 mt-0.5">{proactiveTimeLabel(s.last_active)}</div>
+                <div className="text-[11px] font-medium text-foreground/80 dark:text-foreground/90 truncate">{title}</div>
+                <div className="text-[10px] text-muted-foreground/50 dark:text-muted-foreground/60 mt-0.5">{proactiveTimeLabel(s.last_active)}</div>
               </div>
             </button>
           );
