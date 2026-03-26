@@ -19,18 +19,31 @@ class ProactiveDelivery:
         self._bus = bus
         self._notification_service = notification_service
 
-    async def deliver(self, job: ProactiveJob, session_id: str, result: str):
+    async def deliver(
+        self, job: ProactiveJob, session_id: str, result: str,
+        *,
+        source_session_id: str | None = None,
+        items: list[dict] | None = None,
+    ):
         """投递 proactive 执行结果：发布事件 + 发送通知。"""
+        payload = {
+            "job_id": job.id,
+            "job_name": job.name,
+            "result": result,
+            "session_id": session_id,
+        }
+        if source_session_id:
+            payload["source_session_id"] = source_session_id
+        if job.delivery.recommendation_type:
+            payload["recommendation_type"] = job.delivery.recommendation_type
+        if items:
+            payload["items"] = items
+
         await self._bus.publish(EventEnvelope(
             type=PROACTIVE_RESULT,
             session_id=session_id,
             agent_id=job.agent_id,
-            payload={
-                "job_id": job.id,
-                "job_name": job.name,
-                "result": result,
-                "session_id": session_id,
-            },
+            payload=payload,
             source="proactive",
         ))
 

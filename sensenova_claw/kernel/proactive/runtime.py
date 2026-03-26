@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import time
 from typing import Any, TYPE_CHECKING
 
@@ -170,8 +171,37 @@ class ProactiveRuntime:
 
     async def _run_and_deliver(self, job: ProactiveJob, trigger_event: EventEnvelope | None = None) -> None:
         session_id, result = await self._executor.execute_job(job, trigger_event)
-        if self._delivery and job.state.last_status == "ok" and result:
-            await self._delivery.deliver(job, session_id, result)
+        if not (self._delivery and job.state.last_status == "ok" and result):
+            return
+
+        source_session_id = trigger_event.session_id if trigger_event else None
+        items = None
+
+        if job.delivery.recommendation_type:
+            items = self._parse_recommendation_json(result)
+            if items is None:
+                logger.warning("推荐 JSON 解析失败，跳过投递: job=%s", job.id)
+                return
+
+        await self._delivery.deliver(
+            job, session_id, result,
+            source_session_id=source_session_id,
+            items=items,
+        )
+
+    @staticmethod
+    def _parse_recommendation_json(text: str) -> list[dict] | None:
+        """从 LLM 回复中提取推荐 JSON。支持 markdown code block 包裹。"""
+        match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+        json_str = match.group(1) if match else text
+        try:
+            data = json.loads(json_str)
+            recs = data.get("recommendations")
+            if isinstance(recs, list) and len(recs) > 0:
+                return recs
+            return None
+        except (json.JSONDecodeError, AttributeError):
+            return None
 
     # ---------- Job 加载 ----------
 

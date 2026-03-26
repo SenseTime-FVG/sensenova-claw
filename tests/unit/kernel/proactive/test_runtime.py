@@ -360,7 +360,11 @@ class TestRunAndDeliver:
         job.state.last_status = "ok"
         rt._delivery.deliver = AsyncMock()
         await rt._run_and_deliver(job)
-        rt._delivery.deliver.assert_called_once_with(job, "session-1", "执行结果")
+        rt._delivery.deliver.assert_called_once_with(
+            job, "session-1", "执行结果",
+            source_session_id=None,
+            items=None,
+        )
 
     @pytest.mark.asyncio
     async def test_delivery_skipped_on_failure(self):
@@ -384,3 +388,25 @@ class TestRunAndDeliver:
         await rt._run_and_deliver(job)
         # 空字符串 result 是 falsy，不应调用 delivery
         rt._delivery.deliver.assert_not_called()
+
+
+class TestParseRecommendationJson:
+    def test_plain_json(self):
+        text = '{"recommendations": [{"id": "1", "title": "t", "prompt": "p", "category": "action"}]}'
+        result = ProactiveRuntime._parse_recommendation_json(text)
+        assert len(result) == 1
+        assert result[0]["title"] == "t"
+
+    def test_code_block_json(self):
+        text = '```json\n{"recommendations": [{"id": "1", "title": "t", "prompt": "p"}]}\n```'
+        result = ProactiveRuntime._parse_recommendation_json(text)
+        assert len(result) == 1
+
+    def test_invalid_json_returns_none(self):
+        assert ProactiveRuntime._parse_recommendation_json("not json") is None
+
+    def test_missing_recommendations_key(self):
+        assert ProactiveRuntime._parse_recommendation_json('{"items": []}') is None
+
+    def test_empty_recommendations(self):
+        assert ProactiveRuntime._parse_recommendation_json('{"recommendations": []}') is None
