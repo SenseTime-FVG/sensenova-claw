@@ -95,7 +95,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
   }, []);
 
   // 当切换 session 时，从 session meta 中提取 agent_id 并设置为当前选中的 agent
+  // lockAgent 模式下始终使用 defaultAgentId，不被会话实际 agent 覆盖
   useEffect(() => {
+    if (lockAgent) return;
     if (currentSessionId) {
       const currentSession = sessions.find(s => s.session_id === currentSessionId);
       if (currentSession) {
@@ -105,7 +107,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         }
       }
     }
-  }, [currentSessionId, sessions]);
+  }, [currentSessionId, sessions, lockAgent]);
 
   // 自动滚动到底部
   useEffect(() => {
