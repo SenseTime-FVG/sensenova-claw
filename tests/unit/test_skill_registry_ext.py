@@ -74,3 +74,15 @@ def test_skills_state_json_persistence(tmp_workspace):
     reg2.set_enabled("test-skill", True)
     reg2.load_skills({})
     assert reg2.get("test-skill") is not None
+
+
+def test_discover_all_includes_disabled_skill(tmp_workspace):
+    state_file = tmp_workspace / "skills_state.json"
+    reg = SkillRegistry(workspace_dir=tmp_workspace / "skills", state_file=state_file)
+    reg.load_skills({})
+    reg.set_enabled("test-skill", False)
+
+    all_skills = {skill.name: skill for skill in reg.discover_all_skills()}
+
+    assert "test-skill" in all_skills
+    assert reg.get("test-skill") is None

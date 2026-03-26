@@ -309,6 +309,24 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 邮件工具虽然注册后会暴露给运行时，但真实可用性仍依赖 `tools.email.enabled` 及 SMTP/IMAP 凭据；仅单元测试通过不能代表邮件链路已完成真实回归。
 
+### 2026-03-26 Skills 管理页禁用显示修复补充
+
+成功经验：
+- Skills 管理页需要区分“发现到的所有 skill”和“运行时已启用并注入的 skill”；前者用于 `/api/skills` 管理展示，后者继续由 `SkillRegistry.get_all()` 供 agent/runtime 使用，边界清晰后修复很小。
+- 对这类“禁用后消失”的回归，直接把 API 单测期望改成“仍返回该项但 `enabled=false`”最有效，能精确锁定问题落在后端列表源数据而不是前端渲染。
+
+失败/风险经验：
+- 如果继续让 `/api/skills` 直接遍历 `get_all()`，任何通过 `set_enabled(False)` 从内存移除的 skill 都会从管理页消失，用户无法直观看到已禁用项；以后不要把“管理视图”建立在“运行时启用集合”上。
+
+### 2026-03-26 Skills 详情弹窗 disabled 回归补充
+
+成功经验：
+- 本地 skill 详情接口不能只依赖 `SkillRegistry.get()`；disabled skill 已从运行时注册表移除，管理页详情应改为从 `discover_all_skills()` 回查落盘 skill，再读取 `SKILL.md` 和文件列表。
+- 前端详情弹窗对接口响应做 `res.ok` 检查和字段归一化（`files` 默认 `[]`）很有必要，能避免后端偶发返回错误结构时直接触发 `undefined.length`。
+
+失败/风险经验：
+- `/skills` 这类后台页的 Playwright 鉴权比 `/chat` 更脆，单靠 `page.route()` 不一定能稳定覆盖 `AuthProvider/ProtectedRoute` 初始化；更稳的方式是在 `addInitScript` 里直接接管 `window.fetch` 返回认证与页面所需数据。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：

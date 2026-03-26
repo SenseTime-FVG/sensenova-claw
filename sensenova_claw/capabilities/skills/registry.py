@@ -143,24 +143,39 @@ class SkillRegistry:
         """
         self._skills.clear()
 
-        # 最先加载内置 skills（最低优先级）
+        for base_dir in self._iter_skill_dirs(config):
+            self._load_from_dir(base_dir, config)
+
+    def discover_all_skills(self, config: dict[str, Any] | None = None) -> list[Skill]:
+        """发现所有可解析的 skill，包含已禁用项，用于管理页展示"""
+        discovered: dict[str, Skill] = {}
+        for base_dir in self._iter_skill_dirs(config or {}):
+            for skill_md in base_dir.rglob("SKILL.md"):
+                skill = self._parse_skill(skill_md)
+                if skill and self._check_binary_deps(skill):
+                    discovered[skill.name] = skill
+        return list(discovered.values())
+
+    def _iter_skill_dirs(self, config: dict[str, Any]) -> list[Path]:
+        """按加载优先级返回所有 skill 根目录"""
+        dirs: list[Path] = []
+
         if self._builtin_dir and self._builtin_dir.exists():
-            self._load_from_dir(self._builtin_dir, config)
+            dirs.append(self._builtin_dir)
 
-        # 加载用户级 skills
         if self._user_dir.exists():
-            self._load_from_dir(self._user_dir, config)
+            dirs.append(self._user_dir)
 
-        # 加载工作区 skills（覆盖同名）
         if self._workspace_dir and self._workspace_dir.exists():
-            self._load_from_dir(self._workspace_dir, config)
+            dirs.append(self._workspace_dir)
 
-        # 加载 extra_dirs 中配置的额外 skill 目录
         extra_dirs = config.get("skills", {}).get("extra_dirs", [])
         for dir_path in extra_dirs:
             p = Path(dir_path)
             if p.exists():
-                self._load_from_dir(p, config)
+                dirs.append(p)
+
+        return dirs
 
     def _load_from_dir(self, base_dir: Path, config: dict[str, Any]) -> None:
         """从目录加载所有 SKILL.md"""

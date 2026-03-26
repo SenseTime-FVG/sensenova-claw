@@ -163,3 +163,26 @@ async def test_uninstall_local_skill_denied(service, tmp_workspace):
     result = await service.uninstall("local-skill")
     assert result["ok"] is False
     assert result["code"] == "PERMISSION_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_get_local_detail_for_disabled_skill(service, registry, tmp_workspace):
+    """禁用的本地 skill 仍应能在管理页读取详情"""
+    skill_dir = tmp_workspace / "skills" / "local-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: local-skill\ndescription: Local skill\n---\nLocal body",
+        encoding="utf-8",
+    )
+    (skill_dir / "README.md").write_text("# Readme", encoding="utf-8")
+
+    registry.load_skills({})
+    registry.set_enabled("local-skill", False)
+
+    detail = await service.get_detail("local", "local-skill")
+
+    assert detail.name == "local-skill"
+    assert detail.description == "Local skill"
+    assert "Local body" in detail.skill_md_preview
+    assert sorted(detail.files) == ["README.md", "SKILL.md"]
+    assert detail.installed is True
