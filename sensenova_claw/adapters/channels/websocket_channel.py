@@ -138,12 +138,16 @@ class WebSocketChannel(Channel):
         if msg_type == "create_session":
             agent_id = payload.get("agent_id", "default")
             meta = payload.get("meta", {})
+            request_id = payload.get("request_id")
             result = await gw.create_session(agent_id=agent_id, meta=meta, channel_id=self._channel_id)
             sid = result["session_id"]
             self.bind_session(sid, websocket)
+            response_payload = {"created_at": result["created_at"]}
+            if isinstance(request_id, str) and request_id.strip():
+                response_payload["request_id"] = request_id
             await self.send_json(websocket, {
                 "type": "session_created", "session_id": sid,
-                "payload": {"created_at": result["created_at"]}, "timestamp": time.time(),
+                "payload": response_payload, "timestamp": time.time(),
             })
             return
 

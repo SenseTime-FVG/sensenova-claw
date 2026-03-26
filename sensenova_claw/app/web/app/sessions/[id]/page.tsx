@@ -4,12 +4,11 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send, Square, ChevronRight, ChevronDown, Brain } from 'lucide-react';
-import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
+import { Markdown } from '@/components/ui/Markdown';
+import { isJsonLike, stringifyContent } from '@/lib/utils';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { AskUserResponseForm } from '@/components/chat/AskUserResponseForm';
 import { type PendingInteraction } from '@/components/chat/QuestionDialog';
-import { MarkdownContent } from '@/components/chat/MarkdownContent';
 import { extractThinkContentFromReasoningDetails, resolveAssistantDisplayContent } from '@/lib/assistantThink';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
@@ -105,7 +104,7 @@ function InlineToolContent({ value }: { value: unknown }) {
       </pre>
     );
   }
-  return <MarkdownRenderer className="chat-markdown chat-markdown--detail text-xs" content={stringifyContent(value)} />;
+  return <Markdown variant="detail" content={stringifyContent(value)} />;
 }
 
 function attachAskUserToLatestToolMessage(messages: Message[], askUser: AskUserToolState): Message[] {
@@ -379,7 +378,7 @@ function MessageBubble({ msg }: { msg: Message }) {
     return (
       <div className="flex justify-center my-8">
         <div className="max-w-3xl rounded-2xl border border-border bg-muted px-4 py-2 text-xs text-muted-foreground">
-          <MarkdownRenderer className="chat-markdown chat-markdown--system" content={msg.content || ''} />
+          <Markdown variant="system" content={msg.content || ''} />
         </div>
       </div>
     );
@@ -393,7 +392,7 @@ function MessageBubble({ msg }: { msg: Message }) {
         </div>
         <div className="flex-1 flex flex-col items-end">
           <div className="bg-primary text-primary-foreground text-sm p-4 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] leading-relaxed">
-            <MarkdownRenderer className="chat-markdown chat-markdown--user" content={msg.content || ''} />
+            <Markdown variant="user" content={msg.content || ''} />
           </div>
         </div>
       </div>
@@ -446,13 +445,13 @@ function AssistantMessageBubble({ msg }: { msg: Message }) {
                 hidden={!showThink}
                 className="border-t border-amber-500/15 px-4 py-3 text-sm"
               >
-                <MarkdownContent content={parsedAssistantContent.thinkContent} />
+                <Markdown content={parsedAssistantContent.thinkContent} />
               </div>
             </div>
           ) : null}
           {parsedAssistantContent.answerContent ? (
             <div className="text-sm text-foreground leading-relaxed">
-              <MarkdownContent content={parsedAssistantContent.answerContent} />
+              <Markdown content={parsedAssistantContent.answerContent} />
             </div>
           ) : null}
         </div>
