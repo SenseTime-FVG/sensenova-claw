@@ -55,8 +55,8 @@ export function RightContext() {
                       <span className={cn(
                         'text-sm',
                         step.status === 'running' && 'text-foreground font-medium',
-                        step.status === 'done' && 'text-muted-foreground',
-                        step.status === 'pending' && 'text-muted-foreground/50'
+                        step.status === 'done' && 'text-muted-foreground dark:text-muted-foreground/80',
+                        step.status === 'pending' && 'text-muted-foreground/50 dark:text-muted-foreground/40'
                       )}>
                         {step.label}
                       </span>
@@ -79,7 +79,7 @@ export function RightContext() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-foreground truncate">{task.task}</p>
                       </div>
-                      <span className="text-xs text-amber-500 font-medium shrink-0">
+                      <span className="text-xs text-amber-600 dark:text-amber-400 font-medium shrink-0">
                         {task.step}/{task.total}
                       </span>
                     </div>
