@@ -151,7 +151,7 @@ class ProactiveRuntime:
 
     # ---------- 触发与执行 ----------
 
-    async def _evaluate_and_execute(self, job: ProactiveJob) -> bool:
+    async def _evaluate_and_execute(self, job: ProactiveJob, trigger_event: EventEnvelope | None = None) -> bool:
         """调度器回调：发布触发事件，委托 executor 执行。"""
         if not job.enabled or job.id in self._executor._running_jobs:
             return False
@@ -159,17 +159,17 @@ class ProactiveRuntime:
         # 发布触发事件
         await self._bus.publish(EventEnvelope(
             type=PROACTIVE_JOB_TRIGGERED,
-            session_id="system",
+            session_id=trigger_event.session_id if trigger_event else "system",
             agent_id=job.agent_id,
             source="proactive",
             payload={"job_id": job.id, "job_name": job.name},
         ))
 
-        asyncio.create_task(self._run_and_deliver(job))
+        asyncio.create_task(self._run_and_deliver(job, trigger_event))
         return True
 
-    async def _run_and_deliver(self, job: ProactiveJob) -> None:
-        session_id, result = await self._executor.execute_job(job)
+    async def _run_and_deliver(self, job: ProactiveJob, trigger_event: EventEnvelope | None = None) -> None:
+        session_id, result = await self._executor.execute_job(job, trigger_event)
         if self._delivery and job.state.last_status == "ok" and result:
             await self._delivery.deliver(job, session_id, result)
 

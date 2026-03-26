@@ -55,7 +55,7 @@ class ProactiveExecutor:
         # 当前正在执行的 job id 集合
         self._running_jobs: set[str] = set()
 
-    async def execute_job(self, job: ProactiveJob) -> tuple[str, str | None]:
+    async def execute_job(self, job: ProactiveJob, trigger_event: EventEnvelope | None = None) -> tuple[str, str | None]:
         """执行 job，返回 (session_id, result_text)。若跳过或失败返回 ("", None)。"""
         if job.id in self._running_jobs:
             logger.debug("Proactive job %s 已在运行，跳过", job.id)
@@ -67,7 +67,7 @@ class ProactiveExecutor:
         # 尝试获取锁（非阻塞）
         if not lock.locked():
             async with lock:
-                return await self._do_execute(job)
+                return await self._do_execute(job, trigger_event)
         else:
             logger.debug("Proactive job %s 锁已被占用，跳过", job.id)
             return ("", None)
@@ -77,7 +77,7 @@ class ProactiveExecutor:
         self._job_locks.pop(job_id, None)
         self._running_jobs.discard(job_id)
 
-    async def _do_execute(self, job: ProactiveJob) -> tuple[str, str | None]:
+    async def _do_execute(self, job: ProactiveJob, trigger_event: EventEnvelope | None = None) -> tuple[str, str | None]:
         session_id = f"proactive_{job.id}_{uuid.uuid4().hex[:8]}"
         run_id = f"pr_{uuid.uuid4().hex[:12]}"
         start_ms = int(time.time() * 1000)
