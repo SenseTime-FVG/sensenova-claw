@@ -569,37 +569,49 @@ async def _do_execute_inject(self, job: ProactiveJob, trigger_event: EventEnvelo
 
 - [ ] **Step 5: 实现 _wait_for_completion_by_turn 方法**
 
+基于现有 `_wait_for_completion` 的模式（`subscribe_queue` / `unsubscribe_queue(queue)`），增加 `turn_id` 过滤：
+
 ```python
 async def _wait_for_completion_by_turn(
     self, session_id: str, turn_id: str, timeout_ms: float,
 ) -> str | None:
     """等待指定 turn 的 agent.step_completed 事件。"""
-    queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
-    sub_id = await self._bus.subscribe_queue(queue)
-    heartbeat_timeout = timeout_ms / 3
-    last_activity = time.time() * 1000
-
+    timeout_s = timeout_ms / 1000.0
+    heartbeat_timeout_s = timeout_s / 3.0
+    queue = self._bus.subscribe_queue()
     try:
+        deadline = time.monotonic() + timeout_s
+        last_event_time = time.monotonic()
+
         while True:
-            remaining = (timeout_ms - (time.time() * 1000 - last_activity * 1000 / heartbeat_timeout)) / 1000
+            now = time.monotonic()
+            remaining = deadline - now
+            if remaining <= 0:
+                return None
+
+            if (now - last_event_time) >= heartbeat_timeout_s:
+                logger.warning(
+                    "推荐 turn %s 心跳超时（%.1fs 无事件）",
+                    turn_id, heartbeat_timeout_s,
+                )
+                return None
+
+            wait_s = min(remaining, heartbeat_timeout_s - (now - last_event_time))
             try:
-                event = await asyncio.wait_for(queue.get(), timeout=heartbeat_timeout / 1000)
+                event = await asyncio.wait_for(queue.get(), timeout=max(wait_s, 0.01))
             except asyncio.TimeoutError:
-                if (time.time() * 1000 - last_activity) > timeout_ms:
-                    return None
                 continue
 
-            if event.session_id != session_id:
-                continue
-            last_activity = time.time() * 1000
+            last_event_time = time.monotonic()
 
-            if event.type == AGENT_STEP_COMPLETED and event.turn_id == turn_id:
+            # 按 turn_id 精确匹配（而非 session_id）
+            if (event.type == AGENT_STEP_COMPLETED
+                    and event.session_id == session_id
+                    and event.turn_id == turn_id):
                 return event.payload.get("result", {}).get("content", "")
     finally:
-        await self._bus.unsubscribe_queue(sub_id)
+        self._bus.unsubscribe_queue(queue)
 ```
-
-注意：实际实现时参考现有 `_wait_for_completion` 的 subscribe 模式（可能是 `async for` 而非 queue），保持一致。
 
 - [ ] **Step 6: 运行测试确认通过**
 
@@ -774,41 +786,89 @@ git commit -m "feat(proactive): extend delivery with recommendation items and JS
 ## Task 7: AgentWorker 透传 meta.source 到 step_completed payload
 
 **Files:**
-- Modify: `sensenova_claw/kernel/runtime/workers/agent_worker.py:525-537` (step_completed 发布)
+- Modify: `sensenova_claw/kernel/runtime/workers/agent_worker.py:311-312,525-537`
 
-- [ ] **Step 1: 确认 send_user_input 的 extra_payload 如何传递 meta**
+**背景**：`send_user_input` 的 `extra_payload={"meta": {"source": "recommendation"}}` 会被 `payload.update()` 合并到 `USER_INPUT` 事件的 payload 中。所以 `event.payload["meta"]["source"]` 在 `_handle_user_input` 中可读。需要将此值透传到最终的 `AGENT_STEP_COMPLETED` payload。
 
-检查 `agent_runtime.send_user_input` 的 `extra_payload` 是否会被 AgentWorker 读取。如果 `extra_payload` 中的 `meta` 字段会被存入 turn 或 session 的 meta，则 AgentWorker 可以在发布 `step_completed` 时读取。
-
-如果不是，需要在 `USER_INPUT` 事件的 payload 中增加 `meta` 字段，AgentWorker 在 `_handle_user_input` 中提取并存储到 TurnState。
-
-- [ ] **Step 2: 修改 AgentWorker 发布 step_completed 时透传 source**
+- [ ] **Step 1: 写失败测试**
 
 ```python
-# sensenova_claw/kernel/runtime/workers/agent_worker.py
-# 在发布 AGENT_STEP_COMPLETED 的 payload 中，检查 turn 的 meta 是否有 source 字段
+# tests/unit/kernel/runtime/test_agent_worker_meta.py（新建）
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+from sensenova_claw.kernel.events.envelope import EventEnvelope
+
+def test_step_completed_carries_meta_source():
+    """当 USER_INPUT payload 包含 meta.source 时，step_completed 应透传。"""
+    # 构造一个 USER_INPUT 事件，payload 中有 meta
+    event = EventEnvelope(
+        type="user.input",
+        session_id="s1",
+        turn_id="t1",
+        payload={"content": "test", "meta": {"source": "recommendation"}},
+    )
+    # 验证 _extract_meta_source 辅助函数
+    from sensenova_claw.kernel.runtime.workers.agent_worker import _extract_meta_source
+    assert _extract_meta_source(event.payload) == "recommendation"
+
+def test_step_completed_no_meta_returns_none():
+    event = EventEnvelope(
+        type="user.input",
+        session_id="s1",
+        turn_id="t1",
+        payload={"content": "test"},
+    )
+    from sensenova_claw.kernel.runtime.workers.agent_worker import _extract_meta_source
+    assert _extract_meta_source(event.payload) is None
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `python3 -m pytest tests/unit/kernel/runtime/test_agent_worker_meta.py -v`
+Expected: FAIL — `_extract_meta_source` 不存在
+
+- [ ] **Step 3: 实现 meta source 提取和透传**
+
+```python
+# sensenova_claw/kernel/runtime/workers/agent_worker.py — 模块级辅助函数
+def _extract_meta_source(payload: dict) -> str | None:
+    """从 USER_INPUT payload 中提取 meta.source。"""
+    meta = payload.get("meta")
+    if isinstance(meta, dict):
+        return meta.get("source")
+    return None
+```
+
+在 `_handle_user_input` 中保存 meta source 到实例变量：
+
+```python
+# _handle_user_input 方法开头（line 312 附近）
+content = str(event.payload.get("content", ""))
+turn_id = event.turn_id or f"turn_{uuid.uuid4().hex[:12]}"
+self._current_turn_meta_source = _extract_meta_source(event.payload)  # 新增
+```
+
+在发布 `AGENT_STEP_COMPLETED` 时透传（line 525 附近）：
+
+```python
 payload = {
     "step_type": "final",
     "result": {"content": content},
     "next_action": "end",
 }
-# 如果 turn 有 meta.source，透传到 payload
-turn_meta = event.payload.get("meta") or {}
-if turn_meta.get("source"):
-    payload["source"] = turn_meta["source"]
+if getattr(self, '_current_turn_meta_source', None):
+    payload["source"] = self._current_turn_meta_source
 ```
 
-具体实现取决于 `extra_payload` 在 `USER_INPUT` 事件中的传递方式。实现时需要追踪 `extra_payload.meta` 从 `send_user_input` → `USER_INPUT` 事件 → `_handle_user_input` → TurnState → `step_completed` payload 的完整链路。
+- [ ] **Step 4: 运行测试确认通过**
 
-- [ ] **Step 3: 运行全部 proactive 测试确认无回归**
+Run: `python3 -m pytest tests/unit/kernel/runtime/test_agent_worker_meta.py -v`
+Expected: PASS
 
-Run: `python3 -m pytest tests/unit/kernel/proactive/ -v`
-Expected: ALL PASS
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add sensenova_claw/kernel/runtime/workers/agent_worker.py
+git add sensenova_claw/kernel/runtime/workers/agent_worker.py tests/unit/kernel/runtime/test_agent_worker_meta.py
 git commit -m "feat(agent-worker): propagate turn meta.source to step_completed payload"
 ```
 
@@ -1166,9 +1226,17 @@ function RecommendationCard({
 ```typescript
 // Dashboard.tsx — handleOutputClick 附近新增
 const handleRecommendationClick = useCallback(async (sourceSessionId: string, prompt: string) => {
-  await switchSession(sourceSessionId);
-  prefillInput(prompt);
-}, [switchSession, prefillInput]);
+  try {
+    await switchSession(sourceSessionId);
+    prefillInput(prompt);
+  } catch {
+    pushNotification(
+      { title: '会话已删除', body: '该推荐对应的会话已不存在', level: 'warning', source: 'system' },
+      { toast: true, browser: false },
+    );
+    setProactiveResults(prev => prev.filter(r => r.sourceSessionId !== sourceSessionId));
+  }
+}, [switchSession, prefillInput, pushNotification, setProactiveResults]);
 
 // ProactiveAgentPanel 调用处增加 props
 <ProactiveAgentPanel
@@ -1208,13 +1276,39 @@ git commit -m "feat(web): render recommendation cards with click-to-fill interac
 ## Task 12: 隐藏推荐 turn 消息 & 最终集成测试
 
 **Files:**
+- Modify: `sensenova_claw/kernel/runtime/workers/agent_worker.py` (推荐 turn 消息标记)
 - Modify: `sensenova_claw/app/web/contexts/ChatSessionContext.tsx` (消息过滤)
 
-- [ ] **Step 1: 前端过滤 hidden 消息**
+**方案**：不修改 messages 表 schema。利用现有 `USER_INPUT` 事件 payload 中的 `meta.source` 字段。在 AgentWorker 的 `_handle_user_input` 中，当检测到 `meta.source === "recommendation"` 时，将该 turn 的所有消息在前端过滤掉。
 
-在 ChatSessionContext 加载会话消息时，过滤掉 `meta.source === "recommendation"` 的消息。具体实现取决于消息结构中 meta 的传递方式。
+具体做法：
+1. 后端：推荐 turn 的 `turn_completed` WebSocket 消息中携带 `meta: {source: "recommendation"}`（已在 Task 7 中实现 step_completed payload 透传）
+2. 前端：`ChatSessionContext` 在处理 `turn_completed` 事件时，如果 payload 包含 `source: "recommendation"`，不将该 turn 的消息追加到对话流
 
-如果后端 `save_message` 不支持 meta 字段，需要在 messages 表增加 `meta TEXT` 列，或者在 turn 级别标记。实现时需要追踪完整链路。
+- [ ] **Step 1: 前端过滤推荐 turn 消息**
+
+在 `ChatSessionContext.tsx` 的 `handleWsMessage` 中，`turn_completed` case 里增加过滤：
+
+```typescript
+// ChatSessionContext.tsx — turn_completed case
+case 'turn_completed': {
+  // 如果是推荐 turn，不追加到对话流
+  if (payload.source === 'recommendation') {
+    break;
+  }
+  // ... 现有逻辑
+}
+```
+
+同时，在加载历史消息（`loadSessionHistory`）时，后端返回的消息列表中推荐 turn 的消息也需要过滤。可以在后端 `get_session_messages` 中通过 turn 的 meta 过滤，或者在前端加载后过滤。
+
+简单方案：在前端 `loadSessionHistory` 返回后，过滤掉 `turn_id` 对应的推荐 turn。这需要后端在 turn 表中记录 meta。
+
+更简单的方案：推荐 turn 的 user 消息 content 以特定前缀开头（如 `[recommendation]`），前端按前缀过滤。但这不够优雅。
+
+**推荐方案**：在 `turns` 表增加 `meta TEXT` 列（如果不存在），`create_turn` 时传入 meta。前端加载历史时，后端在返回消息时附带 turn meta，前端过滤 `meta.source === "recommendation"` 的 turn 的所有消息。
+
+实现时需要检查 `turns` 表是否已有 `meta` 列，如果没有则通过 migration 添加。
 
 - [ ] **Step 2: 手动集成测试**
 
@@ -1229,7 +1323,7 @@ git commit -m "feat(web): render recommendation cards with click-to-fill interac
 
 ```bash
 git add -A
-git commit -m "feat(web): hide recommendation turn messages from chat flow"
+git commit -m "feat: hide recommendation turn messages from chat flow"
 ```
 
 ---
