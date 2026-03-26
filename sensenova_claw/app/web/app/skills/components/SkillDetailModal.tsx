@@ -26,6 +26,25 @@ interface DetailData {
   readme?: string;
 }
 
+function normalizeDetailData(data: Partial<DetailData> | null | undefined): DetailData | null {
+  if (!data || typeof data.name !== 'string' || typeof data.description !== 'string') {
+    return null;
+  }
+
+  return {
+    name: data.name,
+    description: data.description,
+    version: data.version,
+    author: data.author,
+    skill_md_preview: typeof data.skill_md_preview === 'string' ? data.skill_md_preview : '',
+    files: Array.isArray(data.files) ? data.files : [],
+    installed: Boolean(data.installed),
+    updated_at: data.updated_at,
+    dependencies: Array.isArray(data.dependencies) ? data.dependencies : undefined,
+    readme: data.readme,
+  };
+}
+
 const categoryConfig: Record<string, { label: string; color: string }> = {
   clawhub:   { label: 'ClawHub',  color: 'bg-violet-600' },
   anthropic: { label: 'Anthropic', color: 'bg-orange-600' },
@@ -41,7 +60,12 @@ export function SkillDetailModal({
 
   useEffect(() => {
     authFetch(`${API_BASE}/api/skills/market/detail?source=${source}&id=${encodeURIComponent(skillId)}`)
-      .then(r => r.json())
+      .then(async (r) => {
+        if (!r.ok) {
+          throw new Error(`detail request failed: ${r.status}`);
+        }
+        return normalizeDetailData(await r.json());
+      })
       .then(setDetail)
       .catch(() => setDetail(null))
       .finally(() => setLoading(false));

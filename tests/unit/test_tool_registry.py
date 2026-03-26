@@ -20,9 +20,11 @@ class TestToolRegistry:
         r = ToolRegistry()
         assert r.get("apply_patch") is not None
         assert r.get("bash_command") is not None
+        assert r.get("get_secret") is not None
         assert r.get("serper_search") is not None
         assert r.get("fetch_url") is not None
         assert r.get("read_file") is not None
+        assert r.get("write_secret") is not None
         assert r.get("write_file") is not None
         assert r.get("ask_user") is not None
 
@@ -68,6 +70,8 @@ class TestToolRegistry:
         assert len(tools) >= 5
         names = [t["name"] for t in tools]
         assert "bash_command" in names
+        assert "get_secret" in names
+        assert "write_secret" in names
         for t in tools:
             assert "name" in t
             assert "description" in t

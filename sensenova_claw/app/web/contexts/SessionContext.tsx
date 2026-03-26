@@ -204,7 +204,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setPendingUserInput(null);
 
         // 从 events 重建完整历史
-        fetch(`http://localhost:8000/api/sessions/${newSessionId}/events`)
+        fetch(`/api/sessions/${newSessionId}/events`)
           .then((res) => res.json())
           .then((data) => {
             const events = data.events || [];

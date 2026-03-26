@@ -7,7 +7,7 @@
 目标如下：
 
 1. 将旧的“大一统 `pptx` skill”重构为新的 `ppt-*` superpower 体系。
-2. 默认采用“快速优先”路径，避免生成一套 PPT 时出现过长流程。
+2. 默认采用“确认优先”路径，先沉淀关键工件并等待确认，只有用户明确授权自动继续时才走快速直达；旧的“快速优先”不再作为默认模式。
 3. 同时保留 `B + C` 级别的中断、介入和继续推进能力：
    - `B`：关键工件级可独立生成、替换、重跑。
    - `C`：页面级、图片槽位级可按需单独修复。
@@ -156,6 +156,7 @@
 
 - 页面叙事和页面生成的控制面
 - 前端阶段展示和局部编辑的稳定契约
+- research 的消费层；把可上页的 claim、evidence 和缺口显式落到页面级对象
 
 ### 3.6 上传文件必须先分类
 
@@ -194,6 +195,37 @@
 - `images/...`
 - `review.md`
 
+### 3.8 阶段性结果回显是默认交互
+
+长链路 PPT 任务不能一旦开始就持续沉默。除了产出工件，还必须持续给用户最小但有用的进度感知。
+
+总原则：
+
+- 默认进入 `guided`，先产出 `task-pack.json`、`style-spec.json`、`storyboard.json` 并等待确认。
+- 只有用户明确说“直接生成”“不要确认”“自动继续”或“一口气跑完”时，才进入 `fast`。
+- `fast` 也要有简短阶段回显，但默认非阻塞，不要求用户每步确认。
+- `guided` 除了阶段回显，还要在关键停点明确等待用户确认。
+- `surgical` 的回显必须说明当前只改哪个页面、槽位或控制面，避免用户误以为会重跑整套。
+- 回显内容优先包含：当前阶段、已产出工件、未解决项、下一步。
+- 搜图下载、逐页 HTML、整套 review、导出 PPTX 这类明显耗时阶段，可以补 1 条进行中反馈，但不能刷屏。
+- 依赖缺失、路径不一致、下载失败、页面失败等异常要立即回显，不允许静默跳过。
+
+### 3.9 正文页内容诊断维度
+
+后续实验统一使用以下审计词汇：
+
+- 论点密度
+- 证据密度
+- 结构密度
+- 视觉承载密度
+- 空白感
+
+为了避免内容密度只停留在控制面，正文页还需要一个可执行承载预算：`payload_budget`。
+它由 `ppt-storyboard` 逐页写入，至少包含 `claim_count`、`evidence_count`、`structure_block_count`、`require_comparison_or_summary`。
+分析类页默认应拿到更高预算，展示类页预算可以更轻，但二者都必须有明确下限，不能退回成看起来完整却没有实际承载能力的安全模板。
+
+当前优先实现方案 1，采用强约束渲染契约；可选补层包括预置装饰模板库和后置抛光补层。
+
 ---
 
 ## 4. 新 Skill 体系
@@ -220,11 +252,49 @@
 
 #### `ppt-task-pack`
 
-负责统一记录任务目标、页数、受众、语言、限制、交付物、输出目录和推荐路径，产出 `task-pack.json`。
+负责统一记录任务目标、页数、受众、语言、限制、交付物、输出目录、推荐路径、`research_required`、`content_gap_assessment`、`research_needs`、`风格意图` 和 `content_density_profile`，产出 `task-pack.json`。
+在实验 1 中，`ppt-task-pack` 不只是任务收敛层，也是内容控制面：要先把内容缺口评估清楚，再决定 research 是否值得执行。
+`content_density_profile` 用来表达正文页承载策略：`analysis-heavy` 适合分析 / 汇报 / 评估类主题，`balanced` 适合普通汇报 / 培训 / 项目介绍，`showcase-light` 适合品牌 / 展示 / 活动 / 发布类主题；如果用户明确要求更满或更克制，可覆盖默认 profile。
+但 profile 不能只停留在 deck 级描述；后续必须由 `ppt-storyboard` 把 `content_density_profile` 转成可执行的 `payload_budget`，再由 `ppt-page-html` 兑现、由 `ppt-review` 审核是否兑现。
 
 #### `ppt-research-pack`
 
-负责内容研究和内容补充，产出 `research-pack.md` 或 `research-pack.json`。
+负责内容研究和内容补充。它必须先读取 `task-pack.json`，并且只在 `task-pack.json.research_required` 为真时才执行，产出 `research-pack.md` 或 `research-pack.json`。
+上传报告、事实数据案例、长文档这些输入都要先交给 `ppt-task-pack` 消化，它们只是 `research_required` 的信号，不是绕过 `task-pack` 的独立入口。
+research 不是摘要，而是“可上页内容池”。
+pageworthy chunks 是 storyboard 的上游输入。
+同时 research 条目必须带稳定 ID，至少覆盖 `claim_id`、`evidence_id`、`chunk_id`，供 storyboard 的 `source_claim_ids` / `source_evidence_ids` 回指。
+
+建议最小结构：
+
+```python
+class Claim:
+    claim_id: str
+    claim: str
+    importance: str
+    evidence_ids: list[str]
+
+
+class EvidencePoint:
+    evidence_id: str
+    evidence: str
+    source: str
+    supports_claim_ids: list[str]
+
+
+class PageworthyChunk:
+    chunk_id: str
+    chunk: str
+    why_pageworthy: str
+    related_claim_ids: list[str]
+
+
+class ResearchPack:
+    claims: list[Claim]
+    evidence_points: list[EvidencePoint]
+    pageworthy_chunks: list[PageworthyChunk]
+    risks_or_uncertainties: list[str]
+```
 
 #### `ppt-template-pack`
 
@@ -233,19 +303,49 @@
 #### `ppt-style-spec`
 
 负责 deck 级设计语言，产出 `style-spec.json`。默认必产。
+它必须优先理解用户需求，再把 `task-pack.json` 中的 `风格意图` 转成可执行的设计语法；只有在风格信号不足时，才允许退到 `商务` 或 `海报` 这两种兜底。
+同时必须读取 `task-pack.json.content_density_profile`，把它解释成正文页的承载策略，而不是单纯视觉风格切换。
+这里的“可执行”不是多写几个形容词，而是要产出 variant 级页面壳子映射，例如 `variant_key`、`layout_shell`、`header_strategy`，不要只按 `page_type` 粗分。
+同时要给出 `svg_motif_library` 这类可直接绘制的装饰元素库，让背景和前景的插画感不是停留在文字描述。
+对装饰层的当前实现策略采用“强约束渲染契约”，不是只描述气质，而是给出可直接落地的 motif 配方。
+这里的 `插画感` 只影响装饰层与组件皮肤，不应被误用成“所有视觉都改成插画、无需真实图片”。
+正文 / 内容页不能把 `background_motif_recipe` 留空，也不要只给一个角落里的小图标；至少要有一个大面积或跨边缘的背景 motif 配方。真实图片也不能替代背景装饰配方。
 
 #### `ppt-storyboard`
 
 负责分页叙事和前端契约，产出 `storyboard.json`。默认必产。
+storyboard 是 research 的消费层，不允许只把 research 主题词重新改写成页面摘要；每页必须能说明主 claim 和 evidence 从哪里来。
+同时必须把 `content_density_profile` 转成可执行的 `payload_budget`；内容密度 profile 到这里必须落成页级预算，而不是继续停留在控制面描述。
+如果 research 里存在缺口、证据不足或待确认项，必须在页面级 `content_blocks[].unresolved_gaps` 或页级未解决项里显式保留，不要静默吞掉。
+未触发 `research-pack` 时，`source_claim_ids` 与 `source_evidence_ids` 保留为空列表即可；这是合法状态，不要伪造 research 回指。
+其中 `unresolved_gaps` 只承接块级内容 / 证据 / claim 缺口，`unresolved_issues` 只承接页级问题，例如布局、资产、待确认页级约束。
+其中每页的 `style_variant` 必须直接引用 `style-spec.json` 中已声明的 variant 映射，不要把它写成宽泛形容词。
+每页必须声明页级 `payload_budget`。分析类页通常要更高的 `claim_count`、`evidence_count` 与 `structure_block_count`；展示类页预算可以更轻，但仍要明确最低承载与是否需要摘要。
+`asset_requirements` 也不能只写模糊槽位名；要带上 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder` 这类类型提示。
+资产类型判断必须先看页面语义。如果页面要呈现人物、产品、空间、场景、活动现场、作品样张或环境氛围，默认应规划为 `real-photo`；`插画感` 只影响装饰语法，不要因为风格里有插画感，就把整套 deck 的图片需求都改成 `svg-illustration`。
 
 #### `ppt-asset-plan`
 
 负责图片与视觉资产规划，产出 `asset-plan.json`，必要时同时落地 `image_search_results.json`、`image_selection.json` 和 `images/`，并在下载前先创建 `deck_dir/images`。
+它只应为真实图片槽位走搜图与下载；可直接绘制的图标或插画应标记为 `draw-inline-svg`，不要强行走搜图下载。
+如果 `asset_requirements` 写得过轻，但 `visual_requirements` 或页面语义明显指向真实图片，资产规划阶段应补出对应的 `real-photo` 槽位，不要静默接受“整套都只有 SVG”。
 
 #### `ppt-page-html`
 
 负责按页生成 `pages/page_XX.html`。
 每个 `storyboard.json.pages[n]` 都必须对应一个单独的页面文件，不允许把整套 deck 拼成单个 HTML，同时必须忠实消费 `style-spec.json` 和已经下载成功的本地图片，并继续遵守 `1280x720` 固定画布、16:9 比例和页脚安全区约束。
+不要编写 Python 脚本来批量生成页面；必须逐页直接生成最终 HTML，不要先写生成器脚本再批量产出页面。
+同时必须按 `storyboard.json.pages[n].payload_budget` 落地：如果预算要求 3 块结构、多个 claim / evidence，页面就要真的承载出来，不允许把应承载 3 块内容的页面退回成“一个标题 + 一张大卡片”。
+页面实现时必须显式消费 `background_system`、`foreground_motifs`、`component_skins`、`density_rules`、`page_type_variants`；不要只做纯色背景 + 普通白卡片，除非 `style-spec` 明确要求极简。
+生成时应优先按 `style_variant` 映射页面壳子，不要把多个不同 `style_variant` 页面重新压成同一种安全模板。
+图标、装饰性元素、可直接绘制的插画应使用内联 SVG 落地；只有真实照片、二维码、用户专有素材缺失时才允许 placeholder。
+不要把图标画成 placeholder。
+可见标题必须放在 `#ct` 内，或放在单独的 `#header` 容器内；不要把 `.header` 当作 `#bg` 和 `#ct` 之间的裸兄弟节点，否则很容易被内容层盖住。
+非极简页面必须至少 1 层背景装饰，且至少 1 处前景装饰；如果只有纯色或渐变背景，应视为未完成。
+背景装饰层必须是用户可感知的视觉层，不能退化成极小角标或几乎不可见的弱纹理。
+正文 / 内容页即使有真实图片，也不能把照片当成背景装饰层的替代。
+根据 recipe 落地的背景 motif 元素必须带 `data-layer="bg-motif"`；前景 motif 元素必须带 `data-layer="fg-motif"`；每个 motif 还要带 `data-motif-key`，让 review 和导出前校验可以核对。真实图片或主视觉照片不能替代这些标记。
+同时，页面必须逐项消费 `storyboard.json.pages[n].asset_requirements`，不要用一个通用 motif 替代不同页面的具体资产要求；如果页面要求 `real-photo`，不要改画成 SVG 小图标。
 在生成前，消费前必须先确认 `task-pack.json`、`style-spec.json`、`storyboard.json` 以及相关 `asset-plan.json` 真实存在且可读；如果目标文件不存在、目录不一致或关键字段缺失，先补齐依赖，不要猜测。
 
 #### `ppt-speaker-notes`
@@ -255,6 +355,8 @@
 #### `ppt-review`
 
 负责整套结果审查，产出 `review.md` 或 `review.json`。
+review 不是口头总结，必须写回工件；并且必须写出 `review.md` 或 `review.json`，检查是否满足页级 `asset_requirements`、如果要求真实图片却只落了 SVG 或 placeholder、以及装饰层是否真的成立。审查时必须直接读取页面 HTML，不要只根据模型自述；如果 style-spec recipe 要求某个 motif，就要在页面里找到对应的 `data-motif-key`。同时必须核对标题元素是否放在 `#ct` 或 `#header`，不要把仅存在于源码但被层级盖住的标题判成通过；如果 `.header` 落在 `#ct` 外面，应视为标题不可见。
+此外还必须对照 `payload_budget` 审查是否存在承载不足、结构块不足、缺少对比或摘要等问题；如果 storyboard 已声明预算而页面没有兑现，不能直接判定可交付。没有 `review.md` 或 `review.json` 时，不得继续导出。
 
 ### 4.3 局部修复 skills
 
@@ -266,58 +368,29 @@
 - `ppt-style-refine`
 - `ppt-story-refine`
 
-### 4.4 新方案流程图
+### 4.4 技能清单速览
 
-下面这张流程图描述了新体系的完整推进方式：默认先走 `fast` 快路径，只在命中触发器时插入研究、模板、资产、讲稿或局部修复链路。
+流程图可以由使用方按需要自行绘制；这里保留技能清单表，明确每个 skill 的职责和用户可见反馈点。
 
-```mermaid
-flowchart TD
-    A[用户输入<br/>需求 / 文件 / 链接 / 截图 / 模板] --> B[ppt-superpower]
-    B --> C{是否存在已有工件<br/>可继续推进?}
-    C -- 是 --> D[复用已有 task-pack / style-spec / storyboard]
-    C -- 否 --> E{是否有上传来源?}
-
-    E -- 是 --> F[ppt-source-analysis<br/>产出 source-map.json]
-    E -- 否 --> G[ppt-task-pack<br/>产出 task-pack.json]
-    F --> G
-
-    G --> H{是否存在内容缺口<br/>或事实敏感?}
-    H -- 是 --> I[ppt-research-pack<br/>产出 research-pack]
-    H -- 否 --> J{是否存在模板参考?}
-    I --> J
-
-    J -- 是 --> K[ppt-template-pack<br/>产出 template-pack.json]
-    J -- 否 --> L[ppt-style-spec<br/>产出 style-spec.json<br/>默认必产]
-    K --> L
-
-    D --> L
-    L --> M[ppt-storyboard<br/>产出 storyboard.json<br/>默认必产 / 前端契约]
-    M --> N{是否存在图片或视觉资产缺口?}
-    N -- 是 --> O[ppt-asset-plan<br/>产出 asset-plan.json / image_search_results.json / image_selection.json / images]
-    N -- 否 --> P[ppt-page-html<br/>产出 pages/page_XX.html]
-    O --> P
-
-    P --> Q{是否需要讲稿?}
-    Q -- 是 --> R[ppt-speaker-notes<br/>产出 speaker-notes]
-    Q -- 否 --> S[ppt-review]
-    R --> S
-
-    S --> T{Review 是否发现问题?}
-    T -- 否 --> U[交付当前结果]
-    T -- 是 --> V{问题级别}
-
-    V -- 单页规划 --> W[ppt-page-plan]
-    V -- 单页资产 --> X[ppt-page-assets]
-    V -- 单页抛光 --> Y[ppt-page-polish]
-    V -- 全局风格 --> Z[ppt-style-refine]
-    V -- 叙事结构 --> AA[ppt-story-refine]
-
-    W --> P
-    X --> P
-    Y --> P
-    Z --> M
-    AA --> M
-```
+| Skill | 类型 | 触发时机 | 主要输入 | 主要产物 | 用户回显 |
+| --- | --- | --- | --- | --- | --- |
+| `ppt-superpower` | 总控入口 | 用户提出整套生成、继续已有 deck、局部修改、阶段确认时 | 用户 query、上传文件、已有 deck 工件 | `deck_dir`、mode、下一步 skill 选择 | 首条消息说明目标 / mode / `deck_dir` / 第一步；后续统一要求各阶段给 `开始反馈`、`完成反馈`、必要时给 `进行中反馈` 或 `阻塞反馈` |
+| `ppt-source-analysis` | 来源分析 | 有报告、网页、截图、模板、已有 deck 等上传来源时 | 原始文件、链接、截图 | `source-map.json` | 回显识别出的来源角色、限制和推荐 `下一步` |
+| `ppt-task-pack` | 任务收敛 | 新建 deck、重新明确页数、受众、语言、交付物时 | 用户目标、来源分析结果、输出要求 | `task-pack.json` | 回显主题、页数、mode、`deck_dir`、`research_required` 和关键假设 |
+| `ppt-research-pack` | 研究补充 | `task-pack.json.research_required` 为真，且 task-pack 仍有内容缺口时 | `task-pack.json`、来源材料、检索结果 | `research-pack.md` / `research-pack.json` | 回显核心结论、不确定性和 `下一步` |
+| `ppt-template-pack` | 模板拆解 | 用户提供模板 deck、参考版式或样页时 | 模板文件、参考页面、`task-pack.json` | `template-pack.json` | 回显识别出的布局规则、组件约束和可复用范围 |
+| `ppt-style-spec` | 设计控制面 | 默认必产；明确 deck 级设计语言时 | `task-pack.json`、模板约束、风格参考 | `style-spec.json` | 回显设计主题、风格关键词、主色 / 字体方向和 `下一步` |
+| `ppt-storyboard` | 叙事控制面 | 默认必产；确定分页结构与前端契约时 | `task-pack.json`、`style-spec.json`、`research-pack` | `storyboard.json` | 回显页数、章节结构、未解决项；`guided` 下提示用户先审阅 |
+| `ppt-asset-plan` | 资产规划 | 页面存在图片、背景、图标等视觉资产缺口时 | `task-pack.json`、`storyboard.json`、可选 `style-spec.json` | `asset-plan.json`、`image_search_results.json`、`image_selection.json`、`images/` | 回显待补槽位数、下载进度、成功落地数量、未解决槽位和 `下一步` |
+| `ppt-page-html` | 页面生成 | 需要按页落地 HTML 或局部重做页面时 | `task-pack.json`、`style-spec.json`、`storyboard.json`、`asset-plan.json` | `pages/page_XX.html` | 回显当前页范围、进度、已生成页数、保留的占位或残留问题 |
+| `ppt-speaker-notes` | 讲稿生成 | 用户要求讲稿、备注页、演讲词时 | `storyboard.json`、页面 HTML | `speaker-notes.json` / `speaker-notes.md` | 回显讲稿覆盖页数、语气方向和 `下一步` |
+| `ppt-review` | 结果审查 | 页面生成后统一检查叙事、风格、页面质量和资产状态时 | `task-pack.json`、`style-spec.json`、`storyboard.json`、页面与资产 | `review.md` / `review.json` | 回显总体结论、问题数量、建议下钻 skill 和是否可直接交付 |
+| `ppt-page-plan` | 单页规划修复 | 只改某一页结构、布局意图或内容块时 | 指定页规划、`storyboard.json`、用户反馈 | 单页规划更新 | 回显锁定的 `page_id`、影响范围和 `下一步` |
+| `ppt-page-assets` | 单页资产修复 | 只换某页或某槽位的图片 / 图标 / 背景时 | 指定页、`asset-plan.json`、`storyboard.json` | 单页资产更新与本地图片 | 回显锁定槽位、资产替换结果、未解决项和 `下一步` |
+| `ppt-page-polish` | 单页视觉抛光 | 单页结构基本正确，但视觉质量需要微调时 | 指定页 HTML、`style-spec.json`、用户反馈 | 抛光后的单页 HTML | 回显本页抛光目标、已做调整和残留问题 |
+| `ppt-style-refine` | 全局风格修复 | 全局风格方向对，但品牌感、变化度或一致性不足时 | `style-spec.json`、若干页面 HTML、用户反馈 | 更新后的 `style-spec.json` | 回显增强了哪些全局规则、影响哪些页面类型和 `下一步` |
+| `ppt-story-refine` | 叙事修正 | 故事线、章节顺序、页数分配需要调整时 | `storyboard.json`、`task-pack.json`、用户反馈 | 更新后的 `storyboard.json` | 回显调整后的故事线、影响页数和 `下一步` |
+| `ppt-export-pptx` | 导出交付 | 页面和 review 基本就绪，需要导出最终 PPTX 时 | `deck_dir`、`pages/page_XX.html`、可选 `style-spec.json` / `storyboard.json` | `<deck_dir>/<目录名>.pptx` | 回显导出开始、处理页数、失败页数、输出路径和 `下一步` |
 
 ---
 
@@ -337,6 +410,7 @@ flowchart TD
 - `style-spec` 提供统一设计语言
 - `storyboard` 提供统一叙事与前端契约
 - 三者共同固定 `deck_dir`、设计控制面和页面控制面，保证 deck 可继续演进
+- `task-pack.json` 还负责显式标记 `research_required`，作为是否进入 `ppt-research-pack` 的唯一门控输入
 
 ### 5.2 可选工件
 
@@ -360,6 +434,7 @@ from typing import Literal
 
 Mode = Literal["fast", "guided", "surgical"]
 OutputPolicy = Literal["user-provided", "reuse-existing", "auto-generated"]
+ContentDensityProfile = Literal["analysis-heavy", "balanced", "showcase-light"]
 
 class TaskPack:
     schema_version: str
@@ -373,18 +448,53 @@ class TaskPack:
     must_have_sections: list[str]
     constraints: list[str]
     known_gaps: list[str]
+    content_gap_assessment: list[str]
+    research_required: bool
+    research_needs: list["ResearchNeed"]
     available_sources: list[str]
+    style_intent: "StyleIntent"
+    content_density_profile: ContentDensityProfile
     deck_dir: str
     output_policy: OutputPolicy
+
+
+class StyleIntent:
+    scenario: str
+    audience_signal: str
+    tone: list[str]
+    industry_context: str
+    explicit_style_preference: str | None
+
+
+class ResearchNeed:
+    topic: str
+    reason: str
+    scope: list[str]
+    priority: str
 ```
 
 要求：
 
+- `风格意图` 必须先从用户 query 中抽取，至少覆盖 `场景`、`气质`、`行业语境` 和显式风格偏好
+- 如果用户已经明确给出风格偏好、品牌语气、参考图或模板方向，必须在 `task-pack.json` 中显式记录，供后续 `style-spec` 优先消费
+- `content_density_profile` 是正文页内容的承载策略，不是单纯视觉风格切换
+- `ppt-task-pack` 负责根据主题/场景选择默认 profile，并允许用户偏好覆盖
+- `analysis-heavy` 适合分析 / 汇报 / 评估类主题
+- `balanced` 适合普通汇报 / 培训 / 项目介绍
+- `showcase-light` 适合品牌 / 展示 / 活动 / 发布类主题
+- 用户明确要求更满或更克制时，可覆盖默认 profile
 - `deck_dir` 必须被显式记录，并作为后续 skill 的统一输出目录
 - 它是唯一可信的 canonical 输出根目录
 - 后续 skill 只能直接复制这个值，不要手写、缩写、翻译或重拼目录名
 - 如果用户未指定目录，`deck_dir` 使用 `query概述 + 时间戳` 自动创建
 - 不允许把工件散落写到 agent 根目录
+- `known_gaps` 保留“当前已知但尚未补齐的问题清单”角色，记录用户未提供的信息、待确认项和缺失材料
+- `content_gap_assessment` 负责显式记录当前内容缺什么、为什么缺、会阻塞什么
+- `content_gap_assessment` 负责更结构化的判断，用来解释这些缺口为什么会触发 research 或影响后续内容决策
+- 避免两个字段看起来重复：`known_gaps` 记录现象，`content_gap_assessment` 记录判断
+- `research_required` 由 `task-pack.json` 自己判断并显式记录
+- `research_needs` 负责把 research topic、reason、scope、priority 写成稳定输入
+- 不允许在 `task-pack` 之前做外部 research 决策
 
 ### 5.4 `style-spec.json`
 
@@ -395,8 +505,16 @@ class StyleSpec:
     schema_version: str
     design_theme: str
     design_keywords: list[str]
+    visual_archetype: str
+    fallback_archetype: str
     color_roles: list["ColorRole"]
     typography: "TypographySpec"
+    background_system: list[str]
+    foreground_motifs: list[str]
+    svg_motif_library: list["SvgMotif"]
+    component_skins: list[str]
+    density_rules: list[str]
+    page_type_variants: list["PageTypeVariant"]
     page_type_principles: list["PageTypePrinciple"]
     component_tone: list[str]
     diversity_rules: list[str]
@@ -420,6 +538,33 @@ class PageTypePrinciple:
     page_type: str
     visual_goal: str
     allowed_variants: list[str]
+
+
+class PageTypeVariant:
+    variant_key: str
+    page_type: str
+    layout_shell: str
+    header_strategy: str
+    background_strategy: str
+    foreground_strategy: str
+    required_svg_motifs: list[str]
+    background_motif_recipe: list["MotifPlacement"]
+    foreground_motif_recipe: list["MotifPlacement"]
+    component_strategy: str
+
+
+class SvgMotif:
+    motif_key: str
+    usage_layer: str
+    drawing_hint: str
+    palette_binding: list[str]
+
+
+class MotifPlacement:
+    motif_key: str
+    placement_hint: str
+    density_hint: str
+    opacity_hint: str
 ```
 
 要求：
@@ -427,11 +572,35 @@ class PageTypePrinciple:
 - `style-spec.json` 为默认必产
 - 它是设计控制面
 - 必须先读取 `task-pack.json`
+- 必须读取 `task-pack.json.content_density_profile`
+- 必须优先理解用户需求，再决定具体风格方向
+- `visual_archetype` 表示根据用户需求推断出的主风格；只有在风格信号不足时，`fallback_archetype` 才允许取 `商务` 或 `海报`
+- `content_density_profile` 是正文页承载策略，不是单纯视觉风格切换
 - 输出路径必须严格为 `${deck_dir}/style-spec.json`
 - 不要手写、缩写、翻译或重拼目录名
+- 必须包含 `background_system`、`foreground_motifs`、`component_skins`、`density_rules`、`page_type_variants`
 - 必须包含“页面类型视觉原则”
 - 必须包含“禁用项”或等价反模式
 - 后续 `ppt-storyboard` 与 `ppt-page-html` 必须显式消费它
+
+补充要求：
+
+- `background_system` 要明确背景层次、渐变、纹理、几何层、光晕或分区底纹，避免页面退回纯色底
+- `foreground_motifs` 要明确角标、编号块、导视线、强调框、标签等前景装饰语法
+- 背景和前景都要给出可绘制的装饰元素，不要只停留在文字描述
+- `svg_motif_library` 要列出可直接绘制的装饰元素或插画母题，供后续页面生成直接消费
+- `component_skins` 要明确卡片、数据面板、表格、引言块、图表容器的皮肤规则
+- `density_rules` 要明确哪些页面允许更浓、哪些页面必须更克制，并且与 `analysis-heavy`、`balanced`、`showcase-light` 的承载语义一致
+- `page_type_variants` 要明确封面页、分析页、结论页、风险页等页面如何变化而不失统一
+- `page_type_variants` 不要只按 `page_type` 粗分；要能覆盖 `style_variant`
+- 每个 variant 都应提供 `variant_key`、`layout_shell`、`header_strategy` 等可执行字段，避免只剩形容词风格
+- 每个 variant 都应带 `required_svg_motifs`
+- 每个 variant 还应带 `background_motif_recipe`、`foreground_motif_recipe`、`placement_hint`、`density_hint`
+- 正文 / 内容页不能把 `background_motif_recipe` 留空
+- 正文 / 内容页不要只给一个角落里的小图标
+- 正文 / 内容页至少要有一个大面积或跨边缘的背景 motif 配方
+- 真实图片也不能替代背景装饰配方
+- 不要只写“有叶片感”这类抽象描述
 
 ### 5.5 `storyboard.json`
 
@@ -463,6 +632,7 @@ class StoryboardPage:
     audience_takeaway: str
     layout_intent: str
     style_variant: str
+    payload_budget: "PayloadBudget"
     content_blocks: list["ContentBlock"]
     visual_requirements: list[str]
     data_requirements: list[str]
@@ -471,21 +641,45 @@ class StoryboardPage:
     presenter_intent: str
 
 
+class PayloadBudget:
+    claim_count: int
+    evidence_count: int
+    structure_block_count: int
+    require_comparison_or_summary: bool
+
+
 class ContentBlock:
     block_id: str
     heading: str
     summary: str
-    evidence_refs: list[str]
+    source_claim_ids: list[str]
+    source_evidence_ids: list[str]
+    unresolved_gaps: list[str]
 ```
 
 设计要求：
 
+- storyboard 是 research 的消费层
 - 消费前必须先确认依赖文件真实存在且可读
 - 如果目标文件不存在、路径不一致或关键字段缺失，先补齐依赖，不要猜测
 - 页数必须与 `task-pack.json` 对齐
 - 内容语言必须默认与用户 query 保持一致
 - 允许前端稳定渲染页面列表
 - 允许后续 skill 基于 `page_id` 做局部重写
+- 不允许只拿 research 主题词重新写一遍
+- 必须把 `content_density_profile` 转成可执行的 `payload_budget`
+- 每页必须声明页级 `payload_budget`
+- `payload_budget` 至少包含 `claim_count`、`evidence_count`、`structure_block_count`、`require_comparison_or_summary`
+- 分析类页应拿到更高的论点 / 证据 / 结构块预算，展示类页预算可以更轻，但仍要明确最低承载
+- 每页必须能说明主 claim 和 evidence 从哪里来
+- 每个 `ContentBlock` 都必须显式记录 `source_claim_ids` 与 `source_evidence_ids`
+- 未触发 `research-pack` 时，`source_claim_ids` 与 `source_evidence_ids` 应保留为空列表；这是合法状态
+- 缺证据时要显式记录 `unresolved_gaps`
+- `unresolved_gaps` 只承接块级内容 / 证据 / claim 缺口
+- `unresolved_issues` 只承接页级问题，例如布局、资产、待确认页级约束
+- `style_variant` 必须直接引用 `style-spec.json` 中已声明的 variant 映射
+- `style_variant` 不要把它写成宽泛形容词；后续 `ppt-page-html` 可直接按 variant 落地
+- `asset_requirements` 不要只写模糊的槽位名，应带 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder` 这类类型提示
 - `presenter_intent` 只提供轻量讲述意图，不承担完整讲稿职责
 
 ### 5.6 `asset-plan.json`
@@ -504,6 +698,8 @@ class AssetSlot:
     page_title: str
     slot_id: str
     purpose: str
+    asset_kind: str
+    render_strategy: str
     source_caption: str
     query: str
     selected: bool
@@ -534,6 +730,10 @@ class RejectedCandidate:
 - 必须保留 `image_search_results.json`，记录 query 与原始候选
 - 必须保留 `image_selection.json`，记录最终选择与拒绝原因
 - 选图流程必须可审计，不能让“筛选过程”在重构后消失
+- `asset-plan.json` 中必须显式区分 `real-photo`、`svg-illustration`、`svg-icon`、`qr-placeholder`
+- `real-photo` 应走 `download-local`
+- 不要为可直接绘制的图标或插画走搜图下载
+- 如果 `asset_requirements` 写得过轻，但页面语义明显要求人物、产品、场景或活动现场图片，应补出对应的 `real-photo` 槽位
 - 必须先下载验证，再做最终选择
 - 优先落地本地图片
 - 本地文件不存在时必须显式标记 `unresolved`
@@ -562,28 +762,59 @@ class SpeakerNotePage:
     caution: list[str]
 ```
 
+### 5.8 `pages/page_XX.html`
+
+执行要求：
+
+- `ppt-page-html` 必须显式消费 `storyboard.json.pages[n].payload_budget`
+- `claim_count` 决定页面至少要有多少个独立论点承载位
+- `evidence_count` 决定页面至少要有多少个证据承载位，例如数据点、图表说明、案例事实或来源标注
+- `structure_block_count` 决定页面至少要有多少个可感知结构块，不允许把应承载 3 块内容的页面退回成“一个标题 + 一张大卡片”
+- `require_comparison_or_summary=True` 时，页面必须显式出现对比结构或摘要结构
+- 分析类页应优先兑现更高的结构和证据预算；展示类页预算可以更轻，但仍要把该页需要传达的 claim 或 summary 真正落到页面里
+
+### 5.9 `review.md` / `review.json`
+
+审查要求：
+
+- `ppt-review` 必须逐页对照 `payload_budget`
+- 如果 `claim_count`、`evidence_count`、`structure_block_count` 没有兑现，要明确标记为承载不足或结构块不足
+- 如果 `require_comparison_or_summary=True`，但页面没有对比区或摘要区，要明确标记为缺少对比或摘要
+- 这类问题默认属于页面级返工问题，应优先下钻到 `ppt-page-plan`、`ppt-page-polish` 或相关单页修复 skill
+- 只有当预算问题在大多数正文页系统性出现时，才上升为全局设计或叙事问题
+
 ---
 
 ## 6. 默认运行路径
 
-### 6.1 快速优先
+### 6.1 确认优先
 
-无上传文件时的最小路径：
+无上传文件时的最小路径，也是默认路径：
+
+主路径从 `deck_dir -> task-pack -> research(按需) -> style-spec -> storyboard` 开始。
 
 1. `ppt-task-pack`
-2. `ppt-style-spec`
-3. `ppt-storyboard`
-4. `ppt-page-html`
-5. `ppt-review`
+2. 如 `task-pack.json.research_required` 为真且仍有内容缺口，则进入 `ppt-research-pack`
+3. `ppt-style-spec`
+4. `ppt-storyboard`
+5. 默认等待用户确认
+6. 如用户明确授权自动继续，再按需进入 `ppt-asset-plan`
+7. `ppt-page-html`
+8. `ppt-review`
 
 有上传文件时的常规路径：
 
+主路径从 `deck_dir -> task-pack -> research(按需) -> style-spec -> storyboard` 开始。
+
 1. `ppt-source-analysis`
 2. `ppt-task-pack`
-3. `ppt-style-spec`
-4. `ppt-storyboard`
-5. `ppt-page-html`
-6. `ppt-review`
+3. 如 `task-pack.json.research_required` 为真且仍有内容缺口，则进入 `ppt-research-pack`
+4. `ppt-style-spec`
+5. `ppt-storyboard`
+6. 默认等待用户确认
+7. 如用户明确授权自动继续，再按需进入 `ppt-asset-plan`
+8. `ppt-page-html`
+9. `ppt-review`
 
 ### 6.2 按需插入
 
@@ -598,22 +829,27 @@ class SpeakerNotePage:
 
 #### `fast`
 
-默认模式。
+显式 opt-in 模式。
 
+- 只有用户明确说“直接生成”“不要确认”“自动继续”或“一口气跑完”时，才进入 `fast`
 - 只生成必要工件
 - 优先尽快得到整套结果
 - 只在必要时下钻
+- 必须给用户简短阶段回显，但默认非阻塞
+- 除非触发阻塞条件，否则每次回显后自动进入 `下一步`
 
 #### `guided`
 
-用于希望逐步查看中间产物的场景。
+默认模式，用于希望逐步查看中间产物的场景。
 
+- 默认进入 `guided`，走确认优先路径
 - 如果用户说“先看大纲”“先确认大纲”“先看风格和大纲”或“确认后再生成”，必须进入 `guided`
+- `task-pack.json`、`style-spec.json`、`storyboard.json` 后默认等待确认
 - 在用户确认前，不要直接生成 `pages/page_XX.html`
 - 不要只返回一段自由文本大纲，应展示已落盘的结构化工件
-
 - 更稳定地产出中间工件
 - 更适合前端阶段性确认
+- 完成关键工件后必须明确提示用户现在可查看什么，以及确认后的 `下一步`
 
 #### `surgical`
 
@@ -621,6 +857,41 @@ class SpeakerNotePage:
 
 - 不重跑整套
 - 只改指定页面、指定槽位、指定风格或叙事局部
+- 阶段回显必须点明当前锁定的 `page_id`、`slot_id` 或被修改工件范围
+
+### 6.4 阶段回显协议
+
+建议所有阶段回显都遵循同一最小结构：
+
+```python
+from typing import Literal
+
+FeedbackStatus = Literal[
+    "started",
+    "in_progress",
+    "completed",
+    "blocked",
+    "awaiting_confirmation",
+]
+
+
+class StageFeedback:
+    stage: str
+    status: FeedbackStatus
+    scope: str
+    artifacts: list[str]
+    highlights: list[str]
+    unresolved: list[str]
+    next_step: str
+```
+
+执行要求：
+
+- 第一条反馈必须说明目标、mode、`deck_dir` 和第一步。
+- 每个关键阶段至少有一条 `开始反馈` 和一条 `完成反馈`。
+- 搜图、逐页 HTML、review、导出 PPTX 允许补一条 `进行中反馈`，但不要刷屏。
+- 遇到缺依赖、路径错误、下载失败、导出失败时，要立即发 `阻塞反馈`。
+- `guided` 在等待用户决策时使用 `awaiting_confirmation` 语义，并明确告诉用户当前停在哪个工件。
 
 ---
 
@@ -635,7 +906,9 @@ class SpeakerNotePage:
 作用：
 
 - 提供事实、论点、章节信息
-- 进入 `ppt-research-pack`
+- 先进入 `ppt-task-pack`，由 `task-pack.json.research_required` 决定是否进入 `ppt-research-pack`
+- 上传报告、主题涉及事实 / 数据 / 案例、长文档整理等都只是 `task-pack` 判断 `research_required` 的信号
+- 上传报告、事实数据案例和长文档只是 `task-pack` 计算 `research_required` 的信号
 
 ### 7.2 风格参考
 
@@ -751,11 +1024,15 @@ class SpeakerNotePage:
 2. 旧 `ppt-image-selection / ppt-html-gen` 可以保留作参考文档，但 `ppt-superpower` 不得回退调用它们
 3. `ppt-superpower` 明确声明 `fast / guided / surgical` 与 `deck_dir`，并要求初始化 `pages/` / `images/`
 4. `ppt-style-spec` 明确声明默认必产、设计控制面、页面类型视觉原则、禁用项
-5. `ppt-storyboard` 明确包含固定 schema 字段
-6. `ppt-asset-plan` 明确保留搜图候选、筛选记录、本地下载结果，并在下载前先创建 `deck_dir/images`
-7. `ppt-page-html` 明确消费 `style-spec.json` 与本地图片，不退回通用默认样式，同时恢复严格的 `1280x720` / 页脚安全区约束
+5. `ppt-storyboard` 明确包含固定 schema 字段，并为每页声明 `payload_budget`
+6. `ppt-asset-plan` 明确保留搜图候选、筛选记录、本地下载结果，并在下载前先创建 `deck_dir/images`，同时区分 `real-photo` 与可直接绘制的 SVG 资产
+7. `ppt-page-html` 明确消费 `style-spec.json`、本地图片和页级 `payload_budget`，不退回通用默认样式，同时恢复严格的 `1280x720` / 页脚安全区约束，并禁止通过 Python 生成器脚本批量产出页面；优先按 `style_variant` 映射页面壳子，并用内联 SVG 落地图标与装饰性插画；非极简页面若只有纯色或渐变背景则视为未完成
+   并且按 recipe 落地的背景 / 前景 motif 必须带 `data-layer="bg-motif"`、`data-layer="fg-motif"` 与 `data-motif-key`，让 review 和导出前校验可以核对；真实图片或主视觉照片不能替代这些标记
 8. `ppt-speaker-notes` 明确标注可选交付物
-9. 设计文档中的术语与新 skill 体系一致
+9. `ppt-review` 明确按 `payload_budget` 审查承载不足、结构块不足、缺少对比或摘要等问题
+10. 设计文档中的术语与新 skill 体系一致
+11. `ppt-superpower` 与关键子 skill 明确声明阶段回显协议，避免长链路静默执行
+12. 设计文档明确 `fast / guided / surgical` 的交互反馈差异与 `StageFeedback` 结构
 
 ### 11.2 场景测试矩阵
 
@@ -763,17 +1040,20 @@ class SpeakerNotePage:
 
 期望：
 
-- 走 `fast`
+- `deck_dir -> task-pack -> research(按需) -> style-spec -> storyboard`
+- 默认进入 `guided`
 - 生成 `task-pack.json`
 - 生成 `style-spec.json`
 - 生成 `storyboard.json`
+- `task-pack.json`、`style-spec.json`、`storyboard.json` 后默认等待确认
 
 #### 用例 2：上传报告作为内容素材
 
 期望：
 
 - 在 `source-map.json` 中识别为 `content_source`
-- 进入 `ppt-research-pack`
+- 先进入 `ppt-task-pack`
+- 由 `task-pack.json.research_required` 决定是否进入 `ppt-research-pack`
 
 #### 用例 3：上传参考图作为风格参考
 
@@ -824,12 +1104,63 @@ class SpeakerNotePage:
 - 只标记该槽位 unresolved
 - 其他页面继续生成
 
+#### 用例 10：长链路默认阶段回显
+
+期望：
+
+- 默认进入确认优先路径
+- 只有用户明确授权自动继续时才进入 `fast`
+- `fast` 也会在关键阶段给出简短 `开始反馈` / `完成反馈`
+- `guided` 会在关键停点显式等待用户确认
+- 搜图、逐页 HTML、review、导出 PPTX 可补 1 条 `进行中反馈`
+- 遇到阻塞时会立刻告诉用户卡点和 `下一步`
+
 #### 用例 10：用户要求讲稿
 
 期望：
 
 - 生成 `speaker-notes.json` 或 `speaker-notes.md`
 - 不污染 `storyboard.json` 的前端契约
+
+### 11.3 设计优化回归 query 草案
+
+以下用例用于观察“是否先理解用户需求，再生成匹配风格”，以及页面是否真正具备更丰富的背景层、前景装饰和组件皮肤。这里先保留可直接修改的 query 草案，后续可按需要继续细化。
+
+#### 草案 1：高端珠宝限定系列发布
+
+Query：
+
+`帮我做一份“月光与潮汐”珠宝限定系列发布的PPT，给买手店和媒体看。希望高级、克制、精致，有一点戏剧感和材质感，但不要做成普通奢侈品商务介绍。需要有系列灵感、主打款式、材质工艺、目标客群、陈列建议、传播主视觉方向。`
+
+#### 草案 2：山野观察营·秋季亲子自然教育项目
+
+Query：
+
+`帮我做一份“山野观察营·秋季亲子自然教育项目”的PPT，给家长和学校合作方看。希望温暖、自然、有手作感和一点插画感，能吸引孩子，但不能幼稚。需要有课程亮点、导师介绍、每日节奏、安全机制、报名方式。`
+
+#### 草案 3：冷萃乌龙气泡茶新品发布
+
+Query：
+
+`帮我做一份“冷萃乌龙气泡茶新品发布”的PPT，给渠道商和媒体预热。希望年轻、明亮、有点包装设计感，页面要有活力，适合现场大屏展示。需要有品牌概念、新品卖点、目标人群、陈列建议、传播海报方向。`
+
+#### 草案 4：小米汽车城市巡展提案
+
+Query：
+
+`帮我做一份“小米汽车城市巡展提案”的PPT，给商场渠道和品牌合作方看。希望有速度感、科技感和高级感，但不要做成泛蓝色科技模板。需要有巡展主题、主打亮点、体验动线、场景布置、传播话题。`
+
+#### 草案 5：故宫夜游文化体验升级方案
+
+Query：
+
+`帮我做一份“故宫夜游文化体验升级方案”的PPT，给文旅合作方和策展团队看。希望有东方秩序、宫廷质感和当代设计感，不要做成普通旅游宣传册。需要有项目定位、体验章节、空间氛围、文创联动、传播建议。`
+
+#### 草案 6：多模态大模型能力介绍
+
+Query：
+
+`帮我做一份“多模态大模型能力介绍”的PPT，给产品经理和售前团队看。希望专业、现代、信息密度高，但页面不能枯燥。需要有模型定位、核心能力、典型场景、效果对比、部署方式。`
 
 ---
 

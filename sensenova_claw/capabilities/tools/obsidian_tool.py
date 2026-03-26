@@ -14,10 +14,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-import httpx
-
 from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
 from sensenova_claw.platform.config.config import config
+
+try:
+    import httpx
+except ImportError:
+    httpx = None  # type: ignore[assignment]
 
 
 # ============================================================================
@@ -143,8 +146,10 @@ class ObsidianRemoteClient:
         method: str,
         path: str,
         **kwargs: Any,
-    ) -> httpx.Response:
+    ) -> Any:
         """发送 HTTP 请求"""
+        if httpx is None:
+            raise RuntimeError("远程 Obsidian 功能需要 httpx，请运行 'uv sync' 安装依赖")
         async with httpx.AsyncClient(timeout=self.cfg.timeout) as client:
             url = f"{self.base_url}{path}"
             return await client.request(
@@ -900,12 +905,7 @@ class ObsidianWriteTool(Tool):
 
             # 写入
             path = f"/vault/{quote(note_path.lstrip('/'), safe='/')}"
-            async with httpx.AsyncClient(timeout=remote_cfg.timeout) as http_client:
-                resp = await http_client.put(
-                    f"{remote_cfg.url}{path}",
-                    headers=client.headers,
-                    content=content.encode("utf-8"),
-                )
+            resp = await client._request("PUT", path, content=content.encode("utf-8"))
 
             if resp.status_code in (200, 201, 204):
                 return {

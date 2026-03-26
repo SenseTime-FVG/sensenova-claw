@@ -175,13 +175,50 @@ QQ 邮箱:
 - IMAP: imap.qq.com:993
 - 需在设置中开启 IMAP/SMTP 服务并获取授权码
 
+#### Obsidian 工具
+
+Obsidian 工具支持本地和远程 vault。
+
+**本地配置（可选，支持自动检测）：**
+```yaml
+tools:
+  obsidian:
+    vaults:
+      - ~/Documents/MyVault
+```
+
+**远程配置（需安装 Local REST API 插件）：**
+```yaml
+tools:
+  obsidian:
+    remote:
+      - name: work-vault
+        url: http://192.168.1.100:27123
+        api_key: your-api-key
+```
+
+**知识库 Skill 配置（可选）：**
+```yaml
+skills:
+  knowledge-base:
+    enabled: true
+    root_folder: "Knowledge"
+    auto_load_profile: true
+    auto_save: true
+```
+
+自动检测位置: `~/Documents/Obsidian`, `~/Obsidian`, macOS iCloud 等
+
+远程设置: 安装 [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) 插件并配置 API key
+
 ### Skills 系统
 
-Skills 是声明式任务编排机制（`sensenova_claw/capabilities/skills/`），23 个内置 skills 包括：
+Skills 是声明式任务编排机制（`sensenova_claw/capabilities/skills/`），24 个内置 skills 包括：
 - PPT 制作流水线: `ppt-superpower`, `ppt-research-pack`, `ppt-storyboard`, `ppt-page-plan` 等 13 个
 - 飞书集成: `feishu-doc`, `feishu-drive`, `feishu-perm`, `feishu-wiki`
 - 搜索增强: `research-union`, `union-search-plus`
 - 系统运维: `system-admin-skill`
+- 知识管理: `knowledge-base`（基于 Obsidian 的长期记忆、问答增强和知识管理）
 
 Skills 通过 YAML 配置定义，支持多步骤编排和条件分支。
 

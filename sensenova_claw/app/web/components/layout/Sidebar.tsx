@@ -57,7 +57,7 @@ export function Sidebar() {
   const loadSessions = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/sessions');
+      const response = await fetch('/api/sessions');
       const data = await response.json();
       setSessions(data.sessions || []);
     } catch (error) {

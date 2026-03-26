@@ -32,6 +32,8 @@ class TestLLMBody(BaseModel):
     api_key: str
     base_url: str = ""
     model_id: str
+    max_tokens: int = 128000
+    max_output_tokens: int = 16384
 
 
 class ProviderUpdateBody(BaseModel):
@@ -407,6 +409,8 @@ async def test_llm_connection(body: TestLLMBody):
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
         if provider in ("gemini", "gemini-compatible"):
@@ -414,6 +418,8 @@ async def test_llm_connection(body: TestLLMBody):
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
         if provider in ("openai", "openai-compatible"):
@@ -421,6 +427,8 @@ async def test_llm_connection(body: TestLLMBody):
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
         else:
@@ -429,6 +437,8 @@ async def test_llm_connection(body: TestLLMBody):
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
     except Exception as e:
@@ -436,7 +446,13 @@ async def test_llm_connection(body: TestLLMBody):
         return {"success": False, "error": str(e)}
 
 
-async def _test_openai_compatible(api_key: str, base_url: str, model_id: str) -> dict:
+async def _test_openai_compatible(
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    max_tokens: int,
+    max_output_tokens: int,
+) -> dict:
     """通过 OpenAI SDK 测试连通性"""
     from openai import AsyncOpenAI
     client = AsyncOpenAI(
@@ -446,14 +462,22 @@ async def _test_openai_compatible(api_key: str, base_url: str, model_id: str) ->
     )
     response = await client.chat.completions.create(
         model=model_id,
-        messages=[{"role": "user", "content": "Hi"}],
-        max_tokens=5,
+        messages=[{"role": "user", "content": "连接测试，回复我'hi'，不要多余的文字"}],
+        max_tokens=max_tokens,
+        extra_body={"max_output_tokens": max_output_tokens},
     )
     return {"model": response.model, "message": "连接成功"}
 
 
-async def _test_anthropic(api_key: str, base_url: str, model_id: str) -> dict:
+async def _test_anthropic(
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    max_tokens: int,
+    max_output_tokens: int,
+) -> dict:
     """通过 Anthropic SDK 测试连通性"""
+    _ = max_output_tokens
     import anthropic
     client = anthropic.AsyncAnthropic(
         api_key=api_key,
@@ -462,13 +486,19 @@ async def _test_anthropic(api_key: str, base_url: str, model_id: str) -> dict:
     )
     response = await client.messages.create(
         model=model_id,
-        messages=[{"role": "user", "content": "Hi"}],
-        max_tokens=5,
+        messages=[{"role": "user", "content": "连接测试，回复我'hi'，不要多余的文字"}],
+        max_tokens=max_tokens,
     )
     return {"model": response.model, "message": "连接成功"}
 
 
-async def _test_gemini(api_key: str, base_url: str, model_id: str) -> dict:
+async def _test_gemini(
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    max_tokens: int,
+    max_output_tokens: int,
+) -> dict:
     """通过 OpenAI 兼容方式测试 Gemini"""
     from openai import AsyncOpenAI
     gemini_base = base_url or "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -479,7 +509,8 @@ async def _test_gemini(api_key: str, base_url: str, model_id: str) -> dict:
     )
     response = await client.chat.completions.create(
         model=model_id,
-        messages=[{"role": "user", "content": "Hi"}],
-        max_tokens=5,
+        messages=[{"role": "user", "content": "连接测试，回复我'hi'，不要多余的文字"}],
+        max_tokens=max_tokens,
+        extra_body={"max_output_tokens": max_output_tokens},
     )
     return {"model": response.model, "message": "连接成功"}
