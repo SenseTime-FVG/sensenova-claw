@@ -89,6 +89,9 @@ class RejectedCandidate:
 - `svg-illustration`、`svg-icon` 这类可直接绘制的资产使用 `draw-inline-svg`。
 - 不要为可直接绘制的图标或插画走搜图下载。
 - 如果 `asset_requirements` 写得过轻，但 `visual_requirements` 或页面语义明显指向真实图片，应补出对应的 `real-photo` 槽位，并在 `reason` 中注明这是对 storyboard 轻标注的修正。
+- 如果页面实际布局需要多个独立真实图片槽位，`asset-plan.json` 中的 `real-photo` 槽位数量不能少于该页实际需求。
+- 不要让三张人物卡只规划一个图片槽位，也不要让双图展示页只落一个 `selected_image`。
+- 如果当前只能补齐部分真实图片，必须把缺失槽位记为 `unresolved`，而不是静默省略。
 - 不要静默接受“整套都只有 SVG”的结果。
 - 不要把人物、产品、场景、活动现场、作品样张、环境氛围这类应由真实图片承载的内容误判成 `svg-illustration`。
 
@@ -117,6 +120,7 @@ class RejectedCandidate:
 - 最终选择只能从下载成功且校验通过的本地文件中产生。
 - `selected_image.local_path` 必须指向 `deck_dir/images/...` 下真实存在的文件。
 - 如果某个槽位没有成功下载任何图片，必须标记为 `unresolved`，不能静默丢失。
+- 如果 `storyboard` 某页声明了多个独立 `real-photo` 需求，而 `asset-plan` 最终只成功落了一部分，必须在该页保留未兑现槽位，不要把缺口藏掉。
 
 ## 关键规则
 

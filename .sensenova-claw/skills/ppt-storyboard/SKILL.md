@@ -100,6 +100,9 @@ class ContentBlock:
 - `asset_requirements` 不要只写模糊的槽位名；要用能指导后续分流的提示，例如 `svg-illustration`、`svg-icon`、`real-photo`、`qr-placeholder`。
 - 资产类型判断必须先看页面语义，再看风格偏好。
 - 如果页面要呈现人物、产品、空间、场景、活动现场、作品样张、环境氛围等真实对象，默认应规划为 `real-photo`，必要时可叠加 `svg-illustration` 或 `svg-icon` 做装饰。
+- 如果页面布局需要多张独立真实图片，`asset_requirements` 必须拆成多个可追踪槽位，不要只写一个泛化的 `real-photo`。
+- 人物卡、产品卡、双图对照、瀑布流图组、多列样张展示这类布局，都要把每个独立图片位单独写清。
+- 不要让三张人物卡只共享一个宽泛的 `real-photo` 要求；否则后续 `asset-plan` 和 `review` 无法判断是否缺图。
 - `插画感` 只影响装饰语法、背景氛围和前景点缀，不等于把证据型图片全部改成 `svg-illustration`。
 - 不要因为风格里有插画感、手作感、童趣感，就把整套 deck 的图片需求都改写成 `svg-illustration`。
 - `presenter_intent` 只表达讲述意图，不承担完整讲稿。
