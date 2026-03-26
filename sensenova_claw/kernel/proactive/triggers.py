@@ -27,6 +27,10 @@ def is_event_match(trigger: EventTrigger, event_type: str, payload: dict) -> boo
         for k, v in trigger.filter.items():
             if payload.get(k) != v:
                 return False
+    if trigger.exclude_payload:
+        for k, v in trigger.exclude_payload.items():
+            if payload.get(k) == v:
+                return False
     return True
 
 

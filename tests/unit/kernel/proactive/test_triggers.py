@@ -61,6 +61,28 @@ class TestEventMatch:
         assert is_event_match(trigger, "email.received", {"source": "email-agent", "extra": 1}) is True
 
 
+    def test_exclude_payload_blocks_match(self):
+        trigger = EventTrigger(
+            event_type="agent.step_completed",
+            exclude_payload={"source": "recommendation"},
+        )
+        assert is_event_match(trigger, "agent.step_completed", {"source": "recommendation"}) is False
+
+    def test_exclude_payload_allows_normal(self):
+        trigger = EventTrigger(
+            event_type="agent.step_completed",
+            exclude_payload={"source": "recommendation"},
+        )
+        # 没有 source 字段
+        assert is_event_match(trigger, "agent.step_completed", {}) is True
+        # source 不同
+        assert is_event_match(trigger, "agent.step_completed", {"source": "user"}) is True
+
+    def test_exclude_payload_none_no_effect(self):
+        trigger = EventTrigger(event_type="agent.step_completed")
+        assert is_event_match(trigger, "agent.step_completed", {"source": "recommendation"}) is True
+
+
 class TestDebounce:
     def test_no_debounce_first_time(self):
         assert should_debounce("job-1", 5000, {}) is False
