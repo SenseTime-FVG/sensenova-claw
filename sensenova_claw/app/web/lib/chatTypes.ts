@@ -27,8 +27,21 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
   timestamp: number;
+  /**
+   * 同一 turn 中可能产生多条 assistant 消息（LLM 回复 → 工具调用 → LLM 再次回复），
+   * 它们共享相同的 turnId，但每条消息各自持有独立的 content 和 thinkingContent。
+   * **重要**：更新同 turnId 消息时，只能修改最后一条，不得合并或删除前面的消息，
+   * 否则会丢失早期的思考过程和回复内容。
+   */
   turnId?: string;
+  /** LLM 的思考过程文本，每条 assistant 消息独立持有 */
   thinkingContent?: string;
+  /**
+   * 思考过程的展示状态：
+   * - 'streaming': 展开显示（默认状态，包括流式输出中和输出完成后）
+   * - 'collapsed': 折叠隐藏
+   * 当前策略：思考过程默认展开，不在 turn 完成时自动折叠。
+   */
   thinkingState?: 'streaming' | 'collapsed';
   /** 工具消息在没有 toolInfo 时展示的工具名。 */
   name?: string;
@@ -193,6 +206,16 @@ export function findLatestAssistantTurnMessage(messages: ChatMessage[], turnId: 
   return null;
 }
 
+/**
+ * 更新同一 turn 中最后一条 assistant 消息，或在工具调用后追加新气泡。
+ *
+ * 【核心规则】同一 turnId 可能对应多条 assistant 消息（每次工具调用后 LLM 会产生新回复），
+ * 每条消息各自持有独立的 thinkingContent。本函数只操作最后一条：
+ *   - 最后一条之后没有 tool 消息 → 原地更新（流式追加内容）
+ *   - 最后一条之后有 tool 消息 → 追加新气泡（工具调用后的新一轮回复）
+ *
+ * **禁止**合并或删除同 turnId 的早期 assistant 消息，否则会丢失前面的思考过程。
+ */
 export function upsertAssistantTurnMessage(
   messages: ChatMessage[],
   turnId: string,
@@ -245,18 +268,16 @@ export function upsertAssistantTurnMessage(
   const lastIndex = matchingIndices[matchingIndices.length - 1];
   const hasToolAfter = messages.slice(lastIndex + 1).some((message) => message.role === 'tool');
 
-  if (matchingIndices.length === 1 && !hasToolAfter) {
+  if (!hasToolAfter) {
+    // 最后一条 assistant 之后没有 tool → 原地更新最后一条，保留之前的不动
     const next = [...messages];
     next[lastIndex] = nextMessage;
     return next;
   }
 
-  const removedIndices = new Set(matchingIndices);
-  const filtered = messages.filter((_message, index) => !removedIndices.has(index));
-  const duplicateCountBeforeLast = matchingIndices.length - 1;
-  const insertIndex = hasToolAfter ? filtered.length : lastIndex - duplicateCountBeforeLast;
-  filtered.splice(insertIndex, 0, nextMessage);
-  return filtered;
+  // 最后一条 assistant 之后有 tool → 追加新气泡（工具调用后的新一轮回复）
+  // 保留之前所有 assistant 消息不变（它们的 thinking content 各自独立）
+  return [...messages, { ...nextMessage, id: makeId() }];
 }
 
 export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): ChatMessage[] {
@@ -290,7 +311,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
           rebuilt = upsertAssistantTurnMessage(rebuilt, turnId, {
             content,
             thinkingContent,
-            thinkingState: thinkingContent ? 'collapsed' : undefined,
+            thinkingState: thinkingContent ? 'streaming' : undefined,
           });
         } else {
           rebuilt.push({
@@ -299,7 +320,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
             content,
             timestamp: Date.now(),
             thinkingContent: thinkingContent || undefined,
-            thinkingState: thinkingContent ? 'collapsed' : undefined,
+            thinkingState: thinkingContent ? 'streaming' : undefined,
           });
         }
       }
@@ -373,7 +394,6 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
         if (turnId) {
           rebuilt = upsertAssistantTurnMessage(rebuilt, turnId, {
             content: response,
-            thinkingState: 'collapsed',
             keepExistingContentWhenEmpty: true,
           });
         } else {
@@ -386,10 +406,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
           }
 
           if (lastAssistantIdx !== -1 && rebuilt[lastAssistantIdx].content === response) {
-            rebuilt[lastAssistantIdx] = {
-              ...rebuilt[lastAssistantIdx],
-              thinkingState: rebuilt[lastAssistantIdx].thinkingContent ? 'collapsed' : undefined,
-            };
+            // 内容相同，保持不变（thinking 默认展开）
           } else if (lastAssistantIdx !== -1 && !rebuilt[lastAssistantIdx].content) {
             rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], content: response };
           } else {

@@ -566,6 +566,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       case 'agent_thinking':
         setIsTyping(true);
         break;
+      // 流式 LLM 输出：通过 upsertAssistantTurnMessage 追加内容到最后一条同 turnId 消息。
+      // 同一 turn 中工具调用前后会产生多条 assistant 消息，各自独立持有 thinkingContent。
       case 'llm_delta': {
         const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
         if (turnId && cancelledTurnIdsRef.current.has(turnId)) {
@@ -689,9 +691,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         }
         setMessages((prev) => {
           if (completedTurnId) {
+            // 只更新最后一条同 turnId 的 assistant 消息，保留早期消息的 thinking 不变。
+            // 注意：不设置 thinkingState，思考过程默认展开显示。
             return upsertAssistantTurnMessage(prev, completedTurnId, {
               content: final,
-              thinkingState: 'collapsed',
               keepExistingContentWhenEmpty: true,
             });
           }
@@ -699,15 +702,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           for (let i = prev.length - 1; i >= 0; i--) {
             if (prev[i].role === 'assistant') {
               const existing = prev[i];
-              // 如果 llm_result 已经设置了相同内容，只折叠思考状态
+              // 如果 llm_result 已经设置了相同内容，保持不变
               if (existing.content === final || !final) {
-                const next = [...prev];
-                next[i] = { ...next[i], thinkingState: 'collapsed' };
-                return next;
+                return prev;
               }
               // 内容不同时才更新（不创建新消息）
               const next = [...prev];
-              next[i] = { ...next[i], content: final, thinkingState: 'collapsed' };
+              next[i] = { ...next[i], content: final };
               return next;
             }
           }

@@ -168,7 +168,7 @@ function buildTranscriptMessages(run: BuildRun): BuildFeedItem[] {
         content: assistantDraft.content,
         timestamp: assistantDraft.timestamp,
         thinkingContent: assistantDraft.thinkingContent || undefined,
-        thinkingState: assistantDraft.thinkingContent ? 'collapsed' : undefined,
+        thinkingState: assistantDraft.thinkingContent ? 'streaming' : undefined,
       },
     });
     assistantDraft = null;

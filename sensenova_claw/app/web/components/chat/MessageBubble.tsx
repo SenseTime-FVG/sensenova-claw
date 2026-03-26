@@ -148,6 +148,8 @@ export function MessageBubble({ msg }: { msg: ChatMessage }) {
       : { answerContent: '', thinkContent: '' },
     [msg.content, msg.role, msg.thinkingContent],
   );
+  // 思考过程默认展开显示。每条 assistant 消息独立持有 thinkingContent，
+  // 同一 turn 中工具调用前后的多条 assistant 会各自显示自己的思考过程。
   const [showThink, setShowThink] = useState(true);
 
   useEffect(() => {
