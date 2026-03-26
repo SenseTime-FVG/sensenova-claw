@@ -210,6 +210,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前 Playwright 配置会联动启动整套 `npm run dev`，在受限环境下后端 watch 模式可能直接因为系统权限失败，导致前端 e2e 不是页面逻辑失败而是基础设施失败。
 - `next build` 在当前环境会因为 `next/font` 访问 Google Fonts 失败而中断；这种网络型失败不能误判为新页面或跳转逻辑本身有语法问题。
 
+### 2026-03-25 工具审批收口补充
+
+成功经验：
+- 对“用户点击”和“服务端最终裁决”分离的交互，最稳的协议是保留前端上行 `tool_confirmation_response`，新增后端下行 `tool_confirmation_resolved`，让前端只用 `resolved` 收口 UI，`tool_result` 只更新工具消息。
+- `/chat` 与 `/sessions/[id]` 并存时，修审批类 bug 必须同时检查“全局通知卡片/action toast”与“本地 InteractionDialog”两套状态机；只修其中一套很容易留下旧入口悬挂。
+- 对通知中心这类可操作 UI，给卡片和 toast 增加 `pending` 状态，比点击后立刻本地 `resolve` 更稳，能正确覆盖超时自动处理、跨窗口先处理和晚到点击被忽略的场景。
+
+失败/风险经验：
+- 当前环境运行 Playwright 仍缺 `libnspr4.so`，即使越权成功启动 webServer，也会在浏览器拉起阶段失败；前端浏览器级回归需要在具备系统库的环境执行，不能把这类环境错误误判为页面逻辑失败。
+- `npx tsc --noEmit` 目前会先撞上仓库既有类型错误（如 `app/settings/page.tsx`、`components/chat/MessageList.tsx` 等），验证本次前端改动时要明确区分“本次变更相关文件”与“仓库历史遗留错误”。
+
 ### 2026-03-18 Feishu 插件发现补充
 
 成功经验：
@@ -1132,9 +1143,11 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前后端 secret 读取与写入不是同一个接口：读取走 `GET /api/config/secret?path=...`，写入应走 `PUT /api/config/sections`，由 `ConfigManager` 自动写入 keyring / fallback secret store 并将 `config.yml` 改写为 `${secret:...}`。
 - 适合作为通用桥接 skill 的敏感路径范围，应严格对齐 `platform/secrets/registry.py` 里的注册模式，尤其是 `tools.*.api_key` 与 `llm.providers.*.api_key`，这样像 Brave Search 这类 skill 才能稳定复用。
 - 如果希望 skill 自身保留“它依赖哪个 secret 标识”的可追踪信息，最轻量的约定是在目标 skill 目录下维护 `secret.yml`，只写映射不写明文，例如 `OPENAI_API_KEY: secret:openai-whisper-api:OPENAI_API_KEY`；读取时优先查这个文件，写入成功后同步创建或更新它。
+- 如果用户要求 skill 不经过 HTTP，而是直接调用项目内能力，最稳的做法是在 skill 目录下放脚本，通过 stdin JSON 契约驱动，并在脚本内部直接复用 `Config`、`ConfigManager` 与 `SecretStore`；这样行为可测、文档也不会再漂移回接口说明。
 
 失败/风险经验：
 - 如果把 secret skill 设计成“任意 path 都可读写”的通用管理器，很容易和后端 `is_secret_path()` 的约束冲突，最终在运行时直接返回 400；文档必须明确只支持已注册敏感路径。
+- 测试这类脚本时不能直接依赖宿主机 keyring；需要显式加一个仅测试用的“禁用 keyring”分支，把写入强制落到指定 fallback `secret.yml`，否则结果会被本机已有 keyring 状态污染。
 
 ### 2026-03-24 ask_user 提示框溢出补充
 
@@ -1214,3 +1227,53 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 看起来像“第二个 chunk 缺少 `@@`”的补丁，未必真的会分裂成第二个 chunk；像 `+tail` 这种行在上游仍会被视为同一个 chunk 的新增行，测试样例必须先按 parser 规则推演，不然容易把错误归因到实现。
+
+### 2026-03-25 LLM 新增项单项保存补充
+
+成功经验：
+- `/llms` 页面里“新增 provider/model 后再点单项保存”这类问题，先区分“前端按钮真不能点”和“点击后后端 404”；这次根因在后者，最有效的证据是补一个后端 API 红测，而不是只盯着前端交互。
+- 对配置编辑接口，前端允许“本地先新增，再单项保存”时，后端 `PUT /llm/providers/{name}` 与 `PUT /llm/models/{name}` 最好直接做 upsert；否则 UI 看起来支持新增，真实保存链路却只支持更新已存在项。
+- 这类修复适合双侧回归：`tests/unit/test_config_api.py` 锁住 provider/model upsert，`sensenova_claw/app/web/e2e/llms-edit-modes.spec.ts` 锁住新增 provider 后进入编辑并保存的页面行为。
+
+失败/风险经验：
+- 仅靠前端 mock 成功响应的 Playwright 用例，可能掩盖真实后端“不支持新建”的语义缺口；如果问题涉及接口契约，必须至少补一层真实后端测试。
+
+### 2026-03-25 Agent 委托禁用语义补充
+
+成功经验：
+- 对“设置页取消所有勾选应禁用功能”这类需求，不能只改前端文案；这次必须把“前端提交 `null`、后端允许持久化 `None`、运行时隐藏 `send_message`、工具执行再次校验”四层一起收口，行为才真正一致。
+- FastAPI + Pydantic v2 下，如果接口需要区分“字段未传”和“显式传 null”，最稳的写法是 `body.model_dump(exclude_unset=True)` 后再判断字段是否出现在 payload 里。
+- `ContextBuilder` 里断言某个工具名是否出现在 system prompt 时，测试夹具最好清空其它内置工具；否则像 `create_agent` 这类工具描述里的文案会把字符串断言污染成假失败。
+
+失败/风险经验：
+- `send_message` 的授权判断不能只看 `get_sendable()` 返回值是否为空；当白名单被禁用或白名单里的 agent 已失效时，空结果若不结合原始配置解释，工具会错误放行。 
+
+### 2026-03-25 Agent 工具禁用运行时补充
+
+成功经验：
+- “工具被禁用后聊天里也不能调用”这类需求必须做双层防线：一层在 `ContextBuilder/AgentSessionWorker` 过滤掉传给 LLM 的工具列表，另一层在 `ToolSessionWorker` 执行前再次校验；只做前者会被模型的陈旧 tool_call 或 provider 异常输出绕过。
+- Agent 页面和 Tools 页面最好拆成两层语义：顶层 `tools` 继续做全局开关，`agent_tools.<agent_id>` 做按 agent 覆盖；最终生效规则应是“全局禁用优先，其次 agent 级禁用”，避免 agent 配置把全局关闭的工具重新打开。
+- 这类回归最稳的组合是：API 单测验证偏好写入与详情回显，worker 单测验证 LLM 可见工具过滤和执行前拦截，再补一个进程内聊天 e2e 验证首轮 `LLM_CALL_REQUESTED.tools` 已不含禁用工具且工具本体未执行。
+
+失败/风险经验：
+- 进程内 e2e 若依赖“当前默认模型”为 mock，很容易被本机 `config.yml` 漂移污染；更稳的做法是显式注册一个 `model=\"mock\"` 的 default agent，而不是只改全局 `llm.default_model`。
+
+### 2026-03-26 LLM 默认采样参数补充
+
+成功经验：
+- 这类“默认参数统一”问题不要只改 `DEFAULT_CONFIG`；最稳的做法是同时检查 `AgentConfig` 默认值、`AgentRegistry` fallback、`AgentSessionWorker` 合并链路、`LLMSessionWorker` 兜底链路，以及绕过主链路的直接 `provider.call()` 特例，否则很容易出现“普通聊天已更新，但标题生成/摘要仍是旧值”的半收敛状态。
+- `top_p/top_k` 这类额外采样参数放在 `agent.extra_body` 做全局默认，再在 worker/provider 里统一 merge，比为每个 provider 单独加新的函数参数更省改动，也更兼容现有 `extra_body` 透传设计。
+- 对带默认值的运行时链路，最划算的红测是“Config 默认值 + AgentConfig 默认值 + Worker 最终传给 provider 的参数”三层；这样能快速区分“配置没改”“对象默认没改”“链路没透传”。
+
+失败/风险经验：
+- 当前仓库的 `tests/unit/test_llm_worker.py` 本身存在一批与本次改动无关的既有失败，主要围绕流式事件顺序和 fallback 预期；验证这类默认值改动时，应单独抽出新增/相关用例运行，避免把历史问题误判成本次回归。
+
+### 2026-03-25 Action Toast 自动消失补充
+
+成功经验：
+- `action-toast` 这类浮层和通知中心卡片是两套状态，需求若只是“界面上自动收口”，最稳的落点是 `NotificationProvider` 里只移除 `actionToasts`，不要顺手改 `cards/resolved/pending`，否则很容易把“未处理”误判成“已处理”。
+- Playwright 1.52 已支持 `page.clock.install()` 和 `page.clock.fastForward()`；对 60 秒/15 秒这类前端定时器需求，优先用 mock clock 写回归，能把慢测压到秒级且更稳定。
+- `pending` 状态的 toast 不应继续保留旧定时器；在用户点击动作时先清掉 timer，再切 `pending`，可以避免“已提交但浮层被旧 timer 误删”的竞态。
+
+失败/风险经验：
+- `sensenova_claw/app/web/e2e/tool-confirmation-resolution.spec.ts` 里的 session 弹窗用例当前在本机仍会失败，现象是 `/sessions/[id]` 路径下拿不到 `tool-confirmation-dialog`；这和本次 toast 自动消失改动无直接证据关联，提交前需明确区分“本次新增回归通过”与“仓库既有用例仍失败”。

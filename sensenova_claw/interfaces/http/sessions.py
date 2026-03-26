@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from sensenova_claw.adapters.storage.session_jsonl import SessionJsonlWriter
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -19,7 +20,7 @@ def _get_services(request: Request):
 
 
 def _get_sensenova_claw_home(request: Request) -> Path:
-    return Path(getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw"))
+    return Path(getattr(request.app.state, "sensenova_claw_home", "") or default_sensenova_claw_home())
 
 
 class SessionFilter(BaseModel):

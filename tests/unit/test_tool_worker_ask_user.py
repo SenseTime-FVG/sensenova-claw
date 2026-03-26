@@ -39,6 +39,16 @@ class _CaptureSourceAgentTool:
         return {"ok": True}
 
 
+class _ExecutedFlagTool:
+    def __init__(self):
+        self.executed = False
+
+    async def execute(self, **kwargs):
+        _ = kwargs
+        self.executed = True
+        return {"ok": True}
+
+
 @pytest.fixture
 def mock_runtime():
     runtime = MagicMock()
@@ -342,3 +352,38 @@ async def test_tool_requested_injects_source_agent_id(worker, mock_runtime):
     await worker._handle_tool_requested(event)
 
     assert tool.source_agent_id == "research"
+
+
+@pytest.mark.asyncio
+async def test_tool_requested_rejects_disabled_tool_for_agent(worker, mock_runtime, mock_bus, tmp_path, monkeypatch):
+    """当工具被当前 agent 禁用时，不应真正执行工具。"""
+    tool = _ExecutedFlagTool()
+    mock_runtime.registry.get.return_value = tool
+    mock_runtime.sensenova_claw_home = str(tmp_path)
+    monkeypatch.setenv("SENSENOVA_CLAW_HOME", str(tmp_path))
+    (tmp_path / ".agent_preferences.json").write_text(
+        '{"agent_tools": {"research": {"read_file": false}}}',
+        encoding="utf-8",
+    )
+
+    event = EventEnvelope(
+        type="tool.call_requested",
+        session_id="test_session",
+        turn_id="turn1",
+        source="test",
+        payload={
+            "tool_call_id": "call_disabled",
+            "tool_name": "read_file",
+            "arguments": {"path": "README.md"},
+            "_source_agent_id": "research",
+        },
+    )
+
+    await worker._handle_tool_requested(event)
+
+    published = [call.args[0] for call in mock_bus.publish.await_args_list]
+    result_event = next(e for e in published if e.type == TOOL_CALL_RESULT)
+
+    assert tool.executed is False
+    assert result_event.payload["success"] is False
+    assert "工具已被当前 Agent 禁用" in str(result_event.payload["result"])

@@ -470,15 +470,13 @@ export function TodoList() {
       <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-violet-200/30 dark:bg-violet-800/20 blur-3xl" />
 
       <div className="relative z-10 flex h-full flex-col">
-        <div className="flex items-center justify-between mb-3">
-          <SectionHeader
-            title="今日待办"
-            subtitle={`${todoCount} 项待完成${doneCount > 0 ? ` · ${doneCount} 已完成` : ''}`}
-            tag="Todo"
-            tagTone="violet"
-            icon={<ListTodo className="h-4 w-4 text-violet-500" />}
-          />
-        </div>
+        <SectionHeader
+          title="今日待办"
+          subtitle={`${todoCount} 项待完成${doneCount > 0 ? ` · ${doneCount} 已完成` : ''}`}
+          tag="Todo"
+          tagTone="violet"
+          icon={<ListTodo className="h-4 w-4 text-violet-500" />}
+        />
 
         <TodoQuickAdd
           onAdd={(title, priority, dueDate) => addItem(title, priority, dueDate)}

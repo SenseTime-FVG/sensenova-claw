@@ -88,34 +88,19 @@ def _build_identity(base_prompt: str) -> list[str]:
 
 
 def _build_workspace(workspace_dir: str | None) -> list[str]:
-    """Section 2: Workspace 路径提示（有 workspace 时）"""
+    """Section 2: Workspace 路径提示（有 workspace 时）
+    
+    路径规则和文件链接格式等固定指令已迁移到 .sensenova-claw/agents/AGENTS.md，
+    这里只注入动态的工作目录路径。
+    """
     if not workspace_dir:
         return []
-
-    from pathlib import Path
-    home = str(Path(workspace_dir).resolve().parents[1])  # workdir/{id} -> .sensenova-claw
-    todolist_dir = f"{home}/todolist".replace("\\", "/")
 
     return [
         "",
         "## Workspace",
         f"Your working directory is: `{workspace_dir}`",
         "",
-        "**路径规则（必须遵守）：**",
-        f"- 调用 read_file / write_file 等工具时，相对路径会自动基于 `{workspace_dir}` 解析",
-        "- **在回复用户时，所有文件路径必须使用绝对路径**",
-        "- 这样用户可以直接定位和打开文件",
-        "- 访问工作目录外的文件需使用绝对路径",
-        "",
-        "## Todolist（待办事项）",
-        f"待办事项以 JSON 文件存储在 `{todolist_dir}/` 目录，按日期分文件：`todolist_YYYY-MM-DD.json`。",
-        "",
-        "**当用户明确要求记录待办事项时**，使用 write_file 将待办写入对应日期的文件：",
-        f"- 文件路径: `{todolist_dir}/todolist_{{日期}}.json`（如 `{todolist_dir}/todolist_2026-03-23.json`）",
-        "- 未指定日期时默认使用今天的日期",
-        "- 写入前先用 read_file 读取已有内容，在 `items` 数组中追加新条目，避免覆盖已有待办",
-        '- 如果文件不存在，创建新文件，格式为 `{"date": "YYYY-MM-DD", "items": [...]}`',
-        '- 用户说「完成某个待办」时，将对应 item 的 `status` 改为 `done`，并填写 `completed_at`',
     ]
 
 

@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
 
 from sensenova_claw.platform.config.config import config
-from sensenova_claw.adapters.llm.base import LLMProvider
+from sensenova_claw.adapters.llm.base import (
+    DEFAULT_LLM_TEMPERATURE,
+    LLMProvider,
+    merge_sampling_extra_body,
+)
 
 
 class OpenAIProvider(LLMProvider):
-    def __init__(self, provider_key: str = "openai"):
-        provider_cfg = config.get(f"llm.providers.{provider_key}", {})
+    def __init__(self, provider_id: str = "openai", source_type: str | None = None):
+        provider_cfg = config.get(f"llm.providers.{provider_id}", {})
+        self.provider_id = provider_id
+        self.source_type = source_type or str(provider_cfg.get("source_type", "openai") or "openai")
         self.client = AsyncOpenAI(
             api_key=provider_cfg.get("api_key"),
             base_url=provider_cfg.get("base_url") or None,
@@ -23,11 +29,12 @@ class OpenAIProvider(LLMProvider):
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_messages = self._normalize_messages(messages)
+        merged_extra_body = merge_sampling_extra_body(extra_body)
         req: dict[str, Any] = {
             "model": model,
             "messages": normalized_messages,
@@ -37,8 +44,8 @@ class OpenAIProvider(LLMProvider):
             req["tools"] = [{"type": "function", "function": t} for t in tools]
         if max_tokens:
             req["max_tokens"] = max_tokens
-        if extra_body:
-            req["extra_body"] = extra_body
+        if merged_extra_body:
+            req["extra_body"] = merged_extra_body
 
         response = await self.client.chat.completions.create(**req)
         choice = response.choices[0]
@@ -70,6 +77,105 @@ class OpenAIProvider(LLMProvider):
         if reasoning_content:
             result["reasoning_details"] = [{"type": "thinking", "thinking": reasoning_content}]
         return result
+
+    async def stream_call(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
+        max_tokens: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        normalized_messages = self._normalize_messages(messages)
+        merged_extra_body = merge_sampling_extra_body(extra_body)
+        req: dict[str, Any] = {
+            "model": model,
+            "messages": normalized_messages,
+            "temperature": temperature,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools:
+            req["tools"] = [{"type": "function", "function": t} for t in tools]
+        if max_tokens:
+            req["max_tokens"] = max_tokens
+        if merged_extra_body:
+            req["extra_body"] = merged_extra_body
+
+        stream = await self.client.chat.completions.create(**req)
+        tool_calls_acc: dict[int, dict[str, Any]] = {}
+        finish_reason = "stop"
+        usage = {}
+
+        async for chunk in stream:
+            if chunk.usage:
+                usage = {
+                    "prompt_tokens": chunk.usage.prompt_tokens or 0,
+                    "completion_tokens": chunk.usage.completion_tokens or 0,
+                    "total_tokens": chunk.usage.total_tokens or 0,
+                }
+
+            if not chunk.choices:
+                continue
+
+            choice = chunk.choices[0]
+            delta = choice.delta
+
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+
+            content_delta = getattr(delta, "content", None) or ""
+            reasoning_delta = getattr(delta, "reasoning_content", None) or ""
+
+            if content_delta or reasoning_delta:
+                chunk_data: dict[str, Any] = {"type": "delta"}
+                if content_delta:
+                    chunk_data["content"] = content_delta
+                if reasoning_delta:
+                    chunk_data["reasoning_content"] = reasoning_delta
+                yield chunk_data
+
+            if delta and delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_calls_acc:
+                        tool_calls_acc[idx] = {
+                            "id": tc_delta.id or "",
+                            "name": (tc_delta.function.name if tc_delta.function else "") or "",
+                            "arguments": "",
+                        }
+                    if tc_delta.id:
+                        tool_calls_acc[idx]["id"] = tc_delta.id
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            tool_calls_acc[idx]["name"] = tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            tool_calls_acc[idx]["arguments"] += tc_delta.function.arguments
+
+        assembled_tool_calls: list[dict[str, Any]] = []
+        for idx in sorted(tool_calls_acc.keys()):
+            tc = tool_calls_acc[idx]
+            args_str = tc["arguments"]
+            try:
+                parsed = json.loads(args_str) if args_str else {}
+            except (json.JSONDecodeError, TypeError):
+                parsed = args_str
+            assembled_tool_calls.append({
+                "id": tc["id"],
+                "name": tc["name"],
+                "arguments": parsed,
+            })
+
+        if assembled_tool_calls:
+            finish_reason = "tool_calls"
+
+        yield {
+            "type": "finish",
+            "finish_reason": finish_reason,
+            "usage": usage,
+            "tool_calls": assembled_tool_calls,
+        }
 
     def _normalize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []

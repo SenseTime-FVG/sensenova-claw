@@ -53,9 +53,9 @@ async def main() -> None:
     tmp_root = Path("/tmp/sensenova_claw_telegram_real_e2e")
     tmp_root.mkdir(parents=True, exist_ok=True)
 
+    os.environ["SENSENOVA_CLAW_HOME"] = str(tmp_root / ".sensenova-claw")
     config.data["system"]["database_path"] = str(tmp_root / "sensenova-claw.db")
     config.data["system"]["workspace_dir"] = str(tmp_root / "workspace")
-    config.data["system"]["sensenova_claw_home"] = str(tmp_root / ".sensenova-claw")
     config.data["system"]["log_level"] = "DEBUG"
     config.data["agent"]["provider"] = "mock"
     config.data["agent"]["default_model"] = "mock-agent-v1"

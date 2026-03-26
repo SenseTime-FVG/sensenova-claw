@@ -19,9 +19,10 @@ def test_secret_config_bridge_skill_can_be_loaded_from_builtin_dir(tmp_path: Pat
     skill = registry.get("secret-config-bridge")
 
     assert skill is not None
-    assert "GET /api/config/secret" in skill.body
-    assert "PUT /api/config/sections" in skill.body
-    assert "tools.brave_search.api_key" in skill.body
+    assert "scripts/secret_bridge.py" in skill.body
+    assert '"action": "read"' in skill.body
+    assert '"action": "write"' in skill.body
+    assert '"path": "tools.brave_search.api_key"' in skill.body
     assert "优先读取对应 skill 目录下的 `secret.yml`" in skill.body
     assert "OPENAI_API_KEY: secret:openai-whisper-api:OPENAI_API_KEY" in skill.body
     assert "不要在最终回复中泄露 secret 明文" in skill.body

@@ -92,7 +92,7 @@ class TitleRuntime:
                 {"role": "user", "content": f"用户问题：{user_input}\n\n请生成会话标题："},
             ]
 
-            response = await provider.call(model=model, messages=messages, tools=None, temperature=0.7)
+            response = await provider.call(model=model, messages=messages, tools=None, temperature=1.0)
             title = response.get("content", "").strip()
 
             if len(title) > 10:

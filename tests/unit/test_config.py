@@ -54,7 +54,12 @@ class TestConfig:
         # 用户覆盖的值
         assert cfg.get("agent.model") == "gpt-5.4"
         # 默认值保留
-        assert cfg.get("agent.temperature") == 0.2
+        assert cfg.get("agent.temperature") == 1.0
+
+    def test_default_agent_sampling_defaults(self, tmp_path):
+        cfg = Config(config_path=tmp_path / "nonexist.yml")
+        assert cfg.get("agent.temperature") == 1.0
+        assert cfg.get("agent.extra_body") == {"top_p": 0.95, "top_k": 20}
 
     def test_set_runtime(self, tmp_path):
         cfg = Config(config_path=tmp_path / "nonexist.yml")
@@ -101,3 +106,33 @@ class TestConfig:
         assert cfg.get_model_extra_body("claude-thinking") == {
             "thinking": {"type": "adaptive"}
         }
+
+    def test_load_config_adds_source_type_for_known_legacy_provider(self, tmp_path):
+        yml = tmp_path / "config.yml"
+        yml.write_text(
+            "llm:\n"
+            "  providers:\n"
+            "    qwen:\n"
+            "      api_key: sk-qwen\n"
+            "      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1\n",
+            encoding="utf-8",
+        )
+
+        cfg = Config(config_path=yml)
+
+        assert cfg.get("llm.providers.qwen.source_type") == "qwen"
+
+    def test_load_config_adds_openai_compatible_source_type_for_unknown_legacy_provider(self, tmp_path):
+        yml = tmp_path / "config.yml"
+        yml.write_text(
+            "llm:\n"
+            "  providers:\n"
+            "    corp-proxy:\n"
+            "      api_key: sk-proxy\n"
+            "      base_url: https://proxy.example.com/v1\n",
+            encoding="utf-8",
+        )
+
+        cfg = Config(config_path=yml)
+
+        assert cfg.get("llm.providers.corp-proxy.source_type") == "openai-compatible"

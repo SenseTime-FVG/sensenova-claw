@@ -5,37 +5,24 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import type { Components } from 'react-markdown';
-import { Check, Copy, FolderOpen, Presentation } from 'lucide-react';
+import { Check, Copy, FolderOpen, Presentation, FileText } from 'lucide-react';
 import { API_BASE } from '@/lib/authFetch';
 import { useFilePanel } from '@/contexts/FilePanelContext';
+import { getFilePreviewType, isPreviewable } from '@/components/files/fileTypes';
 
-/* ── 文件路径自动链接 ── */
+/* ── sensenova-claw 文件链接常量 ── */
 
 const FILE_LINK_PREFIX = '#sensenova-claw-file:';
 const WORKDIR_LINK_PREFIX = '#sensenova-claw-workdir:';
-const WIN_PATH_RE = /([A-Za-z]:\\[^\s<>"'*\[\]|]+\.\w+)/g;
-const UNIX_PATH_RE = /(\/(?:home|Users|tmp|var|opt|root|mnt)[^\s<>"'*\[\]|]*\/[^\s<>"'*\[\]|/]+\.\w+)/g;
 
-function isFilePath(text: string): boolean {
-  return /^[A-Za-z]:\\/.test(text.trim()) || /^\/(?:home|Users|tmp|var|opt|root|mnt)\//.test(text.trim());
+function isSlideFilePath(text: string): boolean {
+  return /page_\d+\.html/i.test(text);
 }
 
 function isRelativeSlidePath(text: string): boolean {
   const trimmed = text.trim();
   if (/^[A-Za-z]:\\/.test(trimmed) || /^\//.test(trimmed)) return false;
   return /[\\/]/.test(trimmed) && /page_\d+\.html/i.test(trimmed);
-}
-
-/** 以 / 结尾的相对目录路径，或包含 / 且看起来像目录引用的路径 */
-function isRelativeDir(text: string): boolean {
-  const trimmed = text.trim();
-  if (/^[A-Za-z]:\\/.test(trimmed) || /^\//.test(trimmed)) return false;
-  if (trimmed.endsWith('/') && /\w/.test(trimmed)) return true;
-  return false;
-}
-
-function isSlideFilePath(text: string): boolean {
-  return /page_\d+\.html/i.test(text);
 }
 
 /** 从绝对路径中提取 workdir 之后的相对目录 */
@@ -49,56 +36,32 @@ export function extractWorkdirRelDir(absPath: string): string | null {
   return lastSlash > 0 ? afterWorkdir.slice(0, lastSlash) : null;
 }
 
-/** 从路径中提取目录部分 */
 function extractDirFromPath(path: string): string | null {
   const normalized = path.replace(/\\/g, '/');
   const lastSlash = normalized.lastIndexOf('/');
   return lastSlash > 0 ? normalized.slice(0, lastSlash) : null;
 }
 
-/** 触发 PPT 幻灯片预览事件 */
 export function dispatchSlidePreview(dir: string, isAbsolute: boolean) {
   window.dispatchEvent(new CustomEvent('sensenova-claw:open-slide-preview', {
     detail: { dir, isAbsolute },
   }));
 }
 
-function buildFileMarker(filePath: string): string {
-  return `${FILE_LINK_PREFIX}${encodeURIComponent(filePath.trim())}`;
-}
+/* ── 最小预处理：只修复 sensenova-claw 链接显示文本中的反斜杠 ── */
 
-function buildWorkdirMarker(relPath: string): string {
-  return `${WORKDIR_LINK_PREFIX}${encodeURIComponent(relPath.trim())}`;
-}
-
-function extractFileName(filePath: string): string {
-  return filePath.split(/[/\\]/).pop() || filePath;
-}
-
-function linkifyFilePaths(md: string): string {
-  const parts = md.split(/(```[\s\S]*?```)/g);
-  return parts.map((part, i) => {
-    if (i % 2 !== 0) return part;
-
-    part = part.replace(/`([^`\n]+)`/g, (_match, code: string) => {
-      const trimmed = code.trim();
-      if (isFilePath(trimmed)) {
-        return `[${extractFileName(trimmed)}](${buildFileMarker(trimmed)})`;
-      }
-      if (isRelativeSlidePath(trimmed)) {
-        return `[${trimmed}](${buildWorkdirMarker(trimmed)})`;
-      }
-      if (isRelativeDir(trimmed)) {
-        return `[${trimmed}](${buildWorkdirMarker(trimmed)})`;
-      }
-      return _match;
-    });
-
-    part = part.replace(WIN_PATH_RE, (m) => `[${extractFileName(m)}](${buildFileMarker(m)})`);
-    part = part.replace(UNIX_PATH_RE, (m) => `[${extractFileName(m)}](${buildFileMarker(m)})`);
-
-    return part;
-  }).join('');
+/**
+ * 修复 [text\with\backslash](#sensenova-claw-file:...) 中显示文本的反斜杠。
+ * markdown 引擎会将 \t \n 等视为转义，导致链接断裂。
+ */
+function preprocessFileLinks(md: string): string {
+  return md.replace(
+    /\[([^\]]*?)\]\((#sensenova-claw-(?:file|workdir):[^)]+)\)/g,
+    (_m, display: string, href: string) => {
+      if (!display.includes('\\')) return _m;
+      return `[${display.replace(/\\/g, '/')}](${href})`;
+    },
+  );
 }
 
 /* ── 复制按钮 ── */
@@ -134,7 +97,7 @@ function extractText(node: React.ReactNode): string {
   return '';
 }
 
-/* ── 不依赖 onFileClick 的基础组件 ── */
+/* ── 基础 markdown 组件 ── */
 
 const baseComponents: Partial<Components> = {
   pre({ children, ...props }) {
@@ -186,7 +149,7 @@ const baseComponents: Partial<Components> = {
 
 export const MarkdownContent = memo(function MarkdownContent({ content }: { content: string }) {
   const { openToPath } = useFilePanel();
-  const processed = linkifyFilePaths(content);
+  const processed = preprocessFileLinks(content);
 
   const mdComponents = useMemo<Components>(() => ({
     ...baseComponents,
@@ -199,9 +162,14 @@ export const MarkdownContent = memo(function MarkdownContent({ content }: { cont
           if (isSlideFilePath(filePath)) {
             const dir = extractWorkdirRelDir(filePath) || extractDirFromPath(filePath);
             if (dir) dispatchSlidePreview(dir, true);
+          } else if (isPreviewable(filePath)) {
+            window.dispatchEvent(new CustomEvent('sensenova-claw:open-file-preview', {
+              detail: { path: filePath, type: getFilePreviewType(filePath) },
+            }));
           }
         };
         const isSlide = isSlideFilePath(filePath);
+        const previewable = !isSlide && isPreviewable(filePath);
         return (
           <a
             href="#"
@@ -209,7 +177,7 @@ export const MarkdownContent = memo(function MarkdownContent({ content }: { cont
             className="inline-flex items-center gap-1.5 px-2.5 py-1 my-0.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-sm font-medium no-underline border border-primary/20 cursor-pointer"
             {...props}
           >
-            {isSlide ? <Presentation size={14} className="shrink-0" /> : <FolderOpen size={14} className="shrink-0" />}
+            {isSlide ? <Presentation size={14} className="shrink-0" /> : previewable ? <FileText size={14} className="shrink-0" /> : <FolderOpen size={14} className="shrink-0" />}
             {children}
           </a>
         );

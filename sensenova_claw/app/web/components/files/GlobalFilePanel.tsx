@@ -5,6 +5,7 @@ import {
   Folder, FolderOpen, File, ChevronRight, ChevronDown,
   Loader2, RefreshCw, CheckCircle2,
   Search, Presentation, Cog, Sparkles, Plus,
+  Eye, FolderOpen as FolderOpenIcon,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useDrag } from 'react-dnd';
@@ -14,6 +15,8 @@ import { useFilePanel } from '@/contexts/FilePanelContext';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { useFeatureNavItems } from '@/components/layout/DashboardNav';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu';
+import { getFilePreviewType, isPreviewable, isPPTFolder } from './fileTypes';
 
 interface FileItem {
   name: string;
@@ -27,10 +30,11 @@ function norm(p: string): string {
 
 /* ── 文件树节点 ── */
 
-function FileTreeItem({ item, depth = 0, expandToPath }: {
+function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu }: {
   item: FileItem;
   depth?: number;
   expandToPath?: string | null;
+  onContextMenu?: (e: React.MouseEvent, item: FileItem, children: FileItem[] | null) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileItem[] | null>(null);
@@ -114,6 +118,7 @@ function FileTreeItem({ item, depth = 0, expandToPath }: {
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         onClick={toggleFolder}
+        onContextMenu={(e) => onContextMenu?.(e, item, children)}
       >
         {isFolder && (expanded
           ? <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
@@ -135,7 +140,7 @@ function FileTreeItem({ item, depth = 0, expandToPath }: {
       {isFolder && expanded && children && (
         <div>
           {children.map(child => (
-            <FileTreeItem key={child.path} item={child} depth={depth + 1} expandToPath={expandToPath} />
+            <FileTreeItem key={child.path} item={child} depth={depth + 1} expandToPath={expandToPath} onContextMenu={onContextMenu} />
           ))}
           {children.length === 0 && (
             <div className="text-[10px] text-muted-foreground/50 py-1" style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}>
@@ -204,10 +209,13 @@ const FEATURE_ICONS: Record<string, React.ReactNode> = {
   '+ 创建': <Plus className="w-4 h-4" />,
 };
 
+const pptEntry = { path: '/ppt', label: 'PPT' };
+
 function AIWorkspace() {
   const { currentSessionId, taskProgress } = useChatSession();
   const featureNavItems = useFeatureNavItems();
   const mergedProgress = useMemo(() => mergeProgress(taskProgress), [taskProgress]);
+  const allItems = useMemo(() => [pptEntry, ...featureNavItems], [featureNavItems]);
 
   const isInConversation = Boolean(currentSessionId);
   const hasProgress = mergedProgress.length > 0;
@@ -260,7 +268,7 @@ function AIWorkspace() {
         ) : (
           /* ── 空闲：显示功能入口 ── */
           <div className="space-y-1.5 pt-2">
-            {featureNavItems.map((item) => (
+            {allItems.map((item) => (
               <Link
                 key={item.path}
                 href={item.path}
@@ -299,6 +307,11 @@ export function GlobalFilePanel() {
   const { focusPath, focusGeneration } = useFilePanel();
   const localTreeKey = `${focusPath ?? 'manual'}-${focusGeneration}`;
   const [roots, setRoots] = useState<FileItem[]>([]);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
 
   const loadRoots = useCallback(async () => {
     try {
@@ -312,6 +325,83 @@ export function GlobalFilePanel() {
   useEffect(() => { loadRoots(); }, [loadRoots]);
 
   const bestRoot = bestMatchRoot(roots, focusPath);
+
+  const handleContextMenu = useCallback(async (
+    e: React.MouseEvent,
+    item: FileItem,
+    loadedChildren: FileItem[] | null,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const items: ContextMenuItem[] = [];
+
+    if (item.type === 'folder') {
+      // 检测是否为 PPT 文件夹
+      let isPPT = false;
+      if (loadedChildren !== null) {
+        isPPT = isPPTFolder(loadedChildren);
+      }
+
+      if (isPPT) {
+        items.push({
+          label: '探索 (Explore)',
+          icon: <Eye className="w-3.5 h-3.5" />,
+          onClick: () => {
+            window.dispatchEvent(new CustomEvent('sensenova-claw:open-slide-preview', {
+              detail: { dir: item.path, isAbsolute: true },
+            }));
+          },
+        });
+      }
+
+      items.push({
+        label: '在文件夹中打开',
+        icon: <FolderOpenIcon className="w-3.5 h-3.5" />,
+        onClick: async () => {
+          try {
+            await authFetch(`${API_BASE}/api/files/open-in-explorer`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: item.path }),
+            });
+          } catch { /* ignore */ }
+        },
+      });
+    } else {
+      // 文件
+      const previewType = getFilePreviewType(item.name);
+      if (isPreviewable(item.name)) {
+        items.push({
+          label: '探索 (Explore)',
+          icon: <Eye className="w-3.5 h-3.5" />,
+          onClick: () => {
+            window.dispatchEvent(new CustomEvent('sensenova-claw:open-file-preview', {
+              detail: { path: item.path, type: previewType },
+            }));
+          },
+        });
+      }
+
+      items.push({
+        label: '在文件夹中打开',
+        icon: <FolderOpenIcon className="w-3.5 h-3.5" />,
+        onClick: async () => {
+          try {
+            await authFetch(`${API_BASE}/api/files/open-in-explorer`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: item.path }),
+            });
+          } catch { /* ignore */ }
+        },
+      });
+    }
+
+    if (items.length > 0) {
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
+    }
+  }, []);
 
   return (
     <ResizablePanelGroup orientation="vertical" className="h-full gap-2.5">
@@ -334,6 +424,7 @@ export function GlobalFilePanel() {
                   key={r.path}
                   item={r}
                   expandToPath={bestRoot === norm(r.path) ? focusPath : null}
+                  onContextMenu={handleContextMenu}
                 />
               ))}
               {roots.length === 0 && (
@@ -353,6 +444,15 @@ export function GlobalFilePanel() {
       <ResizablePanel id="ai-workspace" defaultSize="50%" minSize="15%" className="rounded-[var(--panel-radius)] border border-border/40 overflow-hidden bg-background shadow-sm">
         <AIWorkspace />
       </ResizablePanel>
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </ResizablePanelGroup>
   );
 }

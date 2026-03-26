@@ -14,17 +14,19 @@ from sensenova_claw.kernel.events.types import (
     AGENT_UPDATE_TITLE_COMPLETED,
     CRON_DELIVERY_REQUESTED,
     ERROR_RAISED,
+    LLM_CALL_DELTA,
     LLM_CALL_RESULT,
     LLM_CALL_COMPLETED,
     LLM_CALL_REQUESTED,
-    LLM_CALL_RESULT,
     NOTIFICATION_PUSH,
     NOTIFICATION_SESSION,
     PROACTIVE_RESULT,
     SESSION_CREATED,
+    TODOLIST_UPDATED,
     TOOL_CALL_REQUESTED,
     TOOL_CALL_RESULT,
     TOOL_CONFIRMATION_REQUESTED,
+    TOOL_CONFIRMATION_RESOLVED,
     USER_QUESTION_ASKED,
     USER_QUESTION_ANSWERED,
 )
@@ -298,6 +300,11 @@ class WebSocketChannel(Channel):
         if not mapped:
             return
 
+        # todolist 变更：全连接广播
+        if event.type == TODOLIST_UPDATED:
+            await self._send_to_websockets(self._connections, mapped)
+            return
+
         # 通知/cron 事件：有 session 则路由到绑定连接，否则广播
         if event.type in {CRON_DELIVERY_REQUESTED, NOTIFICATION_PUSH, PROACTIVE_RESULT}:
             if event.session_id and event.session_id != "system":
@@ -310,6 +317,7 @@ class WebSocketChannel(Channel):
         if event.type in {
             SESSION_CREATED,
             TOOL_CONFIRMATION_REQUESTED,
+            TOOL_CONFIRMATION_RESOLVED,
             USER_QUESTION_ASKED,
             USER_QUESTION_ANSWERED,
         }:
@@ -352,6 +360,18 @@ class WebSocketChannel(Channel):
                 "type": "agent_thinking",
                 "session_id": event.session_id,
                 "payload": {"step_type": "llm_call", "description": "正在调用模型..."},
+                "timestamp": event.ts,
+            }
+        if event.type == LLM_CALL_DELTA:
+            return {
+                "type": "llm_delta",
+                "session_id": event.session_id,
+                "payload": {
+                    "turn_id": event.turn_id,
+                    "content_delta": event.payload.get("content_delta", ""),
+                    "reasoning_delta": event.payload.get("reasoning_delta", ""),
+                    "content_snapshot": event.payload.get("content_snapshot", ""),
+                },
                 "timestamp": event.ts,
             }
         if event.type == LLM_CALL_RESULT:
@@ -406,6 +426,17 @@ class WebSocketChannel(Channel):
             }
         if event.type == ERROR_RAISED:
             user_message = event.payload.get("user_message") or event.payload.get("error_message")
+            if event.payload.get("error_type") == "TurnCancelled":
+                return {
+                    "type": "turn_cancelled",
+                    "session_id": event.session_id,
+                    "payload": {
+                        "turn_id": event.turn_id,
+                        "reason": user_message,
+                        "cancelled": True,
+                    },
+                    "timestamp": event.ts,
+                }
             return {
                 "type": "error",
                 "session_id": event.session_id,
@@ -518,6 +549,24 @@ class WebSocketChannel(Channel):
                     "tool_name": event.payload.get("tool_name"),
                     "arguments": event.payload.get("arguments", {}),
                     "risk_level": event.payload.get("risk_level", "high"),
+                    "timeout": event.payload.get("timeout"),
+                    "timeout_action": event.payload.get("timeout_action"),
+                    "requested_at_ms": event.payload.get("requested_at_ms"),
+                },
+                "timestamp": event.ts,
+            }
+        if event.type == TOOL_CONFIRMATION_RESOLVED:
+            return {
+                "type": "tool_confirmation_resolved",
+                "session_id": event.session_id,
+                "payload": {
+                    "tool_call_id": event.payload.get("tool_call_id"),
+                    "tool_name": event.payload.get("tool_name"),
+                    "approved": event.payload.get("approved", False),
+                    "status": event.payload.get("status"),
+                    "reason": event.payload.get("reason"),
+                    "resolved_by": event.payload.get("resolved_by"),
+                    "resolved_at_ms": event.payload.get("resolved_at_ms"),
                 },
                 "timestamp": event.ts,
             }
@@ -553,6 +602,15 @@ class WebSocketChannel(Channel):
                 "payload": {
                     "question_id": event.payload.get("question_id"),
                     "cancelled": event.payload.get("cancelled", False),
+                },
+                "timestamp": event.ts,
+            }
+        if event.type == TODOLIST_UPDATED:
+            return {
+                "type": "todolist_updated",
+                "payload": {
+                    "date": event.payload.get("date"),
+                    "action": event.payload.get("action"),
                 },
                 "timestamp": event.ts,
             }
