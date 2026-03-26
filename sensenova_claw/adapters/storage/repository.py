@@ -9,6 +9,7 @@ from typing import Any
 from sensenova_claw.kernel.runtime.message_record import MessageRecord
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.envelope import EventEnvelope
+from sensenova_claw.kernel.events.types import PROACTIVE_RESULT, USER_INPUT
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -217,7 +218,12 @@ class Repository:
             conn.commit()
         conn.close()
 
-    async def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def list_sessions(
+        self,
+        limit: int = 50,
+        *,
+        include_hidden: bool = False,
+    ) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             """
@@ -235,12 +241,13 @@ class Repository:
                 FROM turns
             ) lt ON lt.session_id = s.session_id AND lt.rn = 1
             ORDER BY s.last_active DESC
-            LIMIT ?
             """,
-            (limit,),
         ).fetchall()
         conn.close()
-        return [dict(row) for row in rows]
+        sessions = [dict(row) for row in rows]
+        if not include_hidden:
+            sessions = [row for row in sessions if not self._is_hidden_session(row.get("meta"))]
+        return sessions[:limit]
 
     async def create_turn(self, turn_id: str, session_id: str, user_input: str) -> None:
         conn = self._conn()
@@ -300,6 +307,124 @@ class Repository:
         conn.close()
         return [dict(row) for row in rows]
 
+    def _parse_payload_json(self, raw: str | bytes | None) -> dict[str, Any]:
+        """解析 events.payload_json，失败时回退为空 dict。"""
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _list_consumed_recommendation_ids(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_session_id: str,
+        after_timestamp: float,
+    ) -> set[str]:
+        """读取某个 source session 在推荐生成后已消费的 recommendation_id 集合。"""
+        rows = conn.execute(
+            """
+            SELECT payload_json
+            FROM events
+            WHERE event_type = ? AND session_id = ? AND timestamp > ?
+            ORDER BY timestamp
+            """,
+            (USER_INPUT, source_session_id, after_timestamp),
+        ).fetchall()
+
+        consumed_ids: set[str] = set()
+        for row in rows:
+            payload = self._parse_payload_json(row["payload_json"])
+            meta = payload.get("meta")
+            if not isinstance(meta, dict):
+                continue
+            recommendation_id = str(meta.get("recommendation_id") or "").strip()
+            if recommendation_id:
+                consumed_ids.add(recommendation_id)
+        return consumed_ids
+
+    async def list_pending_recommendations(self, limit: int = 3) -> list[dict[str, Any]]:
+        """聚合最近未消费的 turn_end 下一问推荐。"""
+        if limit <= 0:
+            return []
+
+        conn = self._conn()
+        rows = conn.execute(
+            """
+            SELECT event_id, session_id, timestamp, payload_json
+            FROM events
+            WHERE event_type = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (PROACTIVE_RESULT, max(limit * 20, 100)),
+        ).fetchall()
+
+        pending: list[dict[str, Any]] = []
+        seen_source_sessions: set[str] = set()
+
+        for row in rows:
+            payload = self._parse_payload_json(row["payload_json"])
+            if str(payload.get("recommendation_type") or "") != "turn_end":
+                continue
+
+            source_session_id = str(
+                payload.get("source_session_id")
+                or payload.get("session_id")
+                or row["session_id"]
+                or ""
+            ).strip()
+            if not source_session_id or source_session_id in seen_source_sessions:
+                continue
+
+            items = payload.get("items")
+            if not isinstance(items, list) or not items:
+                continue
+
+            consumed_ids = self._list_consumed_recommendation_ids(
+                conn,
+                source_session_id=source_session_id,
+                after_timestamp=float(row["timestamp"]),
+            )
+
+            remaining_items: list[dict[str, Any]] = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item_id = str(item.get("id") or "").strip()
+                if item_id and item_id in consumed_ids:
+                    continue
+                remaining_items.append({
+                    "id": item_id,
+                    "title": str(item.get("title") or ""),
+                    "prompt": str(item.get("prompt") or ""),
+                    "category": str(item.get("category") or "") or None,
+                })
+
+            if not remaining_items:
+                seen_source_sessions.add(source_session_id)
+                continue
+
+            pending.append({
+                "job_id": str(payload.get("job_id") or ""),
+                "job_name": str(payload.get("job_name") or ""),
+                "session_id": str(payload.get("session_id") or row["session_id"] or ""),
+                "source_session_id": source_session_id,
+                "recommendation_type": "turn_end",
+                "received_at_ms": int(float(row["timestamp"]) * 1000),
+                "items": remaining_items[:5],
+            })
+            seen_source_sessions.add(source_session_id)
+
+            if len(pending) >= limit:
+                break
+
+        conn.close()
+        return pending
+
     async def get_session_turns(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
@@ -325,6 +450,17 @@ class Repository:
             if col not in existing_cols:
                 conn.execute(sql)
         conn.commit()
+
+    @staticmethod
+    def _is_hidden_session(meta_raw: Any) -> bool:
+        """根据 session meta 判定是否为 hidden session。"""
+        if not meta_raw:
+            return False
+        try:
+            meta = json.loads(meta_raw) if isinstance(meta_raw, str) else dict(meta_raw)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return False
+        return str(meta.get("visibility", "")).strip().lower() == "hidden"
         # 回填：从 meta JSON 中提取 agent_id 写入 agent_id 列（修复历史数据）
         rows = conn.execute(
             "SELECT session_id, meta FROM sessions WHERE agent_id IS NULL OR agent_id = 'default'"

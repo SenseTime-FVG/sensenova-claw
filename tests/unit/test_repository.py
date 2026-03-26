@@ -21,6 +21,26 @@ class TestRepository:
         s = next(s for s in sessions if s["session_id"] == "sa")
         assert s["last_active"] > 0
 
+    async def test_list_sessions_hides_hidden_visibility_by_default(self, test_repo):
+        await test_repo.create_session("visible_s", meta={"title": "Visible"})
+        await test_repo.create_session("hidden_s", meta={"title": "Hidden", "visibility": "hidden"})
+
+        sessions = await test_repo.list_sessions()
+        ids = {s["session_id"] for s in sessions}
+
+        assert "visible_s" in ids
+        assert "hidden_s" not in ids
+
+    async def test_list_sessions_include_hidden_returns_hidden_sessions(self, test_repo):
+        await test_repo.create_session("visible_s", meta={"title": "Visible"})
+        await test_repo.create_session("hidden_s", meta={"title": "Hidden", "visibility": "hidden"})
+
+        sessions = await test_repo.list_sessions(include_hidden=True)
+        ids = {s["session_id"] for s in sessions}
+
+        assert "visible_s" in ids
+        assert "hidden_s" in ids
+
     async def test_create_turn_and_complete(self, test_repo):
         await test_repo.create_session("st")
         await test_repo.create_turn("t1", "st", "hello")

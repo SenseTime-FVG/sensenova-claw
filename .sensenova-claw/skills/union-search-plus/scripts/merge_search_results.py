@@ -5,8 +5,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+# 确保同目录模块可导入
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from search_fusion import deduplicate_and_rank
 
@@ -43,6 +47,9 @@ def _collect_items(data: dict[str, Any], default_provider: str) -> list[dict[str
 
 
 def _load(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        print(f"警告: 文件不存在 {path}，使用空结果", file=sys.stderr)
+        return {}
     return json.loads(path.read_text(encoding="utf-8"))
 
 

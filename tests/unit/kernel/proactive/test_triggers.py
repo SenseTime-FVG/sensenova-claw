@@ -61,6 +61,28 @@ class TestEventMatch:
         assert is_event_match(trigger, "email.received", {"source": "email-agent", "extra": 1}) is True
 
 
+    def test_exclude_payload_blocks_match(self):
+        trigger = EventTrigger(
+            event_type="agent.step_completed",
+            exclude_payload={"source": "recommendation"},
+        )
+        assert is_event_match(trigger, "agent.step_completed", {"source": "recommendation"}) is False
+
+    def test_exclude_payload_allows_normal(self):
+        trigger = EventTrigger(
+            event_type="agent.step_completed",
+            exclude_payload={"source": "recommendation"},
+        )
+        # 没有 source 字段
+        assert is_event_match(trigger, "agent.step_completed", {}) is True
+        # source 不同
+        assert is_event_match(trigger, "agent.step_completed", {"source": "user"}) is True
+
+    def test_exclude_payload_none_no_effect(self):
+        trigger = EventTrigger(event_type="agent.step_completed")
+        assert is_event_match(trigger, "agent.step_completed", {"source": "recommendation"}) is True
+
+
 class TestDebounce:
     def test_no_debounce_first_time(self):
         assert should_debounce("job-1", 5000, {}) is False
@@ -74,3 +96,12 @@ class TestDebounce:
         now_ms = int(time.time() * 1000)
         last_fires = {"job-1": now_ms - 6000}
         assert should_debounce("job-1", 5000, last_fires) is False
+
+    def test_per_session_debounce_independent(self):
+        """不同 session 的同一 job 不应互相 debounce。"""
+        now_ms = int(time.time() * 1000)
+        last_fires = {"job-1:session-A": now_ms - 2000}
+        # session-A 在窗口内，应 debounce
+        assert should_debounce("job-1:session-A", 5000, last_fires) is True
+        # session-B 没有记录，不应 debounce
+        assert should_debounce("job-1:session-B", 5000, last_fires) is False

@@ -45,6 +45,7 @@ class SystemPromptParams:
     tool_names: list[str] = field(default_factory=list)
     tool_summaries: dict[str, str] = field(default_factory=dict)
     skills_prompt: str | None = None
+    delegation_prompt: str | None = None       # Agent 间通信（独立于 extra）
     memory_context: str | None = None          # v0.6 预留
     context_files: list[ContextFile] = field(default_factory=list)
     extra_system_prompt: str | None = None
@@ -60,15 +61,22 @@ def build_system_prompt(params: SystemPromptParams) -> str:
         return "You are a personal assistant running inside Sensenova-Claw."
 
     sections = [
-        _build_identity(params.base_prompt),
+        # 1. 环境信息
         _build_workspace(params.workspace_dir),
-        _build_tooling(params.tool_names, params.tool_summaries),
-        _build_skills(params.skills_prompt),
-        _build_memory(params.memory_context),
-        _build_context_files(params.context_files),
         _build_datetime(),
-        _build_extra(params.extra_system_prompt),
         _build_runtime(params.runtime_info),
+        # 2. 核心身份
+        _build_identity(params.base_prompt),
+        # 3. 身份补充
+        _build_extra(params.extra_system_prompt),
+        # 4. 能力声明
+        _build_tooling(params.tool_names, params.tool_summaries),
+        _build_delegation(params.delegation_prompt),
+        _build_skills(params.skills_prompt),
+        # 5. 项目规则
+        _build_context_files(params.context_files),
+        # 6. 记忆召回
+        _build_memory(params.memory_context),
     ]
 
     lines: list[str] = []
@@ -81,14 +89,14 @@ def build_system_prompt(params: SystemPromptParams) -> str:
 # ---------- Section Builders ----------
 
 def _build_identity(base_prompt: str) -> list[str]:
-    """Section 1: 身份声明 + 基础行为规范（必选）"""
+    """Section: 身份声明 + 基础行为规范（必选）"""
     if base_prompt.strip():
         return [base_prompt.strip()]
     return ["You are a helpful AI assistant running inside Sensenova-Claw."]
 
 
 def _build_workspace(workspace_dir: str | None) -> list[str]:
-    """Section 2: Workspace 路径提示（有 workspace 时）
+    """Section: Workspace 路径提示（有 workspace 时）
     
     路径规则和文件链接格式等固定指令已迁移到 .sensenova-claw/agents/AGENTS.md，
     这里只注入动态的工作目录路径。
@@ -105,7 +113,7 @@ def _build_workspace(workspace_dir: str | None) -> list[str]:
 
 
 def _build_tooling(tool_names: list[str], tool_summaries: dict[str, str]) -> list[str]:
-    """Section 2: 可用工具列表 + 调用规范（有工具时）"""
+    """Section: 可用工具列表 + 调用规范（有工具时）"""
     if not tool_names:
         return []
     lines = [
@@ -124,14 +132,21 @@ def _build_tooling(tool_names: list[str], tool_summaries: dict[str, str]) -> lis
 
 
 def _build_skills(skills_prompt: str | None) -> list[str]:
-    """Section 3: 可用技能列表 + 使用说明（有 skills 时）"""
+    """Section: 可用技能列表 + 使用说明（有 skills 时）"""
     if not skills_prompt or not skills_prompt.strip():
         return []
     return ["", skills_prompt.strip()]
 
 
+def _build_delegation(delegation_prompt: str | None) -> list[str]:
+    """Section: Agent 间通信能力（有可通信 Agent 时）"""
+    if not delegation_prompt or not delegation_prompt.strip():
+        return []
+    return ["", delegation_prompt.strip()]
+
+
 def _build_memory(memory_context: str | None) -> list[str]:
-    """Section 4: 长期记忆召回结果（v0.6 填充）"""
+    """Section: 长期记忆召回结果（v0.6 填充）"""
     if not memory_context or not memory_context.strip():
         return []
     return [
@@ -142,7 +157,7 @@ def _build_memory(memory_context: str | None) -> list[str]:
 
 
 def _build_context_files(context_files: list[ContextFile]) -> list[str]:
-    """Section 5: AGENTS.md（per-agent）/ USER.md（全局）上下文文件内容（有时）"""
+    """Section: AGENTS.md（per-agent）/ USER.md（全局）上下文文件内容（有时）"""
     if not context_files:
         return []
 
@@ -163,7 +178,7 @@ def _build_context_files(context_files: list[ContextFile]) -> list[str]:
 
 
 def _build_datetime() -> list[str]:
-    """Section 6: 当前日期时间 + 系统信息（必选）"""
+    """Section: 当前日期时间 + 系统信息（必选）"""
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     system_type = platform.system()
     return [
@@ -173,7 +188,7 @@ def _build_datetime() -> list[str]:
 
 
 def _build_extra(extra: str | None) -> list[str]:
-    """Section 7: 用户自定义额外上下文（有时）"""
+    """Section: 用户自定义额外上下文（有时）"""
     if not extra or not extra.strip():
         return []
     return [
@@ -184,7 +199,7 @@ def _build_extra(extra: str | None) -> list[str]:
 
 
 def _build_runtime(info: RuntimeInfo | None) -> list[str]:
-    """Section 8: 运行时信息行（调试用，必选）"""
+    """Section: 运行时信息行（调试用，必选）"""
     if not info:
         return []
     parts: list[str] = []

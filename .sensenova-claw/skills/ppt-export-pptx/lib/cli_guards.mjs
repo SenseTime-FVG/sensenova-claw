@@ -8,6 +8,24 @@ function readJsonIfExists(filePath) {
   return JSON.parse(readFileSync(filePath, 'utf-8'));
 }
 
+function parsePageNumberFromFile(htmlFile) {
+  const fileName = htmlFile.split('/').pop() || '';
+  return Number((/page_(\d+)\.html$/.exec(fileName) || [])[1]);
+}
+
+function listRealPhotoRequirements(page) {
+  return (page?.asset_requirements || [])
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(item => /^real-photo\s*:/i.test(item))
+    .map(item => item.replace(/^real-photo\s*:/i, '').trim())
+    .filter(Boolean);
+}
+
+function listExplicitPlaceholders(html) {
+  return [...html.matchAll(/\[\s*([^\]\n]{2,120})\s*\]/g)].map(match => match[1].trim());
+}
+
 function collectMotifMarkers(html) {
   const markers = {
     'bg-motif': new Set(),
@@ -211,6 +229,66 @@ function ensureVisibleTitles(deckDir, htmlFiles) {
   }
 }
 
+function ensureRealPhotoCoverage(deckDir, htmlFiles) {
+  const storyboard = readJsonIfExists(resolve(deckDir, 'storyboard.json'));
+  if (!storyboard) {
+    return;
+  }
+
+  const assetPlan = readJsonIfExists(resolve(deckDir, 'asset-plan.json'));
+  const slots = Array.isArray(assetPlan?.slots) ? assetPlan.slots : [];
+  const pages = new Map(
+    (storyboard.pages || []).map(page => [Number(page.page_number), page]),
+  );
+  const errors = [];
+
+  for (const htmlFile of htmlFiles) {
+    const fileName = htmlFile.split('/').pop() || '';
+    const pageNumber = parsePageNumberFromFile(htmlFile);
+    const page = pages.get(pageNumber);
+    if (!page) {
+      continue;
+    }
+
+    const requiredRealPhotos = listRealPhotoRequirements(page);
+    if (requiredRealPhotos.length === 0) {
+      continue;
+    }
+
+    const pageSlots = slots.filter(slot => slot?.page_id === page.page_id && slot?.asset_kind === 'real-photo');
+    const resolvedSlots = pageSlots.filter(
+      slot => slot?.selected === true && slot?.status === 'success' && slot?.selected_image?.local_path,
+    );
+    const unresolvedSlots = pageSlots.filter(
+      slot => slot?.status === 'unresolved' || slot?.selected === false || !slot?.selected_image?.local_path,
+    );
+
+    if (resolvedSlots.length < requiredRealPhotos.length) {
+      errors.push(
+        `${fileName} 的必需真实图片未补齐：storyboard 需要 ${requiredRealPhotos.length} 个 real-photo 槽位，但 asset-plan 仅落实 ${resolvedSlots.length} 个`,
+      );
+    }
+
+    if (unresolvedSlots.length > 0) {
+      errors.push(
+        `${fileName} 仍存在未兑现的 real-photo 槽位：${unresolvedSlots.map(slot => slot.slot_id || 'unknown-slot').join(', ')}`,
+      );
+    }
+
+    const html = readFileSync(htmlFile, 'utf-8');
+    const placeholders = listExplicitPlaceholders(html);
+    if (placeholders.length > 0) {
+      errors.push(
+        `${fileName} 仍包含明显媒体 placeholder：${placeholders.join('、')}；必需真实图片未补齐时不得继续导出`,
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`页面真实图片校验失败:\n- ${errors.join('\n- ')}`);
+  }
+}
+
 function ensureDecorativeMarkers(deckDir, htmlFiles) {
   const styleSpec = readJsonIfExists(resolve(deckDir, 'style-spec.json'));
   const storyboard = readJsonIfExists(resolve(deckDir, 'storyboard.json'));
@@ -282,6 +360,8 @@ export function ensureDeckPreconditions(deckDir) {
     throw new Error(`deck_dir 不存在: ${deckDir}`);
   }
 
+  ensureReviewArtifact(deckDir);
+
   const pagesDir = resolve(deckDir, 'pages');
   if (!existsSync(pagesDir)) {
     throw new Error(`pages/ 目录不存在: ${pagesDir}`);
@@ -298,6 +378,7 @@ export function ensureDeckPreconditions(deckDir) {
 
   ensureDecorativeMarkers(deckDir, htmlFiles);
   ensureVisibleTitles(deckDir, htmlFiles);
+  ensureRealPhotoCoverage(deckDir, htmlFiles);
 
   return {
     pagesDir,

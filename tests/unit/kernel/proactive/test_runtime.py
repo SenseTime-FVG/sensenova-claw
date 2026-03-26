@@ -360,7 +360,11 @@ class TestRunAndDeliver:
         job.state.last_status = "ok"
         rt._delivery.deliver = AsyncMock()
         await rt._run_and_deliver(job)
-        rt._delivery.deliver.assert_called_once_with(job, "session-1", "执行结果")
+        rt._delivery.deliver.assert_called_once_with(
+            job, "session-1", "执行结果",
+            source_session_id=None,
+            items=None,
+        )
 
     @pytest.mark.asyncio
     async def test_delivery_skipped_on_failure(self):
@@ -384,3 +388,55 @@ class TestRunAndDeliver:
         await rt._run_and_deliver(job)
         # 空字符串 result 是 falsy，不应调用 delivery
         rt._delivery.deliver.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_recommendation_delivery_maps_back_to_source_session(self):
+        rt = _make_runtime()
+        job = _make_job(delivery=DeliveryConfig(channels=["web"], recommendation_type="turn_end"))
+        rt._jobs[job.id] = job
+        rt._executor.execute_job = AsyncMock(return_value=(
+            "scratch-session-1",
+            '{"recommendations":[{"id":"rec_1","title":"继续追问","prompt":"请继续分析","category":"follow-up"}]}',
+        ))
+        job.state.last_status = "ok"
+        rt._delivery.deliver = AsyncMock()
+
+        trigger_event = MagicMock(session_id="source-session-1")
+
+        await rt._run_and_deliver(job, trigger_event=trigger_event)
+
+        rt._delivery.deliver.assert_called_once_with(
+            job,
+            "source-session-1",
+            '{"recommendations":[{"id":"rec_1","title":"继续追问","prompt":"请继续分析","category":"follow-up"}]}',
+            source_session_id="source-session-1",
+            scratch_session_id="scratch-session-1",
+            items=[{
+                "id": "rec_1",
+                "title": "继续追问",
+                "prompt": "请继续分析",
+                "category": "follow-up",
+            }],
+        )
+
+
+class TestParseRecommendationJson:
+    def test_plain_json(self):
+        text = '{"recommendations": [{"id": "1", "title": "t", "prompt": "p", "category": "action"}]}'
+        result = ProactiveRuntime._parse_recommendation_json(text)
+        assert len(result) == 1
+        assert result[0]["title"] == "t"
+
+    def test_code_block_json(self):
+        text = '```json\n{"recommendations": [{"id": "1", "title": "t", "prompt": "p"}]}\n```'
+        result = ProactiveRuntime._parse_recommendation_json(text)
+        assert len(result) == 1
+
+    def test_invalid_json_returns_none(self):
+        assert ProactiveRuntime._parse_recommendation_json("not json") is None
+
+    def test_missing_recommendations_key(self):
+        assert ProactiveRuntime._parse_recommendation_json('{"items": []}') is None
+
+    def test_empty_recommendations(self):
+        assert ProactiveRuntime._parse_recommendation_json('{"recommendations": []}') is None
