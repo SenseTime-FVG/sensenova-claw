@@ -4,10 +4,10 @@ import { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, FileText, Globe } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useMessages } from '@/contexts/ws';
 
 export function RightContext() {
-  const { steps, taskProgress } = useChatSession();
+  const { steps, taskProgress } = useMessages();
 
   const isCollapsed = steps.length === 0 && taskProgress.length === 0;
   const [expanded, setExpanded] = useState(!isCollapsed);
