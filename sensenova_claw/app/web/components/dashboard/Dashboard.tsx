@@ -175,10 +175,20 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
     switchSession(sessionId);
   }, [switchSession]);
 
-  const handleRecommendationClick = useCallback(async (sourceSessionId: string, prompt: string) => {
+  const handleRecommendationClick = useCallback(async (
+    sourceSessionId: string,
+    recommendationId: string,
+    prompt: string,
+  ) => {
     try {
       await switchSession(sourceSessionId);
-      prefillInput(prompt);
+      prefillInput({
+        text: prompt,
+        recommendation: {
+          recommendationId,
+          sourceSessionId,
+        },
+      });
     } catch {
       pushNotification(
         {

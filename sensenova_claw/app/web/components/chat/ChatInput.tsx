@@ -8,13 +8,17 @@ import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
 import { type ContextFileRef } from '@/lib/chatTypes';
 import { singleFileFlow, dirUploadFlow, type ProgressCallback } from '@/lib/fileUpload';
 import { UploadProgress, type UploadProgressItem } from './UploadProgress';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 
 interface ChatInputProps {
   defaultAgentId: string;
   selectedAgent: string;
   onSelectAgent: (id: string) => void;
-  onSend: (content: string, contextFiles?: ContextFileRef[]) => void;
+  onSend: (
+    content: string,
+    contextFiles?: ContextFileRef[],
+    recommendation?: RecommendationSendMeta | null,
+  ) => void;
   onSlashSubmit: (content: string) => boolean;
   onStop?: () => void;
   disabled: boolean;
@@ -42,9 +46,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   lockAgent,
 }, ref) {
   const [inputValue, setInputValue] = useState('');
+  const [draftRecommendation, setDraftRecommendation] = useState<RecommendationSendMeta | null>(null);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
-  const { pendingInput, setPendingInput } = useChatSession();
+  const { currentSessionId, pendingPrefill, clearPendingPrefill } = useChatSession();
   const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -63,9 +68,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, [showUploadMenu]);
 
   useEffect(() => {
-    if (!pendingInput) return;
-    setInputValue(pendingInput);
-    setPendingInput('');
+    if (!pendingPrefill) return;
+    setInputValue(pendingPrefill.text);
+    setDraftRecommendation(pendingPrefill.recommendation || null);
+    clearPendingPrefill();
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -73,7 +79,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         textareaRef.current.focus();
       }
     });
-  }, [pendingInput, setPendingInput]);
+  }, [pendingPrefill, clearPendingPrefill]);
+
+  useEffect(() => {
+    if (draftRecommendation && currentSessionId && draftRecommendation.sourceSessionId !== currentSessionId) {
+      setDraftRecommendation(null);
+    }
+  }, [currentSessionId, draftRecommendation]);
 
   useImperativeHandle(ref, () => ({
     setInput: (text: string) => {
@@ -211,22 +223,25 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     if (!content || !wsConnected || disabled) return;
 
     if (handleSlashSubmitHook(content)) {
+      setDraftRecommendation(null);
       setInputValue('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
 
     if (onSlashSubmit(content)) {
+      setDraftRecommendation(null);
       setInputValue('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
 
     const contextFiles = parseAtRefs(content);
-    onSend(content, contextFiles.length > 0 ? contextFiles : undefined);
+    onSend(content, contextFiles.length > 0 ? contextFiles : undefined, draftRecommendation);
+    setDraftRecommendation(null);
     setInputValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [inputValue, wsConnected, disabled, handleSlashSubmitHook, onSlashSubmit, onSend, parseAtRefs]);
+  }, [inputValue, wsConnected, disabled, handleSlashSubmitHook, onSlashSubmit, onSend, parseAtRefs, draftRecommendation]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing || isComposingRef.current) return;
@@ -235,6 +250,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value);
+    if (!e.target.value.trim()) {
+      setDraftRecommendation(null);
+    }
     const ta = e.target;
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 96) + 'px';

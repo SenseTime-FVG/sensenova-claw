@@ -60,9 +60,12 @@ async def test_deliver_with_recommendation_items(mock_bus, mock_notification):
     await delivery.deliver(
         job, "session-1", "raw result",
         source_session_id="user-session-1",
+        scratch_session_id="scratch-session-1",
         items=items,
     )
     event = mock_bus.publish.call_args[0][0]
     assert event.payload["source_session_id"] == "user-session-1"
+    assert event.payload["scratch_session_id"] == "scratch-session-1"
     assert event.payload["recommendation_type"] == "turn_end"
     assert event.payload["items"] == items
+    mock_notification.send.assert_not_called()

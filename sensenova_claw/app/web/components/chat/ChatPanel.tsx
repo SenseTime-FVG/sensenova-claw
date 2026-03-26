@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Bot, ChevronLeft } from 'lucide-react';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 import { useFilePanel } from '@/contexts/FilePanelContext';
 import { MessageList } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
@@ -162,8 +162,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     return () => window.removeEventListener('sensenova-claw:open-file-preview', handler);
   }, []);
 
-  const handleSend = useCallback((content: string, contextFiles?: ContextFileRef[]) => {
-    sendMessage(content, contextFiles, selectedAgent);
+  const handleSend = useCallback((
+    content: string,
+    contextFiles?: ContextFileRef[],
+    recommendation?: RecommendationSendMeta | null,
+  ) => {
+    sendMessage(content, contextFiles, selectedAgent, recommendation);
   }, [sendMessage, selectedAgent]);
 
   // 斜杠命令处理（不在 ChatInput 层处理的额外逻辑）

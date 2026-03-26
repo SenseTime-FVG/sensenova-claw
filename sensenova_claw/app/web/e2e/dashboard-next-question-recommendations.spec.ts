@@ -1,0 +1,374 @@
+import { expect, test } from '@playwright/test';
+
+test('下一问推荐应独立于兴趣推送面板展示，并支持点击预填输入框', async ({ page }) => {
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: 'test-token',
+    url: 'http://localhost:3000',
+  }]);
+
+  await page.route('**/api/auth/status', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ authenticated: true }),
+    });
+  });
+
+  await page.route('**/api/agents', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        { id: 'office-main', name: 'Office Main', description: '工作台主智能体', model: 'office-v1' },
+        { id: 'proactive-agent', name: 'Proactive Agent', description: '主动推荐智能体', model: 'proactive-v1' },
+      ]),
+    });
+  });
+
+  await page.route('**/api/sessions', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        sessions: [
+          {
+            session_id: 'sess_source_001',
+            created_at: 1710000000,
+            last_active: 1710000100,
+            meta: JSON.stringify({ title: '市场分析对话', agent_id: 'office-main' }),
+            status: 'idle',
+            last_turn_status: 'completed',
+            last_agent_response: '这是一段足够长的历史回复，用来模拟已完成会话。'.repeat(8),
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route('**/api/sessions/sess_source_001/events', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ events: [] }),
+    });
+  });
+
+  await page.route('**/api/proactive/recommendations**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ recommendations: [] }),
+    });
+  });
+
+  await page.route('**/api/cron/jobs', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ jobs: [] }),
+    });
+  });
+
+  await page.route('**/api/cron/runs?limit=50', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ runs: [] }),
+    });
+  });
+
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+
+    class FakeWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+
+      readyState = FakeWebSocket.CONNECTING;
+      onopen: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+
+      constructor(_url: string) {
+        window.setTimeout(() => {
+          this.readyState = FakeWebSocket.OPEN;
+          this.onopen?.(new Event('open'));
+
+          window.setTimeout(() => {
+            this.onmessage?.(new MessageEvent('message', {
+              data: JSON.stringify({
+                type: 'proactive_result',
+                session_id: 'sess_source_001',
+                payload: {
+                  job_id: 'builtin-turn-end-recommendation',
+                  job_name: '会话推荐',
+                  session_id: 'sess_source_001',
+                  source_session_id: 'sess_source_001',
+                  recommendation_type: 'turn_end',
+                  result: JSON.stringify({
+                    recommendations: [
+                      {
+                        id: 'rec_1',
+                        title: '继续追问竞争对手',
+                        prompt: '请继续分析这个市场里最强的三个竞争对手',
+                        category: 'follow-up',
+                      },
+                    ],
+                  }),
+                  items: [
+                    {
+                      id: 'rec_1',
+                      title: '继续追问竞争对手',
+                      prompt: '请继续分析这个市场里最强的三个竞争对手',
+                      category: 'follow-up',
+                    },
+                  ],
+                },
+              }),
+            }));
+          }, 30);
+        }, 20);
+      }
+
+      send(_data: string) {}
+
+      close() {
+        this.readyState = FakeWebSocket.CLOSED;
+        this.onclose?.(new CloseEvent('close'));
+      }
+
+      addEventListener() {}
+
+      removeEventListener() {}
+    }
+
+    function MockWebSocket(url: string | URL, protocols?: string | string[]) {
+      const urlString = String(url);
+      if (urlString.includes('localhost:8000/ws')) {
+        return new FakeWebSocket(urlString);
+      }
+      return new NativeWebSocket(url, protocols);
+    }
+
+    Object.assign(MockWebSocket, {
+      CONNECTING: FakeWebSocket.CONNECTING,
+      OPEN: FakeWebSocket.OPEN,
+      CLOSING: FakeWebSocket.CLOSING,
+      CLOSED: FakeWebSocket.CLOSED,
+    });
+
+    Object.defineProperty(window, 'WebSocket', {
+      configurable: true,
+      writable: true,
+      value: MockWebSocket,
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByText('Connected')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId('next-question-recommendations')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId('next-question-recommendations')).toContainText('继续追问竞争对手');
+  await expect(page.getByText('推荐操作')).toHaveCount(0);
+
+  await page.getByTestId('next-question-recommendation-item').click();
+
+  await expect(page.getByTestId('chat-input')).toHaveValue('请继续分析这个市场里最强的三个竞争对手');
+});
+
+test('下一问推荐在未发送前刷新后应恢复，发送后应按 recommendation_id 消费', async ({ page }) => {
+  const sentMessages: Array<Record<string, any>> = [];
+
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: 'test-token',
+    url: 'http://localhost:3000',
+  }]);
+
+  await page.exposeBinding('captureSentWsMessage', (_source, payload) => {
+    sentMessages.push(payload as Record<string, any>);
+  });
+
+  await page.route('**/api/auth/status', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ authenticated: true }),
+    });
+  });
+
+  await page.route('**/api/agents', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        { id: 'office-main', name: 'Office Main', description: '工作台主智能体', model: 'office-v1' },
+        { id: 'proactive-agent', name: 'Proactive Agent', description: '主动推荐智能体', model: 'proactive-v1' },
+      ]),
+    });
+  });
+
+  await page.route('**/api/sessions', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        sessions: [
+          {
+            session_id: 'sess_source_001',
+            created_at: 1710000000,
+            last_active: 1710000100,
+            meta: JSON.stringify({ title: '市场分析对话', agent_id: 'office-main' }),
+            status: 'idle',
+            last_turn_status: 'completed',
+            last_agent_response: '这是一段足够长的历史回复，用来模拟已完成会话。'.repeat(8),
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route('**/api/sessions/sess_source_001/events', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ events: [] }),
+    });
+  });
+
+  await page.route('**/api/cron/jobs', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ jobs: [] }),
+    });
+  });
+
+  await page.route('**/api/cron/runs?limit=50', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ runs: [] }),
+    });
+  });
+
+  await page.route('**/api/proactive/recommendations**', async (route) => {
+    const consumed = sentMessages.some((message) =>
+      message.type === 'user_input'
+      && message.payload?.meta?.recommendation_id === 'rec_1',
+    );
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        recommendations: consumed ? [] : [
+          {
+            job_id: 'builtin-turn-end-recommendation',
+            job_name: '会话推荐',
+            session_id: 'sess_source_001',
+            source_session_id: 'sess_source_001',
+            recommendation_type: 'turn_end',
+            received_at_ms: 1710000100000,
+            items: [
+              {
+                id: 'rec_1',
+                title: '继续追问竞争对手',
+                prompt: '请继续分析这个市场里最强的三个竞争对手',
+                category: 'follow-up',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+
+    class FakeWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+
+      readyState = FakeWebSocket.CONNECTING;
+      onopen: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+
+      constructor(_url: string) {
+        window.setTimeout(() => {
+          this.readyState = FakeWebSocket.OPEN;
+          this.onopen?.(new Event('open'));
+        }, 20);
+      }
+
+      send(data: string) {
+        const payload = JSON.parse(data);
+        void (window as any).captureSentWsMessage(payload);
+      }
+
+      close() {
+        this.readyState = FakeWebSocket.CLOSED;
+        this.onclose?.(new CloseEvent('close'));
+      }
+
+      addEventListener() {}
+
+      removeEventListener() {}
+    }
+
+    function MockWebSocket(url: string | URL, protocols?: string | string[]) {
+      const urlString = String(url);
+      if (urlString.includes('localhost:8000/ws')) {
+        return new FakeWebSocket(urlString);
+      }
+      return new NativeWebSocket(url, protocols);
+    }
+
+    Object.assign(MockWebSocket, {
+      CONNECTING: FakeWebSocket.CONNECTING,
+      OPEN: FakeWebSocket.OPEN,
+      CLOSING: FakeWebSocket.CLOSING,
+      CLOSED: FakeWebSocket.CLOSED,
+    });
+
+    Object.defineProperty(window, 'WebSocket', {
+      configurable: true,
+      writable: true,
+      value: MockWebSocket,
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByText('Connected')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId('next-question-recommendations')).toContainText('继续追问竞争对手');
+
+  await page.reload();
+
+  await expect(page.getByText('Connected')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId('next-question-recommendations')).toContainText('继续追问竞争对手');
+
+  await page.getByTestId('next-question-recommendation-item').click();
+  await expect(page.getByTestId('chat-input')).toHaveValue('请继续分析这个市场里最强的三个竞争对手');
+
+  await page.getByTestId('send-button').click();
+
+  await expect.poll(() =>
+    sentMessages.find((message) => message.type === 'user_input')?.payload?.meta?.recommendation_id,
+  ).toBe('rec_1');
+  await expect(page.getByTestId('next-question-recommendation-item')).toHaveCount(0);
+
+  await page.reload();
+
+  await expect(page.getByText('Connected')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId('next-question-recommendation-item')).toHaveCount(0);
+});

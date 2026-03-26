@@ -12,6 +12,7 @@ from sensenova_claw.app.gateway import main as gateway_main
 from sensenova_claw.adapters.channels.websocket_channel import WebSocketChannel
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
+    PROACTIVE_RESULT,
     TOOL_CONFIRMATION_REQUESTED,
     TOOL_CONFIRMATION_RESOLVED,
     USER_INPUT,
@@ -38,6 +39,7 @@ class _FakeGateway:
         content: str,
         attachments: list | None = None,
         context_files: list | None = None,
+        meta: dict | None = None,
         source: str = "websocket",
     ) -> str:
         _ = (attachments, context_files, source)
@@ -46,7 +48,10 @@ class _FakeGateway:
                 type=USER_INPUT,
                 session_id=session_id,
                 source="test",
-                payload={"content": content},
+                payload={
+                    "content": content,
+                    **({"meta": meta} if meta else {}),
+                },
             )
         )
         return "turn_test"
@@ -385,3 +390,45 @@ async def test_tool_confirmation_resolved_broadcasts_to_all_connections(ws_env):
     assert ws2.sent_json[0]["type"] == "tool_confirmation_resolved"
     assert ws1.sent_json[0]["payload"]["reason"] == "timeout_approved"
     assert ws2.sent_json[0]["payload"]["tool_call_id"] == "tc_child_2"
+
+
+@pytest.mark.asyncio
+async def test_proactive_result_broadcasts_to_all_connections_for_dashboard(ws_env):
+    """proactive 推荐需要让工作台连接也能收到，而不依赖 session 绑定。"""
+    ws1 = _FakeWebSocket(messages=[])
+    ws2 = _FakeWebSocket(messages=[])
+    await ws_env.ws_channel.connect(ws1)
+    await ws_env.ws_channel.connect(ws2)
+
+    event = EventEnvelope(
+        type=PROACTIVE_RESULT,
+        session_id="sess_recommendation",
+        source="proactive",
+        payload={
+            "job_id": "builtin-turn-end-recommendation",
+            "job_name": "会话推荐",
+            "session_id": "sess_recommendation",
+            "source_session_id": "sess_recommendation",
+            "scratch_session_id": "sess_recommendation_scratch",
+            "recommendation_type": "turn_end",
+            "result": '{"recommendations":[{"id":"rec_1","title":"继续追问","prompt":"请继续分析","category":"follow-up"}]}',
+            "items": [
+                {
+                    "id": "rec_1",
+                    "title": "继续追问",
+                    "prompt": "请继续分析",
+                    "category": "follow-up",
+                }
+            ],
+        },
+    )
+
+    await ws_env.ws_channel.send_event(event)
+
+    assert len(ws1.sent_json) == 1
+    assert len(ws2.sent_json) == 1
+    assert ws1.sent_json[0]["type"] == "proactive_result"
+    assert ws2.sent_json[0]["type"] == "proactive_result"
+    assert ws1.sent_json[0]["payload"]["recommendation_type"] == "turn_end"
+    assert ws2.sent_json[0]["payload"]["items"][0]["id"] == "rec_1"
+    assert ws1.sent_json[0]["payload"]["scratch_session_id"] == "sess_recommendation_scratch"

@@ -188,7 +188,7 @@ agents:
     name: Proactive Agent
     description: 自主执行定时任务和信息推送的 agent
     temperature: 1.0
-    tools: ["send_message", "fetch_url", "read_file", "write_file", "bash_command", "serper_search", "memory_search", "list_proactive_jobs", "create_proactive_job", "manage_proactive_job"]
+    tools: []
     skills: []
     max_send_depth: 2
     max_pingpong_turns: 10

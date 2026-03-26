@@ -27,6 +27,7 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 const WS_RECONNECT_INTERVAL_MS = 1000;
 const WS_MAX_RECONNECT_ATTEMPTS = 10;
 const BYPASS_PATHS = ['/login', '/setup'];
+const MAX_PROACTIVE_RESULTS = 50;
 
 // ── Context 值类型 ──
 
@@ -59,7 +60,12 @@ export interface ChatSessionContextValue {
   // 消息
   messages: ChatMessage[];
   isTyping: boolean;
-  sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string) => void;
+  sendMessage: (
+    content: string,
+    contextFiles?: ContextFileRef[],
+    agentId?: string,
+    recommendation?: RecommendationSendMeta | null,
+  ) => void;
 
   // 任务列表
   sessions: SessionItem[];
@@ -97,9 +103,19 @@ export interface ChatSessionContextValue {
   proactiveResults: ProactiveResultItem[];
 
   // 推荐卡片预填输入
-  pendingInput: string;
-  prefillInput: (text: string) => void;
-  setPendingInput: (text: string) => void;
+  pendingPrefill: PrefillInputPayload | null;
+  prefillInput: (value: string | PrefillInputPayload) => void;
+  clearPendingPrefill: () => void;
+}
+
+export interface RecommendationSendMeta {
+  recommendationId: string;
+  sourceSessionId: string;
+}
+
+export interface PrefillInputPayload {
+  text: string;
+  recommendation?: RecommendationSendMeta | null;
 }
 
 /** 实时接收到的 proactive 推送结果 */
@@ -107,6 +123,7 @@ export interface ProactiveResultItem {
   jobId: string;
   jobName: string;
   sessionId: string;
+  scratchSessionId?: string;
   result: string;
   receivedAt: number;
   sourceSessionId?: string;
@@ -117,6 +134,76 @@ export interface ProactiveResultItem {
     prompt: string;
     category?: string;
   }>;
+}
+
+interface PendingRecommendationApiItem {
+  job_id?: string;
+  job_name?: string;
+  session_id?: string;
+  source_session_id?: string;
+  recommendation_type?: string;
+  received_at_ms?: number;
+  result?: string;
+  items?: Array<{
+    id?: string;
+    title?: string;
+    prompt?: string;
+    category?: string;
+  }>;
+}
+
+function proactiveResultKey(item: ProactiveResultItem): string {
+  return [
+    item.jobId,
+    item.sessionId,
+    item.sourceSessionId || '',
+    item.recommendationType || '',
+  ].join('::');
+}
+
+function mergeProactiveResults(
+  existing: ProactiveResultItem[],
+  incoming: ProactiveResultItem[],
+): ProactiveResultItem[] {
+  const merged = new Map<string, ProactiveResultItem>();
+
+  for (const item of [...existing, ...incoming]) {
+    const key = proactiveResultKey(item);
+    const prev = merged.get(key);
+    if (!prev || item.receivedAt >= prev.receivedAt) {
+      merged.set(key, item);
+    }
+  }
+
+  return Array.from(merged.values())
+    .sort((a, b) => b.receivedAt - a.receivedAt)
+    .slice(0, MAX_PROACTIVE_RESULTS);
+}
+
+function consumeRecommendationFromResults(
+  results: ProactiveResultItem[],
+  recommendationId: string,
+  sourceSessionId: string,
+): ProactiveResultItem[] {
+  return results
+    .flatMap((result) => {
+      if (result.recommendationType !== 'turn_end') {
+        return [result];
+      }
+
+      const resultSourceSessionId = result.sourceSessionId || result.sessionId;
+      if (resultSourceSessionId !== sourceSessionId || !Array.isArray(result.items)) {
+        return [result];
+      }
+
+      const remainingItems = result.items.filter((item) => item.id !== recommendationId);
+      if (remainingItems.length === 0) {
+        return [];
+      }
+
+      return [{ ...result, items: remainingItems }];
+    })
+    .slice(0, MAX_PROACTIVE_RESULTS);
 }
 
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
@@ -151,10 +238,21 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const [proactiveResults, setProactiveResults] = useState<ProactiveResultItem[]>([]);
 
   // 推荐卡片预填输入
-  const [pendingInput, setPendingInput] = useState<string>('');
+  const [pendingPrefill, setPendingPrefill] = useState<PrefillInputPayload | null>(null);
 
-  const prefillInput = useCallback((text: string) => {
-    setPendingInput(text);
+  const prefillInput = useCallback((value: string | PrefillInputPayload) => {
+    if (typeof value === 'string') {
+      setPendingPrefill({ text: value, recommendation: null });
+      return;
+    }
+    setPendingPrefill({
+      text: value.text,
+      recommendation: value.recommendation || null,
+    });
+  }, []);
+
+  const clearPendingPrefill = useCallback(() => {
+    setPendingPrefill(null);
   }, []);
 
   // Refs
@@ -166,7 +264,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
   const cancelledTurnIdsRef = useRef<Set<string>>(new Set());
   const lastStreamingTurnIdRef = useRef<string | null>(null);
-  const pendingInputRef = useRef<{ content: string; contextFiles?: string[] } | null>(null);
+  const pendingInputRef = useRef<{
+    content: string;
+    contextFiles?: string[];
+    meta?: Record<string, unknown>;
+  } | null>(null);
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
   const pendingCreateMeta = useRef<Record<string, string> | null>(null);
@@ -276,6 +378,42 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     }
   }, [shouldActivate]);
 
+  const loadPendingRecommendations = useCallback(async () => {
+    if (!shouldActivate) {
+      return;
+    }
+    try {
+      const res = await authFetch(`${API_BASE}/api/proactive/recommendations?limit=3`);
+      if (!res.ok) {
+        return;
+      }
+      const data = await res.json() as { recommendations?: PendingRecommendationApiItem[] };
+      const restored = Array.isArray(data.recommendations)
+        ? data.recommendations.map((item): ProactiveResultItem => ({
+            jobId: String(item.job_id || ''),
+            jobName: String(item.job_name || ''),
+            sessionId: String(item.session_id || item.source_session_id || ''),
+            result: String(item.result || ''),
+            receivedAt: Number(item.received_at_ms || Date.now()),
+            sourceSessionId: item.source_session_id ? String(item.source_session_id) : undefined,
+            recommendationType: item.recommendation_type ? String(item.recommendation_type) : undefined,
+            items: Array.isArray(item.items)
+              ? item.items.map((rec) => ({
+                  id: String(rec.id || ''),
+                  title: String(rec.title || ''),
+                  prompt: String(rec.prompt || ''),
+                  category: rec.category ? String(rec.category) : undefined,
+                }))
+              : undefined,
+          }))
+        : [];
+
+      setProactiveResults((prev) => mergeProactiveResults(prev, restored));
+    } catch {
+      // 允许失败
+    }
+  }, [shouldActivate]);
+
   const reloadSessionHistory = useCallback(async (sid: string, shouldBind = true) => {
     if (!shouldActivate) return;
     setSessionId(sid);
@@ -365,7 +503,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     const isGlobalInteractionEvent = eventType === 'tool_confirmation_requested'
       || eventType === 'tool_confirmation_resolved'
       || eventType === 'user_question_asked'
-      || eventType === 'user_question_answered_event';
+      || eventType === 'user_question_answered_event'
+      || eventType === 'proactive_result';
 
     // ── 全局 agent 活动追踪（在 session 过滤之前处理，跨会话） ──
     if (incomingSessionId) {
@@ -396,11 +535,16 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         setSessionId(newSid);
         loadSessionList();
         if (pendingInputRef.current) {
-          const { content, contextFiles } = pendingInputRef.current;
+          const { content, contextFiles, meta } = pendingInputRef.current;
           wsSend({
             type: 'user_input',
             session_id: newSid,
-            payload: { content, attachments: [], context_files: contextFiles || [] },
+            payload: {
+              content,
+              attachments: [],
+              context_files: contextFiles || [],
+              ...(meta ? { meta } : {}),
+            },
             timestamp: Date.now() / 1000,
           });
           pendingInputRef.current = null;
@@ -796,40 +940,44 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         const resultText = String(payload.result || '');
         const resultSessionId = String(payload.session_id || incomingSessionId || '');
         const sourceSessionId = payload.source_session_id ? String(payload.source_session_id) : undefined;
+        const scratchSessionId = payload.scratch_session_id ? String(payload.scratch_session_id) : undefined;
         const recommendationType = payload.recommendation_type ? String(payload.recommendation_type) : undefined;
         const items = Array.isArray(payload.items) ? payload.items : undefined;
+        const rawTimestamp = typeof data.timestamp === 'number' ? data.timestamp : Date.now();
+        const receivedAt = rawTimestamp < 1e12 ? rawTimestamp * 1000 : rawTimestamp;
 
         const newItem: ProactiveResultItem = {
           jobId, jobName, result: resultText,
           sessionId: resultSessionId,
-          receivedAt: Date.now(),
+          scratchSessionId,
+          receivedAt,
           sourceSessionId,
           recommendationType,
           items,
         };
 
-        if (resultText) {
-          setProactiveResults(prev => {
-            const deduped = prev.filter(r => !(r.jobId === jobId && r.sessionId === resultSessionId));
-            return [newItem, ...deduped].slice(0, 50);
-          });
+        if (resultText || items) {
+          setProactiveResults(prev => mergeProactiveResults(prev, [newItem]));
           loadSessionList();
-          pushNotification({
-            title: `[主动推送] ${jobName || 'Proactive Agent'}`,
-            body: resultText.slice(0, 200),
-            level: 'info',
-            source: 'proactive',
-            createdAtMs: Date.now(),
-          }, { toast: true, browser: false });
-          pushCard({
-            kind: 'general',
-            title: `主动推送 — ${jobName || 'Proactive Agent'}`,
-            body: resultText.slice(0, 300),
-            level: 'info',
-            source: 'proactive',
-            sessionId: resultSessionId || undefined,
-            actions: resultSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined,
-          });
+          // 推荐类型只走看板 RecommendationCard，不推送通知/卡片
+          if (resultText && !recommendationType) {
+            pushNotification({
+              title: `[主动推送] ${jobName || 'Proactive Agent'}`,
+              body: resultText.slice(0, 200),
+              level: 'info',
+              source: 'proactive',
+              createdAtMs: Date.now(),
+            }, { toast: true, browser: false });
+            pushCard({
+              kind: 'general',
+              title: `主动推送 — ${jobName || 'Proactive Agent'}`,
+              body: resultText.slice(0, 300),
+              level: 'info',
+              source: 'proactive',
+              sessionId: resultSessionId || undefined,
+              actions: resultSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined,
+            });
+          }
         }
         break;
       }
@@ -914,6 +1062,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     loadSessionList();
   }, [loadSessionList, shouldActivate]);
 
+  useEffect(() => {
+    if (!shouldActivate) return;
+    void loadPendingRecommendations();
+  }, [loadPendingRecommendations, shouldActivate]);
+
   // ── 对外接口 ──
 
   const doCleanupEmptySession = useCallback((excludeSid?: string) => {
@@ -936,9 +1089,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
   const switchSession = useCallback(async (sid: string) => {
     switchedSessionRef.current = true;
+    clearPendingPrefill();
     doCleanupEmptySession(sid);
     await reloadSessionHistory(sid);
-  }, [reloadSessionHistory, doCleanupEmptySession]);
+  }, [clearPendingPrefill, reloadSessionHistory, doCleanupEmptySession]);
 
   const createSession = useCallback((agentId: string, taskId?: string) => {
     const meta: Record<string, string> = { title: '新对话' };
@@ -957,13 +1111,14 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     sessionIdRef.current = null;
     setMessages([]);
     setIsTyping(false);
+    clearPendingPrefill();
     resetTurnTracking();
     toolCallMapRef.current.clear();
     pendingInputRef.current = null;
     setRightSteps([]);
     setRightTaskProgress([]);
     toolStepMapRef.current.clear();
-  }, [doCleanupEmptySession, resetTurnTracking]);
+  }, [clearPendingPrefill, doCleanupEmptySession, resetTurnTracking]);
 
   const deleteSession = useCallback(async (sid: string) => {
     try {
@@ -987,7 +1142,12 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     startNewChat();
   }, [startNewChat]);
 
-  const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
+  const sendMessage = useCallback((
+    content: string,
+    contextFiles?: ContextFileRef[],
+    agentId?: string,
+    recommendation?: RecommendationSendMeta | null,
+  ) => {
     if (!content.trim() || !wsConnected) return;
 
     const targetAgentId = agentId || 'default';
@@ -1001,9 +1161,21 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     addMsg('user', content);
 
     const filePaths = contextFiles?.map(f => f.path) || [];
+    const recommendationMeta = recommendation
+      && sessionIdRef.current
+      && recommendation.sourceSessionId === sessionIdRef.current
+      ? {
+          recommendation_id: recommendation.recommendationId,
+          recommendation_source_session_id: recommendation.sourceSessionId,
+        }
+      : undefined;
 
     if (!sessionIdRef.current) {
-      pendingInputRef.current = { content, contextFiles: filePaths };
+      pendingInputRef.current = {
+        content,
+        contextFiles: filePaths,
+        ...(recommendationMeta ? { meta: recommendationMeta } : {}),
+      };
       const meta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
       wsSend({
         type: 'create_session',
@@ -1014,9 +1186,21 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       wsSend({
         type: 'user_input',
         session_id: sessionIdRef.current,
-        payload: { content, attachments: [], context_files: filePaths },
+        payload: {
+          content,
+          attachments: [],
+          context_files: filePaths,
+          ...(recommendationMeta ? { meta: recommendationMeta } : {}),
+        },
         timestamp: Date.now() / 1000,
       });
+    }
+    if (recommendationMeta) {
+      setProactiveResults((prev) => consumeRecommendationFromResults(
+        prev,
+        recommendationMeta.recommendation_id,
+        recommendationMeta.recommendation_source_session_id,
+      ));
     }
     setIsTyping(true);
   }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsConnected, wsSend]);
@@ -1128,9 +1312,9 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     wsSend,
     resolveInteractionFromNotification: resolveInteraction,
     proactiveResults,
-    pendingInput,
+    pendingPrefill,
     prefillInput,
-    setPendingInput,
+    clearPendingPrefill,
   };
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;

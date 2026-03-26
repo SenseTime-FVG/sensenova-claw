@@ -78,12 +78,12 @@ class ProactiveExecutor:
         self._running_jobs.discard(job_id)
 
     async def _do_execute(self, job: ProactiveJob, trigger_event: EventEnvelope | None = None) -> tuple[str, str | None]:
-        # 注入模式：在源会话中插入推荐请求
+        # 推荐模式：在隐藏 scratch session 中生成推荐，避免污染原会话历史
         if trigger_event and job.delivery.recommendation_type:
-            return await self._do_execute_inject(job, trigger_event)
+            return await self._do_execute_recommendation_scratch(job, trigger_event)
 
         # 独立会话模式（现有逻辑不变）
-        session_id = f"proactive_{job.id}_{uuid.uuid4().hex[:8]}"
+        session_id = self._build_session_id(job)
         run_id = f"pr_{uuid.uuid4().hex[:12]}"
         start_ms = int(time.time() * 1000)
         result_text: str | None = None
@@ -97,7 +97,7 @@ class ProactiveExecutor:
             "job_id": job.id,
             "session_id": session_id,
             "status": "running",
-            "triggered_by": job.trigger.kind,
+            "triggered_by": job.trigger.kind if job.trigger else "manual",
             "started_at_ms": start_ms,
         })
 
@@ -160,41 +160,50 @@ class ProactiveExecutor:
             await self._persist_job_state(job)
         return (session_id, result_text)
 
-    async def _do_execute_inject(self, job: ProactiveJob, trigger_event: EventEnvelope) -> tuple[str, str | None]:
-        """注入模式：在源会话中插入 user 消息生成推荐。"""
+    async def _do_execute_recommendation_scratch(
+        self,
+        job: ProactiveJob,
+        trigger_event: EventEnvelope,
+    ) -> tuple[str, str | None]:
+        """推荐模式：在隐藏 scratch session 中生成推荐结果。"""
         source_session_id = trigger_event.session_id
+        scratch_session_id = self._build_session_id(job)
         run_id = f"pr_{uuid.uuid4().hex[:12]}"
         start_ms = int(time.time() * 1000)
+        result_text: str | None = None
         self._running_jobs.add(job.id)
         job.state.last_triggered_at_ms = start_ms
         job.state.last_status = "running"
 
         await self._repo.create_proactive_run({
             "id": run_id, "job_id": job.id,
-            "session_id": source_session_id,
+            "session_id": scratch_session_id,
             "status": "running", "triggered_by": "event",
             "started_at_ms": start_ms,
         })
 
         try:
-            turn_id = await self._agent_runtime.send_user_input(
-                session_id=source_session_id,
-                user_input=job.task.prompt,
-                extra_payload={"meta": {"source": "recommendation"}},
+            prompt = await self._build_recommendation_prompt(job, source_session_id)
+            meta = self._build_recommendation_scratch_meta(job, source_session_id)
+
+            await self._agent_runtime.spawn_agent_session(
+                agent_id=job.agent_id,
+                session_id=scratch_session_id,
+                user_input=prompt,
+                parent_session_id=source_session_id,
+                meta=meta,
             )
 
             timeout_ms = job.safety.max_duration_ms
-            result_text = await self._wait_for_completion_by_turn(
-                source_session_id, turn_id, timeout_ms,
-            )
+            result_text = await self._wait_for_completion(scratch_session_id, timeout_ms)
 
             if result_text is None:
                 end_ms = int(time.time() * 1000)
                 await self._handle_failure(
-                    job, run_id, source_session_id,
+                    job, run_id, scratch_session_id,
                     f"执行超时（{timeout_ms}ms）", end_ms, status="timeout",
                 )
-                return (source_session_id, None)
+                return (scratch_session_id, None)
 
             end_ms = int(time.time() * 1000)
             job.state.last_status = "ok"
@@ -202,15 +211,24 @@ class ProactiveExecutor:
             job.state.consecutive_errors = 0
             job.state.total_runs += 1
             await self._repo.update_proactive_run(run_id, {
-                "status": "ok", "ended_at_ms": end_ms, "result_text": result_text[:2000],
+                "status": "ok",
+                "completed_at_ms": end_ms,
+                "result_summary": result_text,
             })
+            await self._bus.publish(EventEnvelope(
+                type=PROACTIVE_JOB_COMPLETED,
+                session_id=scratch_session_id,
+                agent_id=job.agent_id,
+                source="proactive",
+                payload={"job_id": job.id, "run_id": run_id, "result": result_text},
+            ))
             await self._persist_job_state(job)
-            return (source_session_id, result_text)
+            return (scratch_session_id, result_text)
 
         except Exception as e:
             end_ms = int(time.time() * 1000)
-            await self._handle_failure(job, run_id, source_session_id, str(e), end_ms)
-            return (source_session_id, None)
+            await self._handle_failure(job, run_id, scratch_session_id, str(e), end_ms)
+            return (scratch_session_id, None)
         finally:
             self._running_jobs.discard(job.id)
 
@@ -309,6 +327,85 @@ class ProactiveExecutor:
                 logger.warning("获取记忆上下文失败: job=%s", job.id)
         return "\n".join(parts)
 
+    async def _build_recommendation_prompt(self, job: ProactiveJob, source_session_id: str) -> str:
+        """基于原会话完整历史快照构建推荐 prompt。"""
+        history = await self._repo.get_session_messages(source_session_id)
+        if history:
+            history = await self._compress_source_history_if_needed(source_session_id, history)
+        history_snapshot = self._format_history_snapshot(history)
+        task_prompt = self._build_prompt(job)
+
+        return "\n".join([
+            "你正在为一个真实用户会话生成“下一问推荐”。",
+            "不要把自己当作用户继续对话，也不要回答原问题。",
+            f"源会话 ID: {source_session_id}",
+            "",
+            "## 源会话完整历史快照",
+            history_snapshot,
+            "",
+            "## 当前任务",
+            task_prompt,
+        ])
+
+    async def _compress_source_history_if_needed(
+        self,
+        source_session_id: str,
+        history: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """优先复用现有上下文压缩器，避免超长历史直接塞给推荐 scratch session。"""
+        compressor = getattr(self._agent_runtime, "context_compressor", None)
+        if not compressor:
+            return history
+
+        source_meta = await self._repo.get_session_meta(source_session_id) or {}
+        source_agent_id = str(source_meta.get("agent_id") or "default")
+        try:
+            return await compressor.compress_if_needed(
+                source_session_id,
+                history,
+                agent_id=source_agent_id,
+            )
+        except Exception:
+            logger.warning("压缩推荐来源会话历史失败，回退到原始历史: session=%s", source_session_id, exc_info=True)
+            return history
+
+    def _format_history_snapshot(self, history: list[dict[str, Any]]) -> str:
+        """将消息历史转成适合推荐 agent 消费的文本快照。"""
+        if not history:
+            return "（该会话暂无历史消息）"
+
+        role_map = {
+            "user": "用户",
+            "assistant": "助手",
+            "tool": "工具",
+            "system": "系统",
+        }
+        lines: list[str] = []
+        for index, message in enumerate(history, start=1):
+            role = role_map.get(str(message.get("role", "")).lower(), str(message.get("role", "unknown")))
+            content = str(message.get("content") or "").strip()
+            if not content:
+                content = "（空内容）"
+            lines.append(f"{index}. {role}: {content}")
+
+            tool_calls = message.get("tool_calls")
+            if tool_calls:
+                lines.append(
+                    f"   tool_calls: {json.dumps(tool_calls, ensure_ascii=False)}"
+                )
+
+            if message.get("role") == "tool":
+                tool_name = str(message.get("name") or message.get("tool_name") or "").strip()
+                if tool_name:
+                    lines.append(f"   tool_name: {tool_name}")
+                tool_call_id = str(message.get("tool_call_id") or "").strip()
+                if tool_call_id:
+                    lines.append(f"   tool_call_id: {tool_call_id}")
+        return "\n".join(lines)
+
+    def _build_session_id(self, job: ProactiveJob) -> str:
+        return f"proactive_{job.id}_{uuid.uuid4().hex[:8]}"
+
     def _build_session_meta(self, job: ProactiveJob) -> dict[str, Any]:
         """构建 spawn_agent_session 的 meta 参数，注入安全约束。"""
         meta: dict[str, Any] = {
@@ -326,6 +423,19 @@ class ProactiveExecutor:
         meta["max_duration_ms"] = safety.max_duration_ms
         if job.task.system_prompt_override:
             meta["system_prompt_override"] = job.task.system_prompt_override
+        return meta
+
+    def _build_recommendation_scratch_meta(
+        self,
+        job: ProactiveJob,
+        source_session_id: str,
+    ) -> dict[str, Any]:
+        """构建推荐 scratch session 的 meta。"""
+        meta = self._build_session_meta(job)
+        meta["type"] = "proactive_recommendation_scratch"
+        meta["visibility"] = "hidden"
+        meta["parent_session_id"] = source_session_id
+        meta["source_session_id"] = source_session_id
         return meta
 
     async def _wait_for_completion(

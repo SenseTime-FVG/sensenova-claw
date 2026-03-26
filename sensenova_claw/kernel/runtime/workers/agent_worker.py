@@ -198,6 +198,10 @@ class AgentSessionWorker(SessionWorker):
         }
         if getattr(self, '_current_turn_meta_source', None):
             limit_payload["source"] = self._current_turn_meta_source
+        if self._session_meta and self._session_meta.get("parent_session_id"):
+            limit_payload["is_delegated"] = True
+        if self._is_proactive_session():
+            limit_payload["is_proactive"] = True
         await self.bus.publish(
             EventEnvelope(
                 type=AGENT_STEP_COMPLETED,
@@ -541,6 +545,10 @@ class AgentSessionWorker(SessionWorker):
         }
         if getattr(self, '_current_turn_meta_source', None):
             step_completed_payload["source"] = self._current_turn_meta_source
+        if self._session_meta and self._session_meta.get("parent_session_id"):
+            step_completed_payload["is_delegated"] = True
+        if self._is_proactive_session():
+            step_completed_payload["is_proactive"] = True
         await self.bus.publish(
             EventEnvelope(
                 type=AGENT_STEP_COMPLETED,

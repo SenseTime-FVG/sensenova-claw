@@ -243,7 +243,7 @@ def job_to_db_row(job: ProactiveJob) -> dict[str, Any]:
         "name": job.name,
         "agent_id": job.agent_id,
         "enabled": 1 if job.enabled else 0,
-        "trigger_json": trigger_to_json(job.trigger),
+        "trigger_json": trigger_to_json(job.trigger) if job.trigger else json.dumps({"kind": "manual"}),
         "task_json": json.dumps(_task_to_dict(job.task)),
         "delivery_json": json.dumps(_delivery_to_dict(job.delivery)),
         "safety_json": json.dumps(_safety_to_dict(job.safety)),

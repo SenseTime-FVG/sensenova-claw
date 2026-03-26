@@ -14,7 +14,7 @@ export function MessageList({ messages }: { messages: Message[] }) {
   return (
     <div className="messages" data-testid="message-list">
       {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
+        <MessageBubble key={message.id} msg={message} />
       ))}
       <div ref={endRef} />
     </div>

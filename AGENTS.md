@@ -1277,3 +1277,65 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - `sensenova_claw/app/web/e2e/tool-confirmation-resolution.spec.ts` 里的 session 弹窗用例当前在本机仍会失败，现象是 `/sessions/[id]` 路径下拿不到 `tool-confirmation-dialog`；这和本次 toast 自动消失改动无直接证据关联，提交前需明确区分“本次新增回归通过”与“仓库既有用例仍失败”。
+
+### 2026-03-26 Proactive 推荐看板补充
+
+成功经验：
+- `proactive` 看板这类全局工作台数据，不能沿用普通会话事件的“按 `session_id` 绑定连接投递”策略；`PROACTIVE_RESULT` 若只发给绑定了源会话的 WebSocket，Dashboard 页面会完全收不到推荐。
+- 这类问题最有效的红测是直接打在 `WebSocketChannel.send_event()`：构造两个未绑定任何 session 的假连接，断言 `PROACTIVE_RESULT` 也会广播到两边，能快速锁定问题在路由层而不是前端渲染层。
+- 当前环境下前端没有成熟的 hook 单测基建时，先用后端 WebSocket 单测锁住“事件确实到达浏览器”这层契约，修复效率最高。
+
+失败/风险经验：
+- `useDashboardData` 里的推荐卡片目前仍主要依赖运行时 `proactiveResults` 内存态；如果后续用户要求“刷新页面后历史推荐仍可见”，还需要继续补后端持久化/回填链路，不能把这次广播修复误判为完整历史恢复。
+
+### 2026-03-26 下一问推荐展示补充
+
+成功经验：
+- 当“模型已经产出推荐，但看板没看到”时，要把“链路没到前端”和“前端组件还是旧展示”分开查；这次后端广播、前端状态聚合都已接上，真正落后的地方是 `ProactiveAgentPanel` 还停留在旧的“推荐操作”块。
+- 对这类 Dashboard 展示改动，直接让组件输出稳定的 `data-testid`（如 `next-question-recommendations`、`next-question-recommendation-item`）最划算，既能对齐 Playwright 断言，也能减少后续样式重构带来的测试脆弱性。
+- 当用户本机已手动启动 `localhost:3000` 时，Playwright 最稳的跑法是临时绕过默认 `webServer` 配置，直接复用现成服务；否则很容易把启动链路问题误判成页面逻辑失败。
+
+失败/风险经验：
+- 当前环境跑浏览器级 Playwright 仍缺系统库 `libnspr4.so`；即使页面服务可访问、用例能开始执行，也会在 Chromium 启动阶段直接失败，不能把这类错误当成“推荐还没显示”的业务证据。
+- `sensenova_claw/app/web` 的仓库级 `tsc --noEmit` 目前仍有与本次改动无关的既有错误（如 `contexts/SessionContext.tsx`、`e2e/miniapp-workspace.spec.ts`、`e2e/setup-skip.spec.ts`）；验证本次前端修复时要明确区分“本次文件无新增类型错误”和“全仓类型检查全绿”。
+
+### 2026-03-26 Hidden Scratch Session 补充
+
+成功经验：
+- 把“下一问推荐”从原会话注入改成 hidden scratch session 时，最小可行切口是四段一起改：`ProactiveExecutor` 改为 `spawn_agent_session(parent_session_id=source_session_id)`、`ProactiveRuntime` 投递时把展示 `session_id` 映射回 `source_session_id`、`ProactiveDelivery/WebSocketChannel` 增加 `scratch_session_id`、`/api/sessions` 默认过滤 `visibility=hidden`。
+- 推荐 scratch prompt 最稳的构造方式不是只传 `parent_session_id`，而是显式读取 `repo.get_session_messages(source_session_id)` 做历史快照，再优先复用 `agent_runtime.context_compressor.compress_if_needed(...)`；因为当前 `parent_session_id` 只负责路由/关系，不会自动继承父会话历史。
+- 对这类行为迁移，红测最划算的组合是：`tests/unit/kernel/proactive/test_executor.py` 锁“不能再 `send_user_input` 注入原会话”、`tests/unit/kernel/proactive/test_runtime.py` 锁“delivery 映射回 source session”、`tests/unit/test_repository.py` 与 `tests/unit/test_sessions_api.py` 锁 hidden 过滤。
+
+失败/风险经验：
+- 当前环境里 `uv` 通过 snap 安装，沙箱内直接跑会报 `snap-confine ... cap_dac_override not found`；需要越权后才能稳定执行 `uv run python -m pytest`。
+- Playwright 在当前环境即使越权成功启动 webServer，Chromium 仍会因为缺少 `libnspr4.so` 失败；浏览器级 e2e 不能在这里作为通过依据，只能保留 spec 并说明环境阻塞。
+
+### 2026-03-26 recommendation_id 推荐消费补充
+
+成功经验：
+- 对“下一问推荐刷新后恢复、发送后消失”这类需求，最稳的实现不是继续堆前端 `localStorage`，而是直接复用已有 `events` 持久化：从 `proactive.result(recommendation_type=turn_end)` 聚合最新推荐，再用后续 `user.input.meta.recommendation_id` 判断是否已消费。
+- `recommendation_id` 真正的关键不在生成 id，而在把它沿“推荐卡片点击 -> 输入框预填 -> WebSocket user_input -> events 表”整条链路透传；其中最容易漏的是 `Gateway.send_user_input()` 和 WebSocket channel 对 `meta` 字段的转发。
+- 前端如果要做到“点击只预填不消费、真正发送后立刻消失”，最省心的做法是让 `ChatInput` 本地持有当前草稿绑定的 `recommendationId/sourceSessionId`，发送时作为可选参数传给 `sendMessage()`；这样既支持用户改写文本，又不会因为只是点击卡片就提前消费。
+
+失败/风险经验：
+- 当前仓库的浏览器级 Playwright 仍受环境阻塞：即使绕过根目录 `webServer`、单独启动 `next dev`，Chromium 也会因为缺少 `libnspr4.so` 无法启动，所以新增的前端 e2e 目前只能保留用例，不能在本机作为通过依据。
+- 这个仓库当前工作区本身已有大量未提交改动；做此类前后端联动需求时，回顾 `git diff --stat` 很重要，避免把历史变更误判成这次 recommendation 改动带来的影响。
+
+### 2026-03-26 推荐分组展示补充
+
+成功经验：
+- 这类“不同来源的数据视觉上混在一起”的问题，先确认数据层是否已经分组很关键；这次 `useDashboardData` 其实早就按 `sourceSessionId` 聚合好了，真正缺的是 `ProactiveAgentPanel` 对分组头的显式渲染。
+- 对推荐卡片这类列表 UI，给“分组容器”和“分组标题”补稳定的 `data-testid`（如 `next-question-recommendation-group`、`next-question-recommendation-group-title`）很有价值，后续既能做 Playwright 分组断言，也能在重构样式时保住行为回归。
+- 当来源会话标题可能缺失时，展示层最好回退到 `sourceSessionId`，再配一个短 ID badge；这样即使元信息不完整，用户也能分辨推荐分别属于哪个会话。
+
+失败/风险经验：
+- 当前前端没有现成的 hook/component 单测基建，这类展示问题最终还是得靠 Playwright 场景兜底；如果环境里浏览器起不来，只能先做静态类型校验并保留 e2e 用例，不能把“没法启动 Chromium”误判为页面逻辑失败。
+
+### 2026-03-26 Proactive 看板统一滚动补充
+
+成功经验：
+- 当一个卡片内部看起来像“被拆成两段”时，优先检查 `overflow-auto` 放在哪一层；这次问题不是数据丢失，而是 `ProactiveAgentPanel` 只给下半段主动产出区加了滚动，导致上面的下一问推荐悬在滚动容器外。
+- 在缺少浏览器级测试条件时，可以先用 `node --test` 读取组件源码做轻量结构回归，至少把“统一滚动容器 + 推荐区 + 产出列表区”的关键约束锁住，再配合 `tsc` 检查避免改坏。
+
+失败/风险经验：
+- 这类源码结构测试只能验证布局骨架，不能替代真实浏览器中的滚动手感与高度表现；如果后续要继续调视觉或 sticky 行为，仍需要在可运行 Playwright 的环境做一次页面级回归。
