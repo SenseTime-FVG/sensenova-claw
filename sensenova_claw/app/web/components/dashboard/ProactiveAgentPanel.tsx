@@ -1,6 +1,9 @@
 'use client';
 
-import { Bot, Lightbulb, MessageCircleMore, MessageSquare, Search, Zap } from 'lucide-react';
+import { Bot, Lightbulb, MessageCircleMore, MessageSquare, Search, Sparkles, Zap } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
 import { getTone } from './widgetTones';
 import { SectionHeader } from './SectionHeader';
 import type { RecentOutput, RecommendationGroup, RecommendationItem } from '@/hooks/useDashboardData';
@@ -83,6 +86,34 @@ function ProactiveCard({ item, onClick }: { item: RecentOutput; onClick?: () => 
 }
 
 export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRecommendationClick }: ProactiveAgentPanelProps) {
+  const [isTriggering, setIsTriggering] = useState(false);
+
+  const handleInterestPush = async () => {
+    setIsTriggering(true);
+    try {
+      const res = await fetch('/api/proactive/jobs/builtin-interest-push/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: null }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+          toast.error('正在推送中，请稍后');
+        } else if (res.status === 400) {
+          toast.error('该功能已禁用');
+        } else {
+          toast.error('触发失败，请稍后重试');
+        }
+      }
+    } catch (err) {
+      toast.error('触发失败，请稍后重试');
+    } finally {
+      setIsTriggering(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col p-4">
       <div className="absolute inset-0 bg-gradient-to-br from-violet-50/70 via-background/90 to-purple-50/50 dark:from-violet-950/30 dark:via-background/90 dark:to-purple-950/20" />
@@ -93,6 +124,18 @@ export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRec
           tag="Proactive"
           tagTone="violet"
           icon={<Bot className="h-4 w-4 text-violet-500" />}
+          action={
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleInterestPush}
+              disabled={isTriggering}
+              className="h-7 px-2 text-xs"
+            >
+              <Sparkles className="h-3.5 w-3.5 mr-1" />
+              兴趣推送
+            </Button>
+          }
         />
 
         {recommendations && recommendations.length > 0 && (
