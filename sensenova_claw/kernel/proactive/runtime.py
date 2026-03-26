@@ -222,6 +222,46 @@ class ProactiveRuntime:
                 self._jobs[job_id] = job_from_db_row(row)
 
         logger.info("Loaded %d proactive jobs (%d from config)", len(self._jobs), len(config_jobs))
+        self._register_builtin_recommendation_job()
+
+    def _register_builtin_recommendation_job(self) -> None:
+        """注册内置的 turn-end 推荐 job。"""
+        from sensenova_claw.platform.config.config import config as _cfg
+        rec_cfg = _cfg.get("proactive.turn_end_recommendation", {})
+        if not rec_cfg.get("enabled", True):
+            return
+
+        job_id = "builtin-turn-end-recommendation"
+        if job_id in self._jobs:
+            return
+
+        job = ProactiveJob(
+            id=job_id,
+            name="会话推荐",
+            agent_id="proactive-agent",
+            enabled=True,
+            trigger=EventTrigger(
+                event_type="agent.step_completed",
+                debounce_ms=rec_cfg.get("debounce_ms", 5000),
+                exclude_payload={"source": "recommendation"},
+            ),
+            task=ProactiveTask(
+                prompt='根据以上完整对话上下文，生成3-5条用户接下来可能想做的事。每条包含title和prompt字段，输出JSON格式：{"recommendations": [{"id": "uuid", "title": "标题", "prompt": "完整提示词", "category": "research|action|follow-up"}]}',
+            ),
+            delivery=DeliveryConfig(
+                channels=["web"],
+                recommendation_type="turn_end",
+            ),
+            safety=SafetyConfig(
+                max_tool_calls=rec_cfg.get("max_tool_calls", 5),
+                max_llm_calls=rec_cfg.get("max_llm_calls", 3),
+                max_duration_ms=rec_cfg.get("max_duration_ms", 30000),
+            ),
+            state=JobState(),
+            source="builtin",
+        )
+        self._jobs[job_id] = job
+        logger.info("已注册内置推荐 job: %s", job_id)
 
     def _load_jobs_from_config(self) -> list[ProactiveJob]:
         """从 config.yml 的 proactive.jobs 列表解析 job 定义。"""
@@ -257,6 +297,7 @@ class ProactiveRuntime:
                 event_type=trigger_cfg.get("event_type", ""),
                 filter=trigger_cfg.get("filter"),
                 debounce_ms=trigger_cfg.get("debounce_ms", 5000),
+                exclude_payload=trigger_cfg.get("exclude_payload"),  # 新增
             )
         else:
             raise ValueError(f"未知 trigger kind: {trigger_kind}")
@@ -275,6 +316,7 @@ class ProactiveRuntime:
             channels=delivery_cfg.get("channels", []),
             feishu_target=delivery_cfg.get("feishu_target"),
             summary_prompt=delivery_cfg.get("summary_prompt"),
+            recommendation_type=delivery_cfg.get("recommendation_type"),  # 新增
         )
 
         # 解析 safety
