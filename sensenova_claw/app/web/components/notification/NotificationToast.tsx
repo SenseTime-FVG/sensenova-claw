@@ -219,6 +219,7 @@ function QuestionToastBody({
           {qd.options && qd.options.length > 0 ? '自定义输入（优先级高于选项）' : '请输入回复'}
         </div>
         <textarea
+          data-testid="action-toast-input"
           value={customInput}
           onChange={e => setCustomInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -238,6 +239,7 @@ function QuestionToastBody({
           取消
         </button>
         <button
+          data-testid="action-toast-submit"
           type="button"
           onClick={submit}
           disabled={!getAnswer()}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Bell,
@@ -12,8 +12,8 @@ import {
   Check,
   X,
   Trash2,
-  Send,
 } from 'lucide-react';
+import { AskUserResponseForm } from '@/components/chat/AskUserResponseForm';
 import { useNotification } from '@/hooks/useNotification';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { getAgentId } from '@/lib/chatTypes';
@@ -90,121 +90,6 @@ function describeResolvedAction(action: string | undefined, kind: NotificationCa
   return `已处理: ${action}`;
 }
 
-// ── ask_user 卡片内嵌输入 ──
-
-function QuestionCardInput({
-  card,
-  onSubmit,
-}: {
-  card: NotificationCard;
-  onSubmit: (cardId: string, answer: string) => void;
-}) {
-  const qd = card.questionData!;
-  const [customInput, setCustomInput] = useState('');
-  const [singleChoice, setSingleChoice] = useState('');
-  const [multiChoices, setMultiChoices] = useState<string[]>([]);
-
-  const toggleMulti = (opt: string) => {
-    setMultiChoices(prev =>
-      prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt],
-    );
-  };
-
-  const getAnswer = (): string | null => {
-    const custom = customInput.trim();
-    if (custom) return custom;
-    if (qd.options && qd.options.length > 0) {
-      if (qd.multiSelect) return multiChoices.length > 0 ? multiChoices.join(', ') : null;
-      return singleChoice || null;
-    }
-    return null;
-  };
-
-  const submit = () => {
-    const answer = getAnswer();
-    if (answer) onSubmit(card.id, answer);
-  };
-
-  const cancel = () => {
-    onSubmit(card.id, '__cancelled__');
-  };
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      submit();
-    }
-  };
-
-  return (
-    <div className="mt-2 space-y-2">
-      {/* 选项 */}
-      {qd.options && qd.options.length > 0 && (
-        <div className="space-y-1">
-          {qd.options.map((opt, idx) => (
-            <label
-              key={`${opt}_${idx}`}
-              className="flex items-center gap-1.5 text-[11px] text-neutral-600 cursor-pointer hover:text-neutral-800"
-            >
-              {qd.multiSelect ? (
-                <input
-                  type="checkbox"
-                  checked={multiChoices.includes(opt)}
-                  onChange={() => toggleMulti(opt)}
-                  className="accent-sky-500 h-3 w-3"
-                />
-              ) : (
-                <input
-                  type="radio"
-                  name={`card-q-${card.id}`}
-                  checked={singleChoice === opt}
-                  onChange={() => setSingleChoice(opt)}
-                  className="accent-sky-500 h-3 w-3"
-                />
-              )}
-              <span>{opt}</span>
-            </label>
-          ))}
-        </div>
-      )}
-
-      {/* 自定义输入 */}
-      <textarea
-        value={customInput}
-        onChange={e => setCustomInput(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="输入回复..."
-        rows={2}
-        className="w-full rounded-md border border-neutral-200 bg-white px-2 py-1 text-[11px] text-neutral-700 placeholder-neutral-400 focus:outline-none focus:border-sky-400 resize-none"
-      />
-
-      {/* 操作按钮 */}
-      <div className="flex gap-1.5">
-        <button
-          type="button"
-          onClick={cancel}
-          className="rounded-md border border-neutral-200 bg-white px-2 py-0.5 text-[10px] font-medium text-neutral-500 hover:bg-neutral-50"
-        >
-          取消
-        </button>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!getAnswer()}
-          className={`flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold transition-colors ${
-            getAnswer()
-              ? 'border-sky-200 bg-sky-500 text-white hover:bg-sky-600'
-              : 'border-neutral-200 bg-neutral-100 text-neutral-400 cursor-not-allowed'
-          }`}
-        >
-          <Send className="h-2.5 w-2.5" />
-          确认
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function NotificationCardItem({
   card,
   onResolve,
@@ -258,7 +143,17 @@ function NotificationCardItem({
 
           {/* ask_user 富交互输入 */}
           {!card.resolved && !card.pending && card.kind === 'user_question' && card.questionData && (
-            <QuestionCardInput card={card} onSubmit={onResolve} />
+            <AskUserResponseForm
+              className="mt-2"
+              value={{
+                question: card.questionData.question,
+                options: card.questionData.options,
+                multiSelect: card.questionData.multiSelect,
+              }}
+              testIdPrefix={`notification-ask-user-${card.interactionId || card.id}`}
+              onSubmit={(answer) => onResolve(card.id, answer, answer)}
+              onCancel={() => onResolve(card.id, '__cancelled__')}
+            />
           )}
 
           {/* 其他类型的操作按钮 */}
@@ -282,7 +177,7 @@ function NotificationCardItem({
               ))}
             </div>
           )}
-          {!card.resolved && !card.pending && card.allowsInput && (
+          {!card.resolved && !card.pending && card.kind !== 'user_question' && card.allowsInput && (
             <div className="mt-2 space-y-2">
               <textarea
                 value={inputValue}
@@ -362,7 +257,12 @@ export function NotificationDropdown() {
     clearAllCards,
     setOnActionToastAction,
   } = useNotification();
-  const { sessions, switchSession, wsSend, resolveInteractionFromNotification } = useChatSession();
+  const {
+    sessions,
+    switchSession,
+    wsSend,
+    submitQuestionResponse,
+  } = useChatSession();
 
   // 点击外部关闭
   useEffect(() => {
@@ -410,26 +310,19 @@ export function NotificationDropdown() {
       // 判断是取消还是正常回答
       const isCancelled = action === '__cancelled__';
       // 发送问题回答
-      wsSend({
-        type: 'user_question_answered',
-        session_id: card.sessionId,
-        payload: {
-          question_id: card.interactionId,
-          answer: isCancelled ? null : (inputValue ?? action ?? ''),
-          cancelled: isCancelled,
-        },
-        timestamp: Date.now() / 1000,
+      submitQuestionResponse({
+        questionId: card.interactionId,
+        sourceSessionId: card.sessionId,
+        answer: isCancelled ? null : (inputValue ?? action ?? ''),
+        cancelled: isCancelled,
       });
-      markCardPending(cardId, inputValue ?? action ?? 'answered');
-      // 同步解除 ChatSessionContext 中的 interaction 阻塞
-      resolveInteractionFromNotification?.('question', card.interactionId);
     } else if (action === 'view_session' && card.sessionId) {
       // 导航到对应会话
       handleNavigate(card.sessionId);
       resolveCard(cardId, action);
       return;
     }
-  }, [cards, wsSend, markCardPending, resolveCard, handleNavigate, resolveInteractionFromNotification]);
+  }, [cards, wsSend, markCardPending, resolveCard, handleNavigate, submitQuestionResponse]);
 
   // 用 ref 持有最新 handleResolve，避免 useEffect 因 handleResolve 变化反复调用
   // setOnActionToastAction 导致无限循环

@@ -1,16 +1,30 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send, Square, ChevronRight, Brain } from 'lucide-react';
+import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send, Square, ChevronRight, ChevronDown, Brain } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { AskUserResponseForm } from '@/components/chat/AskUserResponseForm';
 import { type PendingInteraction } from '@/components/chat/QuestionDialog';
 import { MarkdownContent } from '@/components/chat/MarkdownContent';
+import { extractThinkContentFromReasoningDetails, resolveAssistantDisplayContent } from '@/lib/assistantThink';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
+
+interface AskUserToolState {
+  questionId: string;
+  sourceSessionId: string;
+  sourceAgentId: string;
+  sourceAgentName: string;
+  question: string;
+  options: string[] | null;
+  multiSelect: boolean;
+  pending: boolean;
+  resolved: boolean;
+}
 
 interface ToolInfo {
   name: string;
@@ -19,12 +33,15 @@ interface ToolInfo {
   success?: boolean;
   error?: string;
   status: 'running' | 'completed';
+  askUser?: AskUserToolState;
 }
 
 interface Message {
   id?: string;
   role: string;
   content?: string;
+  thinkingContent?: string;
+  thinkingState?: 'streaming' | 'collapsed';
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
@@ -91,7 +108,99 @@ function InlineToolContent({ value }: { value: unknown }) {
   return <MarkdownRenderer className="chat-markdown chat-markdown--detail text-xs" content={stringifyContent(value)} />;
 }
 
-function SingleToolItem({ msg }: { msg: Message }) {
+function attachAskUserToLatestToolMessage(messages: Message[], askUser: AskUserToolState): Message[] {
+  if (!askUser.questionId) return messages;
+  const next = [...messages];
+
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    const message = next[index];
+    if (message.role !== 'tool' || message.toolInfo?.name !== 'ask_user') continue;
+    if (message.toolInfo.askUser?.questionId === askUser.questionId) return messages;
+    if (!message.toolInfo.askUser) {
+      next[index] = {
+        ...message,
+        toolInfo: {
+          ...message.toolInfo,
+          askUser,
+        },
+      };
+      return next;
+    }
+  }
+
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    const message = next[index];
+    if (message.role !== 'tool' || message.toolInfo?.name !== 'ask_user') continue;
+    next[index] = {
+      ...message,
+      toolInfo: {
+        ...message.toolInfo,
+        askUser,
+      },
+    };
+    return next;
+  }
+
+  return messages;
+}
+
+function updateAskUserToolState(messages: Message[], questionId: string, patch: Partial<AskUserToolState>): Message[] {
+  if (!questionId) return messages;
+  return messages.map((message) => {
+    if (message.role !== 'tool' || !message.toolInfo?.askUser || message.toolInfo.askUser.questionId !== questionId) {
+      return message;
+    }
+    return {
+      ...message,
+      toolInfo: {
+        ...message.toolInfo,
+        askUser: {
+          ...message.toolInfo.askUser,
+          ...patch,
+        },
+      },
+    };
+  });
+}
+
+function getMessageIdentity(message: Message): string {
+  if (message.id) return `id:${message.id}`;
+  if (message.tool_call_id) return `tool-call:${message.tool_call_id}`;
+  if (message.toolInfo) {
+    return `tool:${message.toolInfo.name}:${JSON.stringify(message.toolInfo.arguments || {})}:${message.content || ''}`;
+  }
+  return `${message.role}:${message.name || ''}:${message.content || ''}`;
+}
+
+function mergeSessionMessages(historyMessages: Message[], liveMessages: Message[]): Message[] {
+  if (historyMessages.length === 0) return liveMessages;
+  if (liveMessages.length === 0) return historyMessages;
+
+  const merged = [...historyMessages];
+  const seen = new Set(historyMessages.map(getMessageIdentity));
+
+  for (const message of liveMessages) {
+    const identity = getMessageIdentity(message);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    merged.push(message);
+  }
+
+  return merged;
+}
+
+function SingleToolItem({
+  msg,
+  onSubmitAskUser,
+}: {
+  msg: Message;
+  onSubmitAskUser: (params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const ti = msg.toolInfo;
 
@@ -105,6 +214,7 @@ function SingleToolItem({ msg }: { msg: Message }) {
   const statusCls = ti
     ? (ti.status === 'running' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : ti.success !== false ? 'bg-green-500/10 text-green-600 dark:text-green-400' : 'bg-red-500/10 text-red-600 dark:text-red-400')
     : 'bg-green-500/10 text-green-600 dark:text-green-400';
+  const inlineAskUser = ti?.askUser;
 
   return (
     <div className="py-0.5">
@@ -117,6 +227,35 @@ function SingleToolItem({ msg }: { msg: Message }) {
         <span className="font-mono text-foreground/80">{toolName}</span>
         <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium leading-none ${statusCls}`}>{statusLabel}</span>
       </button>
+      {inlineAskUser && (
+        <div
+          data-testid={`inline-ask-user-${inlineAskUser.questionId}`}
+          className="ml-5 mt-2 rounded-xl border border-sky-200/60 bg-sky-50/50 px-3 py-3"
+        >
+          <AskUserResponseForm
+            value={{
+              question: inlineAskUser.question,
+              options: inlineAskUser.options,
+              multiSelect: inlineAskUser.multiSelect,
+            }}
+            pending={inlineAskUser.pending}
+            resolved={inlineAskUser.resolved}
+            testIdPrefix="ask-user-shared"
+            onSubmit={(answer) => onSubmitAskUser({
+              questionId: inlineAskUser.questionId,
+              sourceSessionId: inlineAskUser.sourceSessionId,
+              answer,
+              cancelled: false,
+            })}
+            onCancel={() => onSubmitAskUser({
+              questionId: inlineAskUser.questionId,
+              sourceSessionId: inlineAskUser.sourceSessionId,
+              answer: null,
+              cancelled: true,
+            })}
+          />
+        </div>
+      )}
       {expanded && (
         <div className="ml-5 mt-1 border-l-2 border-border/30 pl-3 space-y-2 pb-1">
           {ti ? (
@@ -147,12 +286,30 @@ function SingleToolItem({ msg }: { msg: Message }) {
   );
 }
 
-function InlineToolCallGroup({ tools }: { tools: Message[] }) {
-  const [expanded, setExpanded] = useState(false);
+function InlineToolCallGroup({
+  tools,
+  onSubmitAskUser,
+}: {
+  tools: Message[];
+  onSubmitAskUser: (params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => void;
+}) {
+  const hasInlineAskUser = tools.some((tool) => Boolean(tool.toolInfo?.askUser));
+  const [expanded, setExpanded] = useState(hasInlineAskUser);
   const completed = tools.filter(t => t.toolInfo?.status === 'completed').length;
   const running = tools.filter(t => t.toolInfo?.status === 'running').length;
   const total = tools.length;
   const allDone = running === 0 && total > 0;
+
+  useEffect(() => {
+    if (hasInlineAskUser) {
+      setExpanded(true);
+    }
+  }, [hasInlineAskUser]);
 
   return (
     <div className="my-2 ml-14">
@@ -179,7 +336,13 @@ function InlineToolCallGroup({ tools }: { tools: Message[] }) {
       </button>
       {expanded && (
         <div className="ml-3 mt-1 border-l-2 border-border/30 pl-2">
-          {tools.map((tool, idx) => <SingleToolItem key={tool.id || idx} msg={tool} />)}
+          {tools.map((tool, idx) => (
+            <SingleToolItem
+              key={tool.id || idx}
+              msg={tool}
+              onSubmitAskUser={onSubmitAskUser}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -238,31 +401,84 @@ function MessageBubble({ msg }: { msg: Message }) {
   }
 
   if (msg.role === 'assistant') {
-    if (!msg.content) return null;
-    return (
-      <div className="flex gap-4 max-w-5xl mx-auto my-6 overflow-hidden">
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shrink-0 border border-primary/20 shadow-md">
-          <Bot size={22} className="text-primary-foreground" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm text-foreground leading-relaxed">
-            <MarkdownContent content={msg.content} />
-          </div>
-        </div>
-      </div>
-    );
+    return <AssistantMessageBubble msg={msg} />;
   }
 
   return null;
 }
 
-function SessionMessageList({ messages }: { messages: Message[] }) {
+function AssistantMessageBubble({ msg }: { msg: Message }) {
+  const parsedAssistantContent = useMemo(
+    () => resolveAssistantDisplayContent(msg.content || '', msg.thinkingContent),
+    [msg.content, msg.thinkingContent],
+  );
+  const [showThink, setShowThink] = useState(msg.thinkingState === 'streaming');
+
+  useEffect(() => {
+    setShowThink(msg.thinkingState === 'streaming');
+  }, [msg.id, msg.thinkingState]);
+
+  if (!parsedAssistantContent.answerContent && !parsedAssistantContent.thinkContent) {
+    return null;
+  }
+
+  return (
+    <div className="flex gap-4 max-w-5xl mx-auto my-6 overflow-hidden">
+      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shrink-0 border border-primary/20 shadow-md">
+        <Bot size={22} className="text-primary-foreground" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="space-y-3">
+          {parsedAssistantContent.thinkContent ? (
+            <div className="rounded-2xl border border-amber-500/25 bg-amber-500/8 overflow-hidden">
+              <button
+                type="button"
+                data-testid="assistant-think-toggle"
+                onClick={() => setShowThink((prev) => !prev)}
+                className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-amber-900/80 dark:text-amber-200/90"
+              >
+                <Brain size={14} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>思考过程</span>
+                <ChevronDown size={14} className={`shrink-0 transition-transform duration-200 ${showThink ? 'rotate-180' : ''}`} />
+              </button>
+              <div
+                data-testid="assistant-think-content"
+                hidden={!showThink}
+                className="border-t border-amber-500/15 px-4 py-3 text-sm"
+              >
+                <MarkdownContent content={parsedAssistantContent.thinkContent} />
+              </div>
+            </div>
+          ) : null}
+          {parsedAssistantContent.answerContent ? (
+            <div className="text-sm text-foreground leading-relaxed">
+              <MarkdownContent content={parsedAssistantContent.answerContent} />
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SessionMessageList({
+  messages,
+  onSubmitAskUser,
+}: {
+  messages: Message[];
+  onSubmitAskUser: (params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => void;
+}) {
   const groups = groupSessionMessages(messages);
   return (
     <>
       {groups.map(group => {
         if (group.type === 'tool_group') {
-          return <InlineToolCallGroup key={group.key} tools={group.messages} />;
+          return <InlineToolCallGroup key={group.key} tools={group.messages} onSubmitAskUser={onSubmitAskUser} />;
         }
         return <MessageBubble key={group.key} msg={group.msg} />;
       })}
@@ -360,6 +576,34 @@ export default function SessionDetailPage() {
     setInteractionSubmitting(false);
   }, []);
 
+  const submitQuestionResponse = useCallback((params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => {
+    const { questionId, sourceSessionId, answer, cancelled } = params;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!sourceSessionId) return;
+
+    setInteractionSubmitting(true);
+    setMessages((prev) => updateAskUserToolState(prev, questionId, {
+      pending: true,
+      resolved: false,
+    }));
+    wsRef.current.send(JSON.stringify({
+      type: 'user_question_answered',
+      session_id: sourceSessionId,
+      payload: {
+        question_id: questionId,
+        answer,
+        cancelled,
+      },
+      timestamp: Date.now() / 1000,
+    }));
+    resolveInteraction('question', questionId);
+  }, [resolveInteraction]);
+
   const resetTurnTracking = useCallback(() => {
     cancelledTurnIdsRef.current.clear();
     lastStreamingTurnIdRef.current = null;
@@ -398,7 +642,8 @@ export default function SessionDetailPage() {
             }
             const contentDelta = String(payload.content_delta || '');
             const contentSnapshot = String(payload.content_snapshot || '');
-            if (contentDelta || contentSnapshot) {
+            const reasoningDelta = String(payload.reasoning_delta || '');
+            if (contentDelta || contentSnapshot || reasoningDelta) {
               if (turnId) {
                 lastStreamingTurnIdRef.current = turnId;
               }
@@ -410,12 +655,19 @@ export default function SessionDetailPage() {
                     next[i] = {
                       ...next[i],
                       content: contentSnapshot || ((next[i].content || '') + contentDelta),
+                      thinkingContent: reasoningDelta ? `${next[i].thinkingContent || ''}${reasoningDelta}` : next[i].thinkingContent,
+                      thinkingState: reasoningDelta ? 'streaming' : next[i].thinkingState,
                     };
                     return next;
                   }
                   if (prev[i].role === 'tool') break;
                 }
-                return [...prev, { role: 'assistant', content: contentSnapshot || contentDelta }];
+                return [...prev, {
+                  role: 'assistant',
+                  content: contentSnapshot || contentDelta,
+                  thinkingContent: reasoningDelta || undefined,
+                  thinkingState: reasoningDelta ? 'streaming' : undefined,
+                }];
               });
             }
             break;
@@ -426,7 +678,8 @@ export default function SessionDetailPage() {
               break;
             }
             const content = String(payload.content || '');
-            if (content) {
+            const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
+            if (content || thinkingContent) {
               if (turnId) {
                 lastStreamingTurnIdRef.current = turnId;
               }
@@ -434,12 +687,22 @@ export default function SessionDetailPage() {
                 for (let i = prev.length - 1; i >= 0; i--) {
                   if (prev[i].role === 'assistant') {
                     const next = [...prev];
-                    next[i] = { ...next[i], content };
+                    next[i] = {
+                      ...next[i],
+                      content,
+                      thinkingContent: thinkingContent || next[i].thinkingContent,
+                      thinkingState: thinkingContent ? 'streaming' : next[i].thinkingState,
+                    };
                     return next;
                   }
                   if (prev[i].role === 'tool') break;
                 }
-                return [...prev, { role: 'assistant', content }];
+                return [...prev, {
+                  role: 'assistant',
+                  content,
+                  thinkingContent: thinkingContent || undefined,
+                  thinkingState: thinkingContent ? 'streaming' : undefined,
+                }];
               });
             }
             break;
@@ -497,7 +760,13 @@ export default function SessionDetailPage() {
             }
             const finalResponse = String(payload.final_response || '');
             if (finalResponse) {
-              setMessages((prev) => [...prev, { role: 'assistant', content: finalResponse }]);
+              const parsed = resolveAssistantDisplayContent(finalResponse);
+              setMessages((prev) => [...prev, {
+                role: 'assistant',
+                content: parsed.answerContent,
+                thinkingContent: parsed.thinkContent || undefined,
+                thinkingState: parsed.thinkContent ? 'collapsed' : undefined,
+              }]);
             }
             clearInteractions();
             setIsTyping(false);
@@ -556,6 +825,17 @@ export default function SessionDetailPage() {
             if (!sourceSessionId) break;
             const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
             const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
+            setMessages((prev) => attachAskUserToLatestToolMessage(prev, {
+              questionId,
+              sourceSessionId,
+              sourceAgentId,
+              sourceAgentName,
+              question: String(payload.question || ''),
+              options: Array.isArray(payload.options) ? payload.options.map(String) : null,
+              multiSelect: Boolean(payload.multi_select),
+              pending: false,
+              resolved: false,
+            }));
             enqueueInteraction({
               kind: 'question',
               interactionId: questionId,
@@ -575,6 +855,10 @@ export default function SessionDetailPage() {
           case 'user_question_answered_event': {
             const questionId = String(payload.question_id || '');
             if (!questionId) break;
+            setMessages((prev) => updateAskUserToolState(prev, questionId, {
+              pending: false,
+              resolved: true,
+            }));
             resolveInteraction('question', questionId);
             break;
           }
@@ -605,7 +889,7 @@ export default function SessionDetailPage() {
           (s: SessionInfo) => s.session_id === sessionId
         );
         setSessionInfo(found || null);
-        setMessages(msgData.messages || []);
+        setMessages((prev) => mergeSessionMessages(msgData.messages || [], prev));
       } catch {
         setError('Failed to load session data');
       } finally {
@@ -627,20 +911,13 @@ export default function SessionDetailPage() {
     if (activeInteraction?.kind === 'confirmation') return;
 
     if (activeInteraction?.kind === 'question') {
-      if (!activeInteraction.sourceSessionId) return;
-      setInteractionSubmitting(true);
-      wsRef.current.send(JSON.stringify({
-        type: 'user_question_answered',
-        session_id: activeInteraction.sourceSessionId,
-        payload: {
-          question_id: activeInteraction.interactionId,
-          answer: content,
-          cancelled: false,
-        },
-        timestamp: Date.now() / 1000,
-      }));
+      submitQuestionResponse({
+        questionId: activeInteraction.interactionId,
+        sourceSessionId: activeInteraction.sourceSessionId,
+        answer: content,
+        cancelled: false,
+      });
       setInputValue('');
-      resolveInteraction('question', activeInteraction.interactionId);
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
@@ -661,7 +938,7 @@ export default function SessionDetailPage() {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [activeInteraction, inputValue, interactionSubmitting, resetTurnTracking, sessionId]);
+  }, [activeInteraction, inputValue, interactionSubmitting, resetTurnTracking, sessionId, submitQuestionResponse]);
 
   const cancelTurn = useCallback(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -678,22 +955,13 @@ export default function SessionDetailPage() {
 
   const sendQuestionAnswer = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     if (!activeInteraction || activeInteraction.kind !== 'question') return;
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    if (!activeInteraction.sourceSessionId) return;
-
-    setInteractionSubmitting(true);
-    wsRef.current.send(JSON.stringify({
-      type: 'user_question_answered',
-      session_id: activeInteraction.sourceSessionId,
-      payload: {
-        question_id: activeInteraction.interactionId,
-        answer,
-        cancelled,
-      },
-      timestamp: Date.now() / 1000,
-    }));
-    resolveInteraction('question', activeInteraction.interactionId);
-  }, [activeInteraction, resolveInteraction]);
+    submitQuestionResponse({
+      questionId: activeInteraction.interactionId,
+      sourceSessionId: activeInteraction.sourceSessionId,
+      answer,
+      cancelled,
+    });
+  }, [activeInteraction, submitQuestionResponse]);
 
   const sendConfirmationResponse = useCallback((approved: boolean) => {
     if (!activeInteraction || activeInteraction.kind !== 'confirmation') return;
@@ -806,7 +1074,7 @@ export default function SessionDetailPage() {
                   </span>
                 </div>
               )}
-              <SessionMessageList messages={visibleMessages} />
+              <SessionMessageList messages={visibleMessages} onSubmitAskUser={submitQuestionResponse} />
               {isTyping && <TypingIndicator />}
               <div ref={chatEndRef} />
             </div>

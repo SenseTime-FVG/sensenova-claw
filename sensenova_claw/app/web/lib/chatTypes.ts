@@ -7,6 +7,19 @@ export interface ToolInfo {
   success?: boolean;
   error?: string;
   status: 'running' | 'completed';
+  askUser?: AskUserToolState;
+}
+
+export interface AskUserToolState {
+  questionId: string;
+  sourceSessionId: string;
+  sourceAgentId: string;
+  sourceAgentName: string;
+  question: string;
+  options: string[] | null;
+  multiSelect: boolean;
+  pending: boolean;
+  resolved: boolean;
 }
 
 export interface ChatMessage {
@@ -331,6 +344,29 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
       continue;
     }
 
+    if (eventType === 'user_question_asked') {
+      rebuilt = attachAskUserToLatestToolMessage(rebuilt, {
+        questionId: String(payload.question_id || ''),
+        sourceSessionId: String(payload.session_id || event.session_id || ''),
+        sourceAgentId: String(payload.source_agent_id || 'default').trim() || 'default',
+        sourceAgentName: String(payload.source_agent_name || payload.source_agent_id || 'default').trim() || 'default',
+        question: String(payload.question || ''),
+        options: Array.isArray(payload.options) ? payload.options.map(String) : null,
+        multiSelect: Boolean(payload.multi_select),
+        pending: false,
+        resolved: false,
+      });
+      continue;
+    }
+
+    if (eventType === 'user_question_answered_event') {
+      rebuilt = updateAskUserToolState(rebuilt, String(payload.question_id || ''), {
+        pending: false,
+        resolved: true,
+      });
+      continue;
+    }
+
     if (eventType === 'agent.step_completed') {
       const response = String(payload.final_response || '') || String(((payload.result as Record<string, unknown> | undefined)?.content) || '');
       if (response) {
@@ -374,6 +410,67 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
   }
 
   return rebuilt;
+}
+
+export function attachAskUserToLatestToolMessage(
+  messages: ChatMessage[],
+  askUser: AskUserToolState,
+): ChatMessage[] {
+  if (!askUser.questionId) return messages;
+  const next = [...messages];
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    const message = next[index];
+    if (message.role !== 'tool' || message.toolInfo?.name !== 'ask_user') continue;
+    if (message.toolInfo.askUser?.questionId === askUser.questionId) return messages;
+    if (!message.toolInfo.askUser) {
+      next[index] = {
+        ...message,
+        toolInfo: {
+          ...message.toolInfo,
+          askUser,
+        },
+      };
+      return next;
+    }
+  }
+
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    const message = next[index];
+    if (message.role !== 'tool' || message.toolInfo?.name !== 'ask_user') continue;
+    next[index] = {
+      ...message,
+      toolInfo: {
+        ...message.toolInfo,
+        askUser,
+      },
+    };
+    return next;
+  }
+
+  return messages;
+}
+
+export function updateAskUserToolState(
+  messages: ChatMessage[],
+  questionId: string,
+  patch: Partial<AskUserToolState>,
+): ChatMessage[] {
+  if (!questionId) return messages;
+  return messages.map((message) => {
+    if (message.role !== 'tool' || !message.toolInfo?.askUser || message.toolInfo.askUser.questionId !== questionId) {
+      return message;
+    }
+    return {
+      ...message,
+      toolInfo: {
+        ...message.toolInfo,
+        askUser: {
+          ...message.toolInfo.askUser,
+          ...patch,
+        },
+      },
+    };
+  });
 }
 
 export type MessageGroupItem =
