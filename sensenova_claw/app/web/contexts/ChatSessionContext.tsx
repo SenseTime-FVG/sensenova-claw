@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useNotification } from '@/hooks/useNotification';
@@ -152,6 +152,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
   const pendingCreateMeta = useRef<Record<string, string> | null>(null);
+  // 关联 create_session 请求与 session_created 响应，防止快速切换时乱序覆盖
+  const pendingCreateIdRef = useRef<string | null>(null);
   // 追踪新建但未发消息的空会话，切换离开时自动删除
   const emptySessionIdRef = useRef<string | null>(null);
   const skipNextResetRef = useRef(false);
@@ -231,6 +233,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const reloadSessionHistory = useCallback(async (sid: string, shouldBind = true) => {
     if (!shouldActivate) return;
     setSessionId(sid);
+    sessionIdRef.current = sid;
     setMessages([]);
     setIsTyping(false);
     resetTurnTracking();
@@ -243,6 +246,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     try {
       const res = await authFetch(`${API_BASE}/api/sessions/${sid}/events`);
       const d = await res.json();
+      // 竞态保护：异步请求返回时，用户可能已切换到其他 session，丢弃过时结果
+      if (sessionIdRef.current !== sid) return;
       const events = (d.events || []) as Record<string, unknown>[];
       setMessages(rebuildMessagesFromEvents(events));
 
@@ -251,6 +256,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       setRightTaskProgress(taskProgress);
       toolStepMapRef.current = toolStepMap;
     } catch {
+      if (sessionIdRef.current !== sid) return;
       setRightSteps([]);
       setRightTaskProgress([]);
       toolStepMapRef.current.clear();
@@ -279,7 +285,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     interactionQueueRef.current = [...queue, interaction];
   };
 
-  const resolveInteraction = (kind: PendingInteraction['kind'], interactionId: string) => {
+  // useCallback 包裹：通过 ref 操作队列，state setter 稳定，无外部依赖
+  const resolveInteraction = useCallback((kind: PendingInteraction['kind'], interactionId: string) => {
     const active = activeInteractionRef.current;
     const queue = interactionQueueRef.current;
     if (active && active.kind === kind && active.interactionId === interactionId) {
@@ -299,7 +306,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     if (filtered.length !== queue.length) {
       interactionQueueRef.current = filtered;
     }
-  };
+  }, []);
 
   const clearInteractions = () => {
     interactionQueueRef.current = [];
@@ -345,7 +352,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     switch (eventType) {
       case 'session_created': {
         const newSid = data.session_id as string;
+        const requestId = typeof payload.request_id === 'string' ? payload.request_id : null;
+        // 归属校验：如果存在 pendingCreateId 且响应中携带 request_id，
+        // 只接受与最近一次创建请求匹配的 session_created
+        if (pendingCreateIdRef.current && requestId && requestId !== pendingCreateIdRef.current) {
+          // 不匹配的 session_created（来自旧请求），忽略并清理远端空 session
+          authFetch(`${API_BASE}/api/sessions/${newSid}`, { method: 'DELETE' }).catch(() => {});
+          break;
+        }
+        pendingCreateIdRef.current = null;
         setSessionId(newSid);
+        sessionIdRef.current = newSid;
         loadSessionList();
         if (pendingInputRef.current) {
           const { content, contextFiles } = pendingInputRef.current;
@@ -365,7 +382,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       case 'session_loaded': {
         const sid = typeof data.session_id === 'string' ? data.session_id : null;
         const events = Array.isArray(payload.events) ? payload.events as Record<string, unknown>[] : [];
-        if (sid) {
+        // 竞态保护：忽略非当前 session 的 session_loaded 响应（快速切换时可能乱序到达）
+        if (sid && sid === sessionIdRef.current) {
           resetTurnTracking();
           setSessionId(sid);
           setMessages(rebuildMessagesFromEvents(events));
@@ -857,9 +875,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     const meta: Record<string, string> = { title: '新对话' };
     if (taskId) meta.task_id = taskId;
     pendingCreateMeta.current = meta;
+    const requestId = makeId();
+    pendingCreateIdRef.current = requestId;
     wsSend({
       type: 'create_session',
-      payload: { agent_id: agentId || 'default', meta },
+      payload: { agent_id: agentId || 'default', meta, request_id: requestId },
       timestamp: Date.now() / 1000,
     });
   }, [wsSend]);
@@ -903,6 +923,27 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
     if (!content.trim() || !wsConnected) return;
 
+    const interaction = activeInteractionRef.current;
+    if (interaction?.kind === 'question') {
+      if (!interaction.sourceSessionId) {
+        addMsg('system', 'Question source session not found, cannot submit answer.');
+        return;
+      }
+      setInteractionSubmitting(true);
+      wsSend({
+        type: 'user_question_answered',
+        session_id: interaction.sourceSessionId,
+        payload: { question_id: interaction.interactionId, answer: content.trim(), cancelled: false },
+        timestamp: Date.now() / 1000,
+      });
+      resolveCard(`question_${interaction.interactionId}`, 'answered');
+      resolveInteraction('question', interaction.interactionId);
+      return;
+    }
+
+    // 防止在 session 创建中重复发送：如果已有 pending input 且正在等待 session_created，忽略
+    if (pendingInputRef.current && !sessionIdRef.current) return;
+
     const targetAgentId = agentId || 'default';
     const currentSessionAgentId = getCurrentSessionAgentId();
     if (sessionIdRef.current && currentSessionAgentId && currentSessionAgentId !== targetAgentId) {
@@ -918,9 +959,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     if (!sessionIdRef.current) {
       pendingInputRef.current = { content, contextFiles: filePaths };
       const meta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
+      const requestId = makeId();
+      pendingCreateIdRef.current = requestId;
       wsSend({
         type: 'create_session',
-        payload: { agent_id: targetAgentId, meta },
+        payload: { agent_id: targetAgentId, meta, request_id: requestId },
         timestamp: Date.now() / 1000,
       });
     } else {
@@ -932,7 +975,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       });
     }
     setIsTyping(true);
-  }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsConnected, wsSend]);
+  }, [getCurrentSessionAgentId, resetTurnTracking, resolveCard, startNewChat, wsConnected, wsSend]);
 
   const sendQuestionAnswerFn = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     const interaction = activeInteractionRef.current;
@@ -1006,9 +1049,15 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   }, [wsSend]);
 
   // 计算任务分组
-  const taskGroups = groupSessionsToTasks(sessions);
+  const taskGroups = useMemo(() => groupSessionsToTasks(sessions), [sessions]);
 
-  const value: ChatSessionContextValue = {
+  const globalActivity = useMemo<GlobalAgentActivity>(() => ({
+    anyWorking: globalWorkingSessions.size > 0,
+    workingSessionIds: globalWorkingSessions,
+    lastToolName: globalLastToolName,
+  }), [globalWorkingSessions, globalLastToolName]);
+
+  const value: ChatSessionContextValue = useMemo(() => ({
     wsConnected,
     currentSessionId: sessionId,
     switchSession,
@@ -1033,15 +1082,19 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     handleInteractionTimeout: handleInteractionTimeoutFn,
     handleSkillInvoke,
     cancelTurn,
-    globalActivity: {
-      anyWorking: globalWorkingSessions.size > 0,
-      workingSessionIds: globalWorkingSessions,
-      lastToolName: globalLastToolName,
-    },
+    globalActivity,
     wsSend,
     resolveInteractionFromNotification: resolveInteraction,
     proactiveResults,
-  };
+  }), [
+    wsConnected, sessionId, switchSession, createSession, deleteSession,
+    startNewChat, resetIfNeeded, doCleanupEmptySession, messages, isTyping,
+    sendMessage, sessions, taskGroups, loadSessionList, loadingSessions,
+    rightSteps, rightTaskProgress, activeInteraction, interactionSubmitting,
+    sendQuestionAnswerFn, sendConfirmationResponseFn, handleInteractionTimeoutFn,
+    handleSkillInvoke, cancelTurn, globalActivity, wsSend, resolveInteraction,
+    proactiveResults,
+  ]);
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;
 }
