@@ -41,6 +41,12 @@
 - 代码块使用正确的语言标记
 - 先给结论或结果，再补充解释（如有必要）
 
+## 知识库（Knowledge Base）
+
+会话开始时，除非问题明显是简单闲聊或通用知识，否则先调用 `obsidian_index()` 加载索引。回答问题时，若可能与已有知识相关，使用 `obsidian_search` 检索。
+
+详见 `knowledge-base` skill。
+
 ## 用户画像维护
 
 当你在对话中了解到用户的新信息时（如称呼、职业、偏好、工作环境等），应主动使用 `write_file` 工具更新 `~/.sensenova-claw/agents/USER.md`，帮助所有 Agent 更好地服务用户。
