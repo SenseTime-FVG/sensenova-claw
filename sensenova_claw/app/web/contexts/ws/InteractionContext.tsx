@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { useNotification } from '@/hooks/useNotification';
 import { useWebSocket } from './WebSocketContext';
 import { useEventDispatcher } from './EventDispatcherContext';
+import { useSession } from './SessionContext';
 import type { PendingInteraction } from '@/components/chat/QuestionDialog';
 import type { WsInboundEvent } from '@/lib/wsEvents';
 
@@ -27,6 +28,9 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
   const { wsSend } = useWebSocket();
   const { subscribeCurrentSession } = useEventDispatcher();
   const { pushCard, resolveCard } = useNotification();
+  const { currentSessionId } = useSession();
+  const currentSessionIdRef = useRef<string | null>(null);
+  currentSessionIdRef.current = currentSessionId;
 
   const [activeInteraction, setActiveInteraction] = useState<PendingInteraction | null>(null);
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
@@ -92,16 +96,20 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
           const { tool_call_id: toolCallId, tool_name: toolName } = event.payload;
           const sourceSessionId = event.session_id || '';
           if (!toolCallId || !sourceSessionId) break;
-          enqueueInteraction({
-            kind: 'confirmation',
-            interactionId: toolCallId,
-            sourceSessionId,
-            timeout: event.payload.timeout || 300,
-            createdAt: Date.now(),
-            toolName: toolName || '',
-            riskLevel: event.payload.risk_level || 'medium',
-            arguments: (event.payload.arguments || {}) as Record<string, unknown>,
-          });
+          // 重构前行为：enqueueInteraction 仅当前 session，pushCard 始终执行
+          const isThisSession = sourceSessionId === currentSessionIdRef.current;
+          if (isThisSession) {
+            enqueueInteraction({
+              kind: 'confirmation',
+              interactionId: toolCallId,
+              sourceSessionId,
+              timeout: event.payload.timeout || 300,
+              createdAt: Date.now(),
+              toolName: toolName || '',
+              riskLevel: event.payload.risk_level || 'medium',
+              arguments: (event.payload.arguments || {}) as Record<string, unknown>,
+            });
+          }
           pushCard({
             id: `confirm_${toolCallId}`,
             kind: 'tool_confirmation',
@@ -131,18 +139,22 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
           const sourceAgentId = (source_agent_id || 'default').trim() || 'default';
           const sourceAgentName = (source_agent_name || sourceAgentId).trim() || sourceAgentId;
           const rawOptions = Array.isArray(options) ? options : null;
-          enqueueInteraction({
-            kind: 'question',
-            interactionId: questionId,
-            sourceSessionId,
-            timeout: timeout || 300,
-            createdAt: Date.now(),
-            sourceAgentId,
-            sourceAgentName,
-            question: question || '',
-            options: rawOptions,
-            multiSelect: Boolean(multiSelect),
-          });
+          // 重构前行为：enqueueInteraction 仅当前 session，pushCard 始终执行
+          const isThisSession2 = sourceSessionId === currentSessionIdRef.current;
+          if (isThisSession2) {
+            enqueueInteraction({
+              kind: 'question',
+              interactionId: questionId,
+              sourceSessionId,
+              timeout: timeout || 300,
+              createdAt: Date.now(),
+              sourceAgentId,
+              sourceAgentName,
+              question: question || '',
+              options: rawOptions,
+              multiSelect: Boolean(multiSelect),
+            });
+          }
           const questionCardActions = rawOptions
             ? rawOptions.map((o) => ({ label: o, value: o }))
             : undefined;

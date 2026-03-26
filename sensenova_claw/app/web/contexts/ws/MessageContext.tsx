@@ -305,6 +305,13 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           addMsg('system', event.payload.user_message || event.payload.message || event.payload.error_type || 'Unknown Error');
           setIsTyping(false);
           break;
+        // 交互事件的 typing 状态（重构前在单体 handler 中处理）
+        case 'tool_confirmation_requested':
+          setIsTyping(true);
+          break;
+        case 'user_question_asked':
+          setIsTyping(false);
+          break;
       }
     });
   }, [subscribeCurrentSession, resetTurnTracking]);

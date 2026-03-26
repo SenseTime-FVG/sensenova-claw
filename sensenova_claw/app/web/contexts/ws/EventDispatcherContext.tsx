@@ -53,6 +53,14 @@ const CURRENT_SESSION_EVENT_TYPES = new Set([
   'turn_completed', 'turn_cancelled', 'error',
 ]);
 
+/** 交互事件：始终分发到 currentSession（绕过 session 过滤），同时分发到 global
+ *  原因：重构前这些事件被标记为 isGlobalInteractionEvent，不受 session 过滤。
+ *  场景：用户确认工具执行、回答 agent 问题，可能跨 session 触发。 */
+const INTERACTION_EVENT_TYPES = new Set([
+  'tool_confirmation_requested', 'tool_confirmation_resolved',
+  'user_question_asked', 'user_question_answered_event',
+]);
+
 // ── Provider ──
 
 export function EventDispatcherProvider({ children }: { children: React.ReactNode }) {
@@ -138,10 +146,12 @@ export function EventDispatcherProvider({ children }: { children: React.ReactNod
       // 4. 当前 session 事件
       if (CURRENT_SESSION_EVENT_TYPES.has(eventType)) {
         const isCurrentSession = !eventSessionId || eventSessionId === currentSid;
-        if (isCurrentSession) {
+        const isInteraction = INTERACTION_EVENT_TYPES.has(eventType);
+        // 普通事件：严格 session 匹配；交互事件：始终分发到 currentSession
+        if (isCurrentSession || isInteraction) {
           currentSessionSubs.current.forEach((fn) => { try { fn(event); } catch (e) { console.error('[EventDispatcher] handler error:', e); } });
         }
-        // turn_completed / error 同时也分发到 global（用于跨会话通知）
+        // turn_completed / error：非当前 session 时分发到 global（跨会话通知）
         if ((eventType === 'turn_completed' || eventType === 'error') && !isCurrentSession) {
           globalSubs.current.forEach((fn) => { try { fn(event); } catch (e) { console.error('[EventDispatcher] handler error:', e); } });
         }
