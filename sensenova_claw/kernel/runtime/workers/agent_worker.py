@@ -95,7 +95,7 @@ class AgentSessionWorker(SessionWorker):
     def _get_temperature(self) -> float:
         if self.agent_config:
             return self.agent_config.temperature
-        return config.get("agent.temperature", 0.2)
+        return config.get("agent.temperature", 1.0)
 
     def _get_max_tokens(self) -> int:
         """获取 max_output_tokens：agent 级别覆盖 model 级别"""
@@ -106,8 +106,9 @@ class AgentSessionWorker(SessionWorker):
 
     def _get_extra_body(self) -> dict:
         """获取 extra_body：agent 级别覆盖 model 级别"""
+        model_extra = dict(config.get("agent.extra_body", {}))
         model_key = self._get_model_key()
-        model_extra = config.get_model_extra_body(model_key)
+        model_extra.update(config.get_model_extra_body(model_key))
         if self.agent_config and self.agent_config.extra_body:
             model_extra.update(self.agent_config.extra_body)
         return model_extra

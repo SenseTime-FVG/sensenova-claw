@@ -426,6 +426,17 @@ class WebSocketChannel(Channel):
             }
         if event.type == ERROR_RAISED:
             user_message = event.payload.get("user_message") or event.payload.get("error_message")
+            if event.payload.get("error_type") == "TurnCancelled":
+                return {
+                    "type": "turn_cancelled",
+                    "session_id": event.session_id,
+                    "payload": {
+                        "turn_id": event.turn_id,
+                        "reason": user_message,
+                        "cancelled": True,
+                    },
+                    "timestamp": event.ts,
+                }
             return {
                 "type": "error",
                 "session_id": event.session_id,

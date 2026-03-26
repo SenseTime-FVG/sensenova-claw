@@ -20,7 +20,7 @@
 import { Suspense, useState, useCallback, useRef, useEffect } from 'react';
 import { useDrop } from 'react-dnd';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { ChatPanel } from '@/components/chat/ChatPanel';
+import { ChatPanel, type ChatPanelHandle } from '@/components/chat/ChatPanel';
 import { SlideViewer } from '@/components/ppt/PPTViewer';
 import { PipelineProgress, DEFAULT_STAGES } from '@/components/ppt/PipelineProgress';
 import { StoryboardPanel } from '@/components/ppt/StoryboardPanel';
@@ -123,6 +123,7 @@ function PPTWorkspace() {
   const [previewPptx, setPreviewPptx] = useState<DroppedFile | null>(null);
   const [loadingDrop, setLoadingDrop] = useState(false);
   const dropContainerRef = useRef<HTMLDivElement>(null);
+  const chatPanelRef = useRef<ChatPanelHandle>(null);
 
   // 同步活动页到 SlideViewer
   const handlePageSelect = useCallback((pageNumber: number) => {
@@ -141,11 +142,11 @@ function PPTWorkspace() {
     setLeftTab('outline');
   }, [sendMessage]);
 
-  // 模板选择
+  // 模板选择：填充到输入框，由用户自行发送
   const handleTemplateSelect = useCallback((template: TemplateItem) => {
     const prompt = `帮我制作一份 PPT，使用「${template.name}」风格模板。${template.description}`;
-    sendMessage(prompt, [], 'ppt-agent');
-  }, [sendMessage]);
+    chatPanelRef.current?.fillInput(prompt);
+  }, []);
 
   // 拖拽接收
   const handleDrop = useCallback(async (item: DroppedFile) => {
@@ -395,21 +396,19 @@ function PPTWorkspace() {
             {/* 对话面板 */}
             <div className="flex-1 overflow-hidden">
               <ChatPanel
+                ref={chatPanelRef}
                 defaultAgentId="ppt-agent"
                 lockAgent
-                hideAgentSelector
               />
             </div>
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
 
-      {/* ── 底栏：模板条（有 deck 时不显示） ── */}
-      {!hasDeck && (
-        <div className="shrink-0 border-t border-border/40 bg-muted/10">
-          <TemplateStrip onSelect={handleTemplateSelect} />
-        </div>
-      )}
+      {/* ── 底栏：模板条 ── */}
+      <div className="shrink-0 border-t border-border/40 bg-muted/10">
+        <TemplateStrip onSelect={handleTemplateSelect} />
+      </div>
     </div>
   );
 }

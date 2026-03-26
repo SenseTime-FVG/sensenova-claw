@@ -439,7 +439,7 @@ class ContextCompressor:
             resp = await provider.call(
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
+                temperature=1.0,
                 max_tokens=max_tokens * 2,
             )
             summary = resp.get("content", "")
@@ -450,7 +450,7 @@ class ContextCompressor:
                 resp = await provider.call(
                     model=self._model,
                     messages=[{"role": "user", "content": re_prompt}],
-                    temperature=0.1,
+                    temperature=1.0,
                     max_tokens=max_tokens * 2,
                 )
                 summary = resp.get("content", summary)

@@ -82,12 +82,12 @@ function OutlineCard({
   onToggleExpand: () => void;
   onClick: () => void;
 }) {
-  const hasIssues = page.unresolved_issues.length > 0;
-  const hasDetails = page.content_blocks.length > 0
+  const hasIssues = (page.unresolved_issues ?? []).length > 0;
+  const hasDetails = (page.content_blocks ?? []).length > 0
     || page.audience_takeaway
     || page.narrative_role
-    || page.visual_requirements.length > 0
-    || page.unresolved_issues.length > 0;
+    || (page.visual_requirements ?? []).length > 0
+    || (page.unresolved_issues ?? []).length > 0;
 
   const handleExpandClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -149,25 +149,25 @@ function OutlineCard({
               : <ChevronRight className="w-2.5 h-2.5 shrink-0" />
             }
             <span>
-              {page.content_blocks.length > 0
-                ? `${page.content_blocks.length} 个内容块`
+              {(page.content_blocks ?? []).length > 0
+                ? `${(page.content_blocks ?? []).length} 个内容块`
                 : '查看详情'
               }
             </span>
           </button>
 
           {/* 收起状态：只显示前 2 个 heading */}
-          {!isExpanded && page.content_blocks.length > 0 && (
+          {!isExpanded && (page.content_blocks ?? []).length > 0 && (
             <div className="ml-3.5 space-y-0.5">
-              {page.content_blocks.slice(0, 2).map(block => (
+              {(page.content_blocks ?? []).slice(0, 2).map(block => (
                 <div key={block.block_id} className="flex items-center gap-1 text-[10px] text-muted-foreground/40">
                   <span className="w-1 h-1 rounded-full bg-muted-foreground/30 shrink-0" />
                   <span className="truncate">{block.heading}</span>
                 </div>
               ))}
-              {page.content_blocks.length > 2 && (
+              {(page.content_blocks ?? []).length > 2 && (
                 <div className="text-[10px] text-muted-foreground/30">
-                  +{page.content_blocks.length - 2} 更多
+                  +{(page.content_blocks ?? []).length - 2} 更多
                 </div>
               )}
             </div>
@@ -177,9 +177,9 @@ function OutlineCard({
           {isExpanded && (
             <div className="ml-3.5 mt-1 space-y-2">
               {/* 内容块列表 */}
-              {page.content_blocks.length > 0 && (
+              {(page.content_blocks ?? []).length > 0 && (
                 <div className="space-y-1.5">
-                  {page.content_blocks.map(block => (
+                  {(page.content_blocks ?? []).map(block => (
                     <div key={block.block_id} className="space-y-0.5">
                       <div className="text-[10px] font-medium text-foreground/70">
                         {block.heading}
@@ -210,17 +210,17 @@ function OutlineCard({
               )}
 
               {/* 视觉需求 */}
-              {page.visual_requirements.length > 0 && (
+              {(page.visual_requirements ?? []).length > 0 && (
                 <DetailList label="视觉需求" items={page.visual_requirements} />
               )}
 
               {/* 数据需求 */}
-              {page.data_requirements.length > 0 && (
+              {(page.data_requirements ?? []).length > 0 && (
                 <DetailList label="数据需求" items={page.data_requirements} />
               )}
 
               {/* 未解决问题 */}
-              {page.unresolved_issues.length > 0 && (
+              {(page.unresolved_issues ?? []).length > 0 && (
                 <DetailList label="待解决" items={page.unresolved_issues} variant="warn" />
               )}
             </div>

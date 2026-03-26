@@ -222,6 +222,41 @@ test('chat 页面审批通知应等待 tool_confirmation_resolved 后才收口',
   await expect(toast).not.toBeVisible({ timeout: 10000 });
 });
 
+test('chat 页面待处理 action-toast 应在 60 秒后自动消失但保留通知卡片', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-03-25T10:00:00Z') });
+  await page.goto('/chat?token=e2e-sensenova-claw-token');
+
+  await page.evaluate(() => {
+    (window as any).__mockWs.emit({
+      type: 'tool_confirmation_requested',
+      session_id: 'sess_confirm_idle',
+      payload: {
+        tool_call_id: 'tc_confirm_idle',
+        tool_name: 'bash_command',
+        risk_level: 'high',
+        arguments: { command: 'rm -rf /tmp/demo' },
+        timeout: 60,
+        timeout_action: 'approve',
+        requested_at_ms: Date.now(),
+      },
+      timestamp: Date.now() / 1000,
+    });
+  });
+
+  const toast = page.getByTestId('action-toast').filter({ hasText: '需要授权' });
+  await expect(toast).toBeVisible({ timeout: 10000 });
+
+  await page.clock.fastForward('00:59');
+  await expect(toast).toBeVisible();
+
+  await page.clock.fastForward('00:01');
+  await expect(toast).not.toBeVisible({ timeout: 10000 });
+
+  await page.locator('button[title*="通知"]').click();
+  await expect(page.getByText('通知中心')).toBeVisible();
+  await expect(page.getByText('工具 "bash_command" 需要你的确认才能执行')).toBeVisible();
+});
+
 test('session 页面确认弹窗超时后应等待 resolved 事件再关闭', async ({ page }) => {
   await page.goto('/sessions/sess_e2e');
 

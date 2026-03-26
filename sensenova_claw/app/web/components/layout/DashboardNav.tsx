@@ -9,27 +9,27 @@ import { useCustomPages } from '@/hooks/useCustomPages';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 
 const mainNavItems: { path: string; label: string; exact?: boolean; icon?: string }[] = [
-  { path: '/', label: '工作台', exact: true },
+  { path: '/', label: '工作台', exact: true, icon: 'zap' },
   { path: '/ppt', label: 'PPT', icon: 'presentation' },
-  { path: '/chat', label: '消息' },
-  { path: '/office', label: '办公室' },
+  { path: '/chat', label: '消息', icon: 'message-circle' },
+  { path: '/office', label: '办公室', icon: 'home' },
 ];
 
 export type SubNavGroup = 'features' | 'admin' | null;
 
 export const builtinFeatureNavItems = [
-  { path: '/research', label: '深度研究' },
-  { path: '/automation', label: '自动化' },
+  { path: '/research', label: '深度研究', icon: 'search' },
+  { path: '/automation', label: '自动化', icon: 'settings' },
 ];
 
 export const adminNavItems = [
-  { path: '/agents', label: 'Agents' },
-  { path: '/sessions', label: 'Sessions' },
-  { path: '/llms', label: 'LLMs' },
-  { path: '/gateway', label: 'Gateway' },
-  { path: '/tools', label: 'Tools' },
-  { path: '/skills', label: 'Skills' },
-  { path: '/acp', label: 'ACP' },
+  { path: '/agents', label: 'Agents', icon: 'users' },
+  { path: '/sessions', label: 'Sessions', icon: 'clock' },
+  { path: '/llms', label: 'LLMs', icon: 'brain' },
+  { path: '/gateway', label: 'Gateway', icon: 'server' },
+  { path: '/tools', label: 'Tools', icon: 'tool' },
+  { path: '/skills', label: 'Skills', icon: 'star' },
+  { path: '/acp', label: 'ACP', icon: 'shield' },
 ];
 
 export function useFeatureNavItems() {

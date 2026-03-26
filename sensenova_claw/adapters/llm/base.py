@@ -2,6 +2,19 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator
 
+DEFAULT_LLM_TEMPERATURE = 1.0
+DEFAULT_SAMPLING_EXTRA_BODY: dict[str, Any] = {
+    "top_p": 0.95,
+    "top_k": 20,
+}
+
+
+def merge_sampling_extra_body(extra_body: dict[str, Any] | None = None) -> dict[str, Any]:
+    merged = dict(DEFAULT_SAMPLING_EXTRA_BODY)
+    if extra_body:
+        merged.update(extra_body)
+    return merged
+
 
 class LLMProvider:
     async def call(
@@ -9,7 +22,7 @@ class LLMProvider:
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -20,7 +33,7 @@ class LLMProvider:
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:

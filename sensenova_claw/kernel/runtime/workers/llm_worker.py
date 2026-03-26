@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -7,7 +9,7 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.bus import PrivateEventBus
@@ -20,6 +22,7 @@ from sensenova_claw.kernel.events.types import (
     LLM_CALL_RESULT,
     LLM_CALL_STARTED,
     NOTIFICATION_SESSION,
+    USER_TURN_CANCEL_REQUESTED,
 )
 from sensenova_claw.kernel.runtime.workers.base import SessionWorker
 
@@ -29,6 +32,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _LLM_DEBUG = os.environ.get("SENSENOVA_CLAW_DEBUG_LLM", "").strip() not in ("", "0", "false")
+
+
+def _merge_default_extra_body(extra_body: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(config.get("agent.extra_body", {}))
+    if extra_body:
+        merged.update(extra_body)
+    return merged
 
 
 def _normalize_llm_error(provider_name: str, model: str, error_message: str) -> dict[str, Any]:
@@ -89,6 +99,7 @@ async def _stream_llm_provider(
     temperature: float,
     max_tokens: int | None,
     extra_body: dict[str, Any] | None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """流式调用 provider，逐 chunk 发布 LLM_CALL_DELTA，最终返回聚合结果。"""
     content_acc = ""
@@ -103,6 +114,8 @@ async def _stream_llm_provider(
         max_tokens=max_tokens,
         extra_body=extra_body,
     ):
+        if should_stop and should_stop():
+            raise asyncio.CancelledError
         chunk_type = chunk.get("type")
 
         if chunk_type == "delta":
@@ -128,6 +141,9 @@ async def _stream_llm_provider(
             )
         elif chunk_type == "finish":
             finish_data = chunk
+
+    if should_stop and should_stop():
+        raise asyncio.CancelledError
 
     result: dict[str, Any] = {
         "content": content_acc,
@@ -414,10 +430,85 @@ class LLMSessionWorker(SessionWorker):
     def __init__(self, session_id: str, private_bus: PrivateEventBus, runtime: LLMRuntime):
         super().__init__(session_id, private_bus)
         self.rt = runtime
+        self._active_tasks: set[asyncio.Task[None]] = set()
+        self._turn_tasks: dict[str, set[asyncio.Task[None]]] = {}
+
+    async def stop(self) -> None:
+        for task in list(self._active_tasks):
+            task.cancel()
+        await super().stop()
+        for task in list(self._active_tasks):
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._active_tasks.clear()
+        self._turn_tasks.clear()
 
     async def _handle(self, event: EventEnvelope) -> None:
         if event.type == LLM_CALL_REQUESTED:
+            self._start_llm_request(event)
+        elif event.type == USER_TURN_CANCEL_REQUESTED:
+            self._cancel_turn_requests(event)
+
+    def _start_llm_request(self, event: EventEnvelope) -> None:
+        task = asyncio.create_task(self._run_llm_request(event))
+        self._active_tasks.add(task)
+        if event.turn_id:
+            self._turn_tasks.setdefault(event.turn_id, set()).add(task)
+        task.add_done_callback(lambda done_task, turn_id=event.turn_id: self._cleanup_task(turn_id, done_task))
+
+    async def _run_llm_request(self, event: EventEnvelope) -> None:
+        try:
             await self._handle_llm_requested(event)
+        except asyncio.CancelledError:
+            logger.info(
+                "cancel llm request task session=%s turn=%s trace=%s",
+                event.session_id,
+                event.turn_id,
+                event.trace_id,
+            )
+        except Exception:
+            logger.exception(
+                "llm request task crashed session=%s turn=%s trace=%s",
+                event.session_id,
+                event.turn_id,
+                event.trace_id,
+            )
+
+    def _cleanup_task(self, turn_id: str | None, task: asyncio.Task[None]) -> None:
+        self._active_tasks.discard(task)
+        if not turn_id:
+            return
+        tasks = self._turn_tasks.get(turn_id)
+        if not tasks:
+            return
+        tasks.discard(task)
+        if not tasks:
+            self._turn_tasks.pop(turn_id, None)
+
+    def _resolve_turn_id(self, event: EventEnvelope) -> str | None:
+        if event.turn_id:
+            return event.turn_id
+        state_store = getattr(self.rt, "state_store", None)
+        if state_store is None:
+            return None
+        latest_turn = state_store.latest_turn(event.session_id)
+        return latest_turn.turn_id if latest_turn else None
+
+    def _cancel_turn_requests(self, event: EventEnvelope) -> None:
+        turn_id = self._resolve_turn_id(event)
+        if not turn_id:
+            return
+        tasks = list(self._turn_tasks.get(turn_id, ()))
+        if not tasks:
+            return
+        logger.info(
+            "cancel active llm tasks session=%s turn=%s count=%s",
+            event.session_id,
+            turn_id,
+            len(tasks),
+        )
+        for task in tasks:
+            task.cancel()
 
     def _is_turn_cancelled(self, event: EventEnvelope) -> bool:
         if not event.turn_id:
@@ -450,6 +541,7 @@ class LLMSessionWorker(SessionWorker):
             t0 = time.monotonic()
             try:
                 provider = self.rt.factory.get_provider(provider_name)
+                should_stop = lambda: self._is_turn_cancelled(event)
                 if stream:
                     resp = await _stream_llm_provider(
                         provider,
@@ -464,6 +556,7 @@ class LLMSessionWorker(SessionWorker):
                         temperature=temperature,
                         max_tokens=attempt_max_tokens,
                         extra_body=extra_body,
+                        should_stop=should_stop,
                     )
                 else:
                     resp = await _call_llm_provider(
@@ -665,14 +758,22 @@ class LLMSessionWorker(SessionWorker):
             provider_name, model = config.resolve_model(model_key)
         messages = event.payload.get("messages", [])
         tools = event.payload.get("tools")
-        temperature = float(event.payload.get("temperature", config.get("agent.temperature", 0.2)))
+        temperature = float(event.payload.get("temperature", config.get("agent.temperature", 1.0)))
         max_tokens = event.payload.get("max_tokens")
-        extra_body = event.payload.get("extra_body") or None
+        extra_body = _merge_default_extra_body(event.payload.get("extra_body") or None)
 
         logger.debug(
             "LLM call input | provider=%s model=%s llm_call_id=%s extra_body=%s messages=%s tools=%s",
             provider_name, model, llm_call_id, extra_body, messages, tools,
         )
+
+        if self._is_turn_cancelled(event):
+            logger.info(
+                "skip llm started publish for cancelled turn session=%s turn=%s",
+                event.session_id,
+                event.turn_id,
+            )
+            return
 
         await self.bus.publish(
             EventEnvelope(
@@ -712,6 +813,14 @@ class LLMSessionWorker(SessionWorker):
             input_data=input_data,
             stream=stream,
         )
+
+        if self._is_turn_cancelled(event):
+            logger.info(
+                "drop llm result for cancelled turn session=%s turn=%s",
+                event.session_id,
+                event.turn_id,
+            )
+            return
 
         if isinstance(result, _RequestBlockSuccess):
             await _publish_llm_success(

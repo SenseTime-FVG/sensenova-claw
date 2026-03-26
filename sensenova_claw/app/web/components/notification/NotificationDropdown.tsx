@@ -16,7 +16,12 @@ import {
 } from 'lucide-react';
 import { useNotification } from '@/hooks/useNotification';
 import { useChatSession } from '@/contexts/ChatSessionContext';
+import { getAgentId } from '@/lib/chatTypes';
 import type { NotificationCard, NotificationCardKind } from '@/components/notification/NotificationProvider';
+
+const AGENT_PAGE_MAP: Record<string, string> = {
+  'ppt-agent': '/ppt',
+};
 
 // ── 卡片图标 & 配色 ──
 
@@ -357,7 +362,7 @@ export function NotificationDropdown() {
     clearAllCards,
     setOnActionToastAction,
   } = useNotification();
-  const { switchSession, wsSend, resolveInteractionFromNotification } = useChatSession();
+  const { sessions, switchSession, wsSend, resolveInteractionFromNotification } = useChatSession();
 
   // 点击外部关闭
   useEffect(() => {
@@ -378,7 +383,10 @@ export function NotificationDropdown() {
   const handleNavigate = async (sessionId: string) => {
     setOpen(false);
     await switchSession(sessionId);
-    router.push('/');
+    const session = sessions.find(s => s.session_id === sessionId);
+    const agentId = session ? getAgentId(session.meta) : 'default';
+    const targetPage = AGENT_PAGE_MAP[agentId] ?? '/';
+    router.push(targetPage);
   };
 
   // 处理卡片操作：根据类型发送 WebSocket 响应

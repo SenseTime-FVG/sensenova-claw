@@ -154,7 +154,7 @@ const FIVE_MINUTES_MS = 5 * 60 * 1000;
 // ── Hook ──
 
 export function useDashboardData(): DashboardData & { refresh: () => void } {
-  const { sessions } = useChatSession();
+  const { sessions, proactiveResults } = useChatSession();
 
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
@@ -284,14 +284,14 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
   // ── Proactive 输出（基于最近完成的 cron 和活跃会话生成建议） ──
   const proactiveItems: ProactiveItem[] = [];
 
-  // ── Proactive Agent 会话产出 ──
+  // ── Proactive Agent 会话产出（session 派生 + 实时推送合并） ──
   const PROACTIVE_AGENT_ID = 'proactive-agent';
   const proactiveSessions = [...namedSessions]
     .filter(s => getSessionAgentId(s.meta) === PROACTIVE_AGENT_ID)
     .sort((a, b) => getLastActive(b) - getLastActive(a))
     .slice(0, 20);
 
-  const proactiveOutputs: RecentOutput[] = proactiveSessions.map((s, i) => ({
+  const sessionDerivedOutputs: RecentOutput[] = proactiveSessions.map((s, i) => ({
     id: s.session_id,
     title: getSessionTitle(s.meta),
     agentName: 'Proactive Agent',
@@ -299,6 +299,21 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
     tone: OUTPUT_TONES[i % OUTPUT_TONES.length],
     preview: (s.last_agent_response || '').slice(0, 150) || undefined,
   }));
+
+  // 合并实时推送结果：仅保留 session 列表中尚未出现的条目
+  const existingSessionIds = new Set(sessionDerivedOutputs.map(o => o.id));
+  const realtimeOnly = (proactiveResults || [])
+    .filter(r => !existingSessionIds.has(r.sessionId))
+    .map((r, i): RecentOutput => ({
+      id: r.sessionId || r.jobId,
+      title: r.jobName || '主动推送',
+      agentName: 'Proactive Agent',
+      timeLabel: timeLabel(r.receivedAt),
+      tone: OUTPUT_TONES[(sessionDerivedOutputs.length + i) % OUTPUT_TONES.length],
+      preview: r.result.slice(0, 150) || undefined,
+    }));
+
+  const proactiveOutputs: RecentOutput[] = [...realtimeOnly, ...sessionDerivedOutputs].slice(0, 20);
 
   return {
     agents,
