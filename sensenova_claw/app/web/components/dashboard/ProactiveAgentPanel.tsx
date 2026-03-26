@@ -1,13 +1,54 @@
 'use client';
 
-import { Bot, MessageSquare } from 'lucide-react';
+import { Bot, Lightbulb, MessageCircleMore, MessageSquare, Search, Zap } from 'lucide-react';
 import { getTone } from './widgetTones';
 import { SectionHeader } from './SectionHeader';
-import type { RecentOutput } from '@/hooks/useDashboardData';
+import type { RecentOutput, RecommendationGroup, RecommendationItem } from '@/hooks/useDashboardData';
 
 interface ProactiveAgentPanelProps {
   items: RecentOutput[];
   onItemClick?: (id: string) => void;
+  // 推荐卡片
+  recommendations?: RecommendationGroup[];
+  onRecommendationClick?: (sourceSessionId: string, prompt: string) => void;
+}
+
+// 推荐卡片分类图标
+function getRecommendationIcon(category?: string) {
+  switch (category) {
+    case 'research':
+      return Search;
+    case 'action':
+      return Zap;
+    case 'follow-up':
+      return MessageCircleMore;
+    default:
+      return Lightbulb;
+  }
+}
+
+function RecommendationCard({
+  item,
+  onClick,
+}: {
+  item: RecommendationItem;
+  onClick: () => void;
+}) {
+  const Icon = getRecommendationIcon(item.category);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group w-full text-left px-2.5 py-2 rounded-lg hover:bg-white/10 dark:hover:bg-white/5 transition-colors flex items-start gap-2"
+    >
+      <span className="mt-0.5 shrink-0 rounded-md border border-[var(--glass-border)] bg-[var(--glass-bg-heavy)] p-1">
+        <Icon className="h-3.5 w-3.5 text-violet-500" />
+      </span>
+      <span className="text-[12px] leading-[1.4] text-[var(--glass-text)] group-hover:text-foreground line-clamp-2">
+        {item.title}
+      </span>
+    </button>
+  );
 }
 
 function ProactiveCard({ item, onClick }: { item: RecentOutput; onClick?: () => void }) {
@@ -41,7 +82,7 @@ function ProactiveCard({ item, onClick }: { item: RecentOutput; onClick?: () => 
   );
 }
 
-export function ProactiveAgentPanel({ items, onItemClick }: ProactiveAgentPanelProps) {
+export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRecommendationClick }: ProactiveAgentPanelProps) {
   return (
     <div className="flex h-full flex-col p-4">
       <div className="absolute inset-0 bg-gradient-to-br from-violet-50/70 via-background/90 to-purple-50/50 dark:from-violet-950/30 dark:via-background/90 dark:to-purple-950/20" />
@@ -53,6 +94,25 @@ export function ProactiveAgentPanel({ items, onItemClick }: ProactiveAgentPanelP
           tagTone="violet"
           icon={<Bot className="h-4 w-4 text-violet-500" />}
         />
+
+        {recommendations && recommendations.length > 0 && (
+          <div className="mb-3 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg-light)] p-2.5">
+            <div className="mb-1.5 px-0.5 text-[11px] font-medium text-[var(--glass-text-muted)]">推荐操作</div>
+            <div className="space-y-2">
+              {recommendations.map(group => (
+                <div key={group.sourceSessionId} className="space-y-1">
+                  {group.items.map(item => (
+                    <RecommendationCard
+                      key={item.id}
+                      item={item}
+                      onClick={() => onRecommendationClick?.(group.sourceSessionId, item.prompt)}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {items.length === 0 ? (
           <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-[var(--glass-bg-light)]">
