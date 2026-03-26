@@ -13,6 +13,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# 确保同目录模块可导入
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from search_fusion import deduplicate_and_rank
 
 
@@ -68,15 +71,21 @@ def _flatten_items(data: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-def _build_command(vendor_root: Path, query: str, group: str, limit: int, timeout: int, env_file: str) -> list[str]:
+def _build_command(
+    vendor_root: Path,
+    query: str,
+    limit: int,
+    timeout: int,
+    env_file: str,
+    group: str | None = None,
+    platforms: list[str] | None = None,
+) -> list[str]:
     entry = vendor_root / "union_search_cli.py"
-    return [
+    cmd = [
         sys.executable,
         str(entry),
         "search",
         query,
-        "--group",
-        group,
         "--limit",
         str(limit),
         "--timeout",
@@ -88,21 +97,36 @@ def _build_command(vendor_root: Path, query: str, group: str, limit: int, timeou
         "json",
         "--pretty",
     ]
+    if platforms:
+        cmd.extend(["--platforms", *platforms])
+    elif group:
+        cmd.extend(["--group", group])
+    else:
+        cmd.extend(["--group", "preferred"])
+    return cmd
 
 
-def run_union_search(query: str, group: str, limit: int, timeout: int, env_file: str) -> dict[str, Any]:
+def run_union_search(
+    query: str,
+    limit: int,
+    timeout: int,
+    env_file: str,
+    group: str | None = None,
+    platforms: list[str] | None = None,
+) -> dict[str, Any]:
     vendor_root = _vendor_root()
+    source_label = ", ".join(platforms) if platforms else (group or "preferred")
     if not vendor_root.exists():
         return {
             "success": False,
             "provider": "union-search-plus",
             "query": query,
-            "group": group,
+            "source": source_label,
             "items": [],
             "error": f"vendor path not found: {vendor_root}",
         }
 
-    cmd = _build_command(vendor_root, query, group, limit, timeout, env_file)
+    cmd = _build_command(vendor_root, query, limit, timeout, env_file, group=group, platforms=platforms)
     proc = subprocess.run(
         cmd,
         cwd=vendor_root,
@@ -117,7 +141,7 @@ def run_union_search(query: str, group: str, limit: int, timeout: int, env_file:
             "success": False,
             "provider": "union-search-plus",
             "query": query,
-            "group": group,
+            "source": source_label,
             "items": [],
             "error": detail,
             "command": cmd,
@@ -129,7 +153,7 @@ def run_union_search(query: str, group: str, limit: int, timeout: int, env_file:
             "success": False,
             "provider": "union-search-plus",
             "query": query,
-            "group": group,
+            "source": source_label,
             "items": [],
             "error": "unexpected output type",
             "command": cmd,
@@ -149,7 +173,7 @@ def run_union_search(query: str, group: str, limit: int, timeout: int, env_file:
         "success": effective_success,
         "provider": "union-search-plus",
         "query": query,
-        "group": group,
+        "source": source_label,
         "items": merged,
         "summary": {
             "total_items": len(merged),
@@ -167,7 +191,18 @@ def run_union_search(query: str, group: str, limit: int, timeout: int, env_file:
 def main() -> int:
     parser = argparse.ArgumentParser(description="union-search-plus 统一入口")
     parser.add_argument("query", help="搜索关键词")
-    parser.add_argument("--group", default="preferred", choices=["preferred", "all"])
+    parser.add_argument(
+        "--group",
+        default=None,
+        choices=["preferred", "all", "dev", "social", "search", "no_api_key", "tools"],
+        help="搜索分组（与 --platforms 二选一）",
+    )
+    parser.add_argument(
+        "--platforms",
+        nargs="+",
+        default=None,
+        help="指定平台列表，如 --platforms zhihu bilibili github（与 --group 二选一）",
+    )
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--env-file", default=".env")
@@ -176,6 +211,7 @@ def main() -> int:
     result = run_union_search(
         query=args.query,
         group=args.group,
+        platforms=args.platforms,
         limit=max(1, args.limit),
         timeout=max(10, args.timeout),
         env_file=args.env_file,
