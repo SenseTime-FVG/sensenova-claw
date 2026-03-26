@@ -68,6 +68,7 @@ class DeliveryConfig:
     channels: list[str] = field(default_factory=list)
     feishu_target: str | None = None
     summary_prompt: str | None = None
+    recommendation_type: str | None = None  # 推荐类型，如 "turn_end"；前端据此渲染推荐卡片
 
 
 # ---------- Safety ----------
@@ -178,6 +179,7 @@ def _delivery_to_dict(delivery: DeliveryConfig) -> dict:
         "channels": delivery.channels,
         "feishu_target": delivery.feishu_target,
         "summary_prompt": delivery.summary_prompt,
+        "recommendation_type": delivery.recommendation_type,
     }
 
 
@@ -186,6 +188,7 @@ def _delivery_from_dict(d: dict) -> DeliveryConfig:
         channels=d.get("channels", []),
         feishu_target=d.get("feishu_target"),
         summary_prompt=d.get("summary_prompt"),
+        recommendation_type=d.get("recommendation_type"),
     )
 
 
