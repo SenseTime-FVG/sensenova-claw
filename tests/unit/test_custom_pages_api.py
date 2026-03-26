@@ -1,7 +1,6 @@
 """custom_pages / mini-app API 单测。"""
 
 from __future__ import annotations
-
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -78,18 +77,17 @@ def app(tmp_path: Path) -> FastAPI:
     app.state.config = cfg
     app.state.agent_registry = agent_registry
     app.state.services = Services(gateway=gateway)
-
+    yield app
     if previous_home is None:
         os.environ.pop("SENSENOVA_CLAW_HOME", None)
     else:
         os.environ["SENSENOVA_CLAW_HOME"] = previous_home
 
-    return app
-
 
 @pytest.fixture
 def client(app: FastAPI) -> TestClient:
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 def test_create_miniapp_page_creates_workspace_and_agent(app: FastAPI, client: TestClient) -> None:
@@ -116,22 +114,30 @@ def test_create_miniapp_page_creates_workspace_and_agent(app: FastAPI, client: T
     assert data["type"] == "miniapp"
     assert data["build_status"] == "ready"
     assert data["agent_id"].startswith("miniapp-")
+    assert data["preview_mode"] == "server"
     assert data["entry_file_path"].endswith("/app/index.html")
+    assert data["server_entry_file_path"].endswith("/server.py")
 
     agent = app.state.agent_registry.get(data["agent_id"])
     assert agent is not None
-    assert agent.workdir.endswith(f"/workdir/{data['app_dir']}")
+    assert agent.workdir.endswith(f"/workdir/{data['workspace_root']}")
 
     home = Path(app.state.sensenova_claw_home)
     index_path = home / "workdir" / data["entry_file_path"]
     bridge_path = home / "workdir" / data["bridge_script_path"]
+    server_path = home / "workdir" / data["server_entry_file_path"]
+    state_path = home / "workdir" / data["workspace_root"] / "data" / "workspace_state.json"
     prompt_path = home / "agents" / data["agent_id"] / "SYSTEM_PROMPT.md"
 
     assert index_path.exists()
     assert bridge_path.exists()
+    assert server_path.exists()
+    assert state_path.exists()
     assert prompt_path.exists()
-    assert "Workspace App" in index_path.read_text(encoding="utf-8")
+    assert "Standalone Workspace Server" in index_path.read_text(encoding="utf-8")
     assert "window.SensenovaClawMiniApp" in bridge_path.read_text(encoding="utf-8")
+    assert '"/api/workspace-state"' in server_path.read_text(encoding="utf-8")
+    assert "自包含的 client-server 系统" in prompt_path.read_text(encoding="utf-8")
 
 
 def test_reuse_project_preserves_license(app: FastAPI, client: TestClient, tmp_path: Path) -> None:
@@ -213,6 +219,7 @@ def test_interaction_endpoint_creates_and_reuses_session(app: FastAPI, client: T
     second_data = second.json()
     assert second_data["session_id"] == "sess_1"
     assert second_data["turn_id"] == "turn_2"
+    assert second_data["should_refresh_workspace"] is False
 
     gateway: DummyGateway = app.state.services.gateway
     assert len(gateway.created_sessions) == 1
@@ -264,3 +271,62 @@ def test_actions_endpoint_server_target_logs_without_agent_session(app: FastAPI,
     last = lines[-1]
     assert "save_workspace_snapshot" in last
     assert '"target": "server"' in last
+    assert '"refresh_mode": "none"' in last
+
+
+def test_actions_endpoint_immediate_refresh_flag_is_explicit(app: FastAPI, client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/custom-pages",
+        json={
+            "name": "重建工作台",
+            "description": "一个需要显式触发重刷的工作区",
+            "agent_id": "default",
+            "create_dedicated_agent": False,
+            "workspace_mode": "scratch",
+            "builder_type": "builtin",
+            "generation_prompt": "做一个自带 server 的 workspace，普通问答不刷新，只有显式要求时才立即刷新",
+        },
+    )
+    page = create_resp.json()
+
+    resp = client.post(
+        f"/api/custom-pages/{page['slug']}/actions",
+        json={
+            "target": "agent",
+            "action": "request_workspace_rebuild",
+            "payload": {"reason": "schema changed"},
+            "refresh_mode": "immediate",
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["target"] == "agent"
+    assert data["should_refresh_workspace"] is True
+    assert data["refresh_mode"] == "immediate"
+
+
+def test_preview_endpoint_proxies_standalone_workspace_server(app: FastAPI, client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/custom-pages",
+        json={
+            "name": "预览工作台",
+            "description": "验证独立 workspace server 预览",
+            "agent_id": "default",
+            "create_dedicated_agent": False,
+            "workspace_mode": "scratch",
+            "builder_type": "builtin",
+            "generation_prompt": "做一个自带 server 的 workspace，并通过独立 web server 提供页面和状态 API",
+        },
+    )
+    page = create_resp.json()
+
+    preview_resp = client.get(f"/api/custom-pages/{page['slug']}/preview/")
+    assert preview_resp.status_code == 200
+    assert "Standalone Workspace Server" in preview_resp.text
+
+    state_resp = client.get(f"/api/custom-pages/{page['slug']}/preview/api/workspace-state")
+    assert state_resp.status_code == 200
+    state = state_resp.json()
+    assert state["workspace_slug"] == page["slug"]
+    assert isinstance(state["prepared_units"], list)
