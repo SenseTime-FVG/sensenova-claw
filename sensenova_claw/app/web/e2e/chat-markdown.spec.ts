@@ -8,10 +8,27 @@ type MockWindow = Window & {
   WebSocket: typeof globalThis.WebSocket;
 };
 
+const E2E_TOKEN = 'e2e-sensenova-claw-token';
+
+async function loginForMarkdownTests(page: import('@playwright/test').Page) {
+  await page.goto('/login');
+  await page.getByLabel('Token').fill(E2E_TOKEN);
+  await page.getByRole('button', { name: '验证 Token' }).click();
+  await page.context().addCookies([
+    { name: 'sensenova_claw_token', value: E2E_TOKEN, domain: 'localhost', path: '/' },
+    { name: 'sensenova_claw_token', value: E2E_TOKEN, domain: '127.0.0.1', path: '/' },
+  ]);
+  await page.evaluate(() => {
+    sessionStorage.setItem('auth_just_verified', '1');
+    document.cookie = 'sensenova_claw_token=e2e-sensenova-claw-token; path=/';
+  });
+}
+
 function mockAuthAndWebSocket() {
   document.cookie = 'sensenova_claw_token=e2e-sensenova-claw-token; path=/';
   localStorage.setItem('access_token', 'e2e-access-token');
   localStorage.setItem('refresh_token', 'e2e-refresh-token');
+  sessionStorage.setItem('auth_just_verified', '1');
 
   class MockWebSocket {
     static readonly CONNECTING = 0;
@@ -122,6 +139,22 @@ test.describe('chat markdown rendering（mock websocket）', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ configured: true }),
+      });
+    });
+
+    await page.route('**/api/custom-pages', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ pages: [] }),
+      });
+    });
+
+    await page.route('**/api/todolist/*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [] }),
       });
     });
 
@@ -374,7 +407,8 @@ test.describe('chat markdown rendering（mock websocket）', () => {
   });
 
   test('session 详情页也应渲染 markdown 且忽略原始 html', async ({ page }) => {
-    await page.goto('/sessions/sess_md_history?token=e2e-sensenova-claw-token');
+    await loginForMarkdownTests(page);
+    await page.goto('/sessions/sess_md_history');
 
     await expect(page.getByRole('heading', { level: 1, name: '历史摘要' })).toBeVisible();
     await expect(page.locator('table')).toBeVisible();
@@ -383,7 +417,8 @@ test.describe('chat markdown rendering（mock websocket）', () => {
   });
 
   test('session 详情页应把 think 卡片渲染在 assistant 列内而不是贴左侧', async ({ page }) => {
-    await page.goto('/sessions/sess_md_think_history?token=e2e-sensenova-claw-token');
+    await loginForMarkdownTests(page);
+    await page.goto('/sessions/sess_md_think_history');
 
     const thinkToggle = page.getByTestId('assistant-think-toggle');
     const answerText = page.getByText('这是历史会话里的最终答案。');

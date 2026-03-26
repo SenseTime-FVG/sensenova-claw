@@ -1,15 +1,16 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send, Square, ChevronRight, Brain } from 'lucide-react';
+import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send, Square, ChevronRight, ChevronDown, Brain } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { AskUserResponseForm } from '@/components/chat/AskUserResponseForm';
 import { type PendingInteraction } from '@/components/chat/QuestionDialog';
 import { MarkdownContent } from '@/components/chat/MarkdownContent';
+import { extractThinkContentFromReasoningDetails, resolveAssistantDisplayContent } from '@/lib/assistantThink';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
@@ -39,6 +40,8 @@ interface Message {
   id?: string;
   role: string;
   content?: string;
+  thinkingContent?: string;
+  thinkingState?: 'streaming' | 'collapsed';
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
@@ -160,6 +163,32 @@ function updateAskUserToolState(messages: Message[], questionId: string, patch: 
   });
 }
 
+function getMessageIdentity(message: Message): string {
+  if (message.id) return `id:${message.id}`;
+  if (message.tool_call_id) return `tool-call:${message.tool_call_id}`;
+  if (message.toolInfo) {
+    return `tool:${message.toolInfo.name}:${JSON.stringify(message.toolInfo.arguments || {})}:${message.content || ''}`;
+  }
+  return `${message.role}:${message.name || ''}:${message.content || ''}`;
+}
+
+function mergeSessionMessages(historyMessages: Message[], liveMessages: Message[]): Message[] {
+  if (historyMessages.length === 0) return liveMessages;
+  if (liveMessages.length === 0) return historyMessages;
+
+  const merged = [...historyMessages];
+  const seen = new Set(historyMessages.map(getMessageIdentity));
+
+  for (const message of liveMessages) {
+    const identity = getMessageIdentity(message);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    merged.push(message);
+  }
+
+  return merged;
+}
+
 function SingleToolItem({
   msg,
   onSubmitAskUser,
@@ -269,11 +298,18 @@ function InlineToolCallGroup({
     cancelled: boolean;
   }) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const hasInlineAskUser = tools.some((tool) => Boolean(tool.toolInfo?.askUser));
+  const [expanded, setExpanded] = useState(hasInlineAskUser);
   const completed = tools.filter(t => t.toolInfo?.status === 'completed').length;
   const running = tools.filter(t => t.toolInfo?.status === 'running').length;
   const total = tools.length;
   const allDone = running === 0 && total > 0;
+
+  useEffect(() => {
+    if (hasInlineAskUser) {
+      setExpanded(true);
+    }
+  }, [hasInlineAskUser]);
 
   return (
     <div className="my-2 ml-14">
@@ -365,22 +401,64 @@ function MessageBubble({ msg }: { msg: Message }) {
   }
 
   if (msg.role === 'assistant') {
-    if (!msg.content) return null;
-    return (
-      <div className="flex gap-4 max-w-5xl mx-auto my-6 overflow-hidden">
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shrink-0 border border-primary/20 shadow-md">
-          <Bot size={22} className="text-primary-foreground" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm text-foreground leading-relaxed">
-            <MarkdownContent content={msg.content} />
-          </div>
-        </div>
-      </div>
-    );
+    return <AssistantMessageBubble msg={msg} />;
   }
 
   return null;
+}
+
+function AssistantMessageBubble({ msg }: { msg: Message }) {
+  const parsedAssistantContent = useMemo(
+    () => resolveAssistantDisplayContent(msg.content || '', msg.thinkingContent),
+    [msg.content, msg.thinkingContent],
+  );
+  const [showThink, setShowThink] = useState(msg.thinkingState === 'streaming');
+
+  useEffect(() => {
+    setShowThink(msg.thinkingState === 'streaming');
+  }, [msg.id, msg.thinkingState]);
+
+  if (!parsedAssistantContent.answerContent && !parsedAssistantContent.thinkContent) {
+    return null;
+  }
+
+  return (
+    <div className="flex gap-4 max-w-5xl mx-auto my-6 overflow-hidden">
+      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shrink-0 border border-primary/20 shadow-md">
+        <Bot size={22} className="text-primary-foreground" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="space-y-3">
+          {parsedAssistantContent.thinkContent ? (
+            <div className="rounded-2xl border border-amber-500/25 bg-amber-500/8 overflow-hidden">
+              <button
+                type="button"
+                data-testid="assistant-think-toggle"
+                onClick={() => setShowThink((prev) => !prev)}
+                className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-amber-900/80 dark:text-amber-200/90"
+              >
+                <Brain size={14} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>思考过程</span>
+                <ChevronDown size={14} className={`shrink-0 transition-transform duration-200 ${showThink ? 'rotate-180' : ''}`} />
+              </button>
+              <div
+                data-testid="assistant-think-content"
+                hidden={!showThink}
+                className="border-t border-amber-500/15 px-4 py-3 text-sm"
+              >
+                <MarkdownContent content={parsedAssistantContent.thinkContent} />
+              </div>
+            </div>
+          ) : null}
+          {parsedAssistantContent.answerContent ? (
+            <div className="text-sm text-foreground leading-relaxed">
+              <MarkdownContent content={parsedAssistantContent.answerContent} />
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SessionMessageList({
@@ -564,7 +642,8 @@ export default function SessionDetailPage() {
             }
             const contentDelta = String(payload.content_delta || '');
             const contentSnapshot = String(payload.content_snapshot || '');
-            if (contentDelta || contentSnapshot) {
+            const reasoningDelta = String(payload.reasoning_delta || '');
+            if (contentDelta || contentSnapshot || reasoningDelta) {
               if (turnId) {
                 lastStreamingTurnIdRef.current = turnId;
               }
@@ -576,12 +655,19 @@ export default function SessionDetailPage() {
                     next[i] = {
                       ...next[i],
                       content: contentSnapshot || ((next[i].content || '') + contentDelta),
+                      thinkingContent: reasoningDelta ? `${next[i].thinkingContent || ''}${reasoningDelta}` : next[i].thinkingContent,
+                      thinkingState: reasoningDelta ? 'streaming' : next[i].thinkingState,
                     };
                     return next;
                   }
                   if (prev[i].role === 'tool') break;
                 }
-                return [...prev, { role: 'assistant', content: contentSnapshot || contentDelta }];
+                return [...prev, {
+                  role: 'assistant',
+                  content: contentSnapshot || contentDelta,
+                  thinkingContent: reasoningDelta || undefined,
+                  thinkingState: reasoningDelta ? 'streaming' : undefined,
+                }];
               });
             }
             break;
@@ -592,7 +678,8 @@ export default function SessionDetailPage() {
               break;
             }
             const content = String(payload.content || '');
-            if (content) {
+            const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
+            if (content || thinkingContent) {
               if (turnId) {
                 lastStreamingTurnIdRef.current = turnId;
               }
@@ -600,12 +687,22 @@ export default function SessionDetailPage() {
                 for (let i = prev.length - 1; i >= 0; i--) {
                   if (prev[i].role === 'assistant') {
                     const next = [...prev];
-                    next[i] = { ...next[i], content };
+                    next[i] = {
+                      ...next[i],
+                      content,
+                      thinkingContent: thinkingContent || next[i].thinkingContent,
+                      thinkingState: thinkingContent ? 'streaming' : next[i].thinkingState,
+                    };
                     return next;
                   }
                   if (prev[i].role === 'tool') break;
                 }
-                return [...prev, { role: 'assistant', content }];
+                return [...prev, {
+                  role: 'assistant',
+                  content,
+                  thinkingContent: thinkingContent || undefined,
+                  thinkingState: thinkingContent ? 'streaming' : undefined,
+                }];
               });
             }
             break;
@@ -663,7 +760,13 @@ export default function SessionDetailPage() {
             }
             const finalResponse = String(payload.final_response || '');
             if (finalResponse) {
-              setMessages((prev) => [...prev, { role: 'assistant', content: finalResponse }]);
+              const parsed = resolveAssistantDisplayContent(finalResponse);
+              setMessages((prev) => [...prev, {
+                role: 'assistant',
+                content: parsed.answerContent,
+                thinkingContent: parsed.thinkContent || undefined,
+                thinkingState: parsed.thinkContent ? 'collapsed' : undefined,
+              }]);
             }
             clearInteractions();
             setIsTyping(false);
@@ -786,7 +889,7 @@ export default function SessionDetailPage() {
           (s: SessionInfo) => s.session_id === sessionId
         );
         setSessionInfo(found || null);
-        setMessages(msgData.messages || []);
+        setMessages((prev) => mergeSessionMessages(msgData.messages || [], prev));
       } catch {
         setError('Failed to load session data');
       } finally {

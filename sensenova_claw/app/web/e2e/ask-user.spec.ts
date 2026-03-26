@@ -21,11 +21,25 @@ async function gotoSessionPage(page: Page, sessionId: string) {
   await page.goto(`/sessions/${sessionId}`);
 }
 
+async function waitForMockWebSocketReady(page: Page) {
+  await page.waitForFunction(() => {
+    const ws = (window as {
+      __mockWs?: {
+        send?: unknown;
+        onmessage?: unknown;
+      };
+    }).__mockWs;
+    return typeof ws?.send === 'function' && typeof ws?.onmessage === 'function';
+  });
+}
+
 function mockAuthAndWebSocket() {
   // 登录态：避免被 ProtectedRoute 重定向到 /login
   localStorage.setItem('access_token', 'e2e-access-token');
   localStorage.setItem('refresh_token', 'e2e-refresh-token');
   const NativeWebSocket = window.WebSocket;
+  const sharedSent = ((window as any).__mockWsSent as string[] | undefined) ?? [];
+  (window as any).__mockWsSent = sharedSent;
 
   class MockWebSocket {
     static readonly CONNECTING = 0;
@@ -38,11 +52,10 @@ function mockAuthAndWebSocket() {
     public onclose: ((event: Event) => void) | null = null;
     public onerror: ((event: Event) => void) | null = null;
     public onmessage: ((event: MessageEvent) => void) | null = null;
-    public sent: string[] = [];
+    public sent: string[] = sharedSent;
 
     constructor(_url: string) {
       (window as any).__mockWs = this;
-      (window as any).__mockWsSent = this.sent;
       window.setTimeout(() => {
         this.onopen?.(new Event('open'));
       }, 0);
@@ -827,13 +840,10 @@ test.describe('ask_user UI（mock websocket）', () => {
 
   test('session 页面 ask_user 工具卡片内应显示内嵌回复框并可提交', async ({ page }) => {
     await gotoSessionPage(page, 'sess_e2e');
+    await waitForMockWebSocketReady(page);
 
     await page.evaluate(() => {
-      const sent: string[] = [];
-      (window as any).__mockWsSent = sent;
-      (window as any).__mockWs.send = (data: string) => {
-        sent.push(data);
-      };
+      ((window as any).__mockWsSent as string[]).length = 0;
 
       (window as any).__mockWs.emit({
         type: 'tool_execution',
