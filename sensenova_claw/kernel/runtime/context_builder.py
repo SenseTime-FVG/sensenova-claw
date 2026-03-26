@@ -151,6 +151,11 @@ class ContextBuilder:
                 "</skill>",
             ])
         lines.append("</available_skills>")
+        if any(skill.name == "ppt-superpower" for skill in skills):
+            lines.extend([
+                "",
+                "PPT 默认进入确认优先路径；除非用户明确授权自动继续，否则不要默认走 fast。",
+            ])
         return "\n".join(lines)
 
     def _build_agent_to_agent_prompt(self, agent_config: AgentConfig | None) -> str | None:

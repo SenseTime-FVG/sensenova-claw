@@ -7,7 +7,7 @@
 目标如下：
 
 1. 将旧的“大一统 `pptx` skill”重构为新的 `ppt-*` superpower 体系。
-2. 默认采用“快速优先”路径，避免生成一套 PPT 时出现过长流程。
+2. 默认采用“确认优先”路径，先沉淀关键工件并等待确认，只有用户明确授权自动继续时才走快速直达；旧的“快速优先”不再作为默认模式。
 3. 同时保留 `B + C` 级别的中断、介入和继续推进能力：
    - `B`：关键工件级可独立生成、替换、重跑。
    - `C`：页面级、图片槽位级可按需单独修复。
@@ -201,6 +201,8 @@
 
 总原则：
 
+- 默认进入 `guided`，先产出 `task-pack.json`、`style-spec.json`、`storyboard.json` 并等待确认。
+- 只有用户明确说“直接生成”“不要确认”“自动继续”或“一口气跑完”时，才进入 `fast`。
 - `fast` 也要有简短阶段回显，但默认非阻塞，不要求用户每步确认。
 - `guided` 除了阶段回显，还要在关键停点明确等待用户确认。
 - `surgical` 的回显必须说明当前只改哪个页面、槽位或控制面，避免用户误以为会重跑整套。
@@ -785,9 +787,9 @@ class SpeakerNotePage:
 
 ## 6. 默认运行路径
 
-### 6.1 快速优先
+### 6.1 确认优先
 
-无上传文件时的最小路径：
+无上传文件时的最小路径，也是默认路径：
 
 主路径从 `deck_dir -> task-pack -> research(按需) -> style-spec -> storyboard` 开始。
 
@@ -795,9 +797,10 @@ class SpeakerNotePage:
 2. 如 `task-pack.json.research_required` 为真且仍有内容缺口，则进入 `ppt-research-pack`
 3. `ppt-style-spec`
 4. `ppt-storyboard`
-5. 如存在 `real-photo` 槽位，或页面语义明显需要人物 / 产品 / 场景图片，则先进入 `ppt-asset-plan`
-6. `ppt-page-html`
-7. `ppt-review`
+5. 默认等待用户确认
+6. 如用户明确授权自动继续，再按需进入 `ppt-asset-plan`
+7. `ppt-page-html`
+8. `ppt-review`
 
 有上传文件时的常规路径：
 
@@ -808,9 +811,10 @@ class SpeakerNotePage:
 3. 如 `task-pack.json.research_required` 为真且仍有内容缺口，则进入 `ppt-research-pack`
 4. `ppt-style-spec`
 5. `ppt-storyboard`
-6. 如存在 `real-photo` 槽位，或页面语义明显需要人物 / 产品 / 场景图片，则先进入 `ppt-asset-plan`
-7. `ppt-page-html`
-8. `ppt-review`
+6. 默认等待用户确认
+7. 如用户明确授权自动继续，再按需进入 `ppt-asset-plan`
+8. `ppt-page-html`
+9. `ppt-review`
 
 ### 6.2 按需插入
 
@@ -825,8 +829,9 @@ class SpeakerNotePage:
 
 #### `fast`
 
-默认模式。
+显式 opt-in 模式。
 
+- 只有用户明确说“直接生成”“不要确认”“自动继续”或“一口气跑完”时，才进入 `fast`
 - 只生成必要工件
 - 优先尽快得到整套结果
 - 只在必要时下钻
@@ -835,9 +840,11 @@ class SpeakerNotePage:
 
 #### `guided`
 
-用于希望逐步查看中间产物的场景。
+默认模式，用于希望逐步查看中间产物的场景。
 
+- 默认进入 `guided`，走确认优先路径
 - 如果用户说“先看大纲”“先确认大纲”“先看风格和大纲”或“确认后再生成”，必须进入 `guided`
+- `task-pack.json`、`style-spec.json`、`storyboard.json` 后默认等待确认
 - 在用户确认前，不要直接生成 `pages/page_XX.html`
 - 不要只返回一段自由文本大纲，应展示已落盘的结构化工件
 - 更稳定地产出中间工件
@@ -1034,10 +1041,11 @@ class StageFeedback:
 期望：
 
 - `deck_dir -> task-pack -> research(按需) -> style-spec -> storyboard`
-- 走 `fast`
+- 默认进入 `guided`
 - 生成 `task-pack.json`
 - 生成 `style-spec.json`
 - 生成 `storyboard.json`
+- `task-pack.json`、`style-spec.json`、`storyboard.json` 后默认等待确认
 
 #### 用例 2：上传报告作为内容素材
 
@@ -1100,6 +1108,8 @@ class StageFeedback:
 
 期望：
 
+- 默认进入确认优先路径
+- 只有用户明确授权自动继续时才进入 `fast`
 - `fast` 也会在关键阶段给出简短 `开始反馈` / `完成反馈`
 - `guided` 会在关键停点显式等待用户确认
 - 搜图、逐页 HTML、review、导出 PPTX 可补 1 条 `进行中反馈`

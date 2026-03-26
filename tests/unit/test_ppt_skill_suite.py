@@ -151,11 +151,30 @@ class TestPptSkillSuite(unittest.TestCase):
         skills = _load_workspace_skills()
 
         body = skills["ppt-superpower"]
+        self.assertIn("默认进入 `guided`", body)
+        self.assertIn("确认优先", body)
         self.assertIn("先看大纲", body)
         self.assertIn("确认后再生成", body)
         self.assertIn("必须进入 `guided`", body)
         self.assertIn("不要直接生成 `pages/page_XX.html`", body)
         self.assertIn("不要只返回一段自由文本大纲", body)
+
+    def test_ppt_superpower_requires_explicit_fast_opt_in(self):
+        skills = _load_workspace_skills()
+
+        body = skills["ppt-superpower"]
+        self.assertIn("只有用户明确说", body)
+        self.assertIn("直接生成", body)
+        self.assertIn("不要确认", body)
+        self.assertIn("自动继续", body)
+        self.assertIn("一口气跑完", body)
+        self.assertIn("才进入 `fast`", body)
+
+    def test_ppt_superpower_waits_for_confirmation_after_default_artifacts(self):
+        skills = _load_workspace_skills()
+
+        body = skills["ppt-superpower"]
+        self.assertIn("`task-pack.json`、`style-spec.json`、`storyboard.json` 后默认等待确认", body)
 
     def test_ppt_superpower_declares_stage_feedback_contract(self):
         skills = _load_workspace_skills()
