@@ -158,6 +158,66 @@ test.describe('ask_user UI（mock websocket）', () => {
     ).toBeTruthy();
   });
 
+  test('chat 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input', async ({ page }) => {
+    await page.goto('/chat');
+    await page.getByText('E2E Session').click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_chat_main_1',
+          question: '请补充部署环境',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await page.waitForTimeout(200);
+    const chatInput = page.getByTestId('chat-input');
+    await expect(chatInput).toBeEditable();
+    await chatInput.fill('staging');
+    await chatInput.press('Enter');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_answered_event',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_chat_main_1',
+          cancelled: false,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await chatInput.fill('继续正常聊天');
+    await page.getByTestId('send-button').click();
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_chat_main_1'
+          && msg.payload?.answer === 'staging'
+          && msg.session_id === 'sess_e2e'
+      )
+    ).toBeTruthy();
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_input'
+          && msg.session_id === 'sess_e2e'
+          && msg.payload?.content === '继续正常聊天'
+      )
+    ).toBeTruthy();
+  });
+
   test('ask_user 弹窗 textarea 按 Enter 可直接确认提交', async ({ page }) => {
     await page.goto('/chat');
 
@@ -513,6 +573,64 @@ test.describe('ask_user UI（mock websocket）', () => {
         (msg) => msg.type === 'user_question_answered'
           && msg.payload?.question_id === 'q_session_cross_1'
           && msg.session_id === 'sess_child'
+      )
+    ).toBeTruthy();
+  });
+
+  test('session 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input', async ({ page }) => {
+    await page.goto('/sessions/sess_e2e');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_session_main_1',
+          question: '请确认目标环境',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await page.waitForTimeout(200);
+    const chatInput = page.getByTestId('chat-input');
+    await expect(chatInput).toBeEditable();
+    await chatInput.fill('prod');
+    await chatInput.press('Enter');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_answered_event',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_session_main_1',
+          cancelled: false,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await chatInput.fill('后续普通消息');
+    await page.getByTestId('send-button').click();
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_session_main_1'
+          && msg.payload?.answer === 'prod'
+          && msg.session_id === 'sess_e2e'
+      )
+    ).toBeTruthy();
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_input'
+          && msg.session_id === 'sess_e2e'
+          && msg.payload?.content === '后续普通消息'
       )
     ).toBeTruthy();
   });

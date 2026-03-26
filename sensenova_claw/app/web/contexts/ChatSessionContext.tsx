@@ -923,6 +923,24 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
     if (!content.trim() || !wsConnected) return;
 
+    const interaction = activeInteractionRef.current;
+    if (interaction?.kind === 'question') {
+      if (!interaction.sourceSessionId) {
+        addMsg('system', 'Question source session not found, cannot submit answer.');
+        return;
+      }
+      setInteractionSubmitting(true);
+      wsSend({
+        type: 'user_question_answered',
+        session_id: interaction.sourceSessionId,
+        payload: { question_id: interaction.interactionId, answer: content.trim(), cancelled: false },
+        timestamp: Date.now() / 1000,
+      });
+      resolveCard(`question_${interaction.interactionId}`, 'answered');
+      resolveInteraction('question', interaction.interactionId);
+      return;
+    }
+
     // 防止在 session 创建中重复发送：如果已有 pending input 且正在等待 session_created，忽略
     if (pendingInputRef.current && !sessionIdRef.current) return;
 
@@ -957,7 +975,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       });
     }
     setIsTyping(true);
-  }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsConnected, wsSend]);
+  }, [getCurrentSessionAgentId, resetTurnTracking, resolveCard, startNewChat, wsConnected, wsSend]);
 
   const sendQuestionAnswerFn = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     const interaction = activeInteractionRef.current;
