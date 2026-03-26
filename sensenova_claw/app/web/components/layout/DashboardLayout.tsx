@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   DashboardNav,
+  NavIcon,
   useFeatureNavItems,
   adminNavItems,
   type SubNavGroup,
@@ -125,12 +126,13 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 href={item.path}
                 onClick={() => { if (pathname?.startsWith(item.path)) startNewChat(); }}
                 className={cn(
-                  'px-3 py-1 text-[13px] rounded-lg transition-all duration-150',
+                  'px-3 py-1 text-[13px] rounded-lg transition-all duration-150 flex items-center gap-1.5',
                   pathname?.startsWith(item.path)
                     ? 'bg-primary/10 text-primary font-semibold'
                     : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
                 )}
               >
+                {'icon' in item && <NavIcon name={(item as { icon?: string }).icon} />}
                 {item.label}
               </Link>
             ))}
