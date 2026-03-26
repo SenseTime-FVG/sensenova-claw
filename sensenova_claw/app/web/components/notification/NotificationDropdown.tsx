@@ -15,7 +15,7 @@ import {
   Send,
 } from 'lucide-react';
 import { useNotification } from '@/hooks/useNotification';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession, useWebSocket, useInteraction } from '@/contexts/ws';
 import { getAgentId } from '@/lib/chatTypes';
 import type { NotificationCard, NotificationCardKind } from '@/components/notification/NotificationProvider';
 
@@ -362,7 +362,9 @@ export function NotificationDropdown() {
     clearAllCards,
     setOnActionToastAction,
   } = useNotification();
-  const { sessions, switchSession, wsSend, resolveInteractionFromNotification } = useChatSession();
+  const { sessions, switchSession } = useSession();
+  const { wsSend } = useWebSocket();
+  const { resolveInteractionFromNotification } = useInteraction();
 
   // 点击外部关闭
   useEffect(() => {
