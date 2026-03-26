@@ -9,7 +9,7 @@ from copy import deepcopy
 from typing import Any
 
 from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from sensenova_claw.capabilities.miniapps.acp_wizard import ACPWizardInstallError, ACPWizardService
 from sensenova_claw.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
@@ -46,9 +46,12 @@ class ProviderUpdateBody(BaseModel):
 
 
 class ModelUpdateBody(BaseModel):
+    model_config = {"populate_by_name": True}
+
     name: str | None = None
     provider: str
     model_id: str
+    model_type: str = Field(default="chat", alias="type")  # "chat" | "embedding"
     timeout: int = 60
     max_tokens: int = 128000
     max_output_tokens: int = 16384
@@ -56,6 +59,10 @@ class ModelUpdateBody(BaseModel):
 
 class DefaultModelUpdateBody(BaseModel):
     default_model: str = ""
+
+
+class DefaultEmbeddingModelUpdateBody(BaseModel):
+    default_embedding_model: str = ""
 
 
 class ACPWizardInstallBody(BaseModel):
@@ -223,6 +230,7 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     models[next_name] = {
         "provider": body.provider,
         "model_id": body.model_id,
+        "type": body.model_type,
         "timeout": body.timeout,
         "max_tokens": body.max_tokens,
         "max_output_tokens": body.max_output_tokens,
@@ -230,6 +238,8 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     llm_section["models"] = models
     if model_exists and llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
+    if model_exists and llm_section.get("default_embedding_model") == model_name:
+        llm_section["default_embedding_model"] = next_name
 
     try:
         updated_llm = await config_manager.replace("llm", llm_section)
@@ -264,6 +274,31 @@ async def update_llm_default_model(body: DefaultModelUpdateBody, request: Reques
         "status": "saved",
         "default_model": updated_llm.get("default_model", ""),
     }
+
+
+@router.put("/llm/default-embedding-model")
+async def update_llm_default_embedding_model(body: DefaultEmbeddingModelUpdateBody, request: Request):
+    """更新默认 embedding 模型"""
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    models = deepcopy(llm_section.get("models", {}))
+
+    if body.default_embedding_model and body.default_embedding_model not in models:
+        raise HTTPException(400, f"Model 不存在: {body.default_embedding_model}")
+
+    llm_section["default_embedding_model"] = body.default_embedding_model
+
+    try:
+        updated_llm = await config_manager.replace("llm", llm_section)
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
+
+    return {
+        "status": "saved",
+        "default_embedding_model": updated_llm.get("default_embedding_model", ""),
+    }
+
 
 @router.get("/llm-status")
 async def get_llm_status(request: Request):

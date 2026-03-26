@@ -20,6 +20,8 @@ import {
   rebuildMessagesFromEvents,
   rebuildStepsFromEvents,
   groupSessionsToTasks,
+  findLatestAssistantTurnMessage,
+  upsertAssistantTurnMessage,
 } from '@/lib/chatTypes';
 import { extractThinkContentFromReasoningDetails } from '@/lib/assistantThink';
 
@@ -176,41 +178,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     const { turnId, content, thinkingContent, thinkingState } = message;
     setMessages((prev) => {
       if (turnId) {
-        // 从末尾搜索：优先找到最新的流式 assistant，避免命中旧的同 turnId assistant
-        let existingIndex = -1;
-        for (let i = prev.length - 1; i >= 0; i--) {
-          if (prev[i].role === 'assistant' && prev[i].turnId === turnId) {
-            existingIndex = i;
-            break;
-          }
-        }
-        if (existingIndex !== -1) {
-          const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
-          if (hasToolAfter) {
-            // 旧 assistant 后面有 tool 消息 → 追加新气泡（保持原始 turnId）
-            return [
-              ...prev,
-              {
-                id: makeId(),
-                role: 'assistant' as const,
-                content,
-                timestamp: Date.now(),
-                turnId,
-                thinkingContent,
-                thinkingState,
-              },
-            ];
-          }
-          // 同一轮 LLM 调用的流式更新，原地更新
-          const next = [...prev];
-          next[existingIndex] = {
-            ...next[existingIndex],
-            content,
-            thinkingContent,
-            thinkingState,
-          };
-          return next;
-        }
+        return upsertAssistantTurnMessage(prev, turnId, {
+          content,
+          thinkingContent,
+          thinkingState,
+        });
       }
       return [
         ...prev,
@@ -420,44 +392,14 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           setIsTyping(true);
           setMessages((prev) => {
             if (turnId) {
-              // 从末尾搜索：优先找到最新的流式 assistant 消息，
-              // 避免命中旧的（触发工具调用的）同 turnId assistant
-              let existingIndex = -1;
-              for (let i = prev.length - 1; i >= 0; i--) {
-                if (prev[i].role === 'assistant' && prev[i].turnId === turnId) {
-                  existingIndex = i;
-                  break;
-                }
-              }
-              if (existingIndex !== -1) {
-                const hasToolAfter = prev.slice(existingIndex + 1).some((m) => m.role === 'tool');
-                if (hasToolAfter) {
-                  // 旧 assistant 后面有 tool 消息 → 追加新的流式气泡（保持原始 turnId）
-                  return [
-                    ...prev,
-                    {
-                      id: makeId(),
-                      role: 'assistant' as const,
-                      content: contentSnapshot || contentDelta,
-                      timestamp: Date.now(),
-                      turnId,
-                      thinkingContent: reasoningDelta || undefined,
-                      thinkingState: reasoningDelta ? 'streaming' as const : undefined,
-                    },
-                  ];
-                }
-                const existing = prev[existingIndex];
-                const next = [...prev];
-                next[existingIndex] = {
-                  ...existing,
-                  content: contentSnapshot || ((existing.content || '') + contentDelta),
-                  thinkingContent: reasoningDelta
-                    ? (existing.thinkingContent || '') + reasoningDelta
-                    : existing.thinkingContent,
-                  thinkingState: reasoningDelta ? 'streaming' as const : existing.thinkingState,
-                };
-                return next;
-              }
+              const existing = findLatestAssistantTurnMessage(prev, turnId);
+              return upsertAssistantTurnMessage(prev, turnId, {
+                content: contentSnapshot || ((existing?.content || '') + contentDelta),
+                thinkingContent: reasoningDelta
+                  ? (existing?.thinkingContent || '') + reasoningDelta
+                  : existing?.thinkingContent,
+                thinkingState: reasoningDelta ? 'streaming' as const : existing?.thinkingState,
+              });
             }
             return [
               ...prev,
@@ -482,8 +424,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           break;
         }
         const thinkingContent = extractThinkContentFromReasoningDetails(payload.reasoning_details);
-        const hasToolCalls = Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0;
-        if (content || thinkingContent || hasToolCalls) {
+        if (content || thinkingContent) {
           if (turnId) {
             lastStreamingTurnIdRef.current = turnId;
           }
@@ -554,6 +495,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           }
         }
         setMessages((prev) => {
+          if (completedTurnId) {
+            return upsertAssistantTurnMessage(prev, completedTurnId, {
+              content: final,
+              thinkingState: 'collapsed',
+              keepExistingContentWhenEmpty: true,
+            });
+          }
           // 从后往前找最后一条 assistant 消息
           for (let i = prev.length - 1; i >= 0; i--) {
             if (prev[i].role === 'assistant') {

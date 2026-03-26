@@ -296,14 +296,31 @@ class ObsidianSearchTool(Tool):
     """搜索 Obsidian 笔记（支持本地和远程）"""
 
     name = "obsidian_search"
-    description = "搜索 Obsidian 笔记库中的笔记。支持本地 vault 和远程 Obsidian（通过 Local REST API）。"
+    description = """搜索 Obsidian 笔记库中的笔记。支持本地 vault 和远程 Obsidian（通过 Local REST API）。
+
+支持两种搜索模式：
+1. 精确搜索（默认）：query 直接匹配标题和内容
+2. 模糊搜索：设置 fuzzy=true 并提供 synonyms 同义词列表，任一词匹配即返回
+
+建议：搜索用户知识库时，先思考用户问题的核心概念，提取 2-3 个同义词/相关词，使用模糊搜索提高召回率。
+例如：用户问"国际油价"，可设置 query="油价" synonyms=["原油", "石油", "crude oil", "能源价格"]"""
     risk_level = ToolRiskLevel.LOW
     parameters = {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "搜索关键词，会匹配笔记标题和内容"
+                "description": "主搜索关键词，会匹配笔记标题和内容"
+            },
+            "synonyms": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "同义词/相关词列表，模糊搜索时任一词匹配即返回。建议提供 2-5 个相关词提高召回率"
+            },
+            "fuzzy": {
+                "type": "boolean",
+                "description": "是否启用模糊搜索（使用同义词扩展匹配）",
+                "default": False
             },
             "tag": {
                 "type": "string",
@@ -328,10 +345,19 @@ class ObsidianSearchTool(Tool):
 
     async def execute(self, **kwargs: Any) -> Any:
         query = kwargs.get("query", "").lower()
+        synonyms = kwargs.get("synonyms", [])
+        fuzzy = kwargs.get("fuzzy", False)
         tag_filter = kwargs.get("tag", "")
         folder_filter = kwargs.get("folder", "")
         vault_filter = kwargs.get("vault", "")
         limit = int(kwargs.get("limit", 20))
+
+        # 构建搜索词列表
+        search_terms: list[str] = []
+        if query:
+            search_terms.append(query)
+        if fuzzy and synonyms:
+            search_terms.extend([s.lower() for s in synonyms if s])
 
         sources = _get_all_vault_sources()
 
@@ -355,12 +381,12 @@ class ObsidianSearchTool(Tool):
             if source.source_type == "local":
                 local_results = await self._search_local(
                     Path(source.path),
-                    query, tag_filter, folder_filter, limit - len(results)
+                    search_terms, tag_filter, folder_filter, limit - len(results)
                 )
                 results.extend(local_results)
             else:
                 remote_results = await self._search_remote(
-                    source, query, tag_filter, folder_filter, limit - len(results)
+                    source, search_terms, tag_filter, folder_filter, limit - len(results)
                 )
                 results.extend(remote_results)
 
@@ -372,6 +398,7 @@ class ObsidianSearchTool(Tool):
         return {
             "success": True,
             "count": len(results),
+            "search_terms": search_terms,  # 返回实际使用的搜索词
             "vaults": vault_info,
             "results": results[:limit]
         }
@@ -379,12 +406,16 @@ class ObsidianSearchTool(Tool):
     async def _search_local(
         self,
         vault: Path,
-        query: str,
+        search_terms: list[str],
         tag_filter: str,
         folder_filter: str,
         limit: int,
     ) -> list[dict[str, Any]]:
-        """搜索本地 vault"""
+        """搜索本地 vault
+
+        Args:
+            search_terms: 搜索词列表，任一词匹配即返回（OR 逻辑）
+        """
         results: list[dict[str, Any]] = []
         vault_name = vault.name
 
@@ -409,15 +440,25 @@ class ObsidianSearchTool(Tool):
                     continue
 
             title = md_file.stem
-            if query:
-                if query not in title.lower() and query not in content.lower():
+            title_lower = title.lower()
+            content_lower = content.lower()
+
+            # 搜索词匹配：任一词匹配即可（OR 逻辑）
+            if search_terms:
+                matched = False
+                matched_terms: list[str] = []
+                for term in search_terms:
+                    if term in title_lower or term in content_lower:
+                        matched = True
+                        matched_terms.append(term)
+                if not matched:
                     continue
 
             summary = body.strip()[:200].replace("\n", " ")
             if len(body) > 200:
                 summary += "..."
 
-            results.append({
+            result_item: dict[str, Any] = {
                 "vault": vault_name,
                 "vault_type": "local",
                 "path": str(rel_path),
@@ -426,7 +467,12 @@ class ObsidianSearchTool(Tool):
                 "summary": summary,
                 "metadata": metadata,
                 "modified": md_file.stat().st_mtime,
-            })
+            }
+            # 如果有多个搜索词，标注匹配了哪些
+            if search_terms and len(search_terms) > 1:
+                result_item["matched_terms"] = matched_terms
+
+            results.append(result_item)
 
             if len(results) >= limit:
                 break
@@ -436,12 +482,16 @@ class ObsidianSearchTool(Tool):
     async def _search_remote(
         self,
         source: VaultSource,
-        query: str,
+        search_terms: list[str],
         tag_filter: str,
         folder_filter: str,
         limit: int,
     ) -> list[dict[str, Any]]:
-        """搜索远程 vault"""
+        """搜索远程 vault
+
+        Args:
+            search_terms: 搜索词列表，任一词匹配即返回（OR 逻辑）
+        """
         remote_cfg = RemoteVaultConfig(
             name=source.name,
             url=source.url,
@@ -450,45 +500,55 @@ class ObsidianSearchTool(Tool):
         client = ObsidianRemoteClient(remote_cfg)
 
         results: list[dict[str, Any]] = []
+        seen_paths: set[str] = set()
 
-        # 使用 REST API 搜索
-        if query:
-            search_results = await client.search(query)
-            for item in search_results[:limit]:
-                file_path = item.get("filename", "")
-                if folder_filter and not file_path.startswith(folder_filter):
-                    continue
-
-                # 获取文件内容以提取标签
-                file_data = await client.read_file(file_path)
-                if not file_data.get("success"):
-                    continue
-
-                content = file_data.get("content", "")
-                metadata, body = _parse_frontmatter(content)
-                tags = _extract_tags(content)
-
-                if tag_filter:
-                    if tag_filter not in tags and tag_filter not in metadata.get("tags", []):
-                        continue
-
-                summary = body.strip()[:200].replace("\n", " ")
-                if len(body) > 200:
-                    summary += "..."
-
-                results.append({
-                    "vault": source.name,
-                    "vault_type": "remote",
-                    "path": file_path,
-                    "title": Path(file_path).stem,
-                    "tags": tags,
-                    "summary": summary,
-                    "metadata": metadata,
-                    "matches": item.get("matches", []),
-                })
-
+        # 对每个搜索词执行搜索（远程 API 不支持 OR 语法）
+        if search_terms:
+            for term in search_terms:
                 if len(results) >= limit:
                     break
+                search_results = await client.search(term)
+                for item in search_results:
+                    if len(results) >= limit:
+                        break
+                    file_path = item.get("filename", "")
+                    if file_path in seen_paths:
+                        continue
+                    seen_paths.add(file_path)
+
+                    if folder_filter and not file_path.startswith(folder_filter):
+                        continue
+
+                    # 获取文件内容以提取标签
+                    file_data = await client.read_file(file_path)
+                    if not file_data.get("success"):
+                        continue
+
+                    content = file_data.get("content", "")
+                    metadata, body = _parse_frontmatter(content)
+                    tags = _extract_tags(content)
+
+                    if tag_filter:
+                        if tag_filter not in tags and tag_filter not in metadata.get("tags", []):
+                            continue
+
+                    summary = body.strip()[:200].replace("\n", " ")
+                    if len(body) > 200:
+                        summary += "..."
+
+                    result_item: dict[str, Any] = {
+                        "vault": source.name,
+                        "vault_type": "remote",
+                        "path": file_path,
+                        "title": Path(file_path).stem,
+                        "tags": tags,
+                        "summary": summary,
+                        "metadata": metadata,
+                        "matches": item.get("matches", []),
+                    }
+                    if len(search_terms) > 1:
+                        result_item["matched_term"] = term
+                    results.append(result_item)
         else:
             # 无查询时列出文件
             files = await client.list_files(folder_filter or "/")
@@ -915,6 +975,320 @@ class ObsidianWriteTool(Tool):
                     "path": note_path,
                     "action": "appended" if append else "written",
                 }
-            return {"success": False, "error": f"HTTP {resp.status_code}"}
+            return {"success": False, "error": f"HTTP {resp.status_code}: write failed"}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": f"write error: {e}"}
+
+
+class ObsidianIndexTool(Tool):
+    """生成知识库紧凑索引（用于会话开始时加载上下文）"""
+
+    name = "obsidian_index"
+    description = """生成知识库的紧凑索引，包含用户画像摘要和最近修改的笔记列表。
+
+用于会话开始时快速加载知识库上下文，帮助判断用户问题是否与已有知识相关。
+返回格式紧凑，适合直接注入上下文。支持缓存，文件无变化时直接返回缓存。"""
+    risk_level = ToolRiskLevel.LOW
+    parameters = {
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "description": "索引包含的最大笔记数（按修改时间排序）",
+                "default": 30
+            },
+            "vault": {
+                "type": "string",
+                "description": "指定 vault 名称，空则使用第一个可用 vault"
+            },
+            "root_folder": {
+                "type": "string",
+                "description": "知识库根目录",
+                "default": "Knowledge"
+            },
+            "include_profile": {
+                "type": "boolean",
+                "description": "是否包含用户画像摘要",
+                "default": True
+            },
+            "force_refresh": {
+                "type": "boolean",
+                "description": "强制刷新缓存",
+                "default": False
+            }
+        },
+        "required": []
+    }
+
+    CACHE_VERSION = 1
+    CACHE_FILENAME = "_index_cache.json"
+
+    async def execute(self, **kwargs: Any) -> Any:
+        limit = int(kwargs.get("limit", 30))
+        vault_name = kwargs.get("vault", "")
+        root_folder = kwargs.get("root_folder", "Knowledge")
+        include_profile = kwargs.get("include_profile", True)
+        force_refresh = kwargs.get("force_refresh", False)
+
+        sources = _get_all_vault_sources()
+
+        if vault_name:
+            sources = [s for s in sources if s.name == vault_name]
+
+        # 只支持本地 vault
+        local_sources = [s for s in sources if s.source_type == "local"]
+        if not local_sources:
+            return {
+                "success": False,
+                "error": "未找到本地 Obsidian vault",
+            }
+
+        source = local_sources[0]
+        vault_path = Path(source.path)
+        kb_path = vault_path / root_folder
+
+        if not kb_path.exists():
+            return {
+                "success": True,
+                "vault": source.name,
+                "note_count": 0,
+                "index": "[知识库为空]",
+                "from_cache": False,
+            }
+
+        # 计算文件 hash
+        current_hash = self._compute_files_hash(kb_path)
+
+        # 尝试读取缓存
+        if not force_refresh:
+            cache = self._load_cache(kb_path)
+            if cache and cache.get("files_hash") == current_hash and cache.get("limit") == limit:
+                return {
+                    "success": True,
+                    "vault": source.name,
+                    "note_count": cache.get("note_count", 0),
+                    "has_profile": cache.get("has_profile", False),
+                    "index": cache.get("index", ""),
+                    "from_cache": True,
+                }
+
+        # 生成新索引
+        result = self._generate_index(kb_path, source.name, limit, include_profile)
+
+        # 保存缓存
+        self._save_cache(kb_path, current_hash, limit, result)
+
+        result["from_cache"] = False
+        return result
+
+    def _compute_files_hash(self, kb_path: Path) -> str:
+        """计算知识库文件的 hash（基于文件名 + mtime）"""
+        files_data: list[tuple[str, float]] = []
+
+        for md_file in kb_path.rglob("*.md"):
+            if ".obsidian" in md_file.parts:
+                continue
+            if md_file.name.startswith("_"):
+                continue
+            try:
+                rel_path = md_file.relative_to(kb_path)
+                mtime = md_file.stat().st_mtime
+                files_data.append((str(rel_path), mtime))
+            except Exception:
+                continue
+
+        # 排序确保顺序一致
+        files_data.sort()
+        return str(hash(tuple(files_data)))
+
+    def _load_cache(self, kb_path: Path) -> dict[str, Any] | None:
+        """加载缓存文件"""
+        cache_file = kb_path / self.CACHE_FILENAME
+        if not cache_file.exists():
+            return None
+        try:
+            import json
+            data = json.loads(cache_file.read_text(encoding="utf-8"))
+            if data.get("version") != self.CACHE_VERSION:
+                return None
+            return data
+        except Exception:
+            return None
+
+    def _save_cache(
+        self,
+        kb_path: Path,
+        files_hash: str,
+        limit: int,
+        result: dict[str, Any],
+    ) -> None:
+        """保存缓存文件"""
+        cache_file = kb_path / self.CACHE_FILENAME
+        try:
+            import json
+            from datetime import datetime
+            data = {
+                "version": self.CACHE_VERSION,
+                "generated_at": datetime.now().isoformat(),
+                "files_hash": files_hash,
+                "limit": limit,
+                "note_count": result.get("note_count", 0),
+                "has_profile": result.get("has_profile", False),
+                "index": result.get("index", ""),
+            }
+            cache_file.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass  # 缓存写入失败不影响主流程
+
+    def _generate_index(
+        self,
+        kb_path: Path,
+        vault_name: str,
+        limit: int,
+        include_profile: bool,
+    ) -> dict[str, Any]:
+        """生成索引"""
+        result_parts: list[str] = []
+        profile_summary = ""
+        note_count = 0
+
+        # 1. 加载用户画像
+        if include_profile:
+            profile_path = kb_path / "user-profile.md"
+            if profile_path.exists():
+                try:
+                    content = profile_path.read_text(encoding="utf-8")
+                    profile_summary = self._extract_profile_summary(content)
+                    if profile_summary:
+                        result_parts.append(f"[用户画像]\n{profile_summary}")
+                except Exception:
+                    pass
+
+        # 2. 收集所有笔记（排除 user-profile.md）
+        notes: list[tuple[Path, float, str]] = []  # (path, mtime, title)
+
+        for md_file in kb_path.rglob("*.md"):
+            if ".obsidian" in md_file.parts:
+                continue
+            if md_file.name == "user-profile.md":
+                continue
+            if md_file.name.startswith("_"):  # 跳过 _index.md, _index_cache.json 等
+                continue
+
+            try:
+                mtime = md_file.stat().st_mtime
+                title = md_file.stem
+                notes.append((md_file, mtime, title))
+            except Exception:
+                continue
+
+        # 3. 排序：修改时间降序，同时间按标题字母序
+        notes.sort(key=lambda x: (-x[1], x[2].lower()))
+
+        # 4. 取前 N 条，生成紧凑索引
+        selected_notes = notes[:limit]
+        note_count = len(selected_notes)
+
+        if selected_notes:
+            index_lines: list[str] = []
+            for md_file, _, title in selected_notes:
+                try:
+                    content = md_file.read_text(encoding="utf-8")
+                    tags = self._extract_top_tags(content, max_tags=3)
+                    tags_str = ", ".join(tags) if tags else ""
+                    if tags_str:
+                        index_lines.append(f"- {title} [{tags_str}]")
+                    else:
+                        index_lines.append(f"- {title}")
+                except Exception:
+                    index_lines.append(f"- {title}")
+
+            notes_index = "\n".join(index_lines)
+            result_parts.append(f"[知识库索引 - {note_count} 条笔记]\n{notes_index}")
+
+        if not result_parts:
+            return {
+                "success": True,
+                "vault": vault_name,
+                "note_count": 0,
+                "has_profile": False,
+                "index": "[知识库为空]",
+            }
+
+        return {
+            "success": True,
+            "vault": vault_name,
+            "note_count": note_count,
+            "has_profile": bool(profile_summary),
+            "index": "\n\n".join(result_parts),
+        }
+
+    def _extract_profile_summary(self, content: str) -> str:
+        """从用户画像中提取关键信息摘要"""
+        _, body = _parse_frontmatter(content)
+
+        summary_lines: list[str] = []
+
+        for line in body.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+
+            # 跳过章节标题
+            if line.startswith("#"):
+                continue
+
+            # 提取关键字段（以 - 开头的列表项，且有值）
+            if line.startswith("- ") and ":" in line:
+                field_line = line[2:].strip()
+                # 检查冒号后是否有值
+                colon_pos = field_line.find(":")
+                if colon_pos == -1:
+                    colon_pos = field_line.find("：")
+                if colon_pos != -1:
+                    value = field_line[colon_pos + 1:].strip()
+                    if value:  # 有实际值
+                        summary_lines.append(f"- {field_line}")
+
+        # 限制摘要长度
+        if len(summary_lines) > 10:
+            summary_lines = summary_lines[:10]
+
+        return "\n".join(summary_lines)
+
+    def _extract_top_tags(self, content: str, max_tags: int = 3) -> list[str]:
+        """提取笔记的前 N 个标签（跳过系统标签）"""
+        metadata, body = _parse_frontmatter(content)
+
+        tags: list[str] = []
+
+        # 从 frontmatter 提取
+        fm_tags = metadata.get("tags", [])
+        if isinstance(fm_tags, list):
+            tags.extend(fm_tags)
+        elif isinstance(fm_tags, str):
+            tags.append(fm_tags)
+
+        # 从正文提取 #tag
+        inline_tags = _extract_tags(body)
+        tags.extend(inline_tags)
+
+        # 去重并过滤系统标签
+        seen: set[str] = set()
+        result: list[str] = []
+        for tag in tags:
+            tag_lower = tag.lower()
+            if tag_lower in seen:
+                continue
+            seen.add(tag_lower)
+            # 跳过系统标签，保留主题标签
+            if tag.startswith("kb/") or tag.startswith("source/"):
+                continue
+            result.append(tag)
+            if len(result) >= max_tags:
+                break
+
+        return result

@@ -134,6 +134,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
         "default_model": "mock",  # 引用 llm.models 中的 key
+        "default_embedding_model": "",  # 引用 llm.models 中 type=embedding 的 key
     },
     # agent 段保留作为所有 agent 的后备默认值
     "agent": {
@@ -636,6 +637,26 @@ class Config:
         # 都找不到，返回 mock
         logger.warning("未知的模型 key: %s，使用 mock provider", model_key)
         return "mock", model_key
+
+    def resolve_embedding_model(self) -> tuple[str, str] | None:
+        """解析 embedding 模型 key 为 (provider_name, model_id)。
+
+        优先使用 llm.default_embedding_model；未设置时返回 None（由调用方降级）。
+
+        Returns:
+            (provider_name, model_id) 元组，或 None
+        """
+        model_key = self.get("llm.default_embedding_model") or None
+        if not model_key:
+            return None
+
+        models = self.get("llm.models", {})
+        if model_key in models:
+            entry = models[model_key]
+            return entry.get("provider", "mock"), entry.get("model_id", model_key)
+
+        logger.warning("未知的 embedding 模型 key: %s", model_key)
+        return None
 
     def get_model_max_output_tokens(self, model_key: str | None = None) -> int:
         """获取模型配置中的 max_output_tokens（最大输出 token 数）。

@@ -25,6 +25,7 @@ from sensenova_claw.capabilities.tools.email import (
     SendEmailTool,
 )
 from sensenova_claw.capabilities.tools.obsidian_tool import (
+    ObsidianIndexTool,
     ObsidianListVaultsTool,
     ObsidianReadTool,
     ObsidianSearchTool,
@@ -64,6 +65,7 @@ class ToolRegistry:
             ObsidianReadTool(),
             ObsidianWriteTool(),
             ObsidianListVaultsTool(),
+            ObsidianIndexTool(),
         ]:
             self.register(tool)
         if config.get("tools.email.enabled", False):

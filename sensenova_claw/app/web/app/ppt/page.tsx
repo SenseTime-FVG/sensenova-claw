@@ -38,7 +38,9 @@ import {
   Palette, ShieldCheck, Mic, Image as ImageIcon,
   Layers, Loader2,
   RefreshCw, Plus, MessageSquare, Trash2,
+  ArrowLeft,
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
@@ -82,6 +84,7 @@ function PptxPreview({ file, onClose }: { file: DroppedFile; onClose: () => void
 // ── 主工作区 ──
 
 function PPTWorkspace() {
+  const router = useRouter();
   const {
     messages,
     sendMessage,
