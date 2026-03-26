@@ -23,7 +23,10 @@ from sensenova_claw.kernel.events.types import (
     USER_TURN_CANCEL_REQUESTED,
 )
 from sensenova_claw.kernel.runtime.state import SessionStateStore
-from sensenova_claw.kernel.runtime.workers.llm_worker import LLMSessionWorker
+from sensenova_claw.kernel.runtime.workers.llm_worker import (
+    LLMSessionWorker,
+    _extract_unsupported_parameters,
+)
 from sensenova_claw.platform.config.config import config
 from tests.conftest import load_gemini_config, skip_if_gemini_unavailable
 
@@ -68,6 +71,80 @@ class _MiniMaxMaxTokensProvider(LLMProvider):
             "'message': 'invalid params, model[MiniMax-M2.7-highspeed] does not support "
             "max tokens > 196608 (2013)', 'http_code': '400'}}"
         )
+
+
+class _CloudswayMaxTokensProvider(LLMProvider):
+    """模拟 Cloudsway/OpenAI 兼容层的 max_tokens 越界报错。"""
+
+    async def call(self, **kwargs):
+        _ = kwargs
+        raise RuntimeError(
+            'Error code: 400 - {\'error\': {\'code\': \'400\', \'message\': '
+            '\'{ "error": { "message": "max_tokens is too large: 8192000. '
+            'This model supports at most 128000 completion tokens, whereas you provided 8192000.", '
+            '"type": "invalid_request_error", "param": "max_tokens", "code": "invalid_value" }\\n}\'}}'
+        )
+
+
+class _RetryableCloudswayMaxTokensProvider(LLMProvider):
+    """首次报 Cloudsway max_tokens 越界，第二次成功。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def call(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            raise RuntimeError(
+                'Error code: 400 - {\'error\': {\'code\': \'400\', \'message\': '
+                '\'{ "error": { "message": "max_tokens is too large: 8192000. '
+                'This model supports at most 128000 completion tokens, whereas you provided 8192000.", '
+                '"type": "invalid_request_error", "param": "max_tokens", "code": "invalid_value" }\\n}\'}}'
+            )
+        return {
+            "content": "cloudsway 重试成功",
+            "tool_calls": [],
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+
+class _GeminiCloudswayMaxTokensProvider(LLMProvider):
+    """模拟 Gemini/Cloudsway 的 maxOutputTokens 越界报错。"""
+
+    async def call(self, **kwargs):
+        _ = kwargs
+        raise RuntimeError(
+            'Error code: 400 - {\'error\': {\'code\': \'400\', \'message\': '
+            '\'{ "error": { "code": 400, "message": '
+            '"Unable to submit request because it has a maxOutputTokens value of 8192000 '
+            'but the supported range is from 1 (inclusive) to 65537 (exclusive). '
+            'Update the value and try again.", "status": "INVALID_ARGUMENT" }\\n}\'}}'
+        )
+
+
+class _RetryableGeminiCloudswayMaxTokensProvider(LLMProvider):
+    """首次报 Gemini/Cloudsway maxOutputTokens 越界，第二次成功。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def call(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            raise RuntimeError(
+                'Error code: 400 - {\'error\': {\'code\': \'400\', \'message\': '
+                '\'{ "error": { "code": 400, "message": '
+                '"Unable to submit request because it has a maxOutputTokens value of 8192000 '
+                'but the supported range is from 1 (inclusive) to 65537 (exclusive). '
+                'Update the value and try again.", "status": "INVALID_ARGUMENT" }\\n}\'}}'
+            )
+        return {
+            "content": "gemini cloudsway 重试成功",
+            "tool_calls": [],
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
 
 
 class _RetryableMaxTokensProvider(LLMProvider):
@@ -146,6 +223,41 @@ class _RetryableThenErrorProvider(LLMProvider):
                 "'type': 'invalid_request_error', 'code': 'invalid_parameter_error'}}"
             )
         raise RuntimeError("第二次调用仍失败")
+
+
+class _RetryableUnknownParamsProvider(LLMProvider):
+    """首次返回未知参数错误，移除后重试成功。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def call(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            raise RuntimeError(
+                'Error code: 400 - {"error": {"message": "Unknown parameters: [\'top_k\', \'foo\']."}}'
+            )
+        return {
+            "content": "参数剔除后成功",
+            "tool_calls": [],
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+
+class _ExhaustUnknownParamsProvider(LLMProvider):
+    """连续返回未知参数错误，直到超过自动重试上限。"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+        self._params = ["top_k", "foo", "bar", "baz"]
+
+    async def call(self, **kwargs):
+        self.calls.append(kwargs)
+        current_index = len(self.calls) - 1
+        raise RuntimeError(
+            f'Error code: 400 - {{"error": {{"message": "Unknown parameter: \'{self._params[current_index]}\'."}}}}'
+        )
 
 
 class _SimpleLLMRuntime:
@@ -477,6 +589,58 @@ class TestLLMWorkerError:
         finally:
             config.data = original
 
+    async def test_cloudsway_max_tokens_out_of_range_is_normalized_for_user(self, private_bus, public_bus):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "mock"
+            factory = LLMFactory()
+            factory._providers["openai-cloudsway"] = _CloudswayMaxTokensProvider()
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 4)
+
+            event = _make_llm_event("openai-cloudsway", "MaaS_GP_5.4_20260305", [{"role": "user", "content": "你好"}])
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            types = [e.type for e in collected]
+            assert ERROR_RAISED not in types
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 2
+            assert "openai-cloudsway:MaaS_GP_5.4_20260305 调用失败" in notices[0].payload["body"]
+            assert "128000" in notices[0].payload["body"]
+            assert "mock:mock-agent-v1" in notices[1].payload["body"]
+        finally:
+            config.data = original
+
+    async def test_gemini_cloudsway_max_tokens_out_of_range_is_normalized_for_user(self, private_bus, public_bus):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "mock"
+            factory = LLMFactory()
+            factory._providers["gemini"] = _GeminiCloudswayMaxTokensProvider()
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 4)
+
+            event = _make_llm_event("gemini", "MaaS_Ge_3.1_pro_preview_20260219", [{"role": "user", "content": "你好"}])
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            types = [e.type for e in collected]
+            assert ERROR_RAISED not in types
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 2
+            assert "gemini:MaaS_Ge_3.1_pro_preview_20260219 调用失败" in notices[0].payload["body"]
+            assert "65536" in notices[0].payload["body"]
+            assert "mock:mock-agent-v1" in notices[1].payload["body"]
+        finally:
+            config.data = original
+
     async def test_max_tokens_out_of_range_retries_once_after_notification(self, private_bus, public_bus):
         provider = _RetryableMaxTokensProvider()
         factory = LLMFactory()
@@ -511,6 +675,167 @@ class TestLLMWorkerError:
         assert result.payload["response"]["content"] == "重试成功"
         assert provider.calls[0]["max_tokens"] == 1000000
         assert provider.calls[1]["max_tokens"] == 65536
+
+    async def test_cloudsway_max_tokens_out_of_range_retries_once_after_notification(self, private_bus, public_bus):
+        provider = _RetryableCloudswayMaxTokensProvider()
+        factory = LLMFactory()
+        factory._providers["openai-cloudsway"] = provider
+        runtime = _SimpleLLMRuntime(factory)
+        worker = LLMSessionWorker("s1", private_bus, runtime)
+
+        collected, done, task = await _collect_from_bus(public_bus, 4)
+
+        event = EventEnvelope(
+            type=LLM_CALL_REQUESTED,
+            session_id="s1",
+            turn_id="t1",
+            payload={
+                "llm_call_id": "llm_retry_cloudsway",
+                "provider": "openai-cloudsway",
+                "model": "MaaS_GP_5.4_20260305",
+                "messages": [{"role": "user", "content": "你好"}],
+                "max_tokens": 8192000,
+                "stream": False,
+            },
+        )
+        await worker._handle(event)
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        types = [e.type for e in collected]
+        assert ERROR_RAISED not in types
+        assert NOTIFICATION_SESSION in types
+        notification = [e for e in collected if e.type == NOTIFICATION_SESSION][0]
+        assert "已自动调整为 128000 并重试" in notification.payload["body"]
+        result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+        assert result.payload["response"]["content"] == "cloudsway 重试成功"
+        assert provider.calls[0]["max_tokens"] == 8192000
+        assert provider.calls[1]["max_tokens"] == 128000
+
+    async def test_gemini_cloudsway_max_tokens_out_of_range_retries_once_after_notification(self, private_bus, public_bus):
+        provider = _RetryableGeminiCloudswayMaxTokensProvider()
+        factory = LLMFactory()
+        factory._providers["gemini"] = provider
+        runtime = _SimpleLLMRuntime(factory)
+        worker = LLMSessionWorker("s1", private_bus, runtime)
+
+        collected, done, task = await _collect_from_bus(public_bus, 4)
+
+        event = EventEnvelope(
+            type=LLM_CALL_REQUESTED,
+            session_id="s1",
+            turn_id="t1",
+            payload={
+                "llm_call_id": "llm_retry_gemini_cloudsway",
+                "provider": "gemini",
+                "model": "MaaS_Ge_3.1_pro_preview_20260219",
+                "messages": [{"role": "user", "content": "你好"}],
+                "max_tokens": 8192000,
+                "stream": False,
+            },
+        )
+        await worker._handle(event)
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        types = [e.type for e in collected]
+        assert ERROR_RAISED not in types
+        assert NOTIFICATION_SESSION in types
+        notification = [e for e in collected if e.type == NOTIFICATION_SESSION][0]
+        assert "已自动调整为 65536 并重试" in notification.payload["body"]
+        result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+        assert result.payload["response"]["content"] == "gemini cloudsway 重试成功"
+        assert provider.calls[0]["max_tokens"] == 8192000
+        assert provider.calls[1]["max_tokens"] == 65536
+
+    async def test_unknown_parameters_are_removed_in_one_retry(self, private_bus, public_bus):
+        provider = _RetryableUnknownParamsProvider()
+        factory = LLMFactory()
+        factory._providers["qwen"] = provider
+        runtime = _SimpleLLMRuntime(factory)
+        worker = LLMSessionWorker("s1", private_bus, runtime)
+
+        collected, done, task = await _collect_from_bus(public_bus, 4)
+
+        event = EventEnvelope(
+            type=LLM_CALL_REQUESTED,
+            session_id="s1",
+            turn_id="t1",
+            payload={
+                "llm_call_id": "llm_unknown_param_retry",
+                "provider": "qwen",
+                "model": "qwen3.5-plus",
+                "messages": [{"role": "user", "content": "你好"}],
+                "extra_body": {"top_p": 0.95, "top_k": 20, "foo": 1, "bar": 2},
+                "stream": False,
+            },
+        )
+        await worker._handle(event)
+        await asyncio.wait_for(done.wait(), timeout=5)
+        task.cancel()
+
+        notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+        assert len(notices) == 1
+        assert "top_k, foo" in notices[0].payload["body"]
+        result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+        assert result.payload["response"]["content"] == "参数剔除后成功"
+        assert provider.calls[0]["extra_body"] == {"top_p": 0.95, "top_k": 20, "foo": 1, "bar": 2}
+        assert provider.calls[1]["extra_body"] == {"top_p": 0.95, "top_k": None, "foo": None, "bar": 2}
+
+    async def test_unknown_parameter_retry_stops_after_three_rounds(self, private_bus, public_bus):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "mock"
+            provider = _ExhaustUnknownParamsProvider()
+            factory = LLMFactory()
+            factory._providers["qwen"] = provider
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 8)
+
+            event = EventEnvelope(
+                type=LLM_CALL_REQUESTED,
+                session_id="s1",
+                turn_id="t1",
+                payload={
+                    "llm_call_id": "llm_unknown_param_limit",
+                    "provider": "qwen",
+                    "model": "qwen3.5-plus",
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "extra_body": {"top_k": 20, "foo": 1, "bar": 2, "baz": 3},
+                    "stream": False,
+                },
+            )
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 5
+            assert "top_k" in notices[0].payload["body"]
+            assert "foo" in notices[1].payload["body"]
+            assert "bar" in notices[2].payload["body"]
+            assert "qwen:qwen3.5-plus 调用失败" in notices[3].payload["body"]
+            assert "mock:mock-agent-v1" in notices[4].payload["body"]
+            result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert "当前没有可用的 LLM" in result.payload["response"]["content"]
+            assert provider.calls[0]["extra_body"] == {"top_p": 0.95, "top_k": 20, "foo": 1, "bar": 2, "baz": 3}
+            assert provider.calls[1]["extra_body"] == {"top_p": 0.95, "top_k": None, "foo": 1, "bar": 2, "baz": 3}
+            assert provider.calls[2]["extra_body"] == {"top_p": 0.95, "top_k": None, "foo": None, "bar": 2, "baz": 3}
+            assert provider.calls[3]["extra_body"] == {"top_p": 0.95, "top_k": None, "foo": None, "bar": None, "baz": 3}
+        finally:
+            config.data = original
+
+
+def test_extract_unsupported_parameters_from_openai_nested_error_message():
+    message = (
+        "Error code: 400 - {'error': {'code': '400', 'message': "
+        '\'{ "error": { "message": "Unknown parameter: \\\'top_k\\\'.", '
+        '"type": "invalid_request_error", "param": "top_k", "code": "unknown_parameter" }\\n}\'}}'
+    )
+
+    assert _extract_unsupported_parameters(message) == ["top_k"]
 
     async def test_provider_failure_falls_back_to_default_model_with_notification(self, private_bus, public_bus):
         original = deepcopy(config.data)

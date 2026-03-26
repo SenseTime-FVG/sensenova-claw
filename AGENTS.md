@@ -83,6 +83,26 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 每次你执行完成任务之后，需要总结成功和失败的经验，并选择会对后续任务有帮助的内容保存在这里
 
+### 2026-03-26 OpenAI 兼容 top_k 修复补充
+
+成功经验：
+- `agent.extra_body` 的全局默认采样参数不能直接假设所有 OpenAI 兼容网关都支持；对 `OpenAIProvider` 按 `source_type` 做请求级过滤，是修复 `Unknown parameter: 'top_k'` 这类报错的最小改动。
+- 这类问题要同时覆盖 `call` 和 `stream_call` 两条路径；工作台聊天默认走流式，只测非流式很容易漏回归。
+- 用伪造 `client.chat.completions.create` 捕获最终请求体的单测最直接，能精确断言 `extra_body` 到底发了什么，不依赖真实 API。
+
+失败/风险经验：
+- 当前 `tests/unit/test_llm_worker.py` 在本仓库环境下存在既有失败，且会混入与本次修复无关的 `llm.call_delta/notification` 断言差异；验证 provider 参数透传问题时，应优先跑更聚焦的 provider 单测，避免被无关失败干扰判断。
+
+### 2026-03-26 Unknown Parameter 自动重试补充
+
+成功经验：
+- 当用户明确要求“保留 provider 原始透传行为”时，把兼容性修复放在 `LLMSessionWorker._execute_request_block()` 的同目标重试层，比在 provider 里静态过滤更符合预期，也不会误伤其他支持扩展参数的网关。
+- “未知参数”重试应直接基于错误文本提取参数名，并一次移除同一条错误里识别出的全部参数再重试；这样比每次只移除一个参数更贴近真实网关返回，也能减少无效重试次数。
+- 将 `max_tokens` 自动收敛和 `unsupported_parameters` 自动剔除统一放进同一个请求块循环后，只要保留独立计数和通知文案，就能兼容两类自动修复策略。
+
+失败/风险经验：
+- `agent.extra_body` 会在 worker 层与默认 `top_p` 合并，写断言时不能只看测试显式传入的字段；否则很容易把默认值误判成实现缺陷。
+
 ### 2026-03-05 任务复盘
 
 成功经验：
