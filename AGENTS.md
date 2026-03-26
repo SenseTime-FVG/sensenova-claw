@@ -1358,3 +1358,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - `sensenova_claw/app/web/e2e/tool-confirmation-resolution.spec.ts` 里的 session 弹窗用例当前在本机仍会失败，现象是 `/sessions/[id]` 路径下拿不到 `tool-confirmation-dialog`；这和本次 toast 自动消失改动无直接证据关联，提交前需明确区分“本次新增回归通过”与“仓库既有用例仍失败”。
+
+### 2026-03-26 ask_user 消息内联补充
+
+成功经验：
+- `ask_user` 想同时显示在通知和聊天工具卡片里时，把问题元数据挂到工具消息本身最稳；仅靠通知中心状态，很难把“对应哪一个 ask_user 工具块”这件事关联准确。
+- `/chat` 页的前端 e2e 不能只 mock `auth/status` 和 `sessions`；当前工作台初始化还会请求 `agents`、`custom-pages`、`files/roots`、`todolist` 等接口，不补齐会让测试在真正进入聊天区前就偏到登录页或空态。
+- Mock WebSocket 时只拦业务 `localhost:8000/ws`，保留 Next dev 的 HMR socket；全量替换 `window.WebSocket` 会把页面自身运行搞崩，表面看像业务回归，实际是测试夹具问题。
+
+失败/风险经验：
+- 旧 `ask-user.spec.ts` 夹具和当前鉴权/工作台初始化流程已经漂移，新增聊天区行为回归前要先修测试基建，否则失败点会落在登录和页面初始化，而不是 `ask_user` 本身。

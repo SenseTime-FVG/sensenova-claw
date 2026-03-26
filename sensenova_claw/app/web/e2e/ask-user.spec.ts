@@ -1,9 +1,31 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+const E2E_TOKEN = 'e2e-sensenova-claw-token';
+
+async function loginForAskUserTests(page: Page) {
+  await page.goto('/login');
+  await page.getByLabel('Token').fill(E2E_TOKEN);
+  await page.getByRole('button', { name: '验证 Token' }).click();
+  await page.evaluate(() => {
+    sessionStorage.setItem('auth_just_verified', '1');
+  });
+}
+
+async function gotoChatPage(page: Page) {
+  await loginForAskUserTests(page);
+  await page.goto('/chat');
+}
+
+async function gotoSessionPage(page: Page, sessionId: string) {
+  await loginForAskUserTests(page);
+  await page.goto(`/sessions/${sessionId}`);
+}
 
 function mockAuthAndWebSocket() {
   // 登录态：避免被 ProtectedRoute 重定向到 /login
   localStorage.setItem('access_token', 'e2e-access-token');
   localStorage.setItem('refresh_token', 'e2e-refresh-token');
+  const NativeWebSocket = window.WebSocket;
 
   class MockWebSocket {
     static readonly CONNECTING = 0;
@@ -41,11 +63,45 @@ function mockAuthAndWebSocket() {
     }
   }
 
-  (window as any).WebSocket = MockWebSocket;
+  function WrappedWebSocket(url: string | URL, protocols?: string | string[]) {
+    const urlString = String(url);
+    if (urlString.includes('localhost:8000/ws')) {
+      return new MockWebSocket(urlString);
+    }
+    return new NativeWebSocket(url, protocols);
+  }
+
+  Object.assign(WrappedWebSocket, {
+    CONNECTING: MockWebSocket.CONNECTING,
+    OPEN: MockWebSocket.OPEN,
+    CLOSING: MockWebSocket.CLOSING,
+    CLOSED: MockWebSocket.CLOSED,
+  });
+
+  Object.defineProperty(window, 'WebSocket', {
+    configurable: true,
+    writable: true,
+    value: WrappedWebSocket,
+  });
 }
 
 test.describe('ask_user UI（mock websocket）', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, context }) => {
+    await context.addCookies([
+      {
+        name: 'sensenova_claw_token',
+        value: E2E_TOKEN,
+        domain: '127.0.0.1',
+        path: '/',
+      },
+      {
+        name: 'sensenova_claw_token',
+        value: E2E_TOKEN,
+        domain: 'localhost',
+        path: '/',
+      },
+    ]);
+
     await page.route('**/api/auth/me', async (route) => {
       await route.fulfill({
         status: 200,
@@ -59,6 +115,70 @@ test.describe('ask_user UI（mock websocket）', () => {
           created_at: Date.now() / 1000,
           last_login: Date.now() / 1000,
         }),
+      });
+    });
+
+    await page.route('**/api/auth/verify-token', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ authenticated: true }),
+      });
+    });
+
+    await page.route('**/api/auth/status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ authenticated: true }),
+      });
+    });
+
+    await page.route('**/api/config/llm-status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ configured: true }),
+      });
+    });
+
+    await page.route('**/api/agents', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'default',
+            name: 'Default Agent',
+            description: '默认智能体',
+            status: 'active',
+            model: 'mock',
+          },
+        ]),
+      });
+    });
+
+    await page.route('**/api/custom-pages', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ pages: [] }),
+      });
+    });
+
+    await page.route('**/api/files/roots', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ roots: [] }),
+      });
+    });
+
+    await page.route('**/api/todolist/*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [] }),
       });
     });
 
@@ -88,11 +208,120 @@ test.describe('ask_user UI（mock websocket）', () => {
       });
     });
 
+    await page.route('**/api/**', async (route) => {
+      const url = route.request().url();
+
+      if (url.includes('/api/auth/verify-token')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ authenticated: true }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/auth/status')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ authenticated: true }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/config/llm-status')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ configured: true }),
+        });
+        return;
+      }
+
+      if (url.endsWith('/api/sessions')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            sessions: [
+              {
+                session_id: 'sess_e2e',
+                created_at: Date.now() / 1000,
+                last_active: Date.now() / 1000,
+                status: 'active',
+                meta: JSON.stringify({ title: 'E2E Session' }),
+              },
+            ],
+          }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/sessions/') && url.endsWith('/messages')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ messages: [] }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/agents')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              id: 'default',
+              name: 'Default Agent',
+              description: '默认智能体',
+              status: 'active',
+              model: 'mock',
+            },
+          ]),
+        });
+        return;
+      }
+
+      if (url.includes('/api/custom-pages')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ pages: [] }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/files/roots')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ roots: [] }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/todolist/')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ items: [] }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({}),
+      });
+    });
+
     await page.addInitScript(mockAuthAndWebSocket);
   });
 
   test('ask_user 问题应显示弹窗', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -112,8 +341,62 @@ test.describe('ask_user UI（mock websocket）', () => {
     await expect(page.getByTestId('ask-user-dialog')).toBeVisible({ timeout: 10000 });
   });
 
+  test('ask_user 工具卡片内应显示内嵌回复框并可提交', async ({ page }) => {
+    await gotoChatPage(page);
+    await page.getByTestId('session-list').getByText('E2E Session').click();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'tool_execution',
+        session_id: 'sess_e2e',
+        payload: {
+          tool_call_id: 'tc_inline_1',
+          tool_name: 'ask_user',
+          arguments: {
+            question: '请选择部署环境',
+          },
+        },
+        timestamp: Date.now() / 1000,
+      });
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_inline_1',
+          question: '请选择部署环境',
+          options: ['dev', 'prod'],
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    const inlineCard = page.getByTestId('inline-ask-user-q_inline_1');
+    await expect(inlineCard).toBeVisible({ timeout: 10000 });
+    await expect(inlineCard).toContainText('请选择部署环境');
+    await expect(inlineCard).toContainText('dev');
+    await expect(inlineCard).toContainText('prod');
+    await inlineCard.getByTestId('ask-user-shared-custom-input').fill('staging');
+    await inlineCard.getByTestId('ask-user-shared-confirm').click();
+    await expect(inlineCard.getByText('已提交回复，等待服务端确认最终结果。')).toBeVisible({ timeout: 10000 });
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_inline_1'
+          && msg.payload?.answer === 'staging'
+          && msg.session_id === 'sess_e2e'
+      )
+    ).toBeTruthy();
+  });
+
   test('chat 页面可在当前会话接收其他 session 的 ask_user，并按来源 session 提交回答', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -159,7 +442,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
     await page.getByText('E2E Session').click();
     await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
 
@@ -219,7 +502,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('ask_user 弹窗 textarea 按 Enter 可直接确认提交', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -256,7 +539,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('ask_user 弹窗 textarea 按 Shift+Enter 仅换行不提交', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -294,7 +577,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面多个 ask_user 按 FIFO 依次弹出', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -339,7 +622,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面可处理 tool_confirmation_requested 并回传批准结果', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -375,7 +658,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面审批与问答混合事件应按 FIFO 顺序处理', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -412,7 +695,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面交互超时后应自动关闭当前弹窗', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -435,7 +718,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('收到 user_question_answered_event 后应关闭对应问题弹窗', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -470,7 +753,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面错误文案应优先回落到 error_type', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -488,7 +771,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面应忽略非当前 session 的完成事件，避免误关闭 ask_user 弹窗', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -521,7 +804,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('session 页面可处理 ask_user', async ({ page }) => {
-    await page.goto('/sessions/sess_e2e');
+    await gotoSessionPage(page, 'sess_e2e');
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -542,8 +825,62 @@ test.describe('ask_user UI（mock websocket）', () => {
     await expect(page.getByTestId('current-session-id')).toHaveText('sess_e2e');
   });
 
+  test('session 页面 ask_user 工具卡片内应显示内嵌回复框并可提交', async ({ page }) => {
+    await gotoSessionPage(page, 'sess_e2e');
+
+    await page.evaluate(() => {
+      const sent: string[] = [];
+      (window as any).__mockWsSent = sent;
+      (window as any).__mockWs.send = (data: string) => {
+        sent.push(data);
+      };
+
+      (window as any).__mockWs.emit({
+        type: 'tool_execution',
+        session_id: 'sess_e2e',
+        payload: {
+          tool_call_id: 'tc_session_inline_1',
+          tool_name: 'ask_user',
+          arguments: {
+            question: '请选择会话环境',
+          },
+        },
+        timestamp: Date.now() / 1000,
+      });
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_session_inline_1',
+          question: '请选择会话环境',
+          options: ['dev', 'prod'],
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    const inlineCard = page.getByTestId('inline-ask-user-q_session_inline_1');
+    await expect(inlineCard).toBeVisible({ timeout: 10000 });
+    await inlineCard.getByTestId('ask-user-shared-custom-input').fill('staging');
+    await inlineCard.getByTestId('ask-user-shared-confirm').click();
+    await expect(inlineCard.getByText('已提交回复，等待服务端确认最终结果。')).toBeVisible({ timeout: 10000 });
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_session_inline_1'
+          && msg.payload?.answer === 'staging'
+          && msg.session_id === 'sess_e2e'
+      )
+    ).toBeTruthy();
+  });
+
   test('session 页面可接收其他 session 的 ask_user，并按来源 session 提交回答', async ({ page }) => {
-    await page.goto('/sessions/sess_e2e');
+    await gotoSessionPage(page, 'sess_e2e');
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -578,7 +915,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('session 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input', async ({ page }) => {
-    await page.goto('/sessions/sess_e2e');
+    await gotoSessionPage(page, 'sess_e2e');
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -640,7 +977,7 @@ test.describe('真实 API ask_user 回归', () => {
   test.skip(process.env.ENABLE_REAL_API_E2E !== '1', '设置 ENABLE_REAL_API_E2E=1 后执行真实 API 回归');
 
   test('真实 API ask_user 回归', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
     await expect(page.getByText('已连接')).toBeVisible({ timeout: 30000 });
 
     await page.getByTestId('chat-input').fill(

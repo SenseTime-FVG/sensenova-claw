@@ -7,10 +7,23 @@ import { ArrowLeft, Bot, User, Wrench, Loader2, AlertCircle, Send, Square, Chevr
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { isJsonLike, stringifyContent } from '@/components/chat/messageContent';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { AskUserResponseForm } from '@/components/chat/AskUserResponseForm';
 import { type PendingInteraction } from '@/components/chat/QuestionDialog';
 import { MarkdownContent } from '@/components/chat/MarkdownContent';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
+
+interface AskUserToolState {
+  questionId: string;
+  sourceSessionId: string;
+  sourceAgentId: string;
+  sourceAgentName: string;
+  question: string;
+  options: string[] | null;
+  multiSelect: boolean;
+  pending: boolean;
+  resolved: boolean;
+}
 
 interface ToolInfo {
   name: string;
@@ -19,6 +32,7 @@ interface ToolInfo {
   success?: boolean;
   error?: string;
   status: 'running' | 'completed';
+  askUser?: AskUserToolState;
 }
 
 interface Message {
@@ -91,7 +105,73 @@ function InlineToolContent({ value }: { value: unknown }) {
   return <MarkdownRenderer className="chat-markdown chat-markdown--detail text-xs" content={stringifyContent(value)} />;
 }
 
-function SingleToolItem({ msg }: { msg: Message }) {
+function attachAskUserToLatestToolMessage(messages: Message[], askUser: AskUserToolState): Message[] {
+  if (!askUser.questionId) return messages;
+  const next = [...messages];
+
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    const message = next[index];
+    if (message.role !== 'tool' || message.toolInfo?.name !== 'ask_user') continue;
+    if (message.toolInfo.askUser?.questionId === askUser.questionId) return messages;
+    if (!message.toolInfo.askUser) {
+      next[index] = {
+        ...message,
+        toolInfo: {
+          ...message.toolInfo,
+          askUser,
+        },
+      };
+      return next;
+    }
+  }
+
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    const message = next[index];
+    if (message.role !== 'tool' || message.toolInfo?.name !== 'ask_user') continue;
+    next[index] = {
+      ...message,
+      toolInfo: {
+        ...message.toolInfo,
+        askUser,
+      },
+    };
+    return next;
+  }
+
+  return messages;
+}
+
+function updateAskUserToolState(messages: Message[], questionId: string, patch: Partial<AskUserToolState>): Message[] {
+  if (!questionId) return messages;
+  return messages.map((message) => {
+    if (message.role !== 'tool' || !message.toolInfo?.askUser || message.toolInfo.askUser.questionId !== questionId) {
+      return message;
+    }
+    return {
+      ...message,
+      toolInfo: {
+        ...message.toolInfo,
+        askUser: {
+          ...message.toolInfo.askUser,
+          ...patch,
+        },
+      },
+    };
+  });
+}
+
+function SingleToolItem({
+  msg,
+  onSubmitAskUser,
+}: {
+  msg: Message;
+  onSubmitAskUser: (params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const ti = msg.toolInfo;
 
@@ -105,6 +185,7 @@ function SingleToolItem({ msg }: { msg: Message }) {
   const statusCls = ti
     ? (ti.status === 'running' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : ti.success !== false ? 'bg-green-500/10 text-green-600 dark:text-green-400' : 'bg-red-500/10 text-red-600 dark:text-red-400')
     : 'bg-green-500/10 text-green-600 dark:text-green-400';
+  const inlineAskUser = ti?.askUser;
 
   return (
     <div className="py-0.5">
@@ -117,6 +198,35 @@ function SingleToolItem({ msg }: { msg: Message }) {
         <span className="font-mono text-foreground/80">{toolName}</span>
         <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium leading-none ${statusCls}`}>{statusLabel}</span>
       </button>
+      {inlineAskUser && (
+        <div
+          data-testid={`inline-ask-user-${inlineAskUser.questionId}`}
+          className="ml-5 mt-2 rounded-xl border border-sky-200/60 bg-sky-50/50 px-3 py-3"
+        >
+          <AskUserResponseForm
+            value={{
+              question: inlineAskUser.question,
+              options: inlineAskUser.options,
+              multiSelect: inlineAskUser.multiSelect,
+            }}
+            pending={inlineAskUser.pending}
+            resolved={inlineAskUser.resolved}
+            testIdPrefix="ask-user-shared"
+            onSubmit={(answer) => onSubmitAskUser({
+              questionId: inlineAskUser.questionId,
+              sourceSessionId: inlineAskUser.sourceSessionId,
+              answer,
+              cancelled: false,
+            })}
+            onCancel={() => onSubmitAskUser({
+              questionId: inlineAskUser.questionId,
+              sourceSessionId: inlineAskUser.sourceSessionId,
+              answer: null,
+              cancelled: true,
+            })}
+          />
+        </div>
+      )}
       {expanded && (
         <div className="ml-5 mt-1 border-l-2 border-border/30 pl-3 space-y-2 pb-1">
           {ti ? (
@@ -147,7 +257,18 @@ function SingleToolItem({ msg }: { msg: Message }) {
   );
 }
 
-function InlineToolCallGroup({ tools }: { tools: Message[] }) {
+function InlineToolCallGroup({
+  tools,
+  onSubmitAskUser,
+}: {
+  tools: Message[];
+  onSubmitAskUser: (params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const completed = tools.filter(t => t.toolInfo?.status === 'completed').length;
   const running = tools.filter(t => t.toolInfo?.status === 'running').length;
@@ -179,7 +300,13 @@ function InlineToolCallGroup({ tools }: { tools: Message[] }) {
       </button>
       {expanded && (
         <div className="ml-3 mt-1 border-l-2 border-border/30 pl-2">
-          {tools.map((tool, idx) => <SingleToolItem key={tool.id || idx} msg={tool} />)}
+          {tools.map((tool, idx) => (
+            <SingleToolItem
+              key={tool.id || idx}
+              msg={tool}
+              onSubmitAskUser={onSubmitAskUser}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -256,13 +383,24 @@ function MessageBubble({ msg }: { msg: Message }) {
   return null;
 }
 
-function SessionMessageList({ messages }: { messages: Message[] }) {
+function SessionMessageList({
+  messages,
+  onSubmitAskUser,
+}: {
+  messages: Message[];
+  onSubmitAskUser: (params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => void;
+}) {
   const groups = groupSessionMessages(messages);
   return (
     <>
       {groups.map(group => {
         if (group.type === 'tool_group') {
-          return <InlineToolCallGroup key={group.key} tools={group.messages} />;
+          return <InlineToolCallGroup key={group.key} tools={group.messages} onSubmitAskUser={onSubmitAskUser} />;
         }
         return <MessageBubble key={group.key} msg={group.msg} />;
       })}
@@ -359,6 +497,34 @@ export default function SessionDetailPage() {
     setActiveInteraction(null);
     setInteractionSubmitting(false);
   }, []);
+
+  const submitQuestionResponse = useCallback((params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => {
+    const { questionId, sourceSessionId, answer, cancelled } = params;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!sourceSessionId) return;
+
+    setInteractionSubmitting(true);
+    setMessages((prev) => updateAskUserToolState(prev, questionId, {
+      pending: true,
+      resolved: false,
+    }));
+    wsRef.current.send(JSON.stringify({
+      type: 'user_question_answered',
+      session_id: sourceSessionId,
+      payload: {
+        question_id: questionId,
+        answer,
+        cancelled,
+      },
+      timestamp: Date.now() / 1000,
+    }));
+    resolveInteraction('question', questionId);
+  }, [resolveInteraction]);
 
   const resetTurnTracking = useCallback(() => {
     cancelledTurnIdsRef.current.clear();
@@ -556,6 +722,17 @@ export default function SessionDetailPage() {
             if (!sourceSessionId) break;
             const sourceAgentId = String(payload.source_agent_id || 'default').trim() || 'default';
             const sourceAgentName = String(payload.source_agent_name || sourceAgentId).trim() || sourceAgentId;
+            setMessages((prev) => attachAskUserToLatestToolMessage(prev, {
+              questionId,
+              sourceSessionId,
+              sourceAgentId,
+              sourceAgentName,
+              question: String(payload.question || ''),
+              options: Array.isArray(payload.options) ? payload.options.map(String) : null,
+              multiSelect: Boolean(payload.multi_select),
+              pending: false,
+              resolved: false,
+            }));
             enqueueInteraction({
               kind: 'question',
               interactionId: questionId,
@@ -575,6 +752,10 @@ export default function SessionDetailPage() {
           case 'user_question_answered_event': {
             const questionId = String(payload.question_id || '');
             if (!questionId) break;
+            setMessages((prev) => updateAskUserToolState(prev, questionId, {
+              pending: false,
+              resolved: true,
+            }));
             resolveInteraction('question', questionId);
             break;
           }
@@ -627,20 +808,13 @@ export default function SessionDetailPage() {
     if (activeInteraction?.kind === 'confirmation') return;
 
     if (activeInteraction?.kind === 'question') {
-      if (!activeInteraction.sourceSessionId) return;
-      setInteractionSubmitting(true);
-      wsRef.current.send(JSON.stringify({
-        type: 'user_question_answered',
-        session_id: activeInteraction.sourceSessionId,
-        payload: {
-          question_id: activeInteraction.interactionId,
-          answer: content,
-          cancelled: false,
-        },
-        timestamp: Date.now() / 1000,
-      }));
+      submitQuestionResponse({
+        questionId: activeInteraction.interactionId,
+        sourceSessionId: activeInteraction.sourceSessionId,
+        answer: content,
+        cancelled: false,
+      });
       setInputValue('');
-      resolveInteraction('question', activeInteraction.interactionId);
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
@@ -661,7 +835,7 @@ export default function SessionDetailPage() {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [activeInteraction, inputValue, interactionSubmitting, resetTurnTracking, sessionId]);
+  }, [activeInteraction, inputValue, interactionSubmitting, resetTurnTracking, sessionId, submitQuestionResponse]);
 
   const cancelTurn = useCallback(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -678,22 +852,13 @@ export default function SessionDetailPage() {
 
   const sendQuestionAnswer = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     if (!activeInteraction || activeInteraction.kind !== 'question') return;
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    if (!activeInteraction.sourceSessionId) return;
-
-    setInteractionSubmitting(true);
-    wsRef.current.send(JSON.stringify({
-      type: 'user_question_answered',
-      session_id: activeInteraction.sourceSessionId,
-      payload: {
-        question_id: activeInteraction.interactionId,
-        answer,
-        cancelled,
-      },
-      timestamp: Date.now() / 1000,
-    }));
-    resolveInteraction('question', activeInteraction.interactionId);
-  }, [activeInteraction, resolveInteraction]);
+    submitQuestionResponse({
+      questionId: activeInteraction.interactionId,
+      sourceSessionId: activeInteraction.sourceSessionId,
+      answer,
+      cancelled,
+    });
+  }, [activeInteraction, submitQuestionResponse]);
 
   const sendConfirmationResponse = useCallback((approved: boolean) => {
     if (!activeInteraction || activeInteraction.kind !== 'confirmation') return;
@@ -806,7 +971,7 @@ export default function SessionDetailPage() {
                   </span>
                 </div>
               )}
-              <SessionMessageList messages={visibleMessages} />
+              <SessionMessageList messages={visibleMessages} onSubmitAskUser={submitQuestionResponse} />
               {isTyping && <TypingIndicator />}
               <div ref={chatEndRef} />
             </div>

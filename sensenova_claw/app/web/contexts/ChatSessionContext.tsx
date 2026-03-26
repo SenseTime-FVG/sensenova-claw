@@ -22,6 +22,8 @@ import {
   groupSessionsToTasks,
   findLatestAssistantTurnMessage,
   upsertAssistantTurnMessage,
+  attachAskUserToLatestToolMessage,
+  updateAskUserToolState,
 } from '@/lib/chatTypes';
 import { extractThinkContentFromReasoningDetails } from '@/lib/assistantThink';
 
@@ -77,6 +79,12 @@ export interface ChatSessionContextValue {
   activeInteraction: PendingInteraction | null;
   interactionSubmitting: boolean;
   sendQuestionAnswer: (answer: string | string[] | null, cancelled: boolean) => void;
+  submitQuestionResponse: (params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => void;
   sendConfirmationResponse: (approved: boolean) => void;
   handleInteractionTimeout: () => void;
 
@@ -113,7 +121,7 @@ const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
 // ── Provider ──
 
 export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
-  const { pushNotification, pushCard, resolveCard } = useNotification();
+  const { pushNotification, pushCard, resolveCard, markCardPending } = useNotification();
   const { isAuthenticated, isLoading } = useAuth();
   const pathname = usePathname();
 
@@ -669,6 +677,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           : null;
         if (isCurrentSession) {
           setIsTyping(false);
+          setMessages((prev) => attachAskUserToLatestToolMessage(prev, {
+            questionId,
+            sourceSessionId,
+            sourceAgentId,
+            sourceAgentName,
+            question: String(payload.question || ''),
+            options: rawOptions,
+            multiSelect: Boolean(payload.multi_select),
+            pending: false,
+            resolved: false,
+          }));
           enqueueInteraction({
             kind: 'question',
             interactionId: questionId,
@@ -710,6 +729,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       case 'user_question_answered_event': {
         const questionId = String(payload.question_id || '');
         if (questionId) {
+          setMessages((prev) => updateAskUserToolState(prev, questionId, {
+            pending: false,
+            resolved: true,
+          }));
           resolveInteraction('question', questionId);
           resolveCard(`question_${questionId}`, 'answered');
         }
@@ -900,24 +923,43 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     startNewChat();
   }, [startNewChat]);
 
+  const submitQuestionResponse = useCallback((params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => {
+    const { questionId, sourceSessionId, answer, cancelled } = params;
+    if (!sourceSessionId) {
+      addMsg('system', 'Question source session not found, cannot submit answer.');
+      return;
+    }
+    setInteractionSubmitting(true);
+    setMessages((prev) => updateAskUserToolState(prev, questionId, {
+      pending: true,
+      resolved: false,
+    }));
+    wsSend({
+      type: 'user_question_answered',
+      session_id: sourceSessionId,
+      payload: { question_id: questionId, answer, cancelled },
+      timestamp: Date.now() / 1000,
+    });
+    markCardPending(`question_${questionId}`, cancelled ? 'cancel' : 'answered');
+    resolveInteraction('question', questionId);
+  }, [markCardPending, wsSend]);
+
   const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
     if (!content.trim() || !wsConnected) return;
 
     const interaction = activeInteractionRef.current;
     if (interaction?.kind === 'question') {
-      if (!interaction.sourceSessionId) {
-        addMsg('system', 'Question source session not found, cannot submit answer.');
-        return;
-      }
-      setInteractionSubmitting(true);
-      wsSend({
-        type: 'user_question_answered',
-        session_id: interaction.sourceSessionId,
-        payload: { question_id: interaction.interactionId, answer: content.trim(), cancelled: false },
-        timestamp: Date.now() / 1000,
+      submitQuestionResponse({
+        questionId: interaction.interactionId,
+        sourceSessionId: interaction.sourceSessionId,
+        answer: content.trim(),
+        cancelled: false,
       });
-      resolveCard(`question_${interaction.interactionId}`, 'answered');
-      resolveInteraction('question', interaction.interactionId);
       return;
     }
 
@@ -950,25 +992,18 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       });
     }
     setIsTyping(true);
-  }, [getCurrentSessionAgentId, resetTurnTracking, resolveCard, startNewChat, wsConnected, wsSend]);
+  }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, submitQuestionResponse, wsConnected, wsSend]);
 
   const sendQuestionAnswerFn = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     const interaction = activeInteractionRef.current;
     if (!interaction || interaction.kind !== 'question') return;
-    if (!interaction.sourceSessionId) {
-      addMsg('system', 'Question source session not found, cannot submit answer.');
-      return;
-    }
-    setInteractionSubmitting(true);
-    wsSend({
-      type: 'user_question_answered',
-      session_id: interaction.sourceSessionId,
-      payload: { question_id: interaction.interactionId, answer, cancelled },
-      timestamp: Date.now() / 1000,
+    submitQuestionResponse({
+      questionId: interaction.interactionId,
+      sourceSessionId: interaction.sourceSessionId,
+      answer,
+      cancelled,
     });
-    resolveCard(`question_${interaction.interactionId}`, cancelled ? 'cancel' : 'answered');
-    resolveInteraction('question', interaction.interactionId);
-  }, [wsSend, resolveCard]);
+  }, [submitQuestionResponse]);
 
   const sendConfirmationResponseFn = useCallback((approved: boolean) => {
     const interaction = activeInteractionRef.current;
@@ -1047,6 +1082,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     activeInteraction,
     interactionSubmitting,
     sendQuestionAnswer: sendQuestionAnswerFn,
+    submitQuestionResponse,
     sendConfirmationResponse: sendConfirmationResponseFn,
     handleInteractionTimeout: handleInteractionTimeoutFn,
     handleSkillInvoke,
