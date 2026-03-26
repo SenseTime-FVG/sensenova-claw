@@ -1144,6 +1144,9 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 适合作为通用桥接 skill 的敏感路径范围，应严格对齐 `platform/secrets/registry.py` 里的注册模式，尤其是 `tools.*.api_key` 与 `llm.providers.*.api_key`，这样像 Brave Search 这类 skill 才能稳定复用。
 - 如果希望 skill 自身保留“它依赖哪个 secret 标识”的可追踪信息，最轻量的约定是在目标 skill 目录下维护 `secret.yml`，只写映射不写明文，例如 `OPENAI_API_KEY: secret:openai-whisper-api:OPENAI_API_KEY`；读取时优先查这个文件，写入成功后同步创建或更新它。
 - 如果用户要求 skill 不经过 HTTP，而是直接调用项目内能力，最稳的做法是在 skill 目录下放脚本，通过 stdin JSON 契约驱动，并在脚本内部直接复用 `Config`、`ConfigManager` 与 `SecretStore`；这样行为可测、文档也不会再漂移回接口说明。
+- 用 `Skill Creator` 重写 `SKILL.md` 时，最有效的收敛方式是把正文压到“何时触发、唯一入口、输入输出契约、禁止事项”四块，其余实现细节交给 `scripts/`；这样既保住触发质量，也不会让 skill body 过长。
+- 对 `secret-config-bridge` 这类底层桥接 skill，如果用户只要“按路径读写 secret store”，就不要再耦合 `config.yml`、`ConfigManager` 或 skill 目录下的 `secret.yml`；直接把协议收敛成 `read(path)` / `write(path, value)` 最稳，`secret:` 仅作为 path 归一化的语法糖。
+- 当某个 skill 目录里的脚本已经变成“通用底层能力”时，下一步应把逻辑迁到 `sensenova_claw/capabilities/tools/` 做成正式 tool，并让 skill 只负责触发说明；这样模型能直接调用、测试也能直接覆盖 `ToolRegistry` 暴露行为。
 
 失败/风险经验：
 - 如果把 secret skill 设计成“任意 path 都可读写”的通用管理器，很容易和后端 `is_secret_path()` 的约束冲突，最终在运行时直接返回 400；文档必须明确只支持已注册敏感路径。
