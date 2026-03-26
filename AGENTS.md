@@ -1214,3 +1214,35 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 看起来像“第二个 chunk 缺少 `@@`”的补丁，未必真的会分裂成第二个 chunk；像 `+tail` 这种行在上游仍会被视为同一个 chunk 的新增行，测试样例必须先按 parser 规则推演，不然容易把错误归因到实现。
+
+### 2026-03-25 PPT 标题可见层级补充
+
+成功经验：
+- PPT 页面里“标题源码存在但浏览器看不见”往往不是内容缺失，而是层级结构错误；最常见的坏结构是把 `.header` 放在 `#bg` 和 `#ct` 之间，随后被 `#ct` 的更高 `z-index` 盖住。
+- 这类问题不能只靠 skill 提示语约束，最好同时在 `ppt-page-html`、`ppt-review` 和导出前 guard 三处收口：生成时禁止坏结构，review 时检查标题是否落在 `#ct` 或 `#header`，导出前再做一次硬校验。
+- `ppt-export-pptx` 的导出前校验不应只看装饰层证据；`review.md/review.json` 是否存在、是否标记阻塞，也应在 `cli_guards.mjs` 里真实落地，而不是只留在文档里。
+
+失败/风险经验：
+- 如果只检查页面里有没有 `<h1>`/`<h2>`，会把“标题在源码里但被层级盖住”的页面误判为通过；标题校验必须结合容器位置，至少区分“在 `#ct` / `#header` 内”和“落在 `#ct` 外的裸 `.header`”。
+
+### 2026-03-26 payload_budget 下游承接补充
+
+成功经验：
+- 这类“控制面字段继续下沉”的任务，最稳的推进方式是只在下游 skill 文档和契约测试里扩展职责边界：保留 `task-pack` 的 profile 定义不变，由 `ppt-storyboard` 写页级 `payload_budget`，`ppt-page-html` 消费预算，`ppt-review` 审核预算兑现。
+- 先把字符串契约测试补成红灯很有效；像 `每页必须声明页级 payload_budget`、`不允许把应承载 3 块内容的页面退回成一个标题 + 一张大卡片`、`承载不足 / 结构块不足 / 缺少对比或摘要` 这类文案，能直接锁住职责分工和后续回归重点。
+- `content_density_profile -> payload_budget` 的解释链最好同时写在设计总览和 `storyboard` 详细 schema 里；只改一处容易让文档看起来“有字段但没来源”或“有原则但没落点”。
+
+失败/风险经验：
+- 旧测试里如果曾明确断言“设计文档不应出现 payload_budget”，这类历史约束需要先精确缩小作用域，只保留对上游 skill 的边界限制；否则新任务明明要求文档同步，却会被旧断言误杀。
+
+### 2026-03-26 PPT 默认 guided 回归补充
+
+成功经验：
+- 当工作区里的 `.sensenova-claw/skills` 尚未同步到 `~/.sensenova-claw` 时，真实回归不要直接用 home 目录启动服务；最稳的方法是在 `/tmp` 组一个临时 `SENSENOVA_CLAW_HOME`，复用 home 的 `config.yml`/`data/secret`，但把 `agents/skills` 从当前工作区复制进去，这样才能验证“当前代码 + 当前 skill”而不是用户 home 里的旧版本。
+- 对默认 `guided` 的真实回归，判断口径不需要等整轮对话完全结束；只要能确认 `task-pack.json`、`research-pack.json`、`style-spec.json`、`storyboard.json` 已落盘，且 `pages/` 仍为空，就足以说明链路停在确认点之前，没有继续进入 `ppt-page-html`。
+- 对显式 `fast` 的真实回归，不一定要等到整套 HTML/PPTX 都生成完；只要 `task-pack.json.mode == "fast"`，并且日志或工件证明链路在 `style-spec` 之后自动继续进入 `storyboard`/后续步骤、没有等待用户确认，就可以判定默认 mode 切换逻辑生效。
+- 这类长链路真实回归，直接用最小 WebSocket 脚本比依赖 CLI 更稳；可以精确控制 `create_session -> user_input`，并按需观察 `notification.session`、`turn_completed`、`user_question_asked` 等事件。
+
+失败/风险经验：
+- 当前 CLI 读取 token 时调用 `read_token_file()` 没有传 `SENSENOVA_CLAW_HOME`，会硬编码回 `Path.home()/.sensenova-claw/token`；只要测试使用临时 home，CLI 就可能因为 token 不匹配直接报 `1008 Invalid or missing token`。在修掉 CLI 之前，临时 home 回归应优先走原生 WebSocket 脚本。
+- 即便服务进程设置了临时 `SENSENOVA_CLAW_HOME`，当前实现里仍可能继续读取 home 的某些配置/secret/watcher 路径；因此这套真实回归是“技能与工作目录隔离优先”，不是完全沙箱化的全隔离环境，分析日志时要留意 home 路径残留。
