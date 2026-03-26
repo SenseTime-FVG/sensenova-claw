@@ -115,6 +115,28 @@ function parseTextShadow(textShadow) {
 }
 
 /**
+ * 从 CSS transform 中提取旋转角度（deg）。
+ * 支持 rotate(Xdeg) 和 matrix() 形式。
+ * @param {string} transformStr - 如 "rotate(-2deg)" 或 "matrix(...)"
+ * @returns {number|null} - 旋转角度（度），未找到返回 null
+ */
+function parseRotation(transformStr) {
+  if (!transformStr || transformStr === 'none') return null;
+  // rotate(Xdeg)
+  const rotateMatch = transformStr.match(/rotate\(\s*(-?[\d.]+)deg\s*\)/);
+  if (rotateMatch) return parseFloat(rotateMatch[1]);
+  // matrix(a,b,c,d,tx,ty) → angle = atan2(b, a)
+  const matrixMatch = transformStr.match(/matrix\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)/);
+  if (matrixMatch) {
+    const a = parseFloat(matrixMatch[1]);
+    const b = parseFloat(matrixMatch[2]);
+    const angle = Math.round(Math.atan2(b, a) * 180 / Math.PI);
+    if (angle !== 0) return angle;
+  }
+  return null;
+}
+
+/**
  * 将 CSS border-style 映射为 pptxgenjs dashType。
  * @param {string} style - solid/dashed/dotted/double 等
  * @returns {string} pptxgenjs dashType
@@ -137,6 +159,115 @@ function normalizeGradientStops(stops) {
     color: s.color,
     position: s.position !== undefined ? s.position : Math.round(i * 100 / Math.max(stops.length - 1, 1)),
   }));
+}
+
+/**
+ * 解析 mask-image gradient，保留透明色 stop（与 parseLinearGradient 不同，不跳过 alpha=0）。
+ * @param {string} cssValue - 如 "linear-gradient(to left, rgb(0,0,0) 70%, rgba(0,0,0,0))"
+ * @returns {{direction: string|null, stops: Array<{position?:number, rawColor:string}>}|null}
+ */
+function parseMaskGradient(cssValue) {
+  if (!cssValue) return null;
+  const trimmed = cssValue.trim();
+  if (!/^linear-gradient\s*\(/i.test(trimmed)) return null;
+  const inner = trimmed.replace(/^linear-gradient\s*\(\s*/i, '').replace(/\s*\)$/, '');
+  let safeInner = inner.replace(/rgba?\s*\([^)]*\)/gi, m => m.replace(/,/g, '§'));
+  const parts = safeInner.split(',').map(p => p.replace(/§/g, ',').trim());
+  if (parts.length < 2) return null;
+
+  let direction = null;
+  let stopParts = parts;
+  const firstPart = parts[0].trim();
+  if (/^to\s+/i.test(firstPart)) {
+    direction = firstPart.toLowerCase();
+    stopParts = parts.slice(1);
+  } else if (/^-?[\d.]+deg$/i.test(firstPart)) {
+    direction = firstPart;
+    stopParts = parts.slice(1);
+  }
+
+  const stops = [];
+  for (const part of stopParts) {
+    const p = part.trim();
+    if (!p) continue;
+    const posMatch = p.match(/^(.*?)\s+([\d.]+)%\s*$/);
+    if (posMatch) {
+      stops.push({ position: parseFloat(posMatch[2]), rawColor: posMatch[1].trim() });
+    } else {
+      stops.push({ rawColor: p });
+    }
+  }
+  if (stops.length === 0) return null;
+  // 自动补位：如果没有 position，均匀分配
+  for (let i = 0; i < stops.length; i++) {
+    if (stops[i].position === undefined) {
+      stops[i].position = Math.round(i * 100 / Math.max(stops.length - 1, 1));
+    }
+  }
+  return { direction, stops };
+}
+
+/**
+ * CSS 渐变方向 → SVG linearGradient x1/y1/x2/y2 映射。
+ * @param {string} direction - 如 "to left", "to right", "135deg"
+ * @returns {{ x1: string, y1: string, x2: string, y2: string }}
+ */
+function gradientDirectionToSvg(direction) {
+  const dirMap = {
+    'to right':  { x1: '0%', y1: '0%', x2: '100%', y2: '0%' },
+    'to left':   { x1: '100%', y1: '0%', x2: '0%', y2: '0%' },
+    'to bottom': { x1: '0%', y1: '0%', x2: '0%', y2: '100%' },
+    'to top':    { x1: '0%', y1: '100%', x2: '0%', y2: '0%' },
+    'to bottom right': { x1: '0%', y1: '0%', x2: '100%', y2: '100%' },
+    'to top left':     { x1: '100%', y1: '100%', x2: '0%', y2: '0%' },
+  };
+  if (dirMap[direction]) return dirMap[direction];
+  // 角度 → 近似方向
+  const deg = parseFloat(direction);
+  if (!isNaN(deg)) {
+    const rad = (deg - 90) * Math.PI / 180; // CSS 角度：0deg = to top
+    return {
+      x1: `${Math.round(50 - Math.cos(rad) * 50)}%`,
+      y1: `${Math.round(50 + Math.sin(rad) * 50)}%`,
+      x2: `${Math.round(50 + Math.cos(rad) * 50)}%`,
+      y2: `${Math.round(50 - Math.sin(rad) * 50)}%`,
+    };
+  }
+  return dirMap['to right']; // 默认
+}
+
+/**
+ * 为带有 mask-image 的图片生成模拟 mask 的 SVG overlay。
+ * mask-image 中 alpha=1 的区域是可见的，alpha=0 是透明的。
+ * 我们用背景色填充 alpha=0 的区域来模拟遮罩效果。
+ * @param {Object} maskGrad - parseLinearGradient 解析的结果
+ * @param {string} bgColor - 背景色 hex（如 'F1F8E9'）
+ * @param {number} w - 宽度（像素）
+ * @param {number} h - 高度（像素）
+ * @returns {string} SVG data URI
+ */
+function buildMaskOverlaySvg(maskGrad, bgColor, w, h) {
+  const dir = gradientDirectionToSvg(maskGrad.direction || 'to right');
+  // mask gradient 中 alpha=0 表示「隐藏」→ overlay 需要不透明
+  // mask gradient 中 alpha=1 表示「可见」→ overlay 需要透明
+  // 所以 overlay stop opacity = 1 - mask_alpha
+  const stops = maskGrad.stops.map(s => {
+    // 解析 mask stop 的 alpha（mask stop 颜色通常是 rgba(0,0,0, alpha)）
+    const alphaMatch = s.rawColor && s.rawColor.match(/rgba\([^)]*,\s*([\d.]+)\s*\)/);
+    const maskAlpha = alphaMatch ? parseFloat(alphaMatch[1]) : 1;
+    const overlayOpacity = (1 - maskAlpha).toFixed(2);
+    const pos = s.position !== undefined ? s.position : '';
+    return `<stop offset="${pos}%" stop-color="#${bgColor}" stop-opacity="${overlayOpacity}"/>`;
+  }).join('\n      ');
+
+  return `data:image/svg+xml;base64,${Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <defs>
+      <linearGradient id="mask" x1="${dir.x1}" y1="${dir.y1}" x2="${dir.x2}" y2="${dir.y2}">
+      ${stops}
+      </linearGradient>
+    </defs>
+    <rect width="${w}" height="${h}" fill="url(#mask)"/>
+  </svg>`).toString('base64')}`;
 }
 
 /**
@@ -166,9 +297,17 @@ export function buildBackground(bgIR, bodyBgColor, deckDir) {
   let imageFromCss = !!imageUrl; // 标记图片来源：CSS backgroundImage 还是 <img> 子元素
 
   // 如果 CSS backgroundImage 没有 url，检查 #bg 的 <img> 子元素
+  // 仅当图片覆盖 ≥ 90% 的幻灯片面积时，才提升为 slide background
   let imgChildFilter = null;
   if (!imageUrl && bgIR.children) {
-    const imgChild = bgIR.children.find(c => (c.tag || '').toUpperCase() === 'IMG' && c.src);
+    const imgChild = bgIR.children.find(c => {
+      if ((c.tag || '').toUpperCase() !== 'IMG' || !c.src) return false;
+      // 检查图片是否覆盖整个幻灯片
+      const b = c.bounds;
+      if (!b) return false;
+      const slideCoverage = (b.w * b.h) / (1280 * 720);
+      return slideCoverage >= 0.9;
+    });
     if (imgChild) {
       let imgPath = imgChild.src;
       if (imgPath.startsWith('file://')) imgPath = imgPath.slice(7);
@@ -345,11 +484,37 @@ export function buildTextElement(node) {
     autoFit: true,
   };
 
+  // transform: rotate() → pptxgenjs rotate
+  const textRotation = parseRotation(s.transform);
+  if (textRotation !== null) {
+    options.rotate = textRotation;
+  }
+
+  // letter-spacing → charSpacing（单位：磅 pt）
+  if (s.letterSpacing && s.letterSpacing !== 'normal' && s.letterSpacing !== '0px') {
+    const lsPx = parseFloat(s.letterSpacing);
+    if (!isNaN(lsPx) && lsPx !== 0) {
+      options.charSpacing = pxToPt(lsPx);
+    }
+  }
+
   // 单行文本检测：如果高度 < 字号 × 2，说明浏览器中只有一行，
   // 设置 wrap: false 避免因字体渲染差异在 PPTX 中意外换行
   const fsPx = parseFloat(s.fontSize) || 16;
   const isSingleLine = !textRuns && b.h < fsPx * 2;
   options.wrap = !isSingleLine;
+
+  // padding → pptxgenjs margin（文本框内边距）
+  // 仅当节点自身有 text 或 textRuns 时设置（叶子文本节点的 padding 决定文本位置）
+  const padTop = parseFloat(s.paddingTop) || 0;
+  const padRight = parseFloat(s.paddingRight) || 0;
+  const padBottom = parseFloat(s.paddingBottom) || 0;
+  const padLeft = parseFloat(s.paddingLeft) || 0;
+  if (padTop > 0 || padRight > 0 || padBottom > 0 || padLeft > 0) {
+    options.margin = [
+      pxToPt(padTop), pxToPt(padRight), pxToPt(padBottom), pxToPt(padLeft),
+    ];
+  }
 
   // text-shadow → pptxgenjs shadow
   if (s.textShadow) {
@@ -448,21 +613,37 @@ export function buildShapeElement(node) {
     const transparency = Math.round((1 - combinedAlpha) * 100);
     shape.fill = { color: bgColor, transparency: transparency > 0 ? transparency : 0 };
   } else if (s.backgroundImage && s.backgroundImage !== 'none' && s.backgroundImage.includes('gradient')) {
-    // backgroundImage 渐变降级：提取 rgba 颜色作为半透明填充
-    const rgbaMatch = s.backgroundImage.match(/rgba\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/);
-    if (rgbaMatch) {
-      const r = Math.round(parseFloat(rgbaMatch[1]));
-      const g = Math.round(parseFloat(rgbaMatch[2]));
-      const b2 = Math.round(parseFloat(rgbaMatch[3]));
-      const a = parseFloat(rgbaMatch[4]);
+    // backgroundImage 渐变降级：解析 gradient 取最不透明的颜色
+    const grad = parseLinearGradient(s.backgroundImage) || parseRadialGradient(s.backgroundImage);
+    if (grad && grad.stops.length > 0) {
+      shape.fill = { color: grad.stops[0].color };
+    }
+    // 尝试从所有 rgba() 中找最不透明的颜色（跳过 transparent/alpha=0）
+    const allRgba = [...s.backgroundImage.matchAll(/rgba\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/g)];
+    let bestMatch = null;
+    let bestAlpha = 0;
+    for (const m of allRgba) {
+      const a = parseFloat(m[4]);
+      if (a > bestAlpha) {
+        bestAlpha = a;
+        bestMatch = m;
+      }
+    }
+    if (bestMatch && bestAlpha > 0) {
+      const r = Math.round(parseFloat(bestMatch[1]));
+      const g = Math.round(parseFloat(bestMatch[2]));
+      const b2 = Math.round(parseFloat(bestMatch[3]));
       const hex = [r, g, b2].map(n => n.toString(16).padStart(2, '0')).join('').toUpperCase();
-      const transparency = Math.round((1 - a) * 100);
+      const transparency = Math.round((1 - bestAlpha) * 100);
       shape.fill = { color: hex, transparency };
-    } else {
-      // 非 rgba gradient：取第一个颜色
-      const grad = parseLinearGradient(s.backgroundImage) || parseRadialGradient(s.backgroundImage);
-      if (grad && grad.stops.length > 0) {
-        shape.fill = { color: grad.stops[0].color };
+    } else if (!shape.fill) {
+      // 纯 rgb gradient（无 rgba）：取第一个非透明 stop
+      const rgbMatch = s.backgroundImage.match(/rgb\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/);
+      if (rgbMatch) {
+        const r = Math.round(parseFloat(rgbMatch[1]));
+        const g = Math.round(parseFloat(rgbMatch[2]));
+        const b2 = Math.round(parseFloat(rgbMatch[3]));
+        shape.fill = { color: [r, g, b2].map(n => n.toString(16).padStart(2, '0')).join('').toUpperCase() };
       }
     }
   }
@@ -498,6 +679,12 @@ export function buildShapeElement(node) {
       color: shadow.color,
       opacity: shadow.opacity,
     };
+  }
+
+  // transform: rotate()
+  const shapeRotation = parseRotation(s.transform);
+  if (shapeRotation !== null) {
+    shape.rotate = shapeRotation;
   }
 
   return shape;
@@ -747,7 +934,7 @@ function buildBorderLines(node) {
 /**
  * 递归扁平化 IR 节点，生成 slide 元素列表
  */
-export function flattenIRToElements(node, deckDir, parentBorderRadius = 0) {
+export function flattenIRToElements(node, deckDir, parentBorderRadius = 0, parentBgColor = null) {
   const elements = [];
   if (!node) return elements;
 
@@ -782,17 +969,38 @@ export function flattenIRToElements(node, deckDir, parentBorderRadius = 0) {
         imgEl._avLst = `<a:gd name="adj" fmla="val ${adj}"/>`;
       }
       elements.push({ type: 'image', data: imgEl });
+      // 显示尺寸（object-fit workaround 会改 imgEl.w/h 为原始尺寸）
+      const displayW = imgEl.sizing ? imgEl.sizing.w : imgEl.w;
+      const displayH = imgEl.sizing ? imgEl.sizing.h : imgEl.h;
       // 图片 opacity < 1 → 叠加黑色半透明遮罩模拟暗化
       const imgOpacity = s.opacity !== undefined ? parseFloat(s.opacity) : 1;
       if (imgOpacity < 1 && imgOpacity > 0) {
         elements.push({
           type: 'shape',
           data: {
-            x: imgEl.x, y: imgEl.y, w: imgEl.w, h: imgEl.h,
+            x: imgEl.x, y: imgEl.y, w: displayW, h: displayH,
             fill: { color: '000000', transparency: Math.round(imgOpacity * 100) },
             ...(parentBorderRadius > 0 ? { rectRadius: pxToInch(parentBorderRadius) } : {}),
           }
         });
+      }
+      // mask-image: linear-gradient(...) → SVG 渐变蒙版模拟
+      const maskImage = s.WebkitMaskImage || s.webkitMaskImage || s.maskImage;
+      if (maskImage && maskImage !== 'none' && maskImage.includes('linear-gradient')) {
+        const maskGrad = parseMaskGradient(maskImage);
+        if (maskGrad && maskGrad.stops.length >= 2) {
+          const bgColor = parentBgColor || 'FFFFFF';
+          const pxW = Math.round(displayW / 10 * 1280);
+          const pxH = Math.round(displayH / 10 * 1280);
+          const svgDataUri = buildMaskOverlaySvg(maskGrad, bgColor, pxW, pxH);
+          elements.push({
+            type: 'image',
+            data: {
+              data: svgDataUri,
+              x: imgEl.x, y: imgEl.y, w: displayW, h: displayH,
+            }
+          });
+        }
       }
     }
   }
@@ -815,11 +1023,15 @@ export function flattenIRToElements(node, deckDir, parentBorderRadius = 0) {
     if (listEl) elements.push({ type: 'list', data: listEl });
   }
 
-  // 递归子元素（传递当前节点的 borderRadius 给子元素，用于图片圆角继承）
+  // 递归子元素（传递当前节点的 borderRadius 和背景色给子元素）
   const currentRadius = (s.overflow === 'hidden' && parseFloat(s.borderRadius) > 0) ? parseFloat(s.borderRadius) : 0;
+  // 传递背景色给子元素（用于 mask-image 模拟蒙版的底色）
+  const currentBgHex = (s.backgroundColor && !isTransparent(s.backgroundColor))
+    ? cssColorToHex(s.backgroundColor) : null;
+  const effectiveBgColor = currentBgHex || parentBgColor;
   if (node.children) {
     for (const child of node.children) {
-      elements.push(...flattenIRToElements(child, deckDir, currentRadius || parentBorderRadius));
+      elements.push(...flattenIRToElements(child, deckDir, currentRadius || parentBorderRadius, effectiveBgColor));
     }
   }
 
@@ -831,8 +1043,10 @@ export function flattenIRToElements(node, deckDir, parentBorderRadius = 0) {
  */
 export function buildSlideFromIR(pptx, ir, deckDir) {
   const slide = pptx.addSlide();
+  // 预先计算 body 背景色 hex，用于 mask-image 蒙版模拟
+  const bodyBgHex = cssColorToHex(ir.bodyBgColor) || 'FFFFFF';
 
-  // 1. 背景（支持多层：slideBackground + bgElements overlay）
+  // 1. 背景（支持多层：slideBackground + bgElements overlay + #bg 子元素）
   if (ir.bg) {
     const bgResult = buildBackground(ir.bg, ir.bodyBgColor, deckDir);
     if (bgResult) {
@@ -843,6 +1057,30 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
           slide.addShape(pptx.ShapeType.rect, el.data);
         } else if (el.type === 'image') {
           slide.addImage(el.data);
+        }
+      }
+    }
+    // 渲染 #bg 的子元素（装饰层：mesh-gradient、grid-overlay、SVG motif 等）
+    if (ir.bg.children && ir.bg.children.length > 0) {
+      for (const child of ir.bg.children) {
+        const bgChildElements = flattenIRToElements(child, deckDir, 0, bodyBgHex);
+        for (const el of bgChildElements) {
+          switch (el.type) {
+            case 'shape': {
+              const shapeType = el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
+              slide.addShape(shapeType, el.data);
+              break;
+            }
+            case 'text':
+              slide.addText(el.data.text, el.data.options);
+              break;
+            case 'image':
+              slide.addImage(el.data);
+              break;
+            case 'svg':
+              slide.addImage(el.data);
+              break;
+          }
         }
       }
     }
@@ -857,7 +1095,7 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
   // 2. 遮罩层（.wrapper 中的 overlay 元素，如半透明渐变遮罩）
   if (ir.overlays && ir.overlays.length > 0) {
     for (const overlay of ir.overlays) {
-      const overlayElements = flattenIRToElements(overlay, deckDir);
+      const overlayElements = flattenIRToElements(overlay, deckDir, 0, bodyBgHex);
       for (const el of overlayElements) {
         switch (el.type) {
           case 'shape': {
@@ -876,9 +1114,43 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
     }
   }
 
+  // 2.5. rest 层（.wrapper 中非已知 ID 的非绝对定位子元素，如 .header class）
+  if (ir.rest && ir.rest.length > 0) {
+    for (const restNode of ir.rest) {
+      const restElements = flattenIRToElements(restNode, deckDir, 0, bodyBgHex);
+      for (const el of restElements) {
+        switch (el.type) {
+          case 'shape': {
+            const shapeType = el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
+            slide.addShape(shapeType, el.data);
+            break;
+          }
+          case 'text':
+            slide.addText(el.data.text, el.data.options);
+            break;
+          case 'image':
+            slide.addImage(el.data);
+            break;
+          case 'line':
+            slide.addShape(pptx.ShapeType.line, el.data);
+            break;
+          case 'svg':
+            slide.addImage(el.data);
+            break;
+          case 'table':
+            slide.addTable(el.data.rows, el.data.options);
+            break;
+          case 'list':
+            slide.addText(el.data.text, el.data.options);
+            break;
+        }
+      }
+    }
+  }
+
   // 3. 页头（#header，通常包含页面标题）
   if (ir.header) {
-    const headerElements = flattenIRToElements(ir.header, deckDir);
+    const headerElements = flattenIRToElements(ir.header, deckDir, 0, bodyBgHex);
     for (const el of headerElements) {
       switch (el.type) {
         case 'text':
@@ -901,7 +1173,7 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
 
   // 4. 内容区
   if (ir.ct) {
-    const elements = flattenIRToElements(ir.ct, deckDir);
+    const elements = flattenIRToElements(ir.ct, deckDir, 0, bodyBgHex);
     for (const el of elements) {
       switch (el.type) {
         case 'text':
@@ -931,11 +1203,37 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
     }
   }
 
-  // 5. 页脚
+  // 5. 页脚（与页头/内容区一样完整处理子元素）
   if (ir.footer) {
-    const footerText = buildTextElement(ir.footer);
-    if (footerText) {
-      slide.addText(footerText.text, footerText.options);
+    const footerElements = flattenIRToElements(ir.footer, deckDir, 0, bodyBgHex);
+    if (footerElements.length > 0) {
+      for (const el of footerElements) {
+        switch (el.type) {
+          case 'text':
+            slide.addText(el.data.text, el.data.options);
+            break;
+          case 'shape': {
+            const shapeType = el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
+            slide.addShape(shapeType, el.data);
+            break;
+          }
+          case 'image':
+            slide.addImage(el.data);
+            break;
+          case 'line':
+            slide.addShape(pptx.ShapeType.line, el.data);
+            break;
+          case 'svg':
+            slide.addImage(el.data);
+            break;
+        }
+      }
+    } else {
+      // 回退：如果 flattenIRToElements 为空（纯文本 footer），直接构建文本
+      const footerText = buildTextElement(ir.footer);
+      if (footerText) {
+        slide.addText(footerText.text, footerText.options);
+      }
     }
   }
 

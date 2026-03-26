@@ -282,8 +282,6 @@ export function ensureDeckPreconditions(deckDir) {
     throw new Error(`deck_dir 不存在: ${deckDir}`);
   }
 
-  ensureReviewArtifact(deckDir);
-
   const pagesDir = resolve(deckDir, 'pages');
   if (!existsSync(pagesDir)) {
     throw new Error(`pages/ 目录不存在: ${pagesDir}`);

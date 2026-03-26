@@ -31,6 +31,8 @@ const BROWSER_EXTRACT_FN = () => {
     'filter', 'backdrop-filter', 'text-shadow',
     '-webkit-background-clip', 'background-clip',
     '-webkit-text-fill-color',
+    'transform',
+    '-webkit-mask-image', 'mask-image',
   ];
 
   // kebab-case → camelCase 转换（用于返回对象的 key）
@@ -215,6 +217,80 @@ const BROWSER_EXTRACT_FN = () => {
   }
 
   /**
+   * 提取元素的 ::before / ::after 伪元素。
+   * 仅当伪元素有可见内容（背景、尺寸）时提取为合成 IR 节点。
+   * @param {Element} el
+   * @param {DOMRect} wrapperRect
+   * @returns {Array<Object>}
+   */
+  function extractPseudoElements(el, wrapperRect) {
+    const pseudos = [];
+    for (const pseudo of ['::before', '::after']) {
+      try {
+        const cs = window.getComputedStyle(el, pseudo);
+        const content = cs.getPropertyValue('content');
+        // 跳过无 content 或 content: none 的伪元素
+        if (!content || content === 'none' || content === 'normal') continue;
+
+        const display = cs.getPropertyValue('display');
+        if (display === 'none') continue;
+
+        // 检查伪元素是否有可见视觉效果（背景色、背景图、边框等）
+        const bgColor = cs.getPropertyValue('background-color');
+        const bgImage = cs.getPropertyValue('background-image');
+        const hasBg = (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent');
+        const hasBgImg = (bgImage && bgImage !== 'none');
+        if (!hasBg && !hasBgImg) continue;
+
+        // 伪元素的尺寸和位置：
+        // 通常是 position:absolute + width:100% + height:100%（覆盖父元素）
+        // 无法对伪元素调用 getBoundingClientRect，使用父元素的 bounds
+        const position = cs.getPropertyValue('position');
+        let bounds;
+        if (position === 'absolute' || position === 'fixed') {
+          // 绝对定位伪元素：解析 top/left/width/height，回退到父元素的 bounds
+          const parentRect = el.getBoundingClientRect();
+          const wRect = wrapperRect;
+          const top = parseFloat(cs.getPropertyValue('top')) || 0;
+          const left = parseFloat(cs.getPropertyValue('left')) || 0;
+          const width = cs.getPropertyValue('width');
+          const height = cs.getPropertyValue('height');
+          const w = (width === 'auto' || width === '100%') ? parentRect.width : (parseFloat(width) || parentRect.width);
+          const h = (height === 'auto' || height === '100%') ? parentRect.height : (parseFloat(height) || parentRect.height);
+          bounds = {
+            x: parentRect.left - wRect.left + left,
+            y: parentRect.top - wRect.top + top,
+            w,
+            h,
+          };
+        } else {
+          bounds = extractBounds(el, wrapperRect);
+        }
+
+        // 构建合成 styles 对象
+        const styles = {};
+        for (const prop of CSS_PROPS) {
+          const val = cs.getPropertyValue(prop);
+          if (val) {
+            styles[kebabToCamel(prop)] = val;
+          }
+        }
+
+        pseudos.push({
+          tag: 'DIV',
+          id: undefined,
+          className: `_pseudo_${pseudo.replace('::', '')}`,
+          bounds,
+          styles,
+          children: [],
+          _isPseudo: true,
+        });
+      } catch (e) { /* 忽略 */ }
+    }
+    return pseudos;
+  }
+
+  /**
    * 递归提取单个 DOM 元素为 IR 节点。
    * @param {Element} el
    * @param {DOMRect} wrapperRect
@@ -289,6 +365,12 @@ const BROWSER_EXTRACT_FN = () => {
       }
     }
 
+    // 提取 ::before / ::after 伪元素（作为合成子节点追加）
+    const pseudoNodes = extractPseudoElements(el, wrapperRect);
+    for (const pn of pseudoNodes) {
+      node.children.push(pn);
+    }
+
     return node;
   }
 
@@ -320,19 +402,27 @@ const BROWSER_EXTRACT_FN = () => {
 
   // 提取 overlay 层（.wrapper 中非 #bg/#header/#ct/#footer 的绝对定位子元素）
   const overlays = [];
+  // 提取 rest 层（.wrapper 中非已知 ID 的非绝对定位子元素，如 .header 等浮动区域）
+  const rest = [];
   for (const child of wrapper.children) {
     if (child === bgEl || child === headerEl || child === ctEl || child === footerEl) continue;
     const cs = window.getComputedStyle(child);
-    if (cs.getPropertyValue('position') === 'absolute' || cs.getPropertyValue('position') === 'fixed') {
+    if (cs.getPropertyValue('display') === 'none') continue;
+    const pos = cs.getPropertyValue('position');
+    if (pos === 'absolute' || pos === 'fixed') {
       const node = extractNode(child, wrapperRect);
       if (node) overlays.push(node);
+    } else {
+      // 非绝对定位的未知子元素（如 .header class 但无 id="header"）
+      const node = extractNode(child, wrapperRect);
+      if (node) rest.push(node);
     }
   }
 
   // 提取 body 背景色（用于 opacity < 1 的 #bg 底色填充）
   const bodyBgColor = window.getComputedStyle(document.body).getPropertyValue('background-color');
 
-  return { bg, header, ct, footer, overlays, bodyBgColor };
+  return { bg, header, ct, footer, overlays, rest, bodyBgColor };
 };
 
 // ---------------------------------------------------------------------------

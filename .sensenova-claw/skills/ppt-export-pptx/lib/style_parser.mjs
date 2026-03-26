@@ -185,22 +185,26 @@ export function parseLinearGradient(cssValue) {
     // color 可能是 rgb()/rgba()/hex/#xxx/named
     const stopMatch = p.match(/^(.*?)\s+([\d.]+)%\s*$/);
     if (stopMatch) {
-      const colorHex = cssColorToHex(stopMatch[1].trim());
+      const rawColor = stopMatch[1].trim();
+      const colorHex = cssColorToHex(rawColor);
       if (colorHex !== null) {
-        stops.push({ position: parseFloat(stopMatch[2]), color: colorHex });
+        stops.push({ position: parseFloat(stopMatch[2]), color: colorHex, rawColor });
       }
     } else {
       // 无位置的 stop
       const colorHex = cssColorToHex(p);
       if (colorHex !== null) {
-        stops.push({ color: colorHex });
+        stops.push({ color: colorHex, rawColor: p });
       }
     }
   }
 
   if (stops.length === 0) return null;
 
-  return { type: 'linear', angle, stops };
+  // direction: 保留原始方向文本（用于 mask-image SVG 生成等场景）
+  const direction = /^to\s+/i.test(parts[0].trim()) ? parts[0].trim().toLowerCase() : null;
+
+  return { type: 'linear', angle, stops, direction };
 }
 
 // ---------------------------------------------------------------------------
