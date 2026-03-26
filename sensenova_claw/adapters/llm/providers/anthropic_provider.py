@@ -6,7 +6,11 @@ from typing import Any, AsyncIterator
 from anthropic import AsyncAnthropic
 
 from sensenova_claw.platform.config.config import config
-from sensenova_claw.adapters.llm.base import LLMProvider
+from sensenova_claw.adapters.llm.base import (
+    DEFAULT_LLM_TEMPERATURE,
+    LLMProvider,
+    merge_sampling_extra_body,
+)
 
 
 class AnthropicProvider(LLMProvider):
@@ -25,7 +29,7 @@ class AnthropicProvider(LLMProvider):
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -49,7 +53,10 @@ class AnthropicProvider(LLMProvider):
         if tools:
             req["tools"] = [self._convert_tool(t) for t in tools]
 
-        response = await self.client.messages.create(**req, extra_body=extra_body)
+        response = await self.client.messages.create(
+            **req,
+            extra_body=merge_sampling_extra_body(extra_body),
+        )
 
         content_text = ""
         tool_calls: list[dict[str, Any]] = []
@@ -80,7 +87,7 @@ class AnthropicProvider(LLMProvider):
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
@@ -104,7 +111,10 @@ class AnthropicProvider(LLMProvider):
         tool_idx = 0
         usage: dict[str, int] = {}
 
-        async with self.client.messages.stream(**req, extra_body=extra_body) as stream:
+        async with self.client.messages.stream(
+            **req,
+            extra_body=merge_sampling_extra_body(extra_body),
+        ) as stream:
             async for event in stream:
                 if event.type == "content_block_start":
                     block = event.content_block

@@ -125,7 +125,7 @@ class AgentRegistry:
             name=agent_dict.get("name", agent_id.replace("-", " ").title() if agent_id != "default" else "Default Agent"),
             description=agent_dict.get("description", "默认 AI Agent" if agent_id == "default" else ""),
             model=agent_dict.get("model", ""),
-            temperature=agent_dict.get("temperature", fallback.get("temperature", 0.2)),
+            temperature=agent_dict.get("temperature", fallback.get("temperature", 1.0)),
             max_tokens=agent_dict.get("max_tokens"),
             system_prompt=system_prompt,
             tools=list(agent_dict.get("tools", [])),

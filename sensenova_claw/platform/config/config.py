@@ -137,7 +137,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     # agent 段保留作为所有 agent 的后备默认值
     "agent": {
-        "temperature": 0.2,
+        "temperature": 1.0,
+        "extra_body": {
+            "top_p": 0.95,
+            "top_k": 20,
+        },
         "max_turns_per_session": 50,
         "system_prompt": "你是一个有工具能力的AI助手，请在必要时调用工具。",
         "stream": True,
@@ -320,7 +324,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default": {
             "name": "Default Agent",
             "description": "默认 AI Agent",
-            "temperature": 0.2,
+            "temperature": 1.0,
             "tools": [],
             "skills": [],
         },

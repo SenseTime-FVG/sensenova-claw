@@ -60,7 +60,7 @@ class ProactiveDelivery:
                 {"role": "system", "content": summary_prompt},
                 {"role": "user", "content": result},
             ]
-            resp = await provider.call(model=model, messages=messages, temperature=0.3)
+            resp = await provider.call(model=model, messages=messages, temperature=1.0)
             return resp.get("content", result)[:500]
         except Exception as e:
             logger.warning("LLM 摘要失败，回退到原始结果: %s", e)

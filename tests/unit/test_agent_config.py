@@ -23,7 +23,7 @@ class TestAgentConfig:
         a = AgentConfig(id="m", name="M")
         assert a.model == "gpt-4o-mini"
         assert a.enabled is True
-        assert a.temperature == 0.2
+        assert a.temperature == 1.0
         assert a.max_delegation_depth == 3
         assert a.max_pingpong_turns == 10
 

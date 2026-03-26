@@ -2,7 +2,6 @@
 # 复制此文件为 config.yml 并填入真实的 API Key
 
 system:
-  workspace_dir: ~/.sensenova-claw/workspace
   database_path: ~/.sensenova-claw/db/sensenova-claw.db
 
 security:
@@ -167,8 +166,7 @@ agents:
   default:
     name: Default Agent
     description: 默认 AI Agent
-    model: gemini_maas_pro_20260219
-    temperature: 0.2
+    temperature: 1.0
     tools: []
     skills: []
     can_send_message_to: []
@@ -176,11 +174,20 @@ agents:
     max_pingpong_turns: 10
     enabled: true
 
+  system-admin:
+    name: 系统运维管理员
+    description: 系统运维管理员，负责 Sensenova-Claw 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作
+    temperature: 1.0
+    tools: ["read_file", "write_file", "bash_command"]
+    skills: ["system-admin-skill"]
+    max_send_depth: 2
+    max_pingpong_turns: 10
+    enabled: true
+
   proactive-agent:
     name: Proactive Agent
     description: 自主执行定时任务和信息推送的 agent
-    model: gemini_maas_pro_20260219
-    temperature: 0.2
+    temperature: 1.0
     tools: ["send_message", "fetch_url", "read_file", "write_file", "bash_command", "serper_search", "memory_search", "list_proactive_jobs", "create_proactive_job", "manage_proactive_job"]
     skills: []
     max_send_depth: 2
@@ -190,8 +197,7 @@ agents:
   office-main:
     name: 办公主助手
     description: 办公任务总调度，负责理解需求并委托给专业 agent
-    model: gemini_maas_pro_20260219
-    temperature: 0.2
+    temperature: 1.0
     tools: []
     skills: []
     max_send_depth: 3
@@ -200,8 +206,7 @@ agents:
   ppt-agent:
     name: PPT 生成助手
     description: 生成 PPT 演示文稿，支持一句话生成
-    model: gemini_maas_pro_20260219
-    temperature: 0.2
+    temperature: 1.0
     tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "send_message", "image_search", "ask_user", "memory_search"]
     skills: ["ppt-superpower", "ppt-asset-plan", "ppt-html-gen", "ppt-image-selection", "ppt-page-assets", "ppt-page-html", "ppt-page-plan", "ppt-page-polish", "ppt-research-pack", "ppt-review", "ppt-source-analysis", "ppt-speaker-notes", "ppt-story-refine", "ppt-storyboard", "ppt-style-refine", "ppt-style-spec", "ppt-task-pack", "ppt-template-pack"]
     max_send_depth: 2
@@ -210,8 +215,7 @@ agents:
   data-analyst:
     name: 数据分析助手
     description: 数据分析、可视化和报告生成
-    model: gemini_maas_pro_20260219
-    temperature: 0.2
+    temperature: 1.0
     tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "ask_user", "memory_search"]
     skills: ["excel-xlsx", "python-dataviz", "pdf", "csv-pipeline", "mineru-document-extractor", "openai-whisper-api"]
     max_send_depth: 2
@@ -220,8 +224,7 @@ agents:
   doc-organizer:
     name: 文档整理助手
     description: 处理多种来源的文档，支持格式转换和整理
-    model: gemini_maas_pro_20260219
-    temperature: 0.2
+    temperature: 1.0
     tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "feishu-drive", "ask_user", "memory_search"]
     skills: ["markdown-converter", "docx-cn", "excel-xlsx", "pdf", "pdf-generator", "mineru-document-extractor", "openai-whisper-api", "feishu-doc", "feishu-wiki", "feishu-drive"]
     max_send_depth: 2
@@ -230,8 +233,7 @@ agents:
   email-agent:
     name: 邮件助手
     description: 邮件收发、管理和定时提醒
-    model: gemini_maas_pro_20260219
-    temperature: 0.2
+    temperature: 1.0
     tools: ["bash_command", "read_file", "write_file", "send_message", "send_email", "list_emails", "read_email", "download_attachment", "mark_email", "search_emails", "ask_user", "memory_search"]
     skills: []
     max_send_depth: 2
@@ -240,8 +242,7 @@ agents:
   search-agent:
     name: 搜索调研助手
     description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
-    model: gemini_maas_pro_20260219
-    temperature: 0.2
+    temperature: 1.0
     tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search"]
     skills: ["mineru-document-extractor", "research-union", "union-search-plus"]
     max_send_depth: 2

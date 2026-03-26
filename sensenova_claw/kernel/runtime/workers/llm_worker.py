@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 _LLM_DEBUG = os.environ.get("SENSENOVA_CLAW_DEBUG_LLM", "").strip() not in ("", "0", "false")
 
 
+def _merge_default_extra_body(extra_body: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(config.get("agent.extra_body", {}))
+    if extra_body:
+        merged.update(extra_body)
+    return merged
+
+
 def _normalize_llm_error(provider_name: str, model: str, error_message: str) -> dict[str, Any]:
     """将 provider 原始错误归一化为更友好的前端可消费结构。"""
     context: dict[str, Any] = {"model": model, "provider": provider_name}
@@ -751,9 +758,9 @@ class LLMSessionWorker(SessionWorker):
             provider_name, model = config.resolve_model(model_key)
         messages = event.payload.get("messages", [])
         tools = event.payload.get("tools")
-        temperature = float(event.payload.get("temperature", config.get("agent.temperature", 0.2)))
+        temperature = float(event.payload.get("temperature", config.get("agent.temperature", 1.0)))
         max_tokens = event.payload.get("max_tokens")
-        extra_body = event.payload.get("extra_body") or None
+        extra_body = _merge_default_extra_body(event.payload.get("extra_body") or None)
 
         logger.debug(
             "LLM call input | provider=%s model=%s llm_call_id=%s extra_body=%s messages=%s tools=%s",
