@@ -1,4 +1,3 @@
-// 共享类型定义和工具函数
 import { extractThinkContentFromReasoningDetails } from './assistantThink';
 
 export interface ToolInfo {
@@ -18,7 +17,7 @@ export interface ChatMessage {
   turnId?: string;
   thinkingContent?: string;
   thinkingState?: 'streaming' | 'collapsed';
-  /** 工具消息在无 toolInfo 时展示的工具名（如会话历史回放） */
+  /** 工具消息在没有 toolInfo 时展示的工具名。 */
   name?: string;
   toolInfo?: ToolInfo;
 }
@@ -89,26 +88,40 @@ export interface FileItem {
   size?: number;
 }
 
-// --- 工具函数 ---
-
 export function makeId(): string {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
 export function getTitle(meta: string): string {
-  try { return JSON.parse(meta).title || '未命名会话'; } catch { return '未命名会话'; }
+  try {
+    return JSON.parse(meta).title || '未命名会话';
+  } catch {
+    return '未命名会话';
+  }
 }
 
 export function getAgentId(meta: string): string {
-  try { return JSON.parse(meta).agent_id || 'default'; } catch { return 'default'; }
+  try {
+    return JSON.parse(meta).agent_id || 'default';
+  } catch {
+    return 'default';
+  }
 }
 
 export function getParentSessionId(meta: string): string | null {
-  try { return JSON.parse(meta).parent_session_id || null; } catch { return null; }
+  try {
+    return JSON.parse(meta).parent_session_id || null;
+  } catch {
+    return null;
+  }
 }
 
 export function getTaskId(meta: string): string | null {
-  try { return JSON.parse(meta).task_id || null; } catch { return null; }
+  try {
+    return JSON.parse(meta).task_id || null;
+  } catch {
+    return null;
+  }
 }
 
 export function timeLabel(ts: number): string {
@@ -121,17 +134,26 @@ export function timeLabel(ts: number): string {
 
 export function truncateResult(result: unknown, max = 50000): unknown {
   if (!result) return result;
-  const s = JSON.stringify(result);
-  if (s.length <= max) return result;
+  const serialized = JSON.stringify(result);
+  if (serialized.length <= max) return result;
   if (typeof result === 'object' && result !== null && 'content' in result) {
-    return { ...(result as Record<string, unknown>), content: String((result as Record<string, unknown>).content).slice(0, max) + '\n... (截断)' };
+    return {
+      ...(result as Record<string, unknown>),
+      content: String((result as Record<string, unknown>).content).slice(0, max) + '\n... (截断)',
+    };
   }
-  return s.slice(0, max) + '... (截断)';
+  return serialized.slice(0, max) + '... (截断)';
 }
 
 export function formatArgs(args: unknown): string {
   if (!args) return '';
-  if (typeof args === 'string') { try { return JSON.stringify(JSON.parse(args), null, 2); } catch { return args; } }
+  if (typeof args === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(args), null, 2);
+    } catch {
+      return args;
+    }
+  }
   if (typeof args === 'object') return JSON.stringify(args, null, 2);
   return String(args);
 }
@@ -139,57 +161,160 @@ export function formatArgs(args: unknown): string {
 export function parseEventPayload(event: Record<string, unknown>): Record<string, unknown> {
   const rawPayload = event.payload_json;
   if (typeof rawPayload === 'string') {
-    try { return JSON.parse(rawPayload) as Record<string, unknown>; } catch { return {}; }
+    try {
+      return JSON.parse(rawPayload) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
   }
   return (event.payload || {}) as Record<string, unknown>;
 }
 
+export function findLatestAssistantTurnMessage(messages: ChatMessage[], turnId: string): ChatMessage | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role === 'assistant' && message.turnId === turnId) {
+      return message;
+    }
+  }
+  return null;
+}
+
+export function upsertAssistantTurnMessage(
+  messages: ChatMessage[],
+  turnId: string,
+  patch: {
+    content?: string;
+    thinkingContent?: string;
+    thinkingState?: 'streaming' | 'collapsed';
+    keepExistingContentWhenEmpty?: boolean;
+  },
+): ChatMessage[] {
+  const matchingIndices: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    if (message.role === 'assistant' && message.turnId === turnId) {
+      matchingIndices.push(i);
+    }
+  }
+
+  const existing = matchingIndices.length > 0 ? messages[matchingIndices[matchingIndices.length - 1]] : null;
+  const nextContent = patch.content && patch.content.length > 0
+    ? patch.content
+    : patch.keepExistingContentWhenEmpty
+      ? (existing?.content || '')
+      : (patch.content ?? existing?.content ?? '');
+  const nextThinkingContent = patch.thinkingContent !== undefined
+    ? patch.thinkingContent
+    : existing?.thinkingContent;
+  const nextThinkingState = patch.thinkingState !== undefined
+    ? patch.thinkingState
+    : existing?.thinkingState;
+
+  if (!existing && !nextContent && !nextThinkingContent) {
+    return messages;
+  }
+
+  const nextMessage: ChatMessage = {
+    id: existing?.id || makeId(),
+    role: 'assistant',
+    content: nextContent,
+    timestamp: existing?.timestamp || Date.now(),
+    turnId,
+    thinkingContent: nextThinkingContent || undefined,
+    thinkingState: nextThinkingState,
+  };
+
+  if (!existing) {
+    return [...messages, nextMessage];
+  }
+
+  const lastIndex = matchingIndices[matchingIndices.length - 1];
+  const hasToolAfter = messages.slice(lastIndex + 1).some((message) => message.role === 'tool');
+
+  if (matchingIndices.length === 1 && !hasToolAfter) {
+    const next = [...messages];
+    next[lastIndex] = nextMessage;
+    return next;
+  }
+
+  const removedIndices = new Set(matchingIndices);
+  const filtered = messages.filter((_message, index) => !removedIndices.has(index));
+  const duplicateCountBeforeLast = matchingIndices.length - 1;
+  const insertIndex = hasToolAfter ? filtered.length : lastIndex - duplicateCountBeforeLast;
+  filtered.splice(insertIndex, 0, nextMessage);
+  return filtered;
+}
+
 export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): ChatMessage[] {
-  const rebuilt: ChatMessage[] = [];
+  let rebuilt: ChatMessage[] = [];
   const toolMessageMap = new Map<string, string>();
 
   for (const event of events) {
     const payload = parseEventPayload(event);
     const eventType = String(event.event_type || '');
+    const turnId = typeof event.turn_id === 'string' ? event.turn_id : undefined;
 
     if (eventType === 'user.input') {
-      rebuilt.push({ id: makeId(), role: 'user', content: String(payload.content || ''), timestamp: Date.now() });
+      rebuilt.push({
+        id: makeId(),
+        role: 'user',
+        content: String(payload.content || ''),
+        timestamp: Date.now(),
+      });
       continue;
     }
+
     if (eventType === 'llm.call_result') {
       const response = (payload.response || {}) as Record<string, unknown>;
       const content = String(response.content || '');
       const reasoningDetails = response.reasoning_details;
       const thinkingContent = extractThinkContentFromReasoningDetails(reasoningDetails);
-      // 历史重建时只为有实际内容或思考内容的 llm_result 创建 assistant 消息
-      // 仅含 tool_calls 的空结果不需要创建（工具调用已由 tool.call_requested 展示）
+
+      // 仅为有展示内容的 llm_result 建立 assistant 消息，避免工具前草稿常驻。
       if (content || thinkingContent) {
-        rebuilt.push({
-          id: makeId(),
-          role: 'assistant',
-          content,
-          timestamp: Date.now(),
-          thinkingContent: thinkingContent || undefined,
-          thinkingState: thinkingContent ? 'collapsed' : undefined,
-        });
+        if (turnId) {
+          rebuilt = upsertAssistantTurnMessage(rebuilt, turnId, {
+            content,
+            thinkingContent,
+            thinkingState: thinkingContent ? 'collapsed' : undefined,
+          });
+        } else {
+          rebuilt.push({
+            id: makeId(),
+            role: 'assistant',
+            content,
+            timestamp: Date.now(),
+            thinkingContent: thinkingContent || undefined,
+            thinkingState: thinkingContent ? 'collapsed' : undefined,
+          });
+        }
       }
       continue;
     }
+
     if (eventType === 'tool.call_requested') {
       const toolInfo: ToolInfo = {
         name: String(payload.tool_name || ''),
         arguments: (payload.arguments || {}) as Record<string, unknown>,
         status: 'running',
       };
-      const message: ChatMessage = { id: makeId(), role: 'tool', content: `Executing tool: ${payload.tool_name || ''}`, timestamp: Date.now(), toolInfo };
+      const message: ChatMessage = {
+        id: makeId(),
+        role: 'tool',
+        content: `Executing tool: ${payload.tool_name || ''}`,
+        timestamp: Date.now(),
+        toolInfo,
+      };
       rebuilt.push(message);
       toolMessageMap.set(String(payload.tool_call_id || ''), message.id);
       continue;
     }
+
     if (eventType === 'tool.call_result') {
       const messageId = toolMessageMap.get(String(payload.tool_call_id || ''));
       if (!messageId) continue;
-      const messageIndex = rebuilt.findIndex((m) => m.id === messageId);
+      const messageIndex = rebuilt.findIndex((message) => message.id === messageId);
       if (messageIndex === -1) continue;
       rebuilt[messageIndex] = {
         ...rebuilt[messageIndex],
@@ -205,26 +330,40 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
       };
       continue;
     }
+
     if (eventType === 'agent.step_completed') {
       const response = String(payload.final_response || '') || String(((payload.result as Record<string, unknown> | undefined)?.content) || '');
       if (response) {
-        // 查找最后一条 assistant 消息，避免与 llm.call_result 重复
-        let lastAssistantIdx = -1;
-        for (let i = rebuilt.length - 1; i >= 0; i--) {
-          if (rebuilt[i].role === 'assistant') { lastAssistantIdx = i; break; }
-        }
-        if (lastAssistantIdx !== -1 && rebuilt[lastAssistantIdx].content === response) {
-          // 内容相同，只折叠思考状态
-          rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], thinkingState: rebuilt[lastAssistantIdx].thinkingContent ? 'collapsed' : undefined };
-        } else if (lastAssistantIdx !== -1 && !rebuilt[lastAssistantIdx].content) {
-          // 最后一条 assistant 消息内容为空（可能是中间轮次），更新它
-          rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], content: response };
+        if (turnId) {
+          rebuilt = upsertAssistantTurnMessage(rebuilt, turnId, {
+            content: response,
+            thinkingState: 'collapsed',
+            keepExistingContentWhenEmpty: true,
+          });
         } else {
-          rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+          let lastAssistantIdx = -1;
+          for (let i = rebuilt.length - 1; i >= 0; i--) {
+            if (rebuilt[i].role === 'assistant') {
+              lastAssistantIdx = i;
+              break;
+            }
+          }
+
+          if (lastAssistantIdx !== -1 && rebuilt[lastAssistantIdx].content === response) {
+            rebuilt[lastAssistantIdx] = {
+              ...rebuilt[lastAssistantIdx],
+              thinkingState: rebuilt[lastAssistantIdx].thinkingContent ? 'collapsed' : undefined,
+            };
+          } else if (lastAssistantIdx !== -1 && !rebuilt[lastAssistantIdx].content) {
+            rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], content: response };
+          } else {
+            rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+          }
         }
       }
       continue;
     }
+
     if (eventType === 'notification.session') {
       const metadata = (payload.metadata || {}) as Record<string, unknown>;
       const body = String(payload.body || payload.text || '');
@@ -233,10 +372,9 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
       }
     }
   }
+
   return rebuilt;
 }
-
-// --- 消息分组（将连续工具调用收拢到一个折叠组） ---
 
 export type MessageGroupItem =
   | { type: 'message'; id: string; msg: ChatMessage }
@@ -265,7 +403,6 @@ export function groupMessages(messages: ChatMessage[]): MessageGroupItem[] {
   return groups;
 }
 
-/** 从 session 事件中重建右侧面板的步骤和任务进度 */
 export function rebuildStepsFromEvents(events: Record<string, unknown>[]): {
   steps: StepItem[];
   taskProgress: TaskProgressItem[];
@@ -293,7 +430,7 @@ export function rebuildStepsFromEvents(events: Record<string, unknown>[]): {
       if (stepIdx !== undefined && stepIdx < steps.length) {
         steps[stepIdx] = { ...steps[stepIdx], status: 'done' };
       }
-      const progressIdx = taskProgress.findIndex(t => t.task === toolName && t.status === 'running');
+      const progressIdx = taskProgress.findIndex((item) => item.task === toolName && item.status === 'running');
       if (progressIdx !== -1) {
         taskProgress[progressIdx] = { ...taskProgress[progressIdx], step: 1, status: 'completed' };
       }
@@ -303,12 +440,10 @@ export function rebuildStepsFromEvents(events: Record<string, unknown>[]): {
   return { steps, taskProgress, toolStepMap };
 }
 
-/** 将 session 列表按 task_id 分组为 TaskGroup[] */
 export function groupSessionsToTasks(sessions: SessionItem[]): TaskGroup[] {
   const taskMap = new Map<string, TaskGroup>();
   const childSessions: SessionItem[] = [];
 
-  // 第一轮：收集独立任务（无 task_id 的 session）
   for (const session of sessions) {
     const taskId = getTaskId(session.meta);
     if (taskId) {
@@ -323,7 +458,6 @@ export function groupSessionsToTasks(sessions: SessionItem[]): TaskGroup[] {
     }
   }
 
-  // 第二轮：将子 session 归入父任务
   for (const child of childSessions) {
     const taskId = getTaskId(child.meta)!;
     const group = taskMap.get(taskId);
@@ -331,7 +465,6 @@ export function groupSessionsToTasks(sessions: SessionItem[]): TaskGroup[] {
       group.sessions.push(child);
       group.lastActive = Math.max(group.lastActive, child.last_active);
     } else {
-      // 父 session 不存在，作为独立任务
       taskMap.set(child.session_id, {
         taskId: child.session_id,
         title: getTitle(child.meta),

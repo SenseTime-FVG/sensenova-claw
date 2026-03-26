@@ -26,6 +26,7 @@ interface ProviderConfig {
 interface ModelConfig {
   provider: string;
   model_id: string;
+  type?: string;  // "chat" | "embedding"
   timeout: number;
   max_tokens: number;
   max_output_tokens: number;
@@ -43,6 +44,7 @@ interface GlobalDraft {
   providers: Record<string, ProviderDraft>;
   models: Record<string, ModelDraft>;
   defaultModel: string;
+  defaultEmbeddingModel: string;
 }
 
 interface LlmMeta {
@@ -82,6 +84,7 @@ export default function LlmsPage() {
   const [providers, setProviders] = useState<Record<string, ProviderConfig>>({});
   const [models, setModels] = useState<Record<string, ModelConfig>>({});
   const [defaultModel, setDefaultModel] = useState('');
+  const [defaultEmbeddingModel, setDefaultEmbeddingModel] = useState('');
 
   const [showNewProvider, setShowNewProvider] = useState(false);
   const [newProviderName, setNewProviderName] = useState('');
@@ -94,10 +97,12 @@ export default function LlmsPage() {
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [editingModel, setEditingModel] = useState<string | null>(null);
   const [editingDefaultModel, setEditingDefaultModel] = useState(false);
+  const [editingDefaultEmbeddingModel, setEditingDefaultEmbeddingModel] = useState(false);
   const [providerDrafts, setProviderDrafts] = useState<Record<string, ProviderDraft>>({});
   const [modelDrafts, setModelDrafts] = useState<Record<string, ModelDraft>>({});
   const [globalDraft, setGlobalDraft] = useState<GlobalDraft | null>(null);
   const [defaultModelDraft, setDefaultModelDraft] = useState('');
+  const [defaultEmbeddingModelDraft, setDefaultEmbeddingModelDraft] = useState('');
   const [testingModel, setTestingModel] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, ModelTestResult>>({});
   const [openTestErrorModel, setOpenTestErrorModel] = useState<string | null>(null);
@@ -123,6 +128,7 @@ export default function LlmsPage() {
         setProviders(visibleProviders);
         setModels(visibleModels);
         setDefaultModel(llm.default_model && llm.default_model in visibleModels ? llm.default_model : '');
+        setDefaultEmbeddingModel(llm.default_embedding_model && llm.default_embedding_model in visibleModels ? llm.default_embedding_model : '');
         setExpandedProviders(
           Object.fromEntries(Object.keys(visibleProviders).map((name) => [name, false])),
         );
@@ -130,10 +136,12 @@ export default function LlmsPage() {
         setEditingProvider(null);
         setEditingModel(null);
         setEditingDefaultModel(false);
+        setEditingDefaultEmbeddingModel(false);
         setProviderDrafts({});
         setModelDrafts({});
         setGlobalDraft(null);
         setDefaultModelDraft('');
+        setDefaultEmbeddingModelDraft('');
         setOpenTestErrorModel(null);
       })
       .catch(() => {})
@@ -188,6 +196,7 @@ export default function LlmsPage() {
       {
         provider: draft.provider,
         model_id: draft.model_id,
+        type: draft.type,
         timeout: draft.timeout,
         max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
@@ -197,6 +206,8 @@ export default function LlmsPage() {
 
   const providerNames = useMemo(() => Object.keys(activeProviders), [activeProviders]);
   const modelNames = useMemo(() => Object.keys(activeModels), [activeModels]);
+  const chatModelNames = useMemo(() => modelNames.filter((name) => (activeModels[name]?.type || 'chat') === 'chat'), [activeModels, modelNames]);
+  const embeddingModelNames = useMemo(() => modelNames.filter((name) => activeModels[name]?.type === 'embedding'), [activeModels, modelNames]);
 
   const groupedModels = useMemo(() => {
     return providerNames.reduce<Record<string, string[]>>((acc, providerName) => {
@@ -358,6 +369,7 @@ export default function LlmsPage() {
         providers: nextProviders,
         models: nextModels,
         defaultModel: removedModels.includes(globalDraft.defaultModel) ? '' : globalDraft.defaultModel,
+        defaultEmbeddingModel: removedModels.includes(globalDraft.defaultEmbeddingModel) ? '' : globalDraft.defaultEmbeddingModel,
       });
     } else {
       setProviders((prev) => {
@@ -439,6 +451,7 @@ export default function LlmsPage() {
     const nextModel: ModelDraft = {
         provider: providerName,
         model_id: '',
+        type: 'chat',
         timeout: 60,
         max_tokens: 128000,
         max_output_tokens: 16384,
@@ -480,6 +493,7 @@ export default function LlmsPage() {
         ...globalDraft,
         models: nextModels,
         defaultModel: globalDraft.defaultModel === name ? '' : globalDraft.defaultModel,
+        defaultEmbeddingModel: globalDraft.defaultEmbeddingModel === name ? '' : globalDraft.defaultEmbeddingModel,
       });
     } else {
       setModels((prev) => {
@@ -490,6 +504,9 @@ export default function LlmsPage() {
     }
     if (!editingAll && defaultModel === name) {
       setDefaultModel('');
+    }
+    if (!editingAll && defaultEmbeddingModel === name) {
+      setDefaultEmbeddingModel('');
     }
   };
 
@@ -503,6 +520,7 @@ export default function LlmsPage() {
         providers: buildProviderPayloadsFromDrafts(sourceProviders),
         models: buildModelPayloadsFromDrafts(sourceModels),
         default_model: editingAll && globalDraft ? globalDraft.defaultModel : defaultModel,
+        default_embedding_model: editingAll && globalDraft ? globalDraft.defaultEmbeddingModel : defaultEmbeddingModel,
       };
       const res = await authFetch(`${API_BASE}/api/config/sections`, {
         method: 'PUT',
@@ -688,6 +706,7 @@ export default function LlmsPage() {
         name: draft.name,
         provider: draft.provider,
         model_id: draft.model_id,
+        type: draft.type || 'chat',
         timeout: draft.timeout,
         max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
@@ -705,6 +724,7 @@ export default function LlmsPage() {
   const startEditDefaultModel = () => {
     setEditingProvider(null);
     setEditingModel(null);
+    setEditingDefaultEmbeddingModel(false);
     setEditingDefaultModel(true);
     setDefaultModelDraft(defaultModel);
   };
@@ -721,6 +741,37 @@ export default function LlmsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         default_model: defaultModelDraft,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setSaveMsg(err.detail || '保存失败');
+      return;
+    }
+    setSaveMsg('已保存');
+    loadConfig();
+  };
+
+  const startEditDefaultEmbeddingModel = () => {
+    setEditingProvider(null);
+    setEditingModel(null);
+    setEditingDefaultModel(false);
+    setEditingDefaultEmbeddingModel(true);
+    setDefaultEmbeddingModelDraft(defaultEmbeddingModel);
+  };
+
+  const cancelEditDefaultEmbeddingModel = () => {
+    setEditingDefaultEmbeddingModel(false);
+    setDefaultEmbeddingModelDraft('');
+  };
+
+  const saveDefaultEmbeddingModel = async () => {
+    setSaveMsg('');
+    const res = await authFetch(`${API_BASE}/api/config/llm/default-embedding-model`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        default_embedding_model: defaultEmbeddingModelDraft,
       }),
     });
     if (!res.ok) {
@@ -821,6 +872,7 @@ export default function LlmsPage() {
       providers: cloneProvidersToDrafts(providers),
       models: cloneModelsToDrafts(models),
       defaultModel,
+      defaultEmbeddingModel,
     });
   };
 
@@ -828,6 +880,7 @@ export default function LlmsPage() {
     setEditingAll(false);
     setGlobalDraft(null);
     setDefaultModelDraft('');
+    setDefaultEmbeddingModelDraft('');
   };
 
   if (loading) {
@@ -885,7 +938,7 @@ export default function LlmsPage() {
                 type="button"
                 data-testid="edit-all-llm-config"
                 onClick={startEditAll}
-                disabled={Boolean(editingProvider || editingModel || editingDefaultModel)}
+                disabled={Boolean(editingProvider || editingModel || editingDefaultModel || editingDefaultEmbeddingModel)}
                 className="rounded-xl bg-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-50"
               >
                 编辑所有配置
@@ -894,7 +947,7 @@ export default function LlmsPage() {
           </div>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
           <SummaryCard title="Providers" value={providerNames.length} desc="已配置 provider 数量" icon={<Server className="h-5 w-5 text-primary" />} />
           <SummaryCard title="LLMs" value={modelNames.length} desc="已配置 llm 数量" icon={<Cpu className="h-5 w-5 text-primary" />} />
           <Card className="border-border/60 shadow-lg">
@@ -926,7 +979,7 @@ export default function LlmsPage() {
                   type="button"
                   data-testid="default-model-edit"
                   onClick={startEditDefaultModel}
-                  disabled={Boolean(editingProvider || editingModel)}
+                  disabled={Boolean(editingProvider || editingModel || editingDefaultEmbeddingModel)}
                   className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
                 >
                   编辑
@@ -950,11 +1003,71 @@ export default function LlmsPage() {
                 className="w-full cursor-pointer rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
                 <option value="">未设置</option>
-                {modelNames.map((name) => (
+                {chatModelNames.map((name) => (
                   <option key={name} value={name}>{name}</option>
                 ))}
               </select>
               <p className="text-sm text-muted-foreground">默认模型用于 agent 未显式指定 model 的场景。</p>
+            </CardContent>
+          </Card>
+          <Card className="border-border/60 shadow-lg">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Default Embedding</CardTitle>
+              {editingAll ? (
+                <Save className="h-5 w-5 text-primary" />
+              ) : editingDefaultEmbeddingModel ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="default-embedding-model-cancel"
+                    onClick={cancelEditDefaultEmbeddingModel}
+                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-foreground transition-all hover:bg-muted/40"
+                  >
+                    取消编辑
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="default-embedding-model-save"
+                    onClick={saveDefaultEmbeddingModel}
+                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground transition-all hover:bg-primary/90"
+                  >
+                    保存
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="default-embedding-model-edit"
+                  onClick={startEditDefaultEmbeddingModel}
+                  disabled={Boolean(editingProvider || editingModel || editingDefaultModel)}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
+                >
+                  编辑
+                </button>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <select
+                data-testid="default-embedding-model-select"
+                value={editingAll && globalDraft ? globalDraft.defaultEmbeddingModel : editingDefaultEmbeddingModel ? defaultEmbeddingModelDraft : defaultEmbeddingModel}
+                onChange={(e) => {
+                  if (editingAll && globalDraft) {
+                    setGlobalDraft({ ...globalDraft, defaultEmbeddingModel: e.target.value });
+                    return;
+                  }
+                  if (editingDefaultEmbeddingModel) {
+                    setDefaultEmbeddingModelDraft(e.target.value);
+                  }
+                }}
+                disabled={!editingAll && !editingDefaultEmbeddingModel}
+                className="w-full cursor-pointer rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+              >
+                <option value="">未设置</option>
+                {embeddingModelNames.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+              <p className="text-sm text-muted-foreground">默认 embedding 模型用于记忆搜索的向量化。</p>
             </CardContent>
           </Card>
         </div>
@@ -1194,6 +1307,17 @@ export default function LlmsPage() {
                                   }));
                                 }}
                               />
+                              <FieldSelect
+                                label="类型"
+                                value={getModelDraft(modelName).type || 'chat'}
+                                dataTestId={`llm-type-select-${modelName}`}
+                                disabled={!isModelEditable(modelName)}
+                                options={[
+                                  { value: 'chat', label: 'Chat' },
+                                  { value: 'embedding', label: 'Embedding' },
+                                ]}
+                                onChange={(value) => updateModelField(modelName, 'type', value)}
+                              />
                               <FieldInput
                                 label="Model ID"
                                 value={getModelDraft(modelName).model_id || ''}
@@ -1209,22 +1333,26 @@ export default function LlmsPage() {
                                 disabled={!isModelEditable(modelName)}
                                 onChange={(value) => updateModelField(modelName, 'timeout', parseInt(value, 10) || 60)}
                               />
-                              <FieldInput
-                                label="Max Tokens"
-                                type="number"
-                                value={String(getModelDraft(modelName).max_tokens || 128000)}
-                                dataTestId={`llm-max-tokens-input-${modelName}`}
-                                disabled={!isModelEditable(modelName)}
-                                onChange={(value) => updateModelField(modelName, 'max_tokens', parseInt(value, 10) || 128000)}
-                              />
-                              <FieldInput
-                                label="Max Output Tokens"
-                                type="number"
-                                value={String(getModelDraft(modelName).max_output_tokens || 16384)}
-                                dataTestId={`llm-max-output-tokens-input-${modelName}`}
-                                disabled={!isModelEditable(modelName)}
-                                onChange={(value) => updateModelField(modelName, 'max_output_tokens', parseInt(value, 10) || 16384)}
-                              />
+                              {(getModelDraft(modelName).type || 'chat') === 'chat' && (
+                                <>
+                                  <FieldInput
+                                    label="Max Tokens"
+                                    type="number"
+                                    value={String(getModelDraft(modelName).max_tokens || 128000)}
+                                    dataTestId={`llm-max-tokens-input-${modelName}`}
+                                    disabled={!isModelEditable(modelName)}
+                                    onChange={(value) => updateModelField(modelName, 'max_tokens', parseInt(value, 10) || 128000)}
+                                  />
+                                  <FieldInput
+                                    label="Max Output Tokens"
+                                    type="number"
+                                    value={String(getModelDraft(modelName).max_output_tokens || 16384)}
+                                    dataTestId={`llm-max-output-tokens-input-${modelName}`}
+                                    disabled={!isModelEditable(modelName)}
+                                    onChange={(value) => updateModelField(modelName, 'max_output_tokens', parseInt(value, 10) || 16384)}
+                                  />
+                                </>
+                              )}
                             </div>
                             <div className="flex min-w-0 flex-col items-end gap-2">
                               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1509,6 +1637,7 @@ function normalizeModels(input: Record<string, unknown>): Record<string, ModelCo
         {
           provider: String(model.provider || ''),
           model_id: String(model.model_id || ''),
+          type: String(model.type || 'chat'),
           timeout: Number(model.timeout || 60),
           max_tokens: Number(model.max_tokens || 128000),
           max_output_tokens: Number(model.max_output_tokens || 16384),
@@ -1563,6 +1692,7 @@ function buildModelPayloadsFromDrafts(models: Record<string, ModelDraft>): Recor
       {
         provider: draft.provider,
         model_id: draft.model_id,
+        type: draft.type || 'chat',
         timeout: draft.timeout,
         max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
