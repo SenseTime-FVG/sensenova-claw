@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useWebSocket } from './WebSocketContext';
 import { parseWsEvent, type WsInboundEvent } from '@/lib/wsEvents';
 
@@ -111,9 +111,9 @@ export function EventDispatcherProvider({ children }: { children: React.ReactNod
       // 1. 全局活动追踪（在分发之前，对所有 session 生效）
       if (eventSessionId) {
         if (eventType === 'agent_thinking') {
-          setGlobalWorkingSessions(prev => { const next = new Set(prev); next.add(eventSessionId); return next; });
+          setGlobalWorkingSessions(prev => prev.has(eventSessionId) ? prev : new Set(prev).add(eventSessionId));
         } else if (eventType === 'turn_completed' || eventType === 'turn_cancelled' || eventType === 'error') {
-          setGlobalWorkingSessions(prev => { const next = new Set(prev); next.delete(eventSessionId); return next; });
+          setGlobalWorkingSessions(prev => { if (!prev.has(eventSessionId)) return prev; const next = new Set(prev); next.delete(eventSessionId); return next; });
         } else if (eventType === 'tool_execution') {
           setGlobalLastToolName((event.payload as { tool_name?: string }).tool_name || '');
         }
@@ -151,20 +151,21 @@ export function EventDispatcherProvider({ children }: { children: React.ReactNod
 
   // ── value ──
 
-  const globalActivity: GlobalAgentActivity = {
+  const globalActivity = useMemo<GlobalAgentActivity>(() => ({
     anyWorking: globalWorkingSessions.size > 0,
     workingSessionIds: globalWorkingSessions,
     lastToolName: globalLastToolName,
-  };
+  }), [globalWorkingSessions, globalLastToolName]);
 
-  const value: EventDispatcherContextValue = {
+  const value = useMemo<EventDispatcherContextValue>(() => ({
     subscribeCurrentSession,
     subscribeGlobal,
     subscribeFrontendCreate,
     globalActivity,
     setCurrentSessionId,
     markFrontendCreate,
-  };
+  }), [subscribeCurrentSession, subscribeGlobal, subscribeFrontendCreate,
+       globalActivity, setCurrentSessionId, markFrontendCreate]);
 
   return <EventDispatcherCtx.Provider value={value}>{children}</EventDispatcherCtx.Provider>;
 }

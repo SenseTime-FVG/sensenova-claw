@@ -401,7 +401,8 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     return subscribeFrontendCreate((event: WsInboundEvent) => {
       if (event.type === 'session_created') {
-        const newSid = event.session_id!;
+        const newSid = event.session_id;
+        if (!newSid) return;
         if (pendingInputRef.current) {
           const { content, contextFiles } = pendingInputRef.current;
           wsSend({
