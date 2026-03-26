@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface ProviderConfig {
+  source_type: string;
   api_key: string;
   api_key_meta?: SecretValueStatus | null;
   api_key_touched?: boolean;
@@ -191,7 +192,7 @@ export default function SettingsPage() {
       // 重新组装完整的 llm section（包含 mock）
       const llm = {
         providers: {
-          mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          mock: { source_type: 'mock', api_key: '', base_url: '', timeout: 60, max_retries: 1 },
           ...buildProviderPayloads(providers),
         },
         models: { mock: { provider: 'mock', model_id: 'mock-agent-v1' }, ...models },
@@ -313,7 +314,7 @@ export default function SettingsPage() {
     if (!name || providers[name]) return;
     setProviders(prev => ({
       ...prev,
-      [name]: { api_key: '', api_key_meta: null, api_key_touched: true, base_url: '', timeout: 60, max_retries: 3 },
+      [name]: { source_type: 'openai', api_key: '', api_key_meta: null, api_key_touched: true, base_url: '', timeout: 60, max_retries: 3 },
     }));
     setExpandedProviders(prev => ({ ...prev, [name]: true }));
     setNewProviderName('');
@@ -1021,6 +1022,7 @@ function normalizeProviders(input: Record<string, any>): Record<string, Provider
       return [
         name,
         {
+          source_type: String(provider.source_type || 'openai'),
           api_key: hasMeta ? '' : String(apiKeyValue || ''),
           api_key_meta: hasMeta ? apiKeyValue as SecretValueStatus : null,
           api_key_touched: false,
@@ -1081,6 +1083,7 @@ function buildProviderPayloads(providers: Record<string, ProviderConfig>): Recor
   return Object.fromEntries(
     Object.entries(providers).map(([name, provider]) => {
       const payload: Record<string, unknown> = {
+        source_type: provider.source_type || 'openai',
         base_url: provider.base_url,
         timeout: provider.timeout,
         max_retries: provider.max_retries,

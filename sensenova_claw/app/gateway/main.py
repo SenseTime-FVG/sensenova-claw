@@ -227,9 +227,9 @@ async def lifespan(app: FastAPI):
         jsonl_writer=jsonl_writer,
         context_compressor=context_compressor,
     )
-    llm_runtime = LLMRuntime(bus_router=bus_router, factory=llm_factory)
+    llm_runtime = LLMRuntime(bus_router=bus_router, factory=llm_factory, state_store=state_store)
     tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry,
-                               agent_registry=agent_registry)
+                               agent_registry=agent_registry, state_store=state_store)
     agent_message_coordinator = AgentMessageCoordinator(
         bus=bus,
         repo=repo,
@@ -238,7 +238,12 @@ async def lifespan(app: FastAPI):
     )
     title_runtime = TitleRuntime(bus=bus, repo=repo, agent_registry=agent_registry)
 
-    gateway = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
+    gateway = Gateway(
+        publisher=publisher,
+        repo=repo,
+        agent_registry=agent_registry,
+        bus_router=bus_router,
+    )
     custom_page_service.gateway = gateway
 
     # v1.1: 初始化 ProactiveRuntime（主动任务）

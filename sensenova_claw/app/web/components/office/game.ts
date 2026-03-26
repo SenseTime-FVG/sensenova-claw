@@ -1,5 +1,5 @@
 // 办公室 Phaser 场景：状态机、动画、气泡对话
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 import { LAYOUT } from './layout';
 import { STATES, BUBBLE_TEXTS, type OfficeStateName } from './types';
 
@@ -7,11 +7,18 @@ const BUBBLE_INTERVAL = 8000;
 const CAT_BUBBLE_INTERVAL = 18000;
 
 export class OfficeScene extends Phaser.Scene {
-  private star!: Phaser.Physics.Arcade.Sprite;
+  // 多 agent 角色管理
+  private agentSprites = new Map<string, {
+    idleSprite: Phaser.GameObjects.Sprite;
+    workingSprite: Phaser.GameObjects.Sprite;
+    nameLabel: Phaser.GameObjects.Text;
+    slotIndex: number;
+  }>();
+  private nextBubbleAgentIndex = 0;
+
   private sofa!: Phaser.GameObjects.Sprite;
   private serverroom!: Phaser.GameObjects.Sprite;
   private syncAnimSprite!: Phaser.GameObjects.Sprite;
-  private starWorking!: Phaser.GameObjects.Sprite;
   private errorBug!: Phaser.GameObjects.Sprite;
   private errorBugDir = 1;
   private catSprite!: Phaser.GameObjects.Sprite;
@@ -31,8 +38,8 @@ export class OfficeScene extends Phaser.Scene {
     // 背景
     this.load.image('office_bg', `${base}/office_bg_small.webp`);
     // 主角
-    this.load.spritesheet('star_idle', `${base}/icon.png`, { frameWidth: 256, frameHeight: 256 });
-    this.load.spritesheet('star_working', `${base}/icon.png`, { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('star_idle', `${base}/icon.png`, { frameWidth: 128, frameHeight: 128 });
+    this.load.spritesheet('star_working', `${base}/icon.png`, { frameWidth: 128, frameHeight: 128 });
     // 家具
     this.load.image('sofa_idle', `${base}/sofa-idle-v3.png`);
     this.load.image('desk', `${base}/desk-v3.webp`);
@@ -43,7 +50,7 @@ export class OfficeScene extends Phaser.Scene {
     this.load.spritesheet('serverroom', `${base}/serverroom-spritesheet.webp`, { frameWidth: 180, frameHeight: 251 });
     this.load.spritesheet('error_bug', `${base}/error-bug-spritesheet-grid.webp`, { frameWidth: 180, frameHeight: 180 });
     this.load.spritesheet('cats', `${base}/cats-spritesheet.webp`, { frameWidth: 160, frameHeight: 160 });
-    this.load.spritesheet('sync_anim', `${base}/sync-animation-v3-grid.webp`, { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('sync_anim', `${base}/icon.png`, { frameWidth: 128, frameHeight: 128 });
     this.load.spritesheet('flowers', `${base}/flowers-bloom-v2.webp`, { frameWidth: 65, frameHeight: 65 });
   }
 
@@ -56,26 +63,17 @@ export class OfficeScene extends Phaser.Scene {
     this.sofa = this.add.sprite(sf.x, sf.y, 'sofa_idle')
       .setOrigin(sf.origin.x, sf.origin.y).setDepth(sf.depth);
 
-    // 主角 idle 精灵（沙发上休息）
+    // 主角动画定义（多 agent 复用）
     this.anims.create({
       key: 'star_idle',
       frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 0 }),
       frameRate: 1, repeat: -1,
     });
-    // 放在沙发座面上
-    this.star = this.physics.add.sprite(780, 250, 'star_idle')
-      .setOrigin(0.5).setScale(0.35).setAlpha(0.9).setDepth(15);
-    this.star.play('star_idle');
-
-    // 工作动画精灵（桌前，初始隐藏）
     this.anims.create({
       key: 'star_working',
       frames: this.anims.generateFrameNumbers('star_working', { start: 0, end: 0 }),
       frameRate: 1, repeat: -1,
     });
-    const sw = LAYOUT.furniture.starWorking;
-    this.starWorking = this.add.sprite(sw.x, sw.y, 'star_working', 0)
-      .setOrigin(sw.origin.x, sw.origin.y).setScale(sw.scale).setDepth(sw.depth).setVisible(false);
 
     // 办公桌
     const dk = LAYOUT.furniture.desk;
@@ -161,6 +159,11 @@ export class OfficeScene extends Phaser.Scene {
     this.game.events.on('setState', (state: OfficeStateName, detail: string) => {
       this.handleStateChange(state, detail);
     });
+
+    // 监听 agent 列表更新
+    this.game.events.on('setAgents', (agents: { id: string; name: string }[]) => {
+      this.handleAgentsUpdate(agents);
+    });
   }
 
   update(time: number) {
@@ -206,36 +209,91 @@ export class OfficeScene extends Phaser.Scene {
     }
   }
 
+  private handleAgentsUpdate(agents: { id: string; name: string }[]) {
+    const newIds = new Set(agents.map(a => a.id));
+    // 移除不再存在的 agent
+    for (const [id, group] of this.agentSprites) {
+      if (!newIds.has(id)) {
+        group.idleSprite.destroy();
+        group.workingSprite.destroy();
+        group.nameLabel.destroy();
+        this.agentSprites.delete(id);
+      }
+    }
+    // 添加新 agent
+    let slotIndex = 0;
+    for (const agent of agents) {
+      if (this.agentSprites.has(agent.id)) {
+        const existing = this.agentSprites.get(agent.id)!;
+        existing.slotIndex = slotIndex;
+        slotIndex++;
+        continue;
+      }
+      const slots = LAYOUT.agentSlots;
+      const idleSlot = slots.idle[slotIndex % slots.idle.length];
+      const workSlot = slots.working[slotIndex % slots.working.length];
+
+      const idleSprite = this.add.sprite(idleSlot.x, idleSlot.y, 'star_idle', 0)
+        .setOrigin(0.5).setScale(0.8).setAlpha(0.9).setDepth(idleSlot.depth);
+      idleSprite.play('star_idle');
+
+      const workingSprite = this.add.sprite(workSlot.x, workSlot.y, 'star_working', 0)
+        .setOrigin(0.5).setScale(0.8).setDepth(workSlot.depth).setVisible(false);
+
+      const nameLabel = this.add.text(idleSlot.x, idleSlot.y + 50, agent.name, {
+        fontFamily: 'monospace', fontSize: '11px', color: '#fff',
+        stroke: '#000', strokeThickness: 2,
+      }).setOrigin(0.5).setDepth(idleSlot.depth + 1);
+
+      this.agentSprites.set(agent.id, {
+        idleSprite, workingSprite, nameLabel, slotIndex,
+      });
+      slotIndex++;
+    }
+    this.applyStateToAllAgents();
+  }
+
+  private applyStateToAllAgents() {
+    const slots = LAYOUT.agentSlots;
+    for (const [, group] of this.agentSprites) {
+      const idx = group.slotIndex;
+      if (this.currentState === 'idle') {
+        const slot = slots.idle[idx % slots.idle.length];
+        group.idleSprite.setPosition(slot.x, slot.y).setVisible(true);
+        group.workingSprite.setVisible(false);
+        group.nameLabel.setPosition(slot.x, slot.y + 50).setVisible(true);
+      } else if (['writing', 'researching', 'executing'].includes(this.currentState)) {
+        const slot = slots.working[idx % slots.working.length];
+        group.idleSprite.setVisible(false);
+        group.workingSprite.setPosition(slot.x, slot.y).setVisible(true);
+        group.workingSprite.play('star_working');
+        group.nameLabel.setPosition(slot.x, slot.y + 50).setVisible(true);
+      } else {
+        group.idleSprite.setVisible(false);
+        group.workingSprite.setVisible(false);
+        group.nameLabel.setVisible(false);
+      }
+    }
+  }
+
   private handleStateChange(nextState: OfficeStateName, _detail: string) {
     if (nextState === this.currentState) return;
     this.currentState = nextState;
-
-    if (nextState === 'idle') {
-      // 回沙发休息 — 角色显示在沙发上
-      this.star.setPosition(780, 250);
-      this.star.setVisible(true);
-      this.star.play('star_idle');
-      this.starWorking.setVisible(false);
-      this.starWorking.anims.stop();
-    } else if (['writing', 'researching', 'executing'].includes(nextState)) {
-      // 桌前工作
-      this.star.setVisible(false);
-      this.starWorking.setVisible(true);
-      this.starWorking.play('star_working');
-    } else {
-      // syncing / error：隐藏主角，由对应特效展示
-      this.star.setVisible(false);
-      this.starWorking.setVisible(false);
-      this.starWorking.anims.stop();
-    }
+    this.applyStateToAllAgents();
   }
 
   private showBubble() {
     if (this.currentState === 'idle') return;
     if (this.bubble) { this.bubble.destroy(); this.bubble = null; }
+    if (this.agentSprites.size === 0) return;
 
     const texts = BUBBLE_TEXTS[this.currentState] || BUBBLE_TEXTS.idle;
     const text = texts[Math.floor(Math.random() * texts.length)];
+
+    // 轮流选择 agent
+    const entries = [...this.agentSprites.values()];
+    const agent = entries[this.nextBubbleAgentIndex % entries.length];
+    this.nextBubbleAgentIndex = (this.nextBubbleAgentIndex + 1) % entries.length;
 
     let anchorX: number, anchorY: number;
     if (this.currentState === 'syncing') {
@@ -243,7 +301,7 @@ export class OfficeScene extends Phaser.Scene {
     } else if (this.currentState === 'error') {
       anchorX = this.errorBug.x; anchorY = this.errorBug.y;
     } else {
-      anchorX = this.starWorking.x; anchorY = this.starWorking.y;
+      anchorX = agent.workingSprite.x; anchorY = agent.workingSprite.y;
     }
 
     const bubbleY = anchorY - 70;
@@ -284,6 +342,7 @@ export function createOfficeGame(parent: HTMLDivElement): Phaser.Game {
     height: LAYOUT.game.height,
     parent,
     pixelArt: true,
+    backgroundColor: '#2c1e12',
     physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
     scene: [OfficeScene],
     scale: {

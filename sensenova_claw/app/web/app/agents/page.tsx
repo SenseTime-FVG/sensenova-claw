@@ -341,7 +341,7 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
           name: formName.trim(),
           description: formDesc.trim(),
           model: formModel.trim() || undefined,
-          temperature: parseFloat(formTemp) || 0.2,
+          temperature: parseFloat(formTemp) || 1.0,
           system_prompt: formPrompt,
         }),
       });

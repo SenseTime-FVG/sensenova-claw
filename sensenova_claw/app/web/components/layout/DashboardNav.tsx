@@ -4,32 +4,52 @@ import { useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { Settings, ChevronDown, Zap } from 'lucide-react';
+import {
+  Settings, ChevronDown, Zap, Presentation, MessageCircle, Home,
+  Search, Clock, Brain, Server, Wrench, Star, Shield, Users,
+  type LucideIcon,
+} from 'lucide-react';
 import { useCustomPages } from '@/hooks/useCustomPages';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 
-const mainNavItems = [
-  { path: '/', label: '工作台', exact: true },
-  { path: '/chat', label: '消息' },
-  { path: '/office', label: '办公室' },
+const iconMap: Record<string, LucideIcon> = {
+  zap: Zap,
+  presentation: Presentation,
+  'message-circle': MessageCircle,
+  home: Home,
+  search: Search,
+  settings: Settings,
+  users: Users,
+  clock: Clock,
+  brain: Brain,
+  server: Server,
+  tool: Wrench,
+  star: Star,
+  shield: Shield,
+};
+
+const mainNavItems: { path: string; label: string; exact?: boolean; icon?: string }[] = [
+  { path: '/', label: '工作台', exact: true, icon: 'zap' },
+  { path: '/ppt', label: 'PPT', icon: 'presentation' },
+  { path: '/chat', label: '消息', icon: 'message-circle' },
+  { path: '/office', label: '办公室', icon: 'home' },
 ];
 
 export type SubNavGroup = 'features' | 'admin' | null;
 
 export const builtinFeatureNavItems = [
-  { path: '/research', label: '深度研究' },
-  { path: '/ppt', label: 'PPT' },
-  { path: '/automation', label: '自动化' },
+  { path: '/research', label: '深度研究', icon: 'search' },
+  { path: '/automation', label: '自动化', icon: 'settings' },
 ];
 
 export const adminNavItems = [
-  { path: '/agents', label: 'Agents' },
-  { path: '/sessions', label: 'Sessions' },
-  { path: '/llms', label: 'LLMs' },
-  { path: '/gateway', label: 'Gateway' },
-  { path: '/tools', label: 'Tools' },
-  { path: '/skills', label: 'Skills' },
-  { path: '/acp', label: 'ACP' },
+  { path: '/agents', label: 'Agents', icon: 'users' },
+  { path: '/sessions', label: 'Sessions', icon: 'clock' },
+  { path: '/llms', label: 'LLMs', icon: 'brain' },
+  { path: '/gateway', label: 'Gateway', icon: 'server' },
+  { path: '/tools', label: 'Tools', icon: 'tool' },
+  { path: '/skills', label: 'Skills', icon: 'star' },
+  { path: '/acp', label: 'ACP', icon: 'shield' },
 ];
 
 export function useFeatureNavItems() {
@@ -45,6 +65,12 @@ export function useFeatureNavItems() {
       { path: '/create-feature', label: '+ 创建' },
     ];
   }, [pages]);
+}
+
+export function NavIcon({ name }: { name?: string }) {
+  if (!name || !iconMap[name]) return null;
+  const Icon = iconMap[name];
+  return <Icon className="w-3.5 h-3.5" />;
 }
 
 export function DashboardNav({
@@ -94,12 +120,15 @@ export function DashboardNav({
           href={item.path}
           onClick={() => { if (isActive(item)) startNewChat(); }}
           className={cn(
-            'px-3 py-1.5 text-[13px] font-medium rounded-lg transition-all duration-150',
-            isActive(item)
-              ? 'text-foreground bg-[var(--nav-pill-active)]'
-              : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
+            'px-3 py-1.5 text-[13px] font-medium rounded-lg transition-all duration-150 flex items-center gap-1.5',
+            item.icon === 'presentation' && isActive(item)
+              ? 'text-primary bg-primary/10 font-semibold'
+              : isActive(item)
+                ? 'text-foreground bg-[var(--nav-pill-active)]'
+                : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
           )}
         >
+          <NavIcon name={item.icon} />
           {item.label}
         </Link>
       ))}

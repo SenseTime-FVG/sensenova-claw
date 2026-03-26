@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   DashboardNav,
+  NavIcon,
   useFeatureNavItems,
   adminNavItems,
   type SubNavGroup,
@@ -75,7 +76,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           {/* 品牌标识 */}
           <Link href="/" className="flex items-center gap-2.5 mr-2 group">
             <div className="w-8 h-8 bg-primary text-primary-foreground rounded-[10px] flex items-center justify-center font-bold text-xs tracking-tight shadow-sm group-hover:shadow-md transition-shadow">
-              AO
+              SC
             </div>
             <span className="text-[15px] font-bold tracking-[-0.02em] text-foreground">
               Sensenova-Claw
@@ -125,12 +126,13 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 href={item.path}
                 onClick={() => { if (pathname?.startsWith(item.path)) startNewChat(); }}
                 className={cn(
-                  'px-3 py-1 text-[13px] rounded-lg transition-all duration-150',
+                  'px-3 py-1 text-[13px] rounded-lg transition-all duration-150 flex items-center gap-1.5',
                   pathname?.startsWith(item.path)
                     ? 'bg-primary/10 text-primary font-semibold'
                     : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
                 )}
               >
+                {'icon' in item && <NavIcon name={(item as { icon?: string }).icon} />}
                 {item.label}
               </Link>
             ))}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 import pytest
@@ -60,9 +61,9 @@ def app(tmp_path: Path) -> FastAPI:
 
     sensenova_claw_home = tmp_path / "sensenova_claw_home"
     sensenova_claw_home.mkdir()
-
+    previous_home = os.environ.get("SENSENOVA_CLAW_HOME")
+    os.environ["SENSENOVA_CLAW_HOME"] = str(sensenova_claw_home)
     cfg = Config(config_path=tmp_path / "config.yml")
-    cfg.set("system.sensenova_claw_home", str(sensenova_claw_home))
 
     agent_registry = AgentRegistry(sensenova_claw_home=sensenova_claw_home)
     agent_registry.load_from_config(cfg.data)
@@ -77,6 +78,11 @@ def app(tmp_path: Path) -> FastAPI:
     app.state.config = cfg
     app.state.agent_registry = agent_registry
     app.state.services = Services(gateway=gateway)
+
+    if previous_home is None:
+        os.environ.pop("SENSENOVA_CLAW_HOME", None)
+    else:
+        os.environ["SENSENOVA_CLAW_HOME"] = previous_home
 
     return app
 

@@ -57,7 +57,7 @@ class _FakeWhatsAppBridge:
 
 
 @pytest.mark.asyncio
-async def test_whatsapp_channel_end_to_end_flow(tmp_path: Path) -> None:
+async def test_whatsapp_channel_end_to_end_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """覆盖 WhatsApp 文本入站到 Agent 回复出站的完整链路。"""
     original_config = copy.deepcopy(config.data)
 
@@ -65,9 +65,9 @@ async def test_whatsapp_channel_end_to_end_flow(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     sensenova_claw_home = tmp_path / ".sensenova-claw"
 
+    monkeypatch.setenv("SENSENOVA_CLAW_HOME", str(sensenova_claw_home))
     config.data["system"]["database_path"] = str(db_path)
     config.data["system"]["workspace_dir"] = str(workspace)
-    config.data["system"]["sensenova_claw_home"] = str(sensenova_claw_home)
     config.data["system"]["log_level"] = "DEBUG"
     config.data["agent"]["model"] = "mock"
     config.data["llm"]["default_model"] = "mock"
@@ -154,7 +154,7 @@ async def test_whatsapp_channel_end_to_end_flow(tmp_path: Path) -> None:
     assert any(event.type == AGENT_STEP_COMPLETED for event in collected)
     assert bridge.sent_messages
     assert bridge.sent_messages[-1]["target"] == "15550000001@s.whatsapp.net"
-    assert "这是 mock 回复" in bridge.sent_messages[-1]["text"]
+    assert "当前没有可用的 LLM" in bridge.sent_messages[-1]["text"]
     log_file = sensenova_claw_home / "logs" / "system.log"
     assert log_file.exists()
     assert "LLM call input" in log_file.read_text(encoding="utf-8")

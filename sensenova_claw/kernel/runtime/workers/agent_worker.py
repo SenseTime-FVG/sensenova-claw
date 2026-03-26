@@ -8,6 +8,10 @@ import uuid
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from sensenova_claw.capabilities.agents.preferences import (
+    load_preferences,
+    resolve_tool_enabled_from_prefs,
+)
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
@@ -26,6 +30,7 @@ from sensenova_claw.kernel.events.types import (
 )
 from sensenova_claw.kernel.events.bus import PrivateEventBus
 from sensenova_claw.kernel.runtime.state import TurnState
+from sensenova_claw.kernel.runtime.context_builder import resolve_sensenova_claw_home_default
 from sensenova_claw.kernel.runtime.workers.base import SessionWorker
 
 if TYPE_CHECKING:
@@ -90,7 +95,7 @@ class AgentSessionWorker(SessionWorker):
     def _get_temperature(self) -> float:
         if self.agent_config:
             return self.agent_config.temperature
-        return config.get("agent.temperature", 0.2)
+        return config.get("agent.temperature", 1.0)
 
     def _get_max_tokens(self) -> int:
         """获取 max_output_tokens：agent 级别覆盖 model 级别"""
@@ -101,8 +106,9 @@ class AgentSessionWorker(SessionWorker):
 
     def _get_extra_body(self) -> dict:
         """获取 extra_body：agent 级别覆盖 model 级别"""
+        model_extra = dict(config.get("agent.extra_body", {}))
         model_key = self._get_model_key()
-        model_extra = config.get_model_extra_body(model_key)
+        model_extra.update(config.get_model_extra_body(model_key))
         if self.agent_config and self.agent_config.extra_body:
             model_extra.update(self.agent_config.extra_body)
         return model_extra
@@ -118,6 +124,18 @@ class AgentSessionWorker(SessionWorker):
             if self.agent_config.can_delegate_to is not None:
                 allowed.add("send_message")
             tools = [t for t in all_tools if t["name"] in allowed]
+        if self.agent_config and self.agent_config.can_delegate_to is None:
+            tools = [t for t in tools if t["name"] != "send_message"]
+        if self.agent_config:
+            home = (
+                self.rt.context_builder.sensenova_claw_home
+                or str(resolve_sensenova_claw_home_default())
+            )
+            prefs = load_preferences(home)
+            tools = [
+                t for t in tools
+                if resolve_tool_enabled_from_prefs(prefs, self.agent_config.id, t["name"], default=True)
+            ]
 
         # 仅对 proactive 会话应用安全限制
         if self._session_meta and self._session_meta.get("proactive_job_id"):

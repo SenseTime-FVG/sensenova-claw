@@ -36,6 +36,7 @@ class TestLLMBody(BaseModel):
 
 class ProviderUpdateBody(BaseModel):
     name: str | None = None
+    source_type: str = "openai"
     api_key: str | None = None
     base_url: str = ""
     timeout: int = 60
@@ -98,7 +99,20 @@ async def get_config_sections(request: Request):
     """返回 llm / agent / plugins / miniapps 四个 section 的当前值"""
     config_manager = request.app.state.config_manager
     default_sections = ["llm", "agent", "plugins", "miniapps"]
-    return config_manager.get_sections(default_sections)
+    sections = config_manager.get_sections(default_sections)
+    raw_config = config_manager._load_raw_yaml()
+    raw_llm = raw_config.get("llm", {}) if isinstance(raw_config, dict) else {}
+    raw_providers = raw_llm.get("providers", {}) if isinstance(raw_llm, dict) else {}
+    explicit_provider_names = [
+        name for name, value in raw_providers.items()
+        if isinstance(name, str) and isinstance(value, dict)
+    ]
+    llm_section = sections.get("llm", {})
+    if isinstance(llm_section, dict):
+        llm_section["_meta"] = {
+            "explicit_provider_names": explicit_provider_names,
+        }
+    return sections
 
 
 @router.get("/acp/wizard")
@@ -149,17 +163,16 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
     providers = deepcopy(llm_section.get("providers", {}))
     models = deepcopy(llm_section.get("models", {}))
 
-    if provider_name not in providers:
-        raise HTTPException(404, f"Provider 不存在: {provider_name}")
-
+    provider_exists = provider_name in providers
     next_name = (body.name or provider_name).strip().lower()
     if not next_name:
         raise HTTPException(400, "Provider 名称不能为空")
-    if next_name != provider_name and next_name in providers:
+    if provider_exists and next_name != provider_name and next_name in providers:
         raise HTTPException(400, f"Provider 已存在: {next_name}")
 
-    existing = providers.pop(provider_name)
+    existing = providers.pop(provider_name, {})
     provider_payload: dict[str, Any] = {
+        "source_type": body.source_type or (existing.get("source_type") if isinstance(existing, dict) else "openai"),
         "base_url": body.base_url,
         "timeout": body.timeout,
         "max_retries": body.max_retries,
@@ -172,7 +185,7 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
     providers[next_name] = provider_payload
     llm_section["providers"] = providers
 
-    if next_name != provider_name:
+    if provider_exists and next_name != provider_name:
         for model in models.values():
             if isinstance(model, dict) and model.get("provider") == provider_name:
                 model["provider"] = next_name
@@ -197,16 +210,14 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     llm_section = deepcopy(raw_config.get("llm", {}))
     models = deepcopy(llm_section.get("models", {}))
 
-    if model_name not in models:
-        raise HTTPException(404, f"Model 不存在: {model_name}")
-
+    model_exists = model_name in models
     next_name = (body.name or model_name).strip()
     if not next_name:
         raise HTTPException(400, "Model 名称不能为空")
-    if next_name != model_name and next_name in models:
+    if model_exists and next_name != model_name and next_name in models:
         raise HTTPException(400, f"Model 已存在: {next_name}")
 
-    models.pop(model_name)
+    models.pop(model_name, None)
     models[next_name] = {
         "provider": body.provider,
         "model_id": body.model_id,
@@ -215,7 +226,7 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
         "max_output_tokens": body.max_output_tokens,
     }
     llm_section["models"] = models
-    if llm_section.get("default_model") == model_name:
+    if model_exists and llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
 
     try:
@@ -309,7 +320,7 @@ async def list_models(body: ListModelsBody):
     """通过 OpenAI 兼容的 GET /models 接口获取可用模型列表"""
     try:
         logger.debug("List models request: provider=%s base_url=%s", body.provider, body.base_url)
-        if body.provider == "anthropic":
+        if body.provider in ("anthropic", "anthropic-compatible"):
             models = await _list_models_anthropic(body.api_key, body.base_url)
         else:
             models = await _list_models_openai(body.api_key, body.base_url)
@@ -356,22 +367,25 @@ async def test_llm_connection(body: TestLLMBody):
     """用临时配置测试 LLM 连通性，发送一个简单请求验证 API key 和模型是否可用"""
     provider = body.provider
     try:
-        if provider in ("openai", "anthropic", "gemini"):
+        if provider in ("anthropic", "anthropic-compatible"):
+            result = await _test_anthropic(
+                api_key=body.api_key,
+                base_url=body.base_url,
+                model_id=body.model_id,
+            )
+            return {"success": True, **result}
+        if provider in ("gemini", "gemini-compatible"):
+            result = await _test_gemini(
+                api_key=body.api_key,
+                base_url=body.base_url,
+                model_id=body.model_id,
+            )
+            return {"success": True, **result}
+        if provider in ("openai", "openai-compatible"):
             result = await _test_openai_compatible(
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
-            ) if provider == "openai" else (
-                await _test_anthropic(
-                    api_key=body.api_key,
-                    base_url=body.base_url,
-                    model_id=body.model_id,
-                ) if provider == "anthropic" else
-                await _test_gemini(
-                    api_key=body.api_key,
-                    base_url=body.base_url,
-                    model_id=body.model_id,
-                )
             )
             return {"success": True, **result}
         else:

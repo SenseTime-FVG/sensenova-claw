@@ -8,7 +8,7 @@ import { useChatSession } from '@/contexts/ChatSessionContext';
 import { SmartStack } from './SmartStack';
 import { RecentOutputs } from './RecentOutputs';
 import { ScheduledTasks } from './ScheduledTasks';
-import { ProactiveOutputs } from './ProactiveOutputs';
+import { ProactiveAgentPanel } from './ProactiveAgentPanel';
 import { KanbanBoard } from './KanbanBoard';
 import { TodoList } from './TodoList';
 
@@ -17,35 +17,35 @@ const ResponsiveGrid = ResponsiveGridLayout;
 
 // ── 布局持久化 ──────────────────────────────────────────────
 
-const LAYOUT_STORAGE_KEY = 'sensenova-claw-dashboard-layout-v2';
+const LAYOUT_STORAGE_KEY = 'sensenova-claw-dashboard-layout-v3';
 const ZOOM_STORAGE_KEY = 'sensenova-claw-dashboard-zoom';
 const ZOOM_STEPS = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2] as const;
 const DEFAULT_ZOOM = 1.0;
 
 const DEFAULT_LAYOUTS: Layouts = {
   lg: [
-    { i: 'smartstack',  x: 0, y: 0, w: 12, h: 5, minW: 4, minH: 5, maxH: 5 },
-    { i: 'kanban',      x: 0, y: 5, w: 7, h: 3, minW: 3, minH: 2 },
-    { i: 'todo',        x: 7, y: 5, w: 5, h: 5, minW: 3, minH: 4 },
-    { i: 'outputs',     x: 0, y: 8, w: 5, h: 6, minW: 3, minH: 4 },
-    { i: 'scheduled',   x: 5, y: 8, w: 4, h: 6, minW: 2, minH: 4 },
-    { i: 'proactive',   x: 9, y: 8, w: 3, h: 6, minW: 3, minH: 3 },
+    { i: 'smartstack',  x: 0, y: 0, w: 6,  h: 5, minW: 4, minH: 5, maxH: 5 },
+    { i: 'todo',        x: 6, y: 0, w: 6,  h: 5, minW: 3, minH: 4 },
+    { i: 'kanban',      x: 0, y: 5, w: 6,  h: 6, minW: 3, minH: 4 },
+    { i: 'outputs',     x: 6, y: 5, w: 6,  h: 6, minW: 3, minH: 4 },
+    { i: 'scheduled',   x: 0, y: 11, w: 6, h: 4, minW: 2, minH: 3 },
+    { i: 'proactive',   x: 6, y: 11, w: 6, h: 4, minW: 3, minH: 3 },
   ],
   md: [
-    { i: 'smartstack',  x: 0, y: 0, w: 10, h: 5, minW: 3, minH: 5, maxH: 5 },
-    { i: 'kanban',      x: 0, y: 5, w: 6, h: 3, minW: 3, minH: 2 },
-    { i: 'todo',        x: 6, y: 5, w: 4, h: 5, minW: 3, minH: 4 },
-    { i: 'outputs',     x: 0, y: 8, w: 5, h: 6, minW: 3, minH: 4 },
-    { i: 'scheduled',   x: 5, y: 8, w: 5, h: 5, minW: 2, minH: 3 },
-    { i: 'proactive',   x: 0, y: 13, w: 10, h: 5, minW: 3, minH: 3 },
+    { i: 'smartstack',  x: 0, y: 0, w: 5,  h: 5, minW: 3, minH: 5, maxH: 5 },
+    { i: 'todo',        x: 5, y: 0, w: 5,  h: 5, minW: 3, minH: 4 },
+    { i: 'kanban',      x: 0, y: 5, w: 5,  h: 6, minW: 3, minH: 4 },
+    { i: 'outputs',     x: 5, y: 5, w: 5,  h: 6, minW: 3, minH: 4 },
+    { i: 'scheduled',   x: 0, y: 11, w: 5, h: 4, minW: 2, minH: 3 },
+    { i: 'proactive',   x: 5, y: 11, w: 5, h: 4, minW: 3, minH: 3 },
   ],
   sm: [
-    { i: 'smartstack',  x: 0, y: 0, w: 6, h: 5, minW: 3, minH: 5, maxH: 5 },
-    { i: 'kanban',      x: 0, y: 5, w: 6, h: 3, minW: 3, minH: 2 },
-    { i: 'todo',        x: 0, y: 8, w: 6, h: 6, minW: 3, minH: 4 },
-    { i: 'outputs',     x: 0, y: 14, w: 6, h: 5, minW: 3, minH: 4 },
-    { i: 'scheduled',   x: 0, y: 19, w: 6, h: 5, minW: 2, minH: 3 },
-    { i: 'proactive',   x: 0, y: 24, w: 6, h: 5, minW: 3, minH: 3 },
+    { i: 'smartstack',  x: 0, y: 0, w: 6,  h: 5, minW: 3, minH: 5, maxH: 5 },
+    { i: 'todo',        x: 0, y: 5, w: 6,  h: 5, minW: 3, minH: 4 },
+    { i: 'kanban',      x: 0, y: 10, w: 6, h: 5, minW: 3, minH: 3 },
+    { i: 'outputs',     x: 0, y: 15, w: 6, h: 5, minW: 3, minH: 4 },
+    { i: 'scheduled',   x: 0, y: 20, w: 6, h: 4, minW: 2, minH: 3 },
+    { i: 'proactive',   x: 0, y: 24, w: 6, h: 4, minW: 3, minH: 3 },
   ],
 };
 
@@ -82,9 +82,9 @@ function saveLayouts(layouts: Layouts) {
 
 function DragHandle() {
   return (
-    <div className="dashboard-drag-handle absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 rounded-full bg-white/80 border border-black/[0.04] px-2.5 py-1 shadow-sm opacity-0 group-hover/widget:opacity-100 transition-opacity duration-200">
-      <GripHorizontal className="h-3.5 w-3.5 text-neutral-400" />
-      <span className="text-[10px] font-medium text-neutral-400 tracking-wide">拖拽</span>
+    <div className="dashboard-drag-handle absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 rounded-full bg-[var(--glass-bg-heavy)] border border-black/[0.04] dark:border-white/[0.06] px-2.5 py-1 shadow-sm opacity-0 group-hover/widget:opacity-100 transition-opacity duration-200">
+      <GripHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+      <span className="text-[10px] font-medium text-muted-foreground tracking-wide">拖拽</span>
     </div>
   );
 }
@@ -93,7 +93,7 @@ function DragHandle() {
 
 function WidgetCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`group/widget relative h-full rounded-[24px] border border-white/70 bg-white/80 shadow-[0_4px_32px_rgba(15,23,42,0.06)] backdrop-blur-2xl transition-shadow duration-300 hover:shadow-[0_8px_40px_rgba(15,23,42,0.10)] ${className}`}>
+    <div className={`group/widget relative h-full rounded-[24px] border border-[var(--glass-border)] bg-[var(--glass-bg-heavy)] shadow-[0_4px_32px_rgba(15,23,42,0.06)] dark:shadow-[0_4px_32px_rgba(0,0,0,0.25)] backdrop-blur-2xl transition-shadow duration-300 hover:shadow-[0_8px_40px_rgba(15,23,42,0.10)] dark:hover:shadow-[0_8px_40px_rgba(0,0,0,0.35)] ${className}`}>
       <DragHandle />
       <div className="h-full overflow-auto thin-scrollbar p-0">
         {children}
@@ -114,7 +114,7 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
     cronJobs,
     kanbanColumns,
     recentOutputs,
-    proactiveItems,
+    proactiveOutputs,
     loading,
   } = useDashboardData();
 
@@ -184,12 +184,9 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
     setIsCustomized(false);
   }, []);
 
-  // 没有 proactive 内容时隐藏该 widget
   const visibleWidgets = useMemo(() => {
-    const widgets = ['smartstack', 'kanban', 'todo', 'outputs', 'scheduled'];
-    if (proactiveItems.length > 0) widgets.push('proactive');
-    return new Set(widgets);
-  }, [proactiveItems]);
+    return new Set(['smartstack', 'kanban', 'todo', 'outputs', 'scheduled', 'proactive']);
+  }, []);
 
   const filteredLayouts = useMemo(() => {
     const result: Layouts = {};
@@ -203,8 +200,8 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 rounded-full border-2 border-violet-200 border-t-violet-500 animate-spin" />
-          <div className="text-sm text-neutral-400 font-medium">加载中...</div>
+          <div className="h-8 w-8 rounded-full border-2 border-violet-200 dark:border-violet-800 border-t-violet-500 animate-spin" />
+          <div className="text-sm text-muted-foreground font-medium">加载中...</div>
         </div>
       </div>
     );
@@ -216,31 +213,31 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
         {/* 顶部工具栏 */}
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold text-neutral-800 tracking-tight" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+            <h1 className="text-lg font-bold text-[var(--glass-text)] tracking-tight" style={{ fontFamily: "'DM Sans', sans-serif" }}>
               工作台
             </h1>
-            <p className="text-xs text-neutral-400 mt-0.5">拖拽卡片自定义布局</p>
+            <p className="text-xs text-muted-foreground mt-0.5">拖拽卡片自定义布局</p>
           </div>
           <div className="flex items-center gap-2">
             {/* 缩放控制 */}
-            <div className="flex items-center gap-0.5 rounded-full border border-neutral-200 bg-white/80 shadow-sm backdrop-blur-xl">
+            <div className="flex items-center gap-0.5 rounded-full border border-border bg-[var(--glass-bg-heavy)] shadow-sm backdrop-blur-xl">
               <button
                 type="button"
                 onClick={zoomOut}
                 disabled={zoom <= ZOOM_STEPS[0]}
-                className="flex items-center justify-center w-7 h-7 rounded-full text-neutral-500 transition-all hover:text-neutral-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="flex items-center justify-center w-7 h-7 rounded-full text-muted-foreground transition-all hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
                 title="缩小"
               >
                 <ZoomOut className="h-3.5 w-3.5" />
               </button>
-              <span className="text-[10px] font-semibold text-neutral-500 min-w-[32px] text-center tabular-nums">
+              <span className="text-[10px] font-semibold text-muted-foreground min-w-[32px] text-center tabular-nums">
                 {Math.round(zoom * 100)}%
               </span>
               <button
                 type="button"
                 onClick={zoomIn}
                 disabled={zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
-                className="flex items-center justify-center w-7 h-7 rounded-full text-neutral-500 transition-all hover:text-neutral-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="flex items-center justify-center w-7 h-7 rounded-full text-muted-foreground transition-all hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
                 title="放大"
               >
                 <ZoomIn className="h-3.5 w-3.5" />
@@ -251,7 +248,7 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
               <button
                 type="button"
                 onClick={resetLayout}
-                className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white/80 px-3 py-1.5 text-xs font-medium text-neutral-500 shadow-sm transition-all hover:bg-white hover:text-neutral-700 hover:shadow-md backdrop-blur-xl"
+                className="flex items-center gap-1.5 rounded-full border border-border bg-[var(--glass-bg-heavy)] px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-all hover:bg-[var(--glass-bg)] hover:text-foreground hover:shadow-md backdrop-blur-xl"
               >
                 <RotateCcw className="h-3 w-3" />
                 重置布局
@@ -321,11 +318,11 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
             </div>
           )}
 
-          {/* 主动建议 */}
+          {/* Proactive Agent 产出 */}
           {visibleWidgets.has('proactive') && (
             <div key="proactive">
               <WidgetCard>
-                <ProactiveOutputs items={proactiveItems} />
+                <ProactiveAgentPanel items={proactiveOutputs} onItemClick={handleOutputClick} />
               </WidgetCard>
             </div>
           )}

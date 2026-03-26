@@ -25,6 +25,7 @@ from sensenova_claw.kernel.events.types import (
 from sensenova_claw.kernel.runtime.workers.tool_worker import ToolSessionWorker
 from sensenova_claw.kernel.runtime.tool_runtime import ToolRuntime
 from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.runtime.state import SessionStateStore
 from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
 from sensenova_claw.capabilities.tools.builtin import (
     BashCommandTool,
@@ -36,6 +37,8 @@ from sensenova_claw.capabilities.tools.builtin import (
 from sensenova_claw.capabilities.tools.registry import ToolRegistry
 from sensenova_claw.capabilities.agents.registry import AgentRegistry
 from sensenova_claw.platform.config.config import Config
+
+TOOL_CONFIRMATION_RESOLVED_TYPE = "tool.confirmation_resolved"
 
 
 # ---------- 工具风险等级 ----------
@@ -194,10 +197,12 @@ def _make_worker(
     agent_registry.load_from_config(cfg.data)
 
     bus_router = BusRouter(public_bus=public)
+    state_store = SessionStateStore()
     rt = ToolRuntime(
         bus_router=bus_router,
         registry=registry,
         agent_registry=agent_registry,
+        state_store=state_store,
     )
 
     worker = ToolSessionWorker(
@@ -207,6 +212,36 @@ def _make_worker(
     )
 
     return worker, cfg
+
+
+async def _next_event(queue: asyncio.Queue, timeout: float = 1.0):
+    return await asyncio.wait_for(queue.get(), timeout=timeout)
+
+
+async def _drain_events(queue: asyncio.Queue, timeout: float = 0.05) -> list[EventEnvelope]:
+    events: list[EventEnvelope] = []
+    while True:
+        try:
+            events.append(await asyncio.wait_for(queue.get(), timeout=timeout))
+        except asyncio.TimeoutError:
+            break
+    return events
+
+
+class HighRiskEchoTool(Tool):
+    name = "high_risk_echo"
+    description = "测试用高风险回显工具"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string"},
+        },
+        "required": ["text"],
+    }
+    risk_level = ToolRiskLevel.HIGH
+
+    async def execute(self, **kwargs):
+        return {"echo": kwargs.get("text", "")}
 
 
 # ---------- 结果截断统一 ----------
@@ -378,6 +413,101 @@ class TestPermissionManagement:
 class TestTimeoutAction:
     """验证 tools.permission.timeout_action 三种策略"""
 
+    async def test_confirmation_request_payload_contains_timeout_and_timeout_action(self, tmp_path):
+        """确认请求事件应携带真实 timeout 和 timeout_action。"""
+        worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": True,
+            "tools.permission.auto_approve_levels": [],
+            "tools.permission.confirmation_timeout": 3.5,
+            "tools.permission.timeout_action": "block",
+        })
+
+        queue = worker.bus._public_bus.subscribe_queue()
+        tool = BashCommandTool()
+        tool_call_id = "tc_request_payload"
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_session",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": tool_call_id,
+                "tool_name": "bash_command",
+                "arguments": {"command": "echo hi"},
+            },
+        )
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            task = asyncio.create_task(worker._request_confirmation(event, tool))
+            requested = await _next_event(queue)
+            assert requested.type == TOOL_CONFIRMATION_REQUESTED
+            assert requested.payload["tool_call_id"] == tool_call_id
+            assert requested.payload["timeout"] == 3.5
+            assert requested.payload["timeout_action"] == "block"
+            assert isinstance(requested.payload["requested_at_ms"], int)
+
+            worker._confirmation_results[tool_call_id] = True
+            worker._pending_confirmations[tool_call_id].set()
+            result = await task
+            assert result is True
+        finally:
+            tw.config = original_config
+            worker.bus._public_bus.unsubscribe_queue(queue)
+
+    async def test_user_confirmation_response_publishes_user_resolved(self, tmp_path):
+        """用户审批通过后应发布 resolved 事件。"""
+        worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": True,
+            "tools.permission.auto_approve_levels": [],
+            "tools.permission.confirmation_timeout": 30,
+            "tools.permission.timeout_action": "reject",
+        })
+
+        queue = worker.bus._public_bus.subscribe_queue()
+        tool = BashCommandTool()
+        tool_call_id = "tc_user_resolved"
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_session",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": tool_call_id,
+                "tool_name": "bash_command",
+                "arguments": {"command": "echo hi"},
+            },
+        )
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            task = asyncio.create_task(worker._request_confirmation(event, tool))
+            requested = await _next_event(queue)
+            assert requested.type == TOOL_CONFIRMATION_REQUESTED
+
+            await worker._handle_confirmation_response(EventEnvelope(
+                type=TOOL_CONFIRMATION_RESPONSE,
+                session_id="test_session",
+                source="ui",
+                payload={"tool_call_id": tool_call_id, "approved": True},
+            ))
+            result = await task
+            assert result is True
+
+            events = await _drain_events(queue)
+            resolved = [evt for evt in events if evt.type == TOOL_CONFIRMATION_RESOLVED_TYPE]
+            assert len(resolved) == 1
+            assert resolved[0].payload["tool_call_id"] == tool_call_id
+            assert resolved[0].payload["approved"] is True
+            assert resolved[0].payload["reason"] == "user_approved"
+        finally:
+            tw.config = original_config
+            worker.bus._public_bus.unsubscribe_queue(queue)
+
     async def test_timeout_action_reject_default(self, tmp_path):
         """默认 reject 策略：超时返回 False"""
         worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
@@ -409,6 +539,48 @@ class TestTimeoutAction:
         finally:
             tw.config = original_config
 
+    async def test_timeout_reject_publishes_timeout_rejected(self, tmp_path):
+        """reject 策略超时后应发布 timeout_rejected resolved 事件。"""
+        worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": True,
+            "tools.permission.auto_approve_levels": [],
+            "tools.permission.confirmation_timeout": 0.1,
+            "tools.permission.timeout_action": "reject",
+        })
+
+        queue = worker.bus._public_bus.subscribe_queue()
+        tool = BashCommandTool()
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_session",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": "tc_timeout_rejected_event",
+                "tool_name": "bash_command",
+                "arguments": {"command": "echo hi"},
+            },
+        )
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            result = await worker._request_confirmation(event, tool)
+            assert result is False
+
+            events = await _drain_events(queue)
+            assert [evt.type for evt in events[:2]] == [
+                TOOL_CONFIRMATION_REQUESTED,
+                TOOL_CONFIRMATION_RESOLVED_TYPE,
+            ]
+            resolved = events[1]
+            assert resolved.payload["approved"] is False
+            assert resolved.payload["reason"] == "timeout_rejected"
+        finally:
+            tw.config = original_config
+            worker.bus._public_bus.unsubscribe_queue(queue)
+
     async def test_timeout_action_approve(self, tmp_path):
         """approve 策略：超时返回 True"""
         worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
@@ -439,6 +611,50 @@ class TestTimeoutAction:
             assert result is True
         finally:
             tw.config = original_config
+
+    async def test_timeout_approve_publishes_resolved_before_tool_result(self, tmp_path):
+        """approve 策略超时后，应先发布 resolved，再发布 tool_result。"""
+        worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": True,
+            "tools.permission.auto_approve_levels": [],
+            "tools.permission.confirmation_timeout": 0.1,
+            "tools.permission.timeout_action": "approve",
+        })
+        worker.rt.registry.register(HighRiskEchoTool())
+        queue = worker.bus._public_bus.subscribe_queue()
+
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_session",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": "tc_timeout_approve_event",
+                "tool_name": "high_risk_echo",
+                "arguments": {"text": "hello"},
+            },
+        )
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            await worker._handle_tool_requested(event)
+            events = await _drain_events(queue)
+            event_types = [evt.type for evt in events]
+            assert event_types == [
+                TOOL_CALL_STARTED,
+                TOOL_CONFIRMATION_REQUESTED,
+                TOOL_CONFIRMATION_RESOLVED_TYPE,
+                TOOL_CALL_RESULT,
+                TOOL_CALL_COMPLETED,
+            ]
+            resolved = events[2]
+            assert resolved.payload["approved"] is True
+            assert resolved.payload["reason"] == "timeout_approved"
+        finally:
+            tw.config = original_config
+            worker.bus._public_bus.unsubscribe_queue(queue)
 
     async def test_timeout_action_block(self, tmp_path):
         """block 策略：无限等待，手动唤醒后返回用户选择"""
@@ -485,6 +701,97 @@ class TestTimeoutAction:
             assert result is True
         finally:
             tw.config = original_config
+
+    async def test_block_mode_does_not_publish_resolved_on_timeout(self, tmp_path):
+        """block 模式下超时后不应自动发布 resolved。"""
+        worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": True,
+            "tools.permission.auto_approve_levels": [],
+            "tools.permission.confirmation_timeout": 0.05,
+            "tools.permission.timeout_action": "block",
+        })
+
+        queue = worker.bus._public_bus.subscribe_queue()
+        tool = BashCommandTool()
+        tool_call_id = "tc_block_no_resolve"
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_session",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": tool_call_id,
+                "tool_name": "bash_command",
+                "arguments": {"command": "echo hi"},
+            },
+        )
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            task = asyncio.create_task(worker._request_confirmation(event, tool))
+            requested = await _next_event(queue)
+            assert requested.type == TOOL_CONFIRMATION_REQUESTED
+
+            await asyncio.sleep(0.1)
+            events = await _drain_events(queue)
+            assert not any(evt.type == TOOL_CONFIRMATION_RESOLVED_TYPE for evt in events)
+
+            worker._confirmation_results[tool_call_id] = True
+            worker._pending_confirmations[tool_call_id].set()
+            result = await task
+            assert result is True
+        finally:
+            tw.config = original_config
+            worker.bus._public_bus.unsubscribe_queue(queue)
+
+    async def test_late_confirmation_response_is_ignored_after_timeout_resolution(self, tmp_path):
+        """超时已完成裁决后，晚到点击不应残留确认结果。"""
+        worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": True,
+            "tools.permission.auto_approve_levels": [],
+            "tools.permission.confirmation_timeout": 0.05,
+            "tools.permission.timeout_action": "approve",
+        })
+
+        queue = worker.bus._public_bus.subscribe_queue()
+        tool = BashCommandTool()
+        tool_call_id = "tc_late_response"
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_session",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": tool_call_id,
+                "tool_name": "bash_command",
+                "arguments": {"command": "echo hi"},
+            },
+        )
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            result = await worker._request_confirmation(event, tool)
+            assert result is True
+
+            _ = await _drain_events(queue)
+
+            await worker._handle_confirmation_response(EventEnvelope(
+                type=TOOL_CONFIRMATION_RESPONSE,
+                session_id="test_session",
+                source="ui",
+                payload={"tool_call_id": tool_call_id, "approved": False},
+            ))
+            assert tool_call_id not in worker._confirmation_results
+            assert tool_call_id not in worker._pending_confirmations
+            late_events = await _drain_events(queue)
+            assert not any(evt.type == TOOL_CONFIRMATION_RESOLVED_TYPE for evt in late_events)
+        finally:
+            tw.config = original_config
+            worker.bus._public_bus.unsubscribe_queue(queue)
 
 
 # ---------- AgentRegistry 注入不污染 arguments ----------
@@ -636,3 +943,57 @@ class TestContextInjectionIsolation:
                 json.dumps(evt.payload, ensure_ascii=False)
             except TypeError as e:
                 pytest.fail(f"事件 {evt.type} 的 payload 不可 JSON 序列化: {e}")
+class _TrackingTool(Tool):
+    name = "tracking_tool"
+    description = "测试用工具"
+    parameters = {"type": "object", "properties": {}}
+    risk_level = ToolRiskLevel.LOW
+
+    def __init__(self):
+        self.executed = False
+
+    async def execute(self, **kwargs):
+        self.executed = True
+        return {"success": True, "kwargs": kwargs}
+
+
+class TestToolTurnCancellation:
+    async def test_cancelled_turn_skips_tool_execution_and_started_event(self, tmp_path):
+        worker, cfg = _make_worker(session_id="test_cancelled", tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": False,
+        })
+        tool = _TrackingTool()
+        worker.rt.registry.register(tool)
+        worker.rt.state_store.mark_turn_cancelled("test_cancelled", "turn_1")
+
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_cancelled",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": "tc_cancelled",
+                "tool_name": "tracking_tool",
+                "arguments": {},
+            },
+        )
+
+        published: list[EventEnvelope] = []
+        original_publish = worker.bus.publish
+
+        async def capture_publish(evt: EventEnvelope):
+            published.append(evt)
+            await original_publish(evt)
+
+        worker.bus.publish = capture_publish
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            await worker._handle_tool_requested(event)
+        finally:
+            tw.config = original_config
+
+        assert tool.executed is False
+        assert published == []

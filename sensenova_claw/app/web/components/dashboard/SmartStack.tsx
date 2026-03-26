@@ -1,7 +1,6 @@
 'use client';
 
-import { useRef, useState, useCallback, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { getTone } from './widgetTones';
 import type { ToneName } from './widgetTones';
 import type { AgentInfo } from '@/hooks/useDashboardData';
@@ -32,22 +31,22 @@ function CompactAgentCard({ agent, tone, onClick }: { agent: AgentInfo; tone: To
     <button
       type="button"
       onClick={onClick}
-      className="group relative flex items-center gap-2 overflow-hidden rounded-xl border border-white/70 bg-white/65 px-2.5 py-1.5 text-left shadow-[0_1px_8px_rgba(15,23,42,0.04)] backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(15,23,42,0.08)] w-full h-full min-w-0"
+      className="group relative flex items-center gap-2 overflow-hidden rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-2.5 py-1.5 text-left shadow-[0_1px_8px_rgba(15,23,42,0.04)] dark:shadow-[0_1px_8px_rgba(0,0,0,0.15)] backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(15,23,42,0.08)] dark:hover:shadow-[0_4px_16px_rgba(0,0,0,0.25)] w-full h-full min-w-0"
     >
       <div className={`absolute inset-0 bg-gradient-to-br ${style.surface} opacity-60`} />
       <div className={`absolute -right-3 -top-3 h-8 w-8 rounded-full ${style.orb} blur-xl`} />
       <div className="relative z-10 flex items-center gap-2 min-w-0">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/80 bg-white/90 text-xs shadow-sm">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--glass-border-heavy)] bg-[var(--glass-bg-heavy)] text-xs shadow-sm">
           {guessIcon(agent.name)}
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-1">
-            <span className="truncate text-[12px] font-semibold text-neutral-800">{agent.name}</span>
+            <span className="truncate text-[12px] font-semibold text-[var(--glass-text)]">{agent.name}</span>
             <span className={`shrink-0 rounded-full px-1 py-[0.5px] text-[8px] font-semibold ${style.pill}`}>
               常驻
             </span>
           </div>
-          <div className="truncate text-[10px] leading-3 mt-0.5" style={{ color: '#94a3b8' }}>
+          <div className="truncate text-[10px] leading-3 mt-0.5 text-[var(--glass-text-muted)]">
             {agent.description || '点击启动'}
           </div>
         </div>
@@ -61,31 +60,11 @@ export function SmartStack({ agents, onAgentClick }: SmartStackProps) {
     .sort((a, b) => (b.sessionCount || 0) - (a.sessionCount || 0))
     .slice(0, 12);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-
-  const updateScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 4);
-    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
-  }, []);
-
-  const scroll = useCallback((dir: 'left' | 'right') => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollBy({ left: dir === 'left' ? -280 : 280, behavior: 'smooth' });
-    setTimeout(updateScroll, 300);
-  }, [updateScroll]);
-
-  useEffect(() => { updateScroll(); }, [updateScroll, topAgents.length]);
-
   if (topAgents.length === 0) return null;
 
   return (
     <div className="flex h-full flex-col p-2.5">
-      <div className="absolute inset-0 bg-gradient-to-br from-violet-50/80 via-white/90 to-fuchsia-50/60" />
+      <div className="absolute inset-0 bg-gradient-to-br from-violet-50/80 via-background/90 to-fuchsia-50/60 dark:from-violet-950/30 dark:via-background/90 dark:to-fuchsia-950/20" />
       <div className="relative z-10 flex h-full flex-col gap-1">
         <SectionHeader
           title="常用 Agent"
@@ -95,32 +74,11 @@ export function SmartStack({ agents, onAgentClick }: SmartStackProps) {
           icon={<Sparkles className="h-3.5 w-3.5 text-violet-500" />}
         />
 
-        {/* 3×N 网格横向滚动 */}
-        <div className="relative flex-1 min-h-0 mt-0.5">
-          {canScrollLeft && (
-            <button
-              type="button"
-              onClick={() => scroll('left')}
-              className="absolute left-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/80 bg-white/90 p-1 shadow-md backdrop-blur-xl transition hover:bg-white"
-            >
-              <ChevronLeft className="h-3 w-3 text-neutral-500" />
-            </button>
-          )}
-
-          <div
-            ref={scrollRef}
-            onScroll={updateScroll}
-            className="overflow-x-auto snap-x thin-scrollbar h-full"
-            style={{
-              display: 'grid',
-              gridTemplateRows: 'repeat(3, 46px)',
-              gridAutoFlow: 'column',
-              gridAutoColumns: 'calc(50% - 4px)',
-              gap: '7px',
-            }}
-          >
+        {/* N×2 纵向网格 */}
+        <div className="flex-1 min-h-0 mt-0.5 overflow-y-auto thin-scrollbar">
+          <div className="grid grid-cols-2 gap-[7px]">
             {topAgents.map((agent, i) => (
-              <div key={agent.id} className="snap-start min-w-0">
+              <div key={agent.id} className="min-w-0 h-[46px]">
                 <CompactAgentCard
                   agent={agent}
                   tone={AGENT_TONES[i % AGENT_TONES.length]}
@@ -129,16 +87,6 @@ export function SmartStack({ agents, onAgentClick }: SmartStackProps) {
               </div>
             ))}
           </div>
-
-          {canScrollRight && (
-            <button
-              type="button"
-              onClick={() => scroll('right')}
-              className="absolute right-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/80 bg-white/90 p-1 shadow-md backdrop-blur-xl transition hover:bg-white"
-            >
-              <ChevronRight className="h-3 w-3 text-neutral-500" />
-            </button>
-          )}
         </div>
       </div>
     </div>

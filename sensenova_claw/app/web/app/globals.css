@@ -139,6 +139,14 @@
   --panel-header-height: 44px;
 }
 
+/* 导航栏深色模式覆盖 - 需要在 @layer base 外部以确保正确覆盖 */
+.dark {
+  --nav-bg: rgba(15, 20, 30, 0.82);
+  --nav-border: rgba(255, 255, 255, 0.06);
+  --nav-pill-active: rgba(255, 255, 255, 0.08);
+  --nav-pill-hover: rgba(255, 255, 255, 0.04);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -816,6 +824,15 @@ body {
     --sidebar-accent-foreground: hsl(220, 14%, 10%);
     --sidebar-border: hsl(220, 10%, 92%);
     --sidebar-ring: hsl(172, 66%, 40%);
+    /* 玻璃态变量 - 浅色模式 */
+    --glass-bg: rgba(255, 255, 255, 0.65);
+    --glass-bg-heavy: rgba(255, 255, 255, 0.90);
+    --glass-bg-light: rgba(255, 255, 255, 0.50);
+    --glass-border: rgba(255, 255, 255, 0.70);
+    --glass-border-heavy: rgba(255, 255, 255, 0.80);
+    --glass-surface: rgba(255, 255, 255, 0.72);
+    --glass-text: hsl(220, 14%, 20%);
+    --glass-text-muted: hsl(220, 8%, 45%);
   }
   .dark {
     --background: hsl(225, 15%, 8%);
@@ -854,6 +871,15 @@ body {
     --nav-border: rgba(255, 255, 255, 0.06);
     --nav-pill-active: rgba(255, 255, 255, 0.08);
     --nav-pill-hover: rgba(255, 255, 255, 0.04);
+    /* 玻璃态变量 - 深色模式 */
+    --glass-bg: rgba(255, 255, 255, 0.08);
+    --glass-bg-heavy: rgba(255, 255, 255, 0.12);
+    --glass-bg-light: rgba(255, 255, 255, 0.05);
+    --glass-border: rgba(255, 255, 255, 0.12);
+    --glass-border-heavy: rgba(255, 255, 255, 0.18);
+    --glass-surface: rgba(255, 255, 255, 0.06);
+    --glass-text: hsl(210, 20%, 95%);
+    --glass-text-muted: hsl(220, 10%, 60%);
   }
   .theme {
     --font-sans: var(--font-sans);

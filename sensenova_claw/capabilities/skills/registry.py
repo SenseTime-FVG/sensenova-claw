@@ -6,6 +6,8 @@ import yaml
 from pathlib import Path
 from typing import Any
 
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
 
 class Skill:
     def __init__(self, name: str, description: str, body: str, path: Path):
@@ -52,7 +54,7 @@ class SkillRegistry:
     ):
         self._skills: dict[str, Skill] = {}
         self._workspace_dir = workspace_dir
-        self._user_dir = user_dir or Path.home() / ".sensenova-claw" / "skills"
+        self._user_dir = user_dir or default_sensenova_claw_home() / "skills"
         self._state_file = state_file
         self._builtin_dir = builtin_dir
 
@@ -234,6 +236,30 @@ class SkillRegistry:
         except Exception:
             pass
         return {}
+
+    def rescan(self, config: dict[str, Any]) -> int:
+        """重新扫描所有目录，发现新增 skill 并加载，返回新增数量。"""
+        count = 0
+        dirs = []
+        if self._builtin_dir and self._builtin_dir.exists():
+            dirs.append(self._builtin_dir)
+        if self._user_dir and self._user_dir.exists():
+            dirs.append(self._user_dir)
+        if self._workspace_dir and self._workspace_dir.exists():
+            dirs.append(self._workspace_dir)
+        extra_dirs = config.get("skills", {}).get("extra_dirs", [])
+        for d in extra_dirs:
+            p = Path(d)
+            if p.exists():
+                dirs.append(p)
+
+        for base_dir in dirs:
+            for skill_md in base_dir.rglob("SKILL.md"):
+                skill = self._parse_skill(skill_md)
+                if skill and skill.name not in self._skills and self._should_load(skill, config):
+                    self._skills[skill.name] = skill
+                    count += 1
+        return count
 
     def get_all(self) -> list[Skill]:
         """获取所有已加载的 skills"""

@@ -73,3 +73,9 @@ export const BUBBLE_TEXTS: Record<OfficeStateName | 'cat', string[]> = {
     '我是这个办公室的吉祥物',
   ],
 };
+
+// 传入 Phaser 场景的 agent 简要信息
+export interface OfficeAgent {
+  id: string;
+  name: string;
+}

@@ -62,6 +62,14 @@ class ConfigManager:
             # 处理 secret 路径
             for path, value in flat_updates.items():
                 if is_secret_path(path) and self._secret_store is not None:
+                    if isinstance(value, str) and is_secret_ref(value):
+                        existing_raw = original_raw_values.get(path)
+                        _set_nested(
+                            raw_config,
+                            path,
+                            existing_raw if isinstance(existing_raw, str) and existing_raw else value,
+                        )
+                        continue
                     if value:
                         ref = f"sensenova_claw/{path}"
                         try:
@@ -123,6 +131,14 @@ class ConfigManager:
 
             for path, value in flat_updates.items():
                 if is_secret_path(path) and self._secret_store is not None:
+                    if isinstance(value, str) and is_secret_ref(value):
+                        existing_raw = original_raw_values.get(path)
+                        _set_nested(
+                            raw_config,
+                            path,
+                            existing_raw if isinstance(existing_raw, str) and existing_raw else value,
+                        )
+                        continue
                     if value:
                         ref = f"sensenova_claw/{path}"
                         try:

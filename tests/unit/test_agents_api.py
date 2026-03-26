@@ -1,5 +1,6 @@
 """Agents API 端点单测 — 使用真实组件，无 mock"""
 import asyncio
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from sensenova_claw.capabilities.tools.base import Tool
 from sensenova_claw.interfaces.http.agents import router
 from sensenova_claw.capabilities.agents.registry import AgentRegistry
 from sensenova_claw.capabilities.tools.registry import ToolRegistry
@@ -18,6 +20,12 @@ from sensenova_claw.platform.config.config_manager import ConfigManager
 from sensenova_claw.platform.secrets.store import InMemorySecretStore
 from sensenova_claw.kernel.events.bus import PublicEventBus
 from sensenova_claw.adapters.storage.repository import Repository
+
+
+class _SendMessageTool(Tool):
+    name = "send_message"
+    description = "向其他 Agent 发送消息"
+    parameters = {"type": "object", "properties": {}}
 
 
 @pytest.fixture
@@ -226,6 +234,23 @@ def test_update_agent_config_persists_to_config(client, app):
     assert prompt_file.read_text(encoding="utf-8") == "新的系统提示词"
 
 
+def test_update_agent_config_can_disable_delegation(client, app):
+    """显式传 null 时，应禁用委托并隐藏 send_message。"""
+    app.state.tool_registry.register(_SendMessageTool())
+
+    resp = client.put("/api/agents/default/config", json={
+        "can_delegate_to": None,
+    })
+    assert resp.status_code == 200
+
+    data = resp.json()
+    assert data["canDelegateTo"] is None
+    assert "send_message" not in data["tools"]
+
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["agents"]["default"]["can_delegate_to"] is None
+
+
 def test_update_agent_config_model(client):
     """更新 default Agent 的 model"""
     resp = client.put("/api/agents/default/config", json={
@@ -284,6 +309,17 @@ def test_update_preferences(client):
     })
     assert resp.status_code == 200
     assert resp.json()["status"] == "saved"
+
+    prefs = json.loads((Path(client.app.state.sensenova_claw_home) / ".agent_preferences.json").read_text(encoding="utf-8"))
+    assert prefs["agent_tools"]["default"]["bash_command"] is False
+
+    default_detail = client.get("/api/agents/default").json()
+    default_bash = next(tool for tool in default_detail["toolsDetail"] if tool["name"] == "bash_command")
+    assert default_bash["enabled"] is False
+
+    research_detail = client.get("/api/agents/research").json()
+    research_bash = next(tool for tool in research_detail["toolsDetail"] if tool["name"] == "bash_command")
+    assert research_bash["enabled"] is True
 
 
 def test_update_preferences_agent_not_found(client):

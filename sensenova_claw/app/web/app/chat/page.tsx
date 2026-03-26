@@ -4,18 +4,20 @@ import { Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'rea
 import { useSearchParams } from 'next/navigation';
 import {
   Loader2, Bot, MessageSquare, Plus, Search, RefreshCw, Trash2,
+  ChevronDown, ChevronRight, GitBranch,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { useFilePanel } from '@/contexts/FilePanelContext';
-import { type SessionItem, type ContextFileRef, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
+import { type SessionItem, type ContextFileRef, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
 import { MessageList } from '@/components/chat/MessageBubble';
 import { TypingIndicator } from '@/components/chat/TypingIndicator';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { SlideViewer, useSlideSet } from '@/components/ppt/PPTViewer';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+
 
 /* ── workdir 根目录缓存 ── */
 let _workdirRootCache: string | null | undefined;
@@ -107,13 +109,16 @@ function AgentContactItem({
 /* ── Session 列表项（中栏） ── */
 
 function SessionListItem({
-  session, isActive, onClick, onDelete, index,
+  session, isActive, onClick, onDelete, index, isChild, isLast, noMargin,
 }: {
   session: SessionItem;
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
   index: number;
+  isChild?: boolean;
+  isLast?: boolean;
+  noMargin?: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -128,12 +133,63 @@ function SessionListItem({
     }
   };
 
+  if (isChild) {
+    return (
+      <div className="flex items-stretch">
+        {/* 树形连线 */}
+        <div className="w-5 shrink-0 flex flex-col items-center">
+          <div className={cn(
+            'w-px flex-1 bg-violet-300/40 dark:bg-violet-500/25',
+            isLast && 'max-h-[50%]',
+          )} />
+          {isLast && <div className="flex-1" />}
+        </div>
+        <div className="flex items-center -ml-[3px]">
+          <div className="w-2.5 h-px bg-violet-300/40 dark:bg-violet-500/25" />
+        </div>
+        <div
+          onClick={onClick}
+          className={cn(
+            'flex items-center gap-2 flex-1 min-w-0 px-2.5 py-2 rounded-lg cursor-pointer transition-all group',
+            'animate-in fade-in duration-150',
+            isActive
+              ? 'bg-violet-100/80 text-foreground shadow-sm dark:bg-violet-900/30'
+              : 'hover:bg-violet-50/60 text-foreground/70 dark:hover:bg-violet-900/10',
+          )}
+          style={{ animationDelay: `${index * 30}ms`, animationFillMode: 'both' }}
+        >
+          <div className={cn(
+            'w-1.5 h-1.5 rounded-full shrink-0',
+            isActive ? 'bg-violet-500' : 'bg-violet-300/60 dark:bg-violet-500/40',
+          )} />
+          <div className="flex-1 min-w-0">
+            <div className="truncate text-[11px] font-medium">{getTitle(session.meta)}</div>
+            <div className="text-[9px] text-muted-foreground/50 mt-0.5">{timeLabel(session.last_active)}</div>
+          </div>
+          <button
+            onClick={handleDelete}
+            className={cn(
+              'shrink-0 p-0.5 rounded transition-colors',
+              confirmDelete
+                ? 'opacity-100 text-destructive hover:bg-destructive/10'
+                : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10',
+            )}
+            title={confirmDelete ? '确认删除' : '删除会话'}
+          >
+            <Trash2 className="w-2.5 h-2.5" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       onClick={onClick}
       className={cn(
-        'flex items-center gap-2.5 px-3 py-2.5 mx-2 rounded-xl cursor-pointer transition-all text-sm group relative',
+        'flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-all text-sm group relative',
         'animate-in fade-in slide-in-from-left-2 duration-200',
+        !noMargin && 'mx-2',
         isActive ? 'bg-blue-100 dark:bg-blue-900/40 text-foreground shadow-md' : 'hover:bg-muted/60 text-foreground/80 border border-transparent',
       )}
       style={{ animationDelay: `${index * 30}ms`, animationFillMode: 'both' }}
@@ -162,6 +218,93 @@ function SessionListItem({
   );
 }
 
+/* ── 带子会话折叠的 Session 列表项 ── */
+
+function SessionListGroup({
+  session,
+  children: childSessions,
+  currentSessionId,
+  switchSession,
+  deleteSession,
+  index,
+}: {
+  session: SessionItem;
+  children: SessionItem[];
+  currentSessionId: string | null;
+  switchSession: (sid: string) => void;
+  deleteSession: (sid: string) => Promise<void>;
+  index: number;
+}) {
+  const hasActiveChild = childSessions.some(c => c.session_id === currentSessionId);
+  const [expanded, setExpanded] = useState(hasActiveChild);
+
+  useEffect(() => {
+    if (hasActiveChild && !expanded) setExpanded(true);
+  }, [hasActiveChild]);
+
+  const toggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpanded(prev => !prev);
+  };
+
+  return (
+    <div className={cn(
+      'mx-2 rounded-xl transition-colors',
+      expanded && 'bg-violet-50/40 dark:bg-violet-950/20 pb-1.5',
+    )}>
+      {/* 主会话 */}
+      <SessionListItem
+        session={session}
+        isActive={currentSessionId === session.session_id}
+        onClick={() => switchSession(session.session_id)}
+        onDelete={() => deleteSession(session.session_id)}
+        index={index}
+        noMargin
+      />
+
+      {/* 展开/收起按钮 */}
+      <button
+        onClick={toggleExpand}
+        className={cn(
+          'flex items-center gap-1.5 w-full pl-6 pr-3 py-1 transition-colors',
+          'text-[10px] font-medium',
+          expanded
+            ? 'text-violet-500 dark:text-violet-400'
+            : 'text-muted-foreground/50 hover:text-violet-500 dark:hover:text-violet-400',
+        )}
+      >
+        <div className="flex items-center gap-1">
+          {expanded
+            ? <ChevronDown className="w-3 h-3" />
+            : <ChevronRight className="w-3 h-3" />
+          }
+          <GitBranch className="w-3 h-3" />
+        </div>
+        <span>{childSessions.length} 个团队会话</span>
+        <div className="flex-1 h-px bg-current opacity-10 ml-1" />
+      </button>
+
+      {/* 子会话列表 */}
+      {expanded && (
+        <div className="pl-4 pr-1">
+          {childSessions.map((child, childIdx) => (
+            <SessionListItem
+              key={child.session_id}
+              session={child}
+              isActive={currentSessionId === child.session_id}
+              onClick={() => switchSession(child.session_id)}
+              onDelete={() => deleteSession(child.session_id)}
+              index={index + 1 + childIdx}
+              isChild
+              isLast={childIdx === childSessions.length - 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── 主体内容 ── */
 
 function ChatContent() {
@@ -182,6 +325,7 @@ function ChatContent() {
     refreshTaskGroups,
     loadingSessions,
     handleSkillInvoke,
+    cancelTurn,
     cleanupEmptySession,
   } = useChatSession();
 
@@ -300,9 +444,29 @@ function ChatContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAgentId]);
 
-  const selectedSessions = selectedAgentId
+  const allSelectedSessions = selectedAgentId
     ? (sessionsByAgent[selectedAgentId] || []).sort((a, b) => b.last_active - a.last_active)
     : [];
+
+  // 按父子关系分组：只在列表中显示根会话，子会话折叠在父会话下
+  const { rootSelectedSessions, selectedChildrenMap } = useMemo(() => {
+    const idSet = new Set(allSelectedSessions.map(s => s.session_id));
+    const cMap: Record<string, SessionItem[]> = {};
+    const roots: SessionItem[] = [];
+    for (const s of allSelectedSessions) {
+      const parentId = getParentSessionId(s.meta);
+      if (parentId && idSet.has(parentId)) {
+        if (!cMap[parentId]) cMap[parentId] = [];
+        cMap[parentId].push(s);
+      } else {
+        roots.push(s);
+      }
+    }
+    return { rootSelectedSessions: roots, selectedChildrenMap: cMap };
+  }, [allSelectedSessions]);
+
+  // 保持向后兼容：selectedSessions 仍指向所有会话（用于自动选择等逻辑）
+  const selectedSessions = allSelectedSessions;
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
   const currentSessionAgentId = useMemo(() => {
@@ -399,6 +563,7 @@ function ChatContent() {
   };
 
   return (
+    <>
       <ResizablePanelGroup orientation="horizontal" className="h-full overflow-hidden gap-3">
 
         {/* ====== 左栏：Agent 列表 ====== */}
@@ -502,7 +667,7 @@ function ChatContent() {
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="animate-spin text-muted-foreground" size={16} />
                   </div>
-                ) : selectedSessions.length === 0 ? (
+                ) : rootSelectedSessions.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 text-center px-4">
                     <MessageSquare className="w-10 h-10 text-muted-foreground/20 mb-3" />
                     <p className="text-xs text-muted-foreground/60 mb-3">暂无会话</p>
@@ -515,16 +680,33 @@ function ChatContent() {
                   </div>
                 ) : (
                   <div key={selectedAgentId} className="space-y-0.5">
-                    {selectedSessions.map((session, idx) => (
-                      <SessionListItem
-                        key={session.session_id}
-                        session={session}
-                        isActive={currentSessionId === session.session_id}
-                        onClick={() => switchSession(session.session_id)}
-                        onDelete={() => deleteSession(session.session_id)}
-                        index={idx}
-                      />
-                    ))}
+                    {rootSelectedSessions.map((session, idx) => {
+                      const children = selectedChildrenMap[session.session_id] || [];
+                      if (children.length === 0) {
+                        return (
+                          <SessionListItem
+                            key={session.session_id}
+                            session={session}
+                            isActive={currentSessionId === session.session_id}
+                            onClick={() => switchSession(session.session_id)}
+                            onDelete={() => deleteSession(session.session_id)}
+                            index={idx}
+                          />
+                        );
+                      }
+                      return (
+                        <SessionListGroup
+                          key={session.session_id}
+                          session={session}
+                          currentSessionId={currentSessionId}
+                          switchSession={switchSession}
+                          deleteSession={deleteSession}
+                          index={idx}
+                        >
+                          {children}
+                        </SessionListGroup>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -589,6 +771,7 @@ function ChatContent() {
                 onSelectAgent={() => {}}
                 onSend={handleSend}
                 onSlashSubmit={handleSlashSubmit}
+                onStop={cancelTurn}
                 disabled={interactionSubmitting || activeInteraction?.kind === 'confirmation' || (isTyping && activeInteraction?.kind !== 'question')}
                 wsConnected={wsConnected}
                 handleSkillInvoke={handleSkillInvoke}
@@ -599,6 +782,7 @@ function ChatContent() {
         </ResizablePanel>
 
       </ResizablePanelGroup>
+    </>
   );
 }
 
