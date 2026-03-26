@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useCustomPages } from '@/hooks/useCustomPages';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession } from '@/contexts/ws';
 
 const iconMap: Record<string, LucideIcon> = {
   zap: Zap,
@@ -84,7 +84,7 @@ export function DashboardNav({
 }) {
   const pathname = usePathname();
   const featureNavItems = useFeatureNavItems();
-  const { startNewChat } = useChatSession();
+  const { startNewChat } = useSession();
   const isActive = (item: { path: string; exact?: boolean }) => {
     if (item.exact) return pathname === item.path;
     return pathname?.startsWith(item.path);
