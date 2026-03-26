@@ -2,7 +2,7 @@
  * 带认证的 fetch 封装（基于 cookie）
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 const COOKIE_NAME = 'sensenova_claw_token';
 
 /** 从 document.cookie 读取指定 cookie */
