@@ -49,6 +49,7 @@ class AssetSlot:
     query: str
     selected: bool
     selected_image: "SelectedImage | None"
+    quality_review: "AssetQualityReview | None"
     rejected_candidates: list["RejectedCandidate"]
     status: str
     reason: str
@@ -60,6 +61,17 @@ class SelectedImage:
     local_path: str
     source_page: str
     source_domain: str
+
+
+class AssetQualityReview:
+    clarity: str
+    relevance: str
+    watermark: str
+    semantic_alignment: str
+    composition: str
+    style_fit: str
+    hard_fail_reasons: list[str]
+    soft_warnings: list[str]
 
 
 class RejectedCandidate:
@@ -112,10 +124,34 @@ class RejectedCandidate:
 - 优先保留稳定、可直接下载、分辨率合适、无明显强水印的资源。
 - 下载失败、内容无效、强水印、缩略图、语义不符的候选，都要写入 `rejected_candidates`。
 
-### 6. 最终选择
+### 6. 下载后图片审核
+
+- 下载成功不等于可用；每张候选都必须经过下载后图片审核。
+- 以下属于硬性筛查，任一失败都必须踢掉，不能进入最终选择：
+  - `清晰度` 不足
+  - `相关性` 不足
+  - 存在 `明显水印`
+  - 与当前图片槽位语义一致性不符
+- 以下属于弱筛查，可以通过但必须记录：
+  - `构图`
+  - `风格一致性`
+- `quality_review` 必须显式记录：
+  - `clarity`
+  - `relevance`
+  - `watermark`
+  - `semantic_alignment`
+  - `composition`
+  - `style_fit`
+  - `hard_fail_reasons`
+  - `soft_warnings`
+- 只有当 `clarity/relevance/watermark/semantic_alignment` 全部通过时，才允许 `selected=True`。
+- 如果图片只是构图一般、风格不够统一，但没有明显大问题，可以保留为通过候选，同时把问题写进 `soft_warnings`。
+
+### 7. 最终选择
 
 - 最终选择只能从下载成功且校验通过的本地文件中产生。
 - `selected_image.local_path` 必须指向 `deck_dir/images/...` 下真实存在的文件。
+- `selected_image` 一旦被选中，必须同步保留对应的 `quality_review`。
 - 如果某个槽位没有成功下载任何图片，必须标记为 `unresolved`，不能静默丢失。
 
 ## 关键规则
@@ -123,6 +159,7 @@ class RejectedCandidate:
 - 优先将最终图片落地为本地文件。
 - `image_search_results.json` 必须保留每个槽位的原始候选与 query。
 - `image_selection.json` 和 `asset-plan.json` 必须保留 `selected_image` 与 `rejected_candidates`。
+- `image_selection.json` 和 `asset-plan.json` 也必须保留下载后图片审核结果，不要只写“选中了哪张图”。
 - `asset-plan.json` 中必须显式记录 `asset_kind` 与 `render_strategy`。
 - 如果本地文件不存在，必须标记 `unresolved`。
 - 如果只有远程 URL 而没有下载成功的本地文件，不得标记为 `selected=True`。
@@ -131,3 +168,4 @@ class RejectedCandidate:
 - 不要跳过筛选过程，也不要把“没有展示筛选过程”的结果当成完成。
 - 某个槽位失败不应阻塞其他页面继续生成。
 - 与页面语义不相关的图片不能硬塞。
+- 清晰度不足、明显水印、语义不符的图片，即使已经下载成功，也不能算完成。
