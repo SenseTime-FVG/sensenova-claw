@@ -25,6 +25,7 @@ from sensenova_claw.capabilities.tools.email import (
     SendEmailTool,
 )
 from sensenova_claw.capabilities.tools.orchestration import CreateAgentTool
+from sensenova_claw.capabilities.tools.secret_tools import GetSecretTool, WriteSecretTool
 from sensenova_claw.platform.config.config import config
 
 
@@ -44,6 +45,10 @@ class ToolRegistry:
             FetchUrlTool(),
             ReadFileTool(),
             WriteFileTool(),
+            # secret tool
+            GetSecretTool(),
+            WriteSecretTool(),
+
             ManageTodolistTool(),
             ApplyPatchTool(),
             EditTool(),

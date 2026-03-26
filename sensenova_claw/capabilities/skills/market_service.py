@@ -94,6 +94,9 @@ class SkillMarketService:
         """从 SkillRegistry 构造本地 skill 详情"""
         skill = self._registry.get(skill_id)
         if not skill:
+            discovered = self._registry.discover_all_skills(self._config)
+            skill = next((item for item in discovered if item.name == skill_id), None)
+        if not skill:
             raise ValueError(f"本地 Skill 未找到: {skill_id}")
 
         # 读取 SKILL.md 内容作为预览

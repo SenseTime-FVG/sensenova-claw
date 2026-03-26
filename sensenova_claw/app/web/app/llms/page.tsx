@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle, ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, Save, Server, Trash2, X, XCircle, Zap } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface SecretValueStatus {
@@ -55,6 +56,14 @@ interface ModelTestResult {
   detail?: string;
 }
 
+interface BulkModelTestState extends ModelTestResult {
+  status: 'pending' | 'success' | 'failed';
+}
+
+const MAX_BULK_TEST_CONCURRENCY = 10;
+const TEST_TOOLTIP_DELAY_MS = 1000;
+const TEST_TOOLTIP_MESSAGE = '连接测试会消耗少量token';
+
 const PROVIDER_SOURCE_TYPE_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
@@ -101,6 +110,15 @@ export default function LlmsPage() {
   const [testingModel, setTestingModel] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, ModelTestResult>>({});
   const [openTestErrorModel, setOpenTestErrorModel] = useState<string | null>(null);
+  const [bulkTesting, setBulkTesting] = useState(false);
+  const [bulkTestDialogOpen, setBulkTestDialogOpen] = useState(false);
+  const [bulkTestResults, setBulkTestResults] = useState<Record<string, BulkModelTestState>>({});
+  const [openBulkTestErrorModel, setOpenBulkTestErrorModel] = useState<string | null>(null);
+  const [hasBulkTestResults, setHasBulkTestResults] = useState(false);
+  const [hoveredTestModel, setHoveredTestModel] = useState<string | null>(null);
+  const [visibleTestTooltipModel, setVisibleTestTooltipModel] = useState<string | null>(null);
+  const [hoveringBulkTestButton, setHoveringBulkTestButton] = useState(false);
+  const [showBulkTestTooltip, setShowBulkTestTooltip] = useState(false);
 
   const loadConfig = () => {
     authFetch(`${API_BASE}/api/config/sections`)
@@ -135,6 +153,11 @@ export default function LlmsPage() {
         setGlobalDraft(null);
         setDefaultModelDraft('');
         setOpenTestErrorModel(null);
+        setBulkTesting(false);
+        setBulkTestDialogOpen(false);
+        setBulkTestResults({});
+        setOpenBulkTestErrorModel(null);
+        setHasBulkTestResults(false);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -164,6 +187,36 @@ export default function LlmsPage() {
       document.removeEventListener('pointerdown', handlePointerDown);
     };
   }, [openTestErrorModel]);
+
+  useEffect(() => {
+    if (!hoveredTestModel) {
+      setVisibleTestTooltipModel(null);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setVisibleTestTooltipModel(hoveredTestModel);
+    }, TEST_TOOLTIP_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [hoveredTestModel]);
+
+  useEffect(() => {
+    if (!hoveringBulkTestButton) {
+      setShowBulkTestTooltip(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowBulkTestTooltip(true);
+    }, TEST_TOOLTIP_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [hoveringBulkTestButton]);
 
   const activeProviders = useMemo(() => {
     if (!editingAll || !globalDraft) return providers;
@@ -611,6 +664,102 @@ export default function LlmsPage() {
     return currentProvider.api_key;
   };
 
+  const getResolvedModelForTesting = (modelName: string): {
+    model: ModelConfig | ModelDraft;
+    providerName: string;
+    provider: ProviderConfig | ProviderDraft;
+  } | null => {
+    const model = editingAll && globalDraft
+      ? activeModels[modelName]
+      : editingModel === modelName
+        ? getModelDraft(modelName)
+        : activeModels[modelName];
+    if (!model) return null;
+
+    const providerName = model.provider;
+    const provider = editingAll && globalDraft
+      ? activeProviders[providerName]
+      : editingProvider === providerName
+        ? getProviderDraft(providerName)
+        : activeProviders[providerName];
+    if (!provider) return null;
+
+    return { model, providerName, provider };
+  };
+
+  const resolveProviderApiKey = async (
+    providerName: string,
+    provider: ProviderConfig | ProviderDraft,
+    apiKeyCache?: Map<string, string>,
+  ) => {
+    const cachedApiKey = apiKeyCache?.get(providerName);
+    if (cachedApiKey) {
+      return cachedApiKey;
+    }
+
+    let apiKey = provider.api_key;
+    if (!apiKey && provider.api_key_meta?.configured) {
+      const secret = await revealSecret(`llm.providers.${providerName}.api_key`);
+      apiKey = secret.value || '';
+    }
+    if (apiKeyCache && apiKey) {
+      apiKeyCache.set(providerName, apiKey);
+    }
+    return apiKey;
+  };
+
+  const runModelConnectivityTest = async (
+    modelName: string,
+    apiKeyCache?: Map<string, string>,
+  ): Promise<ModelTestResult> => {
+    const target = getResolvedModelForTesting(modelName);
+    if (!target) {
+      return { success: false, message: '连接失败', detail: '未找到对应的 llm 或 provider 配置' };
+    }
+
+    const { model, providerName, provider } = target;
+
+    try {
+      const apiKey = await resolveProviderApiKey(providerName, provider, apiKeyCache);
+      if (isSecretRefLike(apiKey)) {
+        return {
+          success: false,
+          message: '连接失败',
+          detail: 'Secret store 中保存的是占位符，请重新填写真实 API Key',
+        };
+      }
+      if (!apiKey) {
+        return { success: false, message: '连接失败', detail: '未配置 API Key' };
+      }
+
+      const res = await authFetch(`${API_BASE}/api/config/test-llm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: provider.source_type || 'openai',
+          api_key: apiKey,
+          base_url: provider.base_url || '',
+          model_id: model.model_id || modelName,
+          max_tokens: model.max_tokens || 128000,
+          max_output_tokens: model.max_output_tokens || 16384,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        return { success: true, message: data.message || '连接成功' };
+      }
+
+      const detail = typeof data.error === 'string' && data.error.trim() ? data.error : '测试失败';
+      return { success: false, message: '连接失败', detail };
+    } catch (error) {
+      return {
+        success: false,
+        message: '连接失败',
+        detail: error instanceof Error ? error.message : '测试失败',
+      };
+    }
+  };
+
   const startEditProvider = (name: string) => {
     setEditingModel(null);
     setEditingDefaultModel(false);
@@ -733,20 +882,7 @@ export default function LlmsPage() {
   };
 
   const testModel = async (modelName: string) => {
-    const model = editingAll && globalDraft
-      ? activeModels[modelName]
-      : editingModel === modelName
-        ? getModelDraft(modelName)
-        : activeModels[modelName];
-    if (!model) return;
-    const providerName = model.provider;
-    const provider = editingAll && globalDraft
-      ? activeProviders[providerName]
-      : editingProvider === providerName
-        ? getProviderDraft(providerName)
-        : activeProviders[providerName];
-    if (!provider) return;
-
+    if (!getResolvedModelForTesting(modelName)) return;
     setTestingModel(modelName);
     setOpenTestErrorModel(null);
     setTestResults((prev) => {
@@ -756,59 +892,65 @@ export default function LlmsPage() {
     });
 
     try {
-      // 获取 api_key：如果在 secret store 中需要先 reveal
-      let apiKey = provider.api_key;
-      if (!apiKey && provider.api_key_meta?.configured) {
-        const secret = await revealSecret(`llm.providers.${providerName}.api_key`);
-        apiKey = secret.value || '';
-      }
-      if (isSecretRefLike(apiKey)) {
-        setTestResults((prev) => ({
-          ...prev,
-          [modelName]: {
-            success: false,
-            message: '连接失败',
-            detail: 'Secret store 中保存的是占位符，请重新填写真实 API Key',
-          },
-        }));
-        return;
-      }
-      if (!apiKey) {
-        setTestResults((prev) => ({
-          ...prev,
-          [modelName]: { success: false, message: '连接失败', detail: '未配置 API Key' },
-        }));
-        return;
-      }
-
-      const res = await authFetch(`${API_BASE}/api/config/test-llm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: provider.source_type || 'openai',
-          api_key: apiKey,
-          base_url: provider.base_url || '',
-          model_id: model.model_id || modelName,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setTestResults((prev) => ({ ...prev, [modelName]: { success: true, message: data.message || '连接成功' } }));
-      } else {
-        const detail = typeof data.error === 'string' && data.error.trim() ? data.error : '测试失败';
-        setTestResults((prev) => ({ ...prev, [modelName]: { success: false, message: '连接失败', detail } }));
-      }
-    } catch (error) {
-      setTestResults((prev) => ({
-        ...prev,
-        [modelName]: {
-          success: false,
-          message: '连接失败',
-          detail: error instanceof Error ? error.message : '测试失败',
-        },
-      }));
+      const result = await runModelConnectivityTest(modelName);
+      setTestResults((prev) => ({ ...prev, [modelName]: result }));
     } finally {
       setTestingModel(null);
+    }
+  };
+
+  const testAllModels = async () => {
+    const allModelNames = providerNames.flatMap((providerName) => groupedModels[providerName] || []);
+    if (allModelNames.length === 0) {
+      setBulkTestResults({});
+      setHasBulkTestResults(true);
+      setBulkTestDialogOpen(true);
+      return;
+    }
+
+    const initialResults = Object.fromEntries(
+      allModelNames.map((modelName) => [
+        modelName,
+        {
+          status: 'pending' as const,
+          success: false,
+          message: '连接中',
+        },
+      ]),
+    );
+
+    setBulkTesting(true);
+    setHasBulkTestResults(true);
+    setBulkTestDialogOpen(true);
+    setOpenBulkTestErrorModel(null);
+    setBulkTestResults(initialResults);
+
+    const apiKeyCache = new Map<string, string>();
+    let cursor = 0;
+    const workerCount = Math.min(MAX_BULK_TEST_CONCURRENCY, allModelNames.length);
+
+    try {
+      await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (true) {
+          const currentIndex = cursor;
+          cursor += 1;
+          if (currentIndex >= allModelNames.length) {
+            return;
+          }
+
+          const modelName = allModelNames[currentIndex];
+          const result = await runModelConnectivityTest(modelName, apiKeyCache);
+          setBulkTestResults((prev) => ({
+            ...prev,
+            [modelName]: {
+              ...result,
+              status: result.success ? 'success' : 'failed',
+            },
+          }));
+        }
+      }));
+    } finally {
+      setBulkTesting(false);
     }
   };
 
@@ -961,8 +1103,85 @@ export default function LlmsPage() {
 
         <Card className="overflow-hidden border-border/80 shadow-xl">
           <CardHeader className="border-b bg-muted/30 p-8">
-            <CardTitle className="text-2xl font-bold">Provider 列表</CardTitle>
-            <CardDescription className="mt-2 text-base">每个 provider 下直接管理关联的 llm 配置。</CardDescription>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="text-2xl font-bold">Provider 列表</CardTitle>
+                <CardDescription className="mt-2 text-base">每个 provider 下直接管理关联的 llm 配置。</CardDescription>
+              </div>
+              {hasBulkTestResults ? (
+                <div className="flex flex-col items-stretch gap-2">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      data-testid="retest-all-llms"
+                      onClick={() => void testAllModels()}
+                      onMouseEnter={() => setHoveringBulkTestButton(true)}
+                      onMouseLeave={() => {
+                        setHoveringBulkTestButton(false);
+                        setShowBulkTestTooltip(false);
+                      }}
+                      onFocus={() => setHoveringBulkTestButton(true)}
+                      onBlur={() => {
+                        setHoveringBulkTestButton(false);
+                        setShowBulkTestTooltip(false);
+                      }}
+                      disabled={bulkTesting || Boolean(editingProvider || editingModel || editingDefaultModel)}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-500/30 px-4 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+                    >
+                      {bulkTesting ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                      {bulkTesting ? '测试中...' : '重新测试全部'}
+                    </button>
+                    {showBulkTestTooltip ? (
+                      <div
+                        data-testid="bulk-llm-test-tooltip"
+                        className="absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground shadow-lg"
+                      >
+                        {TEST_TOOLTIP_MESSAGE}
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="show-all-llms-test-results"
+                    onClick={() => setBulkTestDialogOpen(true)}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-bold text-foreground transition-all hover:bg-muted/40"
+                  >
+                    测试结果
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <button
+                    type="button"
+                    data-testid="test-all-llms"
+                    onClick={() => void testAllModels()}
+                    onMouseEnter={() => setHoveringBulkTestButton(true)}
+                    onMouseLeave={() => {
+                      setHoveringBulkTestButton(false);
+                      setShowBulkTestTooltip(false);
+                    }}
+                    onFocus={() => setHoveringBulkTestButton(true)}
+                    onBlur={() => {
+                      setHoveringBulkTestButton(false);
+                      setShowBulkTestTooltip(false);
+                    }}
+                    disabled={bulkTesting || Boolean(editingProvider || editingModel || editingDefaultModel)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-amber-500/30 px-4 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+                  >
+                    {bulkTesting ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                    {bulkTesting ? '测试中...' : '测试全部'}
+                  </button>
+                  {showBulkTestTooltip ? (
+                    <div
+                      data-testid="bulk-llm-test-tooltip"
+                      className="absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground shadow-lg"
+                    >
+                      {TEST_TOOLTIP_MESSAGE}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="space-y-6 p-8">
             {providerNames.map((providerName) => (
@@ -1268,20 +1487,40 @@ export default function LlmsPage() {
                                 </button>
                               </div>
                               <div className="flex w-full justify-end">
-                                <button
-                                  type="button"
-                                  data-testid={`llm-test-${modelName}`}
-                                  onClick={() => void testModel(modelName)}
-                                  disabled={testingModel === modelName}
-                                  className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 px-3 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
-                                >
-                                  {testingModel === modelName ? (
-                                    <Loader2 size={16} className="animate-spin" />
-                                  ) : (
-                                    <Zap size={16} />
-                                  )}
-                                  测试
-                                </button>
+                                <div className="relative">
+                                  <button
+                                    type="button"
+                                    data-testid={`llm-test-${modelName}`}
+                                    onClick={() => void testModel(modelName)}
+                                    onMouseEnter={() => setHoveredTestModel(modelName)}
+                                    onMouseLeave={() => {
+                                      setHoveredTestModel((prev) => (prev === modelName ? null : prev));
+                                      setVisibleTestTooltipModel((prev) => (prev === modelName ? null : prev));
+                                    }}
+                                    onFocus={() => setHoveredTestModel(modelName)}
+                                    onBlur={() => {
+                                      setHoveredTestModel((prev) => (prev === modelName ? null : prev));
+                                      setVisibleTestTooltipModel((prev) => (prev === modelName ? null : prev));
+                                    }}
+                                    disabled={testingModel === modelName}
+                                    className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 px-3 py-2 text-sm font-bold text-amber-600 transition-all hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-400"
+                                  >
+                                    {testingModel === modelName ? (
+                                      <Loader2 size={16} className="animate-spin" />
+                                    ) : (
+                                      <Zap size={16} />
+                                    )}
+                                    测试
+                                  </button>
+                                  {visibleTestTooltipModel === modelName ? (
+                                    <div
+                                      data-testid={`llm-test-tooltip-${modelName}`}
+                                      className="absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground shadow-lg"
+                                    >
+                                      {TEST_TOOLTIP_MESSAGE}
+                                    </div>
+                                  ) : null}
+                                </div>
                               </div>
                               {testResults[modelName] && (
                                 <div className="relative flex justify-end self-end" data-llm-test-error-scope="true">
@@ -1375,6 +1614,79 @@ export default function LlmsPage() {
             )}
           </CardContent>
         </Card>
+
+        <Dialog open={bulkTestDialogOpen} onOpenChange={setBulkTestDialogOpen}>
+          <DialogContent data-testid="test-all-llms-dialog" className="z-[260] flex max-h-[85vh] flex-col overflow-hidden rounded-3xl p-0 sm:max-w-3xl">
+            <DialogHeader className="border-b px-8 py-6">
+              <DialogTitle className="text-2xl font-bold">批量测试 LLM 连接</DialogTitle>
+              <DialogDescription className="text-base">
+                按 provider 分组展示所有 llm 的连接进度与结果，失败项可点击查看错误详情。
+              </DialogDescription>
+            </DialogHeader>
+            <div data-testid="test-all-llms-scroll-body" className="min-h-0 flex-1 space-y-6 overflow-y-auto px-8 py-6">
+              {providerNames.map((providerName) => {
+                const providerModels = groupedModels[providerName] || [];
+                return (
+                  <div key={providerName} className="space-y-3">
+                    <div className="text-sm font-bold text-foreground">
+                      {providerName}: {activeProviders[providerName]?.source_type || 'openai'}
+                    </div>
+                    {providerModels.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+                        当前 provider 暂无 llm
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {providerModels.map((modelName) => {
+                          const result = bulkTestResults[modelName];
+                          const isPending = result?.status === 'pending';
+                          const isFailed = result?.status === 'failed';
+                          return (
+                            <div key={modelName} className="space-y-2">
+                              <button
+                                type="button"
+                                data-testid={`test-all-llms-item-${modelName}`}
+                                onClick={() => {
+                                  if (!isFailed || !result?.detail) return;
+                                  setOpenBulkTestErrorModel((prev) => (prev === modelName ? null : modelName));
+                                }}
+                                disabled={!isFailed || !result?.detail}
+                                className={`flex w-full items-start gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                                  isFailed ? 'hover:bg-destructive/5' : ''
+                                } ${!isFailed ? 'cursor-default' : ''}`}
+                              >
+                                <span className="pt-0.5 text-muted-foreground">-</span>
+                                <span className="min-w-0 flex-1 break-all text-foreground">{modelName}</span>
+                                <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                                  isPending
+                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                    : result?.success
+                                      ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                                      : 'bg-destructive/10 text-destructive'
+                                }`}>
+                                  {isPending ? <Loader2 size={14} className="animate-spin" /> : result?.success ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                  {isPending ? '连接中' : result?.message || '未开始'}
+                                </span>
+                              </button>
+                              {isFailed && openBulkTestErrorModel === modelName && result?.detail ? (
+                                <div
+                                  data-testid={`test-all-llms-error-${modelName}`}
+                                  className="ml-6 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-muted-foreground"
+                                >
+                                  {result.detail}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

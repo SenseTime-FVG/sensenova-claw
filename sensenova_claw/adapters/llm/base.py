@@ -12,7 +12,11 @@ DEFAULT_SAMPLING_EXTRA_BODY: dict[str, Any] = {
 def merge_sampling_extra_body(extra_body: dict[str, Any] | None = None) -> dict[str, Any]:
     merged = dict(DEFAULT_SAMPLING_EXTRA_BODY)
     if extra_body:
-        merged.update(extra_body)
+        for key, value in extra_body.items():
+            if value is None:
+                merged.pop(key, None)
+                continue
+            merged[key] = value
     return merged
 
 
