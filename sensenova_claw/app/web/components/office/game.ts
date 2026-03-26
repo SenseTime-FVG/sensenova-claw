@@ -1,5 +1,5 @@
 // 办公室 Phaser 场景：状态机、动画、气泡对话
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 import { LAYOUT } from './layout';
 import { STATES, BUBBLE_TEXTS, type OfficeStateName } from './types';
 

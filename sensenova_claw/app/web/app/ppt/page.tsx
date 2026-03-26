@@ -117,6 +117,19 @@ function PPTWorkspace() {
     }
   }, [loadingSessions, currentSessionId, sessions, pptSessions, switchSession]);
 
+  // 当外部切换到非 ppt-agent 会话时，自动回退到 ppt-agent 会话或空白态
+  useEffect(() => {
+    if (!currentSessionId || loadingSessions) return;
+    const cur = sessions.find(s => s.session_id === currentSessionId);
+    if (cur && getAgentId(cur.meta) !== 'ppt-agent') {
+      if (pptSessions.length > 0) {
+        switchSession(pptSessions[0].session_id);
+      } else {
+        startNewChat();
+      }
+    }
+  }, [currentSessionId, sessions, pptSessions, loadingSessions, switchSession, startNewChat]);
+
   const deckData = useDeckData(messages);
   const [activePage, setActivePage] = useState(1);
   const [leftTab, setLeftTab] = useState<LeftTab>('outline');
