@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authGet, API_BASE } from '@/lib/authFetch';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession, useMessages } from '@/contexts/ws';
 
 // ── 类型定义 ──
 
@@ -154,7 +154,8 @@ const FIVE_MINUTES_MS = 5 * 60 * 1000;
 // ── Hook ──
 
 export function useDashboardData(): DashboardData & { refresh: () => void } {
-  const { sessions, proactiveResults } = useChatSession();
+  const { sessions } = useSession();
+  const { proactiveResults } = useMessages();
 
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
