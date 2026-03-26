@@ -323,8 +323,8 @@ function NotificationCardItem({
             </div>
           )}
 
-          {/* 跳转到会话 */}
-          {card.sessionId && !card.resolved && !card.pending && (
+          {/* 跳转到会话（交互类卡片未处理时不显示，避免用户误点跳转） */}
+          {card.sessionId && !(card.kind === 'tool_confirmation' || card.kind === 'user_question') && !card.resolved && !card.pending && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onNavigate(card.sessionId!); }}
