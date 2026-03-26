@@ -987,7 +987,7 @@ class ObsidianIndexTool(Tool):
     description = """生成知识库的紧凑索引，包含用户画像摘要和最近修改的笔记列表。
 
 用于会话开始时快速加载知识库上下文，帮助判断用户问题是否与已有知识相关。
-返回格式紧凑，适合直接注入上下文。"""
+返回格式紧凑，适合直接注入上下文。支持缓存，文件无变化时直接返回缓存。"""
     risk_level = ToolRiskLevel.LOW
     parameters = {
         "type": "object",
@@ -1010,16 +1010,25 @@ class ObsidianIndexTool(Tool):
                 "type": "boolean",
                 "description": "是否包含用户画像摘要",
                 "default": True
+            },
+            "force_refresh": {
+                "type": "boolean",
+                "description": "强制刷新缓存",
+                "default": False
             }
         },
         "required": []
     }
+
+    CACHE_VERSION = 1
+    CACHE_FILENAME = "_index_cache.json"
 
     async def execute(self, **kwargs: Any) -> Any:
         limit = int(kwargs.get("limit", 30))
         vault_name = kwargs.get("vault", "")
         root_folder = kwargs.get("root_folder", "Knowledge")
         include_profile = kwargs.get("include_profile", True)
+        force_refresh = kwargs.get("force_refresh", False)
 
         sources = _get_all_vault_sources()
 
@@ -1038,6 +1047,110 @@ class ObsidianIndexTool(Tool):
         vault_path = Path(source.path)
         kb_path = vault_path / root_folder
 
+        if not kb_path.exists():
+            return {
+                "success": True,
+                "vault": source.name,
+                "note_count": 0,
+                "index": "[知识库为空]",
+                "from_cache": False,
+            }
+
+        # 计算文件 hash
+        current_hash = self._compute_files_hash(kb_path)
+
+        # 尝试读取缓存
+        if not force_refresh:
+            cache = self._load_cache(kb_path)
+            if cache and cache.get("files_hash") == current_hash and cache.get("limit") == limit:
+                return {
+                    "success": True,
+                    "vault": source.name,
+                    "note_count": cache.get("note_count", 0),
+                    "has_profile": cache.get("has_profile", False),
+                    "index": cache.get("index", ""),
+                    "from_cache": True,
+                }
+
+        # 生成新索引
+        result = self._generate_index(kb_path, source.name, limit, include_profile)
+
+        # 保存缓存
+        self._save_cache(kb_path, current_hash, limit, result)
+
+        result["from_cache"] = False
+        return result
+
+    def _compute_files_hash(self, kb_path: Path) -> str:
+        """计算知识库文件的 hash（基于文件名 + mtime）"""
+        files_data: list[tuple[str, float]] = []
+
+        for md_file in kb_path.rglob("*.md"):
+            if ".obsidian" in md_file.parts:
+                continue
+            if md_file.name.startswith("_"):
+                continue
+            try:
+                rel_path = md_file.relative_to(kb_path)
+                mtime = md_file.stat().st_mtime
+                files_data.append((str(rel_path), mtime))
+            except Exception:
+                continue
+
+        # 排序确保顺序一致
+        files_data.sort()
+        return str(hash(tuple(files_data)))
+
+    def _load_cache(self, kb_path: Path) -> dict[str, Any] | None:
+        """加载缓存文件"""
+        cache_file = kb_path / self.CACHE_FILENAME
+        if not cache_file.exists():
+            return None
+        try:
+            import json
+            data = json.loads(cache_file.read_text(encoding="utf-8"))
+            if data.get("version") != self.CACHE_VERSION:
+                return None
+            return data
+        except Exception:
+            return None
+
+    def _save_cache(
+        self,
+        kb_path: Path,
+        files_hash: str,
+        limit: int,
+        result: dict[str, Any],
+    ) -> None:
+        """保存缓存文件"""
+        cache_file = kb_path / self.CACHE_FILENAME
+        try:
+            import json
+            from datetime import datetime
+            data = {
+                "version": self.CACHE_VERSION,
+                "generated_at": datetime.now().isoformat(),
+                "files_hash": files_hash,
+                "limit": limit,
+                "note_count": result.get("note_count", 0),
+                "has_profile": result.get("has_profile", False),
+                "index": result.get("index", ""),
+            }
+            cache_file.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass  # 缓存写入失败不影响主流程
+
+    def _generate_index(
+        self,
+        kb_path: Path,
+        vault_name: str,
+        limit: int,
+        include_profile: bool,
+    ) -> dict[str, Any]:
+        """生成索引"""
         result_parts: list[str] = []
         profile_summary = ""
         note_count = 0
@@ -1057,21 +1170,20 @@ class ObsidianIndexTool(Tool):
         # 2. 收集所有笔记（排除 user-profile.md）
         notes: list[tuple[Path, float, str]] = []  # (path, mtime, title)
 
-        if kb_path.exists():
-            for md_file in kb_path.rglob("*.md"):
-                if ".obsidian" in md_file.parts:
-                    continue
-                if md_file.name == "user-profile.md":
-                    continue
-                if md_file.name.startswith("_"):  # 跳过 _index.md 等
-                    continue
+        for md_file in kb_path.rglob("*.md"):
+            if ".obsidian" in md_file.parts:
+                continue
+            if md_file.name == "user-profile.md":
+                continue
+            if md_file.name.startswith("_"):  # 跳过 _index.md, _index_cache.json 等
+                continue
 
-                try:
-                    mtime = md_file.stat().st_mtime
-                    title = md_file.stem
-                    notes.append((md_file, mtime, title))
-                except Exception:
-                    continue
+            try:
+                mtime = md_file.stat().st_mtime
+                title = md_file.stem
+                notes.append((md_file, mtime, title))
+            except Exception:
+                continue
 
         # 3. 排序：修改时间降序，同时间按标题字母序
         notes.sort(key=lambda x: (-x[1], x[2].lower()))
@@ -1100,14 +1212,15 @@ class ObsidianIndexTool(Tool):
         if not result_parts:
             return {
                 "success": True,
-                "vault": source.name,
+                "vault": vault_name,
                 "note_count": 0,
+                "has_profile": False,
                 "index": "[知识库为空]",
             }
 
         return {
             "success": True,
-            "vault": source.name,
+            "vault": vault_name,
             "note_count": note_count,
             "has_profile": bool(profile_summary),
             "index": "\n\n".join(result_parts),
