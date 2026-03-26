@@ -42,6 +42,7 @@ class EventTrigger:
     event_type: str = ""
     filter: dict | None = None
     debounce_ms: int = 5000
+    exclude_payload: dict | None = None  # 排除匹配：payload 中含有这些字段时不触发（用于防止自触发）
 
 
 Trigger = TimeTrigger | EventTrigger
@@ -132,6 +133,7 @@ def trigger_to_json(trigger: Trigger) -> str:
             "event_type": trigger.event_type,
             "filter": trigger.filter,
             "debounce_ms": trigger.debounce_ms,
+            "exclude_payload": trigger.exclude_payload,
         })
     raise ValueError(f"未知 trigger 类型: {type(trigger)}")
 
@@ -150,6 +152,7 @@ def trigger_from_json(raw: str) -> Trigger:
             event_type=d.get("event_type", ""),
             filter=d.get("filter"),
             debounce_ms=d.get("debounce_ms", 5000),
+            exclude_payload=d.get("exclude_payload"),
         )
     raise ValueError(f"Unknown trigger kind: {kind}")
 

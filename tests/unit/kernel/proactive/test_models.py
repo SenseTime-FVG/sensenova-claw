@@ -72,6 +72,17 @@ def test_parse_duration_ms():
         parse_duration_ms("invalid")
 
 
+def test_event_trigger_exclude_payload_roundtrip():
+    t = EventTrigger(
+        event_type="agent.step_completed",
+        exclude_payload={"source": "recommendation"},
+    )
+    raw = trigger_to_json(t)
+    restored = trigger_from_json(raw)
+    assert restored == t
+    assert restored.exclude_payload == {"source": "recommendation"}
+
+
 # ---------- DB 操作测试 ----------
 
 import asyncio
