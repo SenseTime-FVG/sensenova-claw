@@ -10,14 +10,23 @@ description: 将 deck_dir 中的 HTML 页面导出为可编辑的 PPTX 文件，
 ## 前置条件
 
 1. `deck_dir` 已存在，且 `pages/` 目录下至少有一个 `page_*.html` 文件
-2. 依赖已安装（首次使用需执行 `cd .agentos/skills/ppt-export-pptx && npm install`）
+2. 依赖已安装（首次使用需执行 `cd .sensenova-claw/skills/ppt-export-pptx && npm install`）
+3. 必须先确认 `review.md` 或 `review.json` 存在；如果 review 标记为阻塞，或根本没有 review 工件，不得继续导出
+4. 如果 `style-spec.json` / `storyboard.json` 声明了背景或前景 motif recipe，页面 HTML 中必须存在对应的 `data-layer="bg-motif"`、`data-layer="fg-motif"` 与 `data-motif-key` 标记；缺失时不得继续导出
+
+## 用户回显要求
+
+- `开始反馈`：说明正在把哪个 `deck_dir` 导出成 PPTX，并提示会生成 `<deck_dir>/<目录名>.pptx`。
+- `进行中反馈`：如果页面较多或导出明显耗时，可补 1 条进度说明，告知已处理页数或当前阶段。
+- `完成反馈`：说明生成的 PPTX 路径、转换页数、失败页数和 `下一步`。
+- 如果导出失败、依赖未安装或部分页面转换异常，必须明确告诉用户失败原因和已保留结果。
 
 ## 使用方式
 
 通过 `bash_command` 执行：
 
 ```bash
-node .agentos/skills/ppt-export-pptx/html_to_pptx.mjs --deck-dir <deck_dir路径>
+node .sensenova-claw/skills/ppt-export-pptx/html_to_pptx.mjs --deck-dir <deck_dir路径>
 ```
 
 可选参数：
