@@ -273,19 +273,22 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           }
           setMessages((prev) => {
             if (completedTurnId) {
+              // 只更新最后一条同 turnId 的 assistant 消息，保留早期消息的 thinking 不变。
+              // 注意：不设置 thinkingState，思考过程默认展开显示。
               return upsertAssistantTurnMessage(prev, completedTurnId, {
                 content: final,
-                thinkingState: 'collapsed',
                 keepExistingContentWhenEmpty: true,
               });
             }
             for (let i = prev.length - 1; i >= 0; i--) {
               if (prev[i].role === 'assistant') {
                 const existing = prev[i];
+                // 如果 llm_result 已经设置了相同内容，保持不变
                 if (existing.content === final || !final) {
-                  const next = [...prev]; next[i] = { ...next[i], thinkingState: 'collapsed' }; return next;
+                  return prev;
                 }
-                const next = [...prev]; next[i] = { ...next[i], content: final, thinkingState: 'collapsed' }; return next;
+                // 内容不同时才更新（不创建新消息）
+                const next = [...prev]; next[i] = { ...next[i], content: final }; return next;
               }
             }
             if (final) return [...prev, { id: makeId(), role: 'assistant', content: final, timestamp: Date.now() }];
