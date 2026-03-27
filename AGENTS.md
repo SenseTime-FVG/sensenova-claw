@@ -356,6 +356,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境下 Playwright 即使能拉起 `next dev` 和 headless Chromium，也可能长时间卡住不返回最终结果；浏览器级回归要和进程内/单元测试分层看，不能把这类环境挂起误判成业务失败。
 
+### 2026-03-27 ask_user 消息内联补充
+
+成功经验：
+- `/sessions/[id]` 这类“先拉历史、再收实时事件”的页面，若历史请求返回较慢，直接 `setMessages(history)` 会覆盖已收到的实时工具消息；应在详情页对历史消息与实时消息做合并，而不是盲覆盖。
+- Playwright 在 `next dev` 下会遇到 React 开发态重挂载，mock WebSocket 可能产生多个实例；测试基座里应把所有实例的 `send` 统一落到同一个全局数组，避免断言只读到“最后一个实例”的发送记录。
+- 对通知 toast / ask_user 这类前端交互回归，先验证“控件是否出现”，再验证“点击后是否真的发出 websocket 消息”，能更快区分是展示链断了还是提交链断了。
+
+失败/风险经验：
+- 仅等待 `window.__mockWs` 存在不够，测试若在 `onmessage` 尚未挂好时就发事件，消息会被静默丢掉；需要等到 mock socket 的 `send` 和 `onmessage` 都可用后再注入事件。
+- `/sessions/[id]` 的 `Thinking` 分组如果默认折叠，会把 ask_user 内联表单藏起来；这类“消息内联交互”不能依赖用户先展开二级容器才能操作。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：
@@ -1420,3 +1431,56 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 这类源码结构测试只能验证布局骨架，不能替代真实浏览器中的滚动手感与高度表现；如果后续要继续调视觉或 sticky 行为，仍需要在可运行 Playwright 的环境做一次页面级回归。
+
+### 2026-03-25 Skills 市场认证补充
+
+成功经验：
+- 前端跨端口访问 `http://localhost:8000/api/...` 时，像 marketplace 这类页面请求不能直接用原生 `fetch`；统一走 `authFetch` 才能稳定带上 `credentials: 'include'` 和 `Authorization: Bearer <cookie-token>`，避免只在个别页面出现 401。
+- 对“浏览器请求到底有没有带 cookie”这类问题，最有效的前端回归不是只断言页面不报错，而是用 Playwright `page.route('**/api/**')` 直接读取 `route.request().allHeaders()`，把 `cookie` 与 `authorization` 都锁进断言。
+- Skills 页面同时存在“市场浏览”“市场内搜索”“统一搜索”三条请求路径；修复时要一起检查，不然很容易只修 `/market/browse`，却漏掉 `/market/search` 或 `/skills/search`。
+
+失败/风险经验：
+- 页面上存在 `Search` 和 `Search Market` 两个相似按钮，Playwright 若用宽松 `name: 'Search'` 会触发 strict mode 冲突；这类页面应优先用 `name: /^Search$/` 或更具体的 placeholder/data-testid 收窄选择器。
+
+### 2026-03-27 聊天稳态与重连补充
+
+成功经验：
+- 前端如果已经用 `request_id` 做 `session_created` 乱序保护，服务端 WebSocket 回执必须原样回传该字段；否则保护逻辑看似存在，实际在快速新建会话时完全失效。
+- 手动“重连 WebSocket”按钮不能只清空 `wsRef` 和重置 attempts；若连接 effect 只在 mount 时跑一次，最稳的做法是引入一个显式 `connectionNonce` 之类的状态，让手动重连能强制重跑连接 effect。
+- 像 `ChatPanel` 预览清理、`MessageArea` 空态显示、前端 node 测试脚本路径这类问题，虽然不一定立刻报错，但非常容易影响用户稳定性；在缺少完整组件测试基建时，可以复用仓库已有的 `node --test + 读取源码` 轻量回归方式先把关键约束锁住。
+- `SessionContext` 这类旧链路即使暂时未挂到页面树，只要仍参与 `tsc`，就必须维持最基本的类型正确；否则会持续污染前端基线，掩盖真正的新回归。
+
+失败/风险经验：
+- 目前仓库里仍同时存在 `ChatSessionContext` 和旧 `SessionContext/useSession/Sidebar/StatusBar` 两套路由；即使当前旧组件未挂载，后续若误接回页面树，仍有语义漂移和维护分叉风险，最好后续继续收敛。
+- 基于源码结构的 node 测试只能锁“关键实现仍存在”，不能替代真实浏览器里的交互回归；像拖拽上传、真实断线重连、预览面板视觉表现，后续仍应在可运行 Playwright 的环境补页面级验证。
+
+### 2026-03-27 前端 i18n 接入补充
+
+成功经验：
+- 对已有前端快速补 i18n，最小改动路径是复用现成的 `UserPreferencesContext` 持久化 `locale`，再在其内层挂一个轻量 `I18nProvider/useI18n`；这样不需要引入新库，也能让语言切换和主题/字号一样即时生效并落到 `localStorage`。
+- 相对时间和“未命名会话”这类分散在工具函数里的文案，不能只在页面层翻译；把 `timeLabel/getTitle` 收口到统一的 locale 感知工具后，像 `chat/ppt/workbench` 这些复用组件才不会继续漏出中文硬编码。
+- 前端 i18n 的回归里，`node --test` 读取源码检查“Provider 链、locale setter、关键页面已接 `useI18n`”性价比很高，适合在没有完整组件单测基建时先锁住架构层约束。
+- Playwright 需要真实鉴权 cookie 时，直接读取 `~/.sensenova-claw/token` 比在用例里硬编码假 token 更稳；同时后端至少要启动过一次，AuthContext 才会走到预期的 cookie/token 分支。
+
+失败/风险经验：
+- 当前环境下 `npx playwright test` 即使前后端都已启动、真实 token 也已注入，`Next dev + Playwright` 仍可能在 `page.goto('/chat')` 阶段长时间不稳定，表现为 `ERR_ABORTED`、frame detached 或页面迟迟不 ready；这类结果不能直接当成 i18n 逻辑失败。
+- `playwright.config.ts` 的 `webServer.command` 会直接拉起根目录 `npm run dev`，而仓库当前 dev 模式会顺带启动真实后端插件和外部连接；若只是验证纯前端文案，后续更稳的做法是给 i18n 场景单独配一个更轻的 webServer/路由 mock 环境。
+
+### 2026-03-27 聊天气泡双背景补充
+
+成功经验：
+- 当前聊天主界面已经把 user/assistant/system/tool 的视觉卡片下沉到 `MessageBubble.tsx` 局部 Tailwind 类里后，`globals.css` 里旧的 `.bubble.user/.assistant/.tool/.system` 全局背景样式就会变成“第二层皮肤”；这类问题优先检查“老全局类 + 新局部类”是否同时生效。
+- 当 `.bubble.*` 还被 Playwright 作为稳定选择器使用时，最小修复不是直接删类名，而是把全局样式降成仅保留语义/测试钩子，避免视觉修复顺手打断现有浏览器断言。
+- 对这种纯样式回归，用 `node --test` 读取 `globals.css` 锁住关键 CSS 约束很划算，能防止后续再把旧背景样式加回来。
+
+失败/风险经验：
+- 如果后续继续在 `MessageBubble.tsx` 做更大重构，要记得同步审视 `globals.css` 里的历史聊天样式块；只改 JSX 很容易留下“视觉上看起来像 bug、但类型和逻辑都正常”的残留问题。
+### 2026-03-26 ask_user 消息内联补充
+
+成功经验：
+- `ask_user` 想同时显示在通知和聊天工具卡片里时，把问题元数据挂到工具消息本身最稳；仅靠通知中心状态，很难把“对应哪一个 ask_user 工具块”这件事关联准确。
+- `/chat` 页的前端 e2e 不能只 mock `auth/status` 和 `sessions`；当前工作台初始化还会请求 `agents`、`custom-pages`、`files/roots`、`todolist` 等接口，不补齐会让测试在真正进入聊天区前就偏到登录页或空态。
+- Mock WebSocket 时只拦业务 `localhost:8000/ws`，保留 Next dev 的 HMR socket；全量替换 `window.WebSocket` 会把页面自身运行搞崩，表面看像业务回归，实际是测试夹具问题。
+
+失败/风险经验：
+- 旧 `ask-user.spec.ts` 夹具和当前鉴权/工作台初始化流程已经漂移，新增聊天区行为回归前要先修测试基建，否则失败点会落在登录和页面初始化，而不是 `ask_user` 本身。
