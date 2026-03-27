@@ -140,8 +140,10 @@ export function ReviewPanel({
     );
   }
 
-  const errorCount = review.page_issues.filter(i => i.severity === 'error').length;
-  const warningCount = review.page_issues.filter(i => i.severity === 'warning').length;
+  const pageIssues = review.page_issues || [];
+  const strengths = review.strengths || [];
+  const errorCount = pageIssues.filter(i => i.severity === 'error').length;
+  const warningCount = pageIssues.filter(i => i.severity === 'warning').length;
 
   return (
     <div className="flex flex-col h-full overflow-y-auto scrollbar-thin">
@@ -167,11 +169,11 @@ export function ReviewPanel({
       </div>
 
       {/* 亮点 */}
-      {review.strengths.length > 0 && (
+      {strengths.length > 0 && (
         <div className="px-3 py-2 border-b border-border/30">
           <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1.5">亮点</div>
           <div className="space-y-1">
-            {review.strengths.map((s, i) => (
+            {strengths.map((s, i) => (
               <div key={i} className="flex items-start gap-1.5 text-[11px] text-foreground/70">
                 <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
                 <span>{s}</span>
@@ -183,13 +185,13 @@ export function ReviewPanel({
 
       {/* 问题列表 */}
       <div className="flex-1 p-2 space-y-1.5">
-        {review.page_issues.length === 0 ? (
+        {pageIssues.length === 0 ? (
           <div className="text-center py-6">
             <CheckCircle2 className="w-8 h-8 text-emerald-400/30 mx-auto mb-2" />
             <p className="text-xs text-muted-foreground/50">无问题，质量通过</p>
           </div>
         ) : (
-          review.page_issues.map((issue, idx) => (
+          pageIssues.map((issue, idx) => (
             <IssueCard key={idx} issue={issue} onFix={onFixIssue} />
           ))
         )}
