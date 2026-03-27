@@ -1495,6 +1495,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 如果后续继续在 `MessageBubble.tsx` 做更大重构，要记得同步审视 `globals.css` 里的历史聊天样式块；只改 JSX 很容易留下“视觉上看起来像 bug、但类型和逻辑都正常”的残留问题。
 
+### 2026-03-25 Mini-App Workspace Server 化补充
+
+成功经验：
+- 把 mini-app 从“单页静态 HTML”提升为“`workspace_root/app + server.py + data/`”之后，最小可行预览链路不是直接暴露工作目录文件，而是由后端提供 `custom-pages/{slug}/preview` 反向代理到独立 workspace server；这样后续无论是 FastAPI、Flask 还是任意轻量 server，都能统一挂到现有工作区入口。
+- 为 workspace 动作显式补 `refresh_mode = none/background/immediate` 很关键；只要把“普通问答/记笔记/状态落盘”默认收敛到 `none`，把“夜间补课/静默补内容”归到 `background`，前端就能避免每次给 Agent 发消息都强刷整个 workspace。
+- 前端 Playwright 对这种纯 mock 的页面回归，`webServer` 应只启动 `app/web` 自己的 `next dev`；若沿用仓库级 `npm run dev`，会把后端和其他 watcher 一起拉起来，3000 端口很容易被拖挂，导致浏览器始终停在 `about:blank`。
+
+失败/风险经验：
+- `DashboardLayout` 会连带触发 `TodoDropdown`、侧边栏 agent 列表等外围请求；如果 e2e 只 mock 了 feature 页自身 API，而漏掉 `/api/todolist/**`、`/api/agents*` 这类布局层接口，`authFetch` 遇到 401 会直接把页面打回 `/login`，看起来像 workspace 页没加载，实际是测试夹具不完整。
+- 当前环境里 Playwright 浏览器访问 `localhost:3000`/`127.0.0.1:3000` 对“已挂死的 next dev”不会快速报错，而是长时间卡在 `page.goto(..., waitUntil='domcontentloaded')`；遇到这类超时，先用 `curl` 和 `ss -ltnp` 判定 3000 端口是否真在响应，再决定是改代码还是重启 dev server。
+
 ### 2026-03-27 PPT ask_user 发送按钮卡死补充
 
 成功经验：
