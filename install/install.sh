@@ -7,7 +7,7 @@
 # 或本地执行:
 #   bash install/install.sh
 #
-# 开发模式（跳过克隆，使用当前目录代码）:
+# 开发模式（跳过克隆，使用当前目录代码，不构建前端）:
 #   bash install/install.sh --dev
 #
 set -euo pipefail
@@ -328,8 +328,16 @@ install_deps() {
   info "安装前端依赖..."
   cd "$APP_DIR/sensenova_claw/app/web"
   npm install 2>&1 | tail -5
-  cd "$APP_DIR"
   log "前端依赖安装完成"
+
+  # 4) 构建前端（--dev 模式跳过）
+  if [ "$DEV_MODE" != "true" ]; then
+    info "构建前端生产版本..."
+    npm run build 2>&1 | tail -10
+    log "前端生产构建完成"
+  fi
+
+  cd "$APP_DIR"
 }
 
 # ── 步骤 5b: 构建 SENSENOVA_CLAW_HOME 目录结构 ──
@@ -441,6 +449,7 @@ print_success() {
     echo "  模式:     开发模式"
     echo "  代码目录: $APP_DIR"
   else
+    echo "  模式:     生产模式（前端已预构建）"
     echo "  安装目录: $APP_DIR"
     echo "  安装来源: $REPO_URL@$REPO_REF"
   fi
