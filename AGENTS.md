@@ -1525,6 +1525,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 在嵌套目录跑真实 `npm install` 时，npm 版本可能顺手重写下游 `package-lock.json` 的元数据；如果这些改动与需求无关，提交前应恢复，避免把环境噪音混进功能修复。
+
+### 2026-03-27 dev 启动器进程树补充
+
+成功经验：
+- 像 `npm run dev -> uv run python -m sensenova_claw.app.main run` 这类总控启动器，不能只盯包装进程 pid；更稳的启动成功判定是“端口开始监听”，否则在 Windows 下很容易因为 `npm`/批处理包装层提前退出而误判失败。
+- 前端开发服务优先直接启动 `node node_modules/next/dist/bin/next dev -p <port>`，比从父进程里再套一层 `npm run dev` 更稳定，也更不容易出现包装进程退出后子服务残留的问题。
+- Windows 清理子进程树时，单纯 `proc.terminate()` 不够；要准备 `taskkill /PID <pid> /T /F` 兜底，真实 smoke test 里再检查 8000/3000 端口是否释放，才能确认没有孤儿进程。
+
+失败/风险经验：
+- `Ctrl+C` 下 `uv run ...` 的顶层退出码不一定等于子脚本的返回码；判断“是否正常收尾”时不能只看 shell 退出码，还要同时看端口释放和后台进程是否残留。
 ### 2026-03-27 PPT ask_user 发送按钮卡死补充
 
 成功经验：
