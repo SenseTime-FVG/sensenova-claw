@@ -1494,3 +1494,18 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 如果后续继续在 `MessageBubble.tsx` 做更大重构，要记得同步审视 `globals.css` 里的历史聊天样式块；只改 JSX 很容易留下“视觉上看起来像 bug、但类型和逻辑都正常”的残留问题。
+
+### 2026-03-27 PPT ask_user 发送按钮卡死补充
+
+成功经验：
+- 工作台类页面若复用 `ChatPanel`，其输入禁用条件必须与 `/chat` 主页面保持一致；像 `interactionSubmitting`、`activeInteraction.kind === 'confirmation'` 这类交互态如果漏传，`ask_user`/审批类流程就会在工作台里表现出与主聊天页不同的 bug。
+- `ChatInput` 的本地 `isSubmitting` 不能盲目覆盖所有发送场景；当主输入框实际上是在提交 `ask_user` 回复时，应跳过普通消息的本地提交锁，否则很容易在回复后把发送按钮永久卡成 disabled。
+- 这类“看起来像按钮坏了”的问题，最有效的前端回归是直接断言 WebSocket 出站序列：先验证第一条是 `user_question_answered`，再验证收到 `user_question_answered_event` 后第二条恢复为 `user_input`。
+- 对“旧会话 ask_user 未完成，点击新建后首条消息被劫持”的问题，不能只看 UI 状态；要额外锁住“点击新建后已经发出 `create_session`，则后续输入不得再走 `user_question_answered`”这条协议级约束。
+
+失败/风险经验：
+- 现有 `ask-user.spec.ts` 中部分旧用例对文案和 WebSocket 初始化时机依赖较强，补跑相邻回归时可能先撞到与本次修复无关的 strict mode 选择器冲突或 `__mockWs` 未就绪问题；验证本次改动时应优先使用更聚焦的新场景。
+- Playwright 在聊天页里若直接用 `getByText('E2E Session')` 这类宽泛选择器，容易同时命中 agent 列表和 session 列表；会话点击应优先收窄到 `getByTestId('session-list')`。
+- `/sessions/[id]` 这类页面的 mock WebSocket 挂载时机不一定和 `/chat` 一样快；凡是用 `page.evaluate(() => __mockWs.emit(...))` 的 session 场景，最好先显式 `waitForMockWebSocketReady(page)`，否则会偶发 `Cannot read properties of undefined (reading 'emit')`。
+- 工作台首页 `/`、PPT `/ppt`、研究页等复用 `ChatPanel` 的页面，只要 `ChatPanel` 的禁用逻辑和 `ChatInput` 的 `ask_user` 提交语义正确，这类“回复 ask_user 后发送按钮卡死”的问题就会一起收敛；验证时可以用一个根工作台页和一个专用工作台页做抽样回归。
+- `/ppt` 这类带全局通知浮层的页面，Playwright 直接点击右上角按钮可能被 toast 遮挡误伤；如果要验证按钮处理链本身，优先给目标按钮加 `data-testid`，必要时直接触发 DOM `click()`，否则很容易把“按钮没被真正点到”误判成业务状态机 bug。
