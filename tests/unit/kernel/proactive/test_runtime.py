@@ -389,6 +389,36 @@ class TestRunAndDeliver:
         # 空字符串 result 是 falsy，不应调用 delivery
         rt._delivery.deliver.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_recommendation_delivery_maps_back_to_source_session(self):
+        rt = _make_runtime()
+        job = _make_job(delivery=DeliveryConfig(channels=["web"], recommendation_type="turn_end"))
+        rt._jobs[job.id] = job
+        rt._executor.execute_job = AsyncMock(return_value=(
+            "scratch-session-1",
+            '{"recommendations":[{"id":"rec_1","title":"继续追问","prompt":"请继续分析","category":"follow-up"}]}',
+        ))
+        job.state.last_status = "ok"
+        rt._delivery.deliver = AsyncMock()
+
+        trigger_event = MagicMock(session_id="source-session-1")
+
+        await rt._run_and_deliver(job, trigger_event=trigger_event)
+
+        rt._delivery.deliver.assert_called_once_with(
+            job,
+            "source-session-1",
+            '{"recommendations":[{"id":"rec_1","title":"继续追问","prompt":"请继续分析","category":"follow-up"}]}',
+            source_session_id="source-session-1",
+            scratch_session_id="scratch-session-1",
+            items=[{
+                "id": "rec_1",
+                "title": "继续追问",
+                "prompt": "请继续分析",
+                "category": "follow-up",
+            }],
+        )
+
 
 class TestParseRecommendationJson:
     def test_plain_json(self):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -74,9 +74,9 @@ async def _delete_session_record(request: Request, session: dict) -> str:
 
 
 @router.get("")
-async def list_sessions(request: Request):
+async def list_sessions(request: Request, include_hidden: bool = Query(default=False)):
     """获取会话列表。"""
-    sessions = await _get_services(request).gateway.list_sessions()
+    sessions = await _get_services(request).gateway.list_sessions(include_hidden=include_hidden)
     return JSONResponse(content={"sessions": sessions})
 
 
@@ -104,7 +104,7 @@ async def list_session_messages(session_id: str, request: Request):
 @router.delete("/{session_id}")
 async def delete_session(session_id: str, request: Request):
     """强制删除会话及其 JSONL 文件。"""
-    sessions = await _get_services(request).repo.list_sessions(limit=9999)
+    sessions = await _get_services(request).repo.list_sessions(limit=9999, include_hidden=True)
     session = next((item for item in sessions if item["session_id"] == session_id), None)
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
@@ -117,7 +117,7 @@ async def delete_session(session_id: str, request: Request):
 @router.post("/bulk-delete")
 async def bulk_delete_sessions(body: BulkDeleteRequest, request: Request):
     """按显式 session 列表或筛选条件批量删除会话。"""
-    sessions = await _get_services(request).repo.list_sessions(limit=999999)
+    sessions = await _get_services(request).repo.list_sessions(limit=999999, include_hidden=True)
 
     if body.session_ids:
         session_id_set = set(body.session_ids)

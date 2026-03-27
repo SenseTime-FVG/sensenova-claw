@@ -26,7 +26,7 @@ def _serialize_job(job) -> dict[str, Any]:
         "agent_id": job.agent_id,
         "enabled": job.enabled,
         "source": job.source,
-        "trigger": dataclasses.asdict(job.trigger),
+        "trigger": dataclasses.asdict(job.trigger) if job.trigger else {"kind": "manual"},
         "task": dataclasses.asdict(job.task),
         "delivery": dataclasses.asdict(job.delivery),
         "safety": dataclasses.asdict(job.safety),
@@ -177,3 +177,10 @@ async def get_run(run_id: str, request: Request):
     if not run:
         raise HTTPException(404, "Proactive run not found")
     return run
+
+
+@router.get("/recommendations")
+async def list_pending_recommendations(request: Request, limit: int = 3):
+    """返回最近未消费的下一问推荐。"""
+    recommendations = await _repo(request).list_pending_recommendations(limit=limit)
+    return {"recommendations": recommendations}

@@ -83,30 +83,34 @@ class Gateway:
         await self.repo.update_session_title(session_id, title)
         logger.info("Session renamed: %s -> %s", session_id, title)
 
-    async def list_sessions(self, limit: int = 50) -> list[dict]:
+    async def list_sessions(self, limit: int = 50, include_hidden: bool = False) -> list[dict]:
         """列出会话"""
-        return await self.repo.list_sessions(limit=limit)
+        return await self.repo.list_sessions(limit=limit, include_hidden=include_hidden)
 
     # ── 消息收发 ──────────────────────────────────────
 
     async def send_user_input(
         self, session_id: str, content: str,
         attachments: list | None = None, context_files: list | None = None,
+        meta: dict | None = None,
         source: str = "websocket",
     ) -> str:
         """发送用户输入，返回 turn_id"""
         turn_id = f"turn_{uuid.uuid4().hex[:12]}"
+        payload = {
+            "content": content,
+            "attachments": attachments or [],
+            "context_files": context_files or [],
+        }
+        if meta:
+            payload["meta"] = meta
         await self.publish_from_channel(
             EventEnvelope(
                 type=USER_INPUT,
                 session_id=session_id,
                 turn_id=turn_id,
                 source=source,
-                payload={
-                    "content": content,
-                    "attachments": attachments or [],
-                    "context_files": context_files or [],
-                },
+                payload=payload,
             )
         )
         return turn_id
@@ -197,8 +201,8 @@ class Gateway:
 
     async def _event_loop(self) -> None:
         """订阅 PublicEventBus 并分发事件到对应的 Channel"""
-        from sensenova_claw.kernel.events.types import TODOLIST_UPDATED
-        _BROADCAST_EVENTS = {TODOLIST_UPDATED}
+        from sensenova_claw.kernel.events.types import TODOLIST_UPDATED, PROACTIVE_RESULT
+        _BROADCAST_EVENTS = {TODOLIST_UPDATED, PROACTIVE_RESULT}
 
         async for event in self.publisher.bus.subscribe():
             if event.type.startswith("config.") or event.type in _BROADCAST_EVENTS:
