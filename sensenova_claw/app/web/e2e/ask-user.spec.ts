@@ -408,6 +408,82 @@ test.describe('ask_user UI（mock websocket）', () => {
     ).toBeTruthy();
   });
 
+  test('chat 页面切换会话后再切回，应从历史 events 恢复 ask_user 内联卡片', async ({ page }) => {
+    const sessionEvents: Record<string, Record<string, unknown>[]> = {
+      sess_e2e: [
+        {
+          event_type: 'tool.call_requested',
+          session_id: 'sess_e2e',
+          payload_json: JSON.stringify({
+            tool_call_id: 'tc_history_ask_user_1',
+            tool_name: 'ask_user',
+            arguments: {
+              question: '请确认部署环境',
+            },
+          }),
+        },
+        {
+          event_type: 'user.question_asked',
+          session_id: 'sess_e2e',
+          payload_json: JSON.stringify({
+            question_id: 'q_history_ask_user_1',
+            question: '请确认部署环境',
+            options: ['dev', 'prod'],
+            multi_select: false,
+          }),
+        },
+      ],
+      sess_other: [],
+    };
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_e2e',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: 'E2E Session' }),
+            },
+            {
+              session_id: 'sess_other',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: 'Other Session' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      const url = route.request().url();
+      const match = url.match(/\/api\/sessions\/([^/]+)\/events/);
+      const sessionId = match?.[1] || '';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ events: sessionEvents[sessionId] || [] }),
+      });
+    });
+
+    await gotoChatPage(page);
+
+    await page.getByTestId('session-list').getByText('E2E Session').click();
+    await expect(page.getByTestId('inline-ask-user-q_history_ask_user_1')).toBeVisible({ timeout: 10000 });
+
+    await page.getByTestId('session-list').getByText('Other Session').click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.getByTestId('session-list').getByText('E2E Session').click();
+    await expect(page.getByTestId('inline-ask-user-q_history_ask_user_1')).toBeVisible({ timeout: 10000 });
+  });
+
   test('chat 页面可在当前会话接收其他 session 的 ask_user，并按来源 session 提交回答', async ({ page }) => {
     await gotoChatPage(page);
 

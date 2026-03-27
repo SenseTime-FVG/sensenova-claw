@@ -367,6 +367,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 仅等待 `window.__mockWs` 存在不够，测试若在 `onmessage` 尚未挂好时就发事件，消息会被静默丢掉；需要等到 mock socket 的 `send` 和 `onmessage` 都可用后再注入事件。
 - `/sessions/[id]` 的 `Thinking` 分组如果默认折叠，会把 ask_user 内联表单藏起来；这类“消息内联交互”不能依赖用户先展开二级容器才能操作。
 
+### 2026-03-27 ask_user 历史恢复补充
+
+成功经验：
+- `/api/sessions/{id}/events` 返回的是仓库落盘后的内核事件名，例如 `user.question_asked`、`user.question_answered`，而不是前端实时 WebSocket 的 `user_question_asked`、`user_question_answered_event`；聊天历史重建必须同时兼容两套命名。
+- 对“切换会话回来 UI 丢状态”这类问题，最有效的 e2e 是直接 mock `/api/sessions/*/events` 返回历史事件，再通过真实的 session 切换操作验证恢复结果；这样能把“实时链路正常但历史恢复失效”单独钉住。
+
+失败/风险经验：
+- 如果只用实时 WebSocket 事件写回归，`ask_user` 看起来是好的，但一旦用户离开当前会话再回来，依赖历史事件重建的内联卡片仍会消失；这类功能必须区分“实时显示”和“历史恢复”两条路径分别覆盖。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：
