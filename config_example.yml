@@ -259,7 +259,7 @@ agents:
     description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
     temperature: 1.0
     tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search", "get_secret", "write_secret"]
-    skills: ["mineru-document-extractor", "research-union", "union-search-plus"]
+    skills: ["mineru-document-extractor", "research-union", "union-search-skill"]
     max_send_depth: 2
     enabled: true
 
