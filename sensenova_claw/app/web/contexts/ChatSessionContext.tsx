@@ -1130,6 +1130,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     sessionIdRef.current = null;
     setMessages([]);
     setIsTyping(false);
+    clearInteractions();
     clearPendingPrefill();
     resetTurnTracking();
     toolCallMapRef.current.clear();
@@ -1196,7 +1197,8 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     if (!content.trim() || !wsConnected) return;
 
     const interaction = activeInteractionRef.current;
-    if (interaction?.kind === 'question') {
+    const hasPendingCreatedSession = Boolean(pendingCreateIdRef.current);
+    if (interaction?.kind === 'question' && sessionIdRef.current && !hasPendingCreatedSession) {
       submitQuestionResponse({
         questionId: interaction.interactionId,
         sourceSessionId: interaction.sourceSessionId,
