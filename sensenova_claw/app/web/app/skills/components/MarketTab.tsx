@@ -99,7 +99,7 @@ export function MarketTab({
     if (!q.trim()) return;
     setLoading(true);
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/skills/search?q=${encodeURIComponent(q)}&sources=${sources}`
       );
       const data = await res.json();
@@ -125,7 +125,7 @@ export function MarketTab({
   const doBrowse = useCallback(async (src: string, p: number) => {
     setBrowseLoading(true);
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/skills/market/browse?source=${src}&page=${p}&page_size=20`
       );
       const data = await res.json();
@@ -157,7 +157,7 @@ export function MarketTab({
     if (!q.trim()) return;
     setLoading(true);
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_BASE}/api/skills/market/search?source=${src}&q=${encodeURIComponent(q)}&page=${p}&page_size=20`
       );
       const data = await res.json();

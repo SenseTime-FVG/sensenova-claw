@@ -25,10 +25,27 @@ class _FakeGateway:
     def __init__(self):
         self.bind_calls: list[tuple[str, str]] = []
         self.published: list[EventEnvelope] = []
+        self.create_session_calls: list[dict[str, object]] = []
         self.agent_registry = types.SimpleNamespace(get=lambda _aid: None)
 
     def bind_session(self, session_id: str, channel_id: str) -> None:
         self.bind_calls.append((session_id, channel_id))
+
+    async def create_session(
+        self,
+        agent_id: str = "default",
+        meta: dict | None = None,
+        channel_id: str = "",
+    ) -> dict:
+        self.create_session_calls.append({
+            "agent_id": agent_id,
+            "meta": meta or {},
+            "channel_id": channel_id,
+        })
+        return {
+            "session_id": f"sess_created_{len(self.create_session_calls)}",
+            "created_at": 1700000000.0,
+        }
 
     async def publish_from_channel(self, event: EventEnvelope) -> None:
         self.published.append(event)
@@ -166,6 +183,35 @@ async def test_user_input_with_existing_session_auto_binds_websocket(ws_env):
     assert ("sess_old", "websocket") in ws_env.gateway.bind_calls
     assert "sess_old" in ws_env.ws_channel._session_bindings
     assert any(e.type == USER_INPUT and e.session_id == "sess_old" for e in ws_env.gateway.published)
+
+
+@pytest.mark.asyncio
+async def test_create_session_echoes_request_id_to_frontend(ws_env):
+    ws = _FakeWebSocket(
+        messages=[
+            {
+                "type": "create_session",
+                "payload": {
+                    "agent_id": "research",
+                    "meta": {"title": "调试会话"},
+                    "request_id": "req_create_123",
+                },
+            }
+        ]
+    )
+
+    await gateway_main.websocket_endpoint(ws)
+
+    assert ws.accepted is True
+    assert ws.sent_json[0]["type"] == "session_created"
+    assert ws.sent_json[0]["payload"]["request_id"] == "req_create_123"
+    assert ws_env.gateway.create_session_calls == [
+        {
+            "agent_id": "research",
+            "meta": {"title": "调试会话"},
+            "channel_id": "websocket",
+        }
+    ]
 
 
 @pytest.mark.asyncio

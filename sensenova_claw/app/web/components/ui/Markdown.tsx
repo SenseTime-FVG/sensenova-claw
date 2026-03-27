@@ -6,12 +6,11 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import type { Components } from 'react-markdown';
 import { Check, Copy, FolderOpen, Presentation, FileText } from 'lucide-react';
-import { API_BASE } from '@/lib/authFetch';
 import { useFilePanel } from '@/contexts/FilePanelContext';
 import { getFilePreviewType, isPreviewable } from '@/components/files/fileTypes';
+import { cn } from '@/lib/utils';
 
-/* ── sensenova-claw 文件链接常量 ── */
-
+/* ── sensenova-claw Constants ── */
 const FILE_LINK_PREFIX = '#sensenova-claw-file:';
 const WORKDIR_LINK_PREFIX = '#sensenova-claw-workdir:';
 
@@ -25,7 +24,6 @@ function isRelativeSlidePath(text: string): boolean {
   return /[\\/]/.test(trimmed) && /page_\d+\.html/i.test(trimmed);
 }
 
-/** 从绝对路径中提取 workdir 之后的相对目录 */
 export function extractWorkdirRelDir(absPath: string): string | null {
   const normalized = absPath.replace(/\\/g, '/');
   const marker = '/workdir/';
@@ -48,12 +46,6 @@ export function dispatchSlidePreview(dir: string, isAbsolute: boolean) {
   }));
 }
 
-/* ── 最小预处理：只修复 sensenova-claw 链接显示文本中的反斜杠 ── */
-
-/**
- * 修复 [text\with\backslash](#sensenova-claw-file:...) 中显示文本的反斜杠。
- * markdown 引擎会将 \t \n 等视为转义，导致链接断裂。
- */
 function preprocessFileLinks(md: string): string {
   return md.replace(
     /\[([^\]]*?)\]\((#sensenova-claw-(?:file|workdir):[^)]+)\)/g,
@@ -64,7 +56,7 @@ function preprocessFileLinks(md: string): string {
   );
 }
 
-/* ── 复制按钮 ── */
+/* ── UI Components ── */
 
 function CopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
@@ -91,13 +83,13 @@ function extractText(node: React.ReactNode): string {
   if (typeof node === 'number') return String(node);
   if (!node) return '';
   if (Array.isArray(node)) return node.map(extractText).join('');
-  if (typeof node === 'object' && 'props' in node) {
-    return extractText((node as React.ReactElement).props.children);
+  if (typeof node === 'object' && node !== null && 'props' in (node as any)) {
+    return extractText((node as any).props.children);
   }
   return '';
 }
 
-/* ── 基础 markdown 组件 ── */
+/* ── Markdown Infrastructure ── */
 
 const baseComponents: Partial<Components> = {
   pre({ children, ...props }) {
@@ -145,11 +137,33 @@ const baseComponents: Partial<Components> = {
       </td>
     );
   },
+  a: ({ href, children, ...props }) => (
+    <a
+      {...props}
+      href={href}
+      rel="noreferrer noopener"
+      target="_blank"
+    >
+        {children}
+    </a>
+  ),
+  input: ({ type, ...props }) => {
+    if (type === 'checkbox') {
+    return <input {...props} disabled type="checkbox" />;
+    }
+    return <input {...props} type={type} />;
+  },
 };
 
-export const MarkdownContent = memo(function MarkdownContent({ content }: { content: string }) {
+interface MarkdownProps {
+  content: string;
+  className?: string;
+  variant?: 'default' | 'user' | 'system' | 'detail';
+}
+
+export const Markdown = memo(function Markdown({ content, className, variant = 'default' }: MarkdownProps) {
   const { openToPath } = useFilePanel();
-  const processed = preprocessFileLinks(content);
+  const processed = useMemo(() => preprocessFileLinks(content), [content]);
 
   const mdComponents = useMemo<Components>(() => ({
     ...baseComponents,
@@ -158,7 +172,7 @@ export const MarkdownContent = memo(function MarkdownContent({ content }: { cont
         const filePath = decodeURIComponent(href.slice(FILE_LINK_PREFIX.length));
         const handleClick = (e: React.MouseEvent) => {
           e.preventDefault();
-          openToPath(filePath);
+          openToPath?.(filePath);
           if (isSlideFilePath(filePath)) {
             const dir = extractWorkdirRelDir(filePath) || extractDirFromPath(filePath);
             if (dir) dispatchSlidePreview(dir, true);
@@ -209,18 +223,31 @@ export const MarkdownContent = memo(function MarkdownContent({ content }: { cont
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors"
+          className={cn(
+            "text-primary underline underline-offset-2 hover:text-primary/80 transition-colors",
+            variant === 'user' && "text-primary-foreground underline-offset-4"
+          )}
           {...props}
         >
           {children}
         </a>
       );
     },
-  }), [openToPath]);
+  }), [openToPath, variant]);
 
   return (
-    <div className="markdown-body prose prose-sm dark:prose-invert max-w-none break-words">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={mdComponents}>
+    <div className={cn(
+      "markdown-body prose prose-sm dark:prose-invert max-w-none break-words",
+      variant === 'system' && "text-[10px] text-muted-foreground",
+      variant === 'user' && "prose-invert",
+      variant === 'detail' && "text-xs",
+      className
+    )}>
+      <ReactMarkdown 
+        remarkPlugins={[remarkGfm]} 
+        rehypePlugins={variant !== 'user' ? [rehypeHighlight] : []} 
+        components={mdComponents}
+      >
         {processed}
       </ReactMarkdown>
     </div>

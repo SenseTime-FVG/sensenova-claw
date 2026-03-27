@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { useTheme } from 'next-themes';
+import { type Locale } from '@/lib/i18n';
 
 // ── 类型定义 ──
 
@@ -13,12 +14,14 @@ export interface UserPreferences {
   accentColor: AccentColor;
   fontSize: FontSize;
   panelRadius: PanelRadius;
+  locale: Locale;
 }
 
 const DEFAULT_PREFS: UserPreferences = {
   accentColor: 'teal',
   fontSize: 'standard',
   panelRadius: 'rounded',
+  locale: 'zh-CN',
 };
 
 const STORAGE_KEY = 'sensenova-claw-user-prefs';
@@ -96,6 +99,7 @@ interface UserPreferencesContextValue {
   setAccentColor: (color: AccentColor) => void;
   setFontSize: (size: FontSize) => void;
   setPanelRadius: (radius: PanelRadius) => void;
+  setLocale: (locale: Locale) => void;
 }
 
 const UserPreferencesContext = createContext<UserPreferencesContextValue | null>(null);
@@ -183,8 +187,12 @@ export function UserPreferencesProvider({ children }: { children: ReactNode }) {
     setPrefs(prev => ({ ...prev, panelRadius: radius }));
   }, []);
 
+  const setLocale = useCallback((locale: Locale) => {
+    setPrefs(prev => ({ ...prev, locale }));
+  }, []);
+
   return (
-    <UserPreferencesContext.Provider value={{ prefs, setAccentColor, setFontSize, setPanelRadius }}>
+    <UserPreferencesContext.Provider value={{ prefs, setAccentColor, setFontSize, setPanelRadius, setLocale }}>
       {children}
     </UserPreferencesContext.Provider>
   );
