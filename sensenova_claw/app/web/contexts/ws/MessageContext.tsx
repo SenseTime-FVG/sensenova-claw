@@ -437,6 +437,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
     if (!content.trim()) return;
 
+    // 防止在 session 创建中重复发送：如果已有 pending input 且正在等待 session_created，忽略
+    if (pendingInputRef.current && !sessionIdRef.current) return;
+
     const targetAgentId = agentId || 'default';
     const currentSessionAgentId = getCurrentSessionAgentId();
     if (sessionIdRef.current && currentSessionAgentId && currentSessionAgentId !== targetAgentId) {
@@ -453,9 +456,10 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       pendingInputRef.current = { content, contextFiles: filePaths };
       markFrontendCreate();
       const meta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
+      const requestId = makeId();
       wsSend({
         type: 'create_session',
-        payload: { agent_id: targetAgentId, meta },
+        payload: { agent_id: targetAgentId, meta, request_id: requestId },
         timestamp: Date.now() / 1000,
       });
     } else {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useWebSocket } from './WebSocketContext';
 import { useEventDispatcher } from './EventDispatcherContext';
@@ -9,6 +9,7 @@ import {
   type TaskGroup,
   getAgentId,
   groupSessionsToTasks,
+  makeId,
 } from '@/lib/chatTypes';
 import type { WsInboundEvent } from '@/lib/wsEvents';
 
@@ -52,6 +53,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const sessionIdRef = useRef<string | null>(null);
   const switchedSessionRef = useRef(false);
   const emptySessionIdRef = useRef<string | null>(null);
+  // 关联 create_session 请求与 session_created 响应，防止快速切换时乱序覆盖
+  const pendingCreateIdRef = useRef<string | null>(null);
 
   // 同步 ref + 通知 EventDispatcher
   useEffect(() => {
@@ -118,10 +121,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const createSession = useCallback((agentId: string, taskId?: string) => {
     const meta: Record<string, string> = { title: '新对话' };
     if (taskId) meta.task_id = taskId;
+    const requestId = makeId();
+    pendingCreateIdRef.current = requestId;
     markFrontendCreate();
     wsSend({
       type: 'create_session',
-      payload: { agent_id: agentId || 'default', meta },
+      payload: { agent_id: agentId || 'default', meta, request_id: requestId },
       timestamp: Date.now() / 1000,
     });
   }, [wsSend, markFrontendCreate]);
@@ -195,6 +200,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       if (event.type === 'session_created') {
         const newSid = event.session_id;
         if (!newSid) return;
+        const requestId = typeof event.payload.request_id === 'string' ? event.payload.request_id : null;
+        // 归属校验：如果存在 pendingCreateId 且响应中携带 request_id，
+        // 只接受与最近一次创建请求匹配的 session_created
+        if (pendingCreateIdRef.current && requestId && requestId !== pendingCreateIdRef.current) {
+          authFetch(`${API_BASE}/api/sessions/${newSid}`, { method: 'DELETE' }).catch(() => {});
+          return;
+        }
+        pendingCreateIdRef.current = null;
         setSessionId(newSid);
         loadSessionList();
       }
@@ -209,7 +222,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   // ── value ──
 
-  const taskGroups = groupSessionsToTasks(sessions);
+  const taskGroups = useMemo(() => groupSessionsToTasks(sessions), [sessions]);
 
   const value: SessionContextValue = {
     currentSessionId: sessionId,
