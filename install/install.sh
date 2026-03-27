@@ -10,6 +10,9 @@
 # 开发模式（跳过克隆，使用当前目录代码）:
 #   bash install/install.sh --dev
 #
+# 生产模式（安装后预构建前端，运行时使用 next start）:
+#   bash install/install.sh --production
+#
 set -euo pipefail
 
 # ── 配置 ──
@@ -22,6 +25,7 @@ REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CL
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
 DEV_MODE=false
+PRODUCTION_MODE=false
 
 # 国内镜像
 CN_NPM_REGISTRY="https://registry.npmmirror.com"
@@ -331,8 +335,16 @@ install_deps() {
   info "安装前端依赖..."
   cd "$APP_DIR/sensenova_claw/app/web"
   npm install 2>&1 | tail -5
-  cd "$APP_DIR"
   log "前端依赖安装完成"
+
+  # 4) 生产模式：预构建前端
+  if [ "$PRODUCTION_MODE" = "true" ]; then
+    info "构建前端生产版本..."
+    npm run build 2>&1 | tail -10
+    log "前端生产构建完成"
+  fi
+
+  cd "$APP_DIR"
 }
 
 # ── 步骤 5b: 构建 SENSENOVA_CLAW_HOME 目录结构 ──
@@ -443,6 +455,10 @@ print_success() {
   if [ "$DEV_MODE" = "true" ]; then
     echo "  模式:     开发模式"
     echo "  代码目录: $APP_DIR"
+  elif [ "$PRODUCTION_MODE" = "true" ]; then
+    echo "  模式:     生产模式（前端已预构建）"
+    echo "  安装目录: $APP_DIR"
+    echo "  安装来源: $REPO_URL@$REPO_REF"
   else
     echo "  安装目录: $APP_DIR"
     echo "  安装来源: $REPO_URL@$REPO_REF"
@@ -455,8 +471,13 @@ print_success() {
   fi
   echo -e "  ${YELLOW}下一步:${NC}"
   echo ""
-  echo "    1. 启动服务:"
-  echo "       sensenova-claw run"
+  if [ "$PRODUCTION_MODE" = "true" ]; then
+    echo "    1. 启动服务（生产模式）:"
+    echo "       sensenova-claw run --production"
+  else
+    echo "    1. 启动服务:"
+    echo "       sensenova-claw run"
+  fi
   echo ""
   echo "    2. 打开 Web 界面进行 LLM 等配置:"
   echo "       http://localhost:3000"
@@ -475,6 +496,7 @@ main() {
   for arg in "$@"; do
     case "$arg" in
       --dev) DEV_MODE=true ;;
+      --production) PRODUCTION_MODE=true ;;
     esac
   done
 
