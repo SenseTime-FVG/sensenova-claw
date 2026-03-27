@@ -74,6 +74,12 @@ export interface ChatSessionContextValue {
   activeInteraction: PendingInteraction | null;
   interactionSubmitting: boolean;
   sendQuestionAnswer: (answer: string | string[] | null, cancelled: boolean) => void;
+  submitQuestionResponse: (params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => void;
   sendConfirmationResponse: (approved: boolean) => void;
   handleInteractionTimeout: () => void;
 
@@ -170,6 +176,7 @@ export function useChatSession(): ChatSessionContextValue {
     activeInteraction: interaction.activeInteraction,
     interactionSubmitting: interaction.interactionSubmitting,
     sendQuestionAnswer: interaction.sendQuestionAnswer,
+    submitQuestionResponse: interaction.submitQuestionResponse,
     sendConfirmationResponse: interaction.sendConfirmationResponse,
     handleInteractionTimeout: interaction.handleInteractionTimeout,
     resolveInteractionFromNotification: interaction.resolveInteractionFromNotification,

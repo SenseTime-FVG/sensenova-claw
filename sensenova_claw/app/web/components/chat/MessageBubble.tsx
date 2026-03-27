@@ -6,6 +6,8 @@ import { Markdown } from '@/components/ui/Markdown';
 import { isJsonLike, stringifyContent } from '@/lib/utils';
 import { type ChatMessage, formatArgs, groupMessages } from '@/lib/chatTypes';
 import { resolveAssistantDisplayContent } from '@/lib/assistantThink';
+import { useChatSession } from '@/contexts/ChatSessionContext';
+import { AskUserResponseForm } from '@/components/chat/AskUserResponseForm';
 
 const MAX_TOOL_CONTENT_HEIGHT = 240;
 
@@ -24,6 +26,7 @@ function ToolContent({ value }: { value: unknown }) {
 const ToolCallItem = memo(function ToolCallItem({ msg }: { msg: ChatMessage }) {
   const [expanded, setExpanded] = useState(false);
   const ti = msg.toolInfo;
+  const { submitQuestionResponse } = useChatSession();
 
   if (!ti) {
     return (
@@ -48,6 +51,8 @@ const ToolCallItem = memo(function ToolCallItem({ msg }: { msg: ChatMessage }) {
     );
   }
 
+  const inlineAskUser = ti.askUser;
+
   return (
     <div className="py-0.5 tool-info">
       <button
@@ -67,6 +72,35 @@ const ToolCallItem = memo(function ToolCallItem({ msg }: { msg: ChatMessage }) {
           {ti.status === 'running' ? '执行中...' : ti.success !== false ? '成功' : '失败'}
         </span>
       </button>
+      {inlineAskUser && (
+        <div
+          data-testid={`inline-ask-user-${inlineAskUser.questionId}`}
+          className="ml-5 mt-2 rounded-xl border border-sky-200/60 bg-sky-50/50 dark:border-sky-800/40 dark:bg-sky-950/30 px-3 py-3"
+        >
+          <AskUserResponseForm
+            value={{
+              question: inlineAskUser.question,
+              options: inlineAskUser.options,
+              multiSelect: inlineAskUser.multiSelect,
+            }}
+            pending={inlineAskUser.pending}
+            resolved={inlineAskUser.resolved}
+            testIdPrefix="ask-user-shared"
+            onSubmit={(answer) => submitQuestionResponse({
+              questionId: inlineAskUser.questionId,
+              sourceSessionId: inlineAskUser.sourceSessionId,
+              answer,
+              cancelled: false,
+            })}
+            onCancel={() => submitQuestionResponse({
+              questionId: inlineAskUser.questionId,
+              sourceSessionId: inlineAskUser.sourceSessionId,
+              answer: null,
+              cancelled: true,
+            })}
+          />
+        </div>
+      )}
       {expanded && (
         <div className="ml-5 mt-1 border-l-2 border-border/30 pl-3 space-y-2 pb-1">
           <div>

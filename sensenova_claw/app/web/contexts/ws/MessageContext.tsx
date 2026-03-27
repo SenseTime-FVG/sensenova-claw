@@ -67,6 +67,9 @@ export interface MessageContextValue {
   sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string) => void;
   cancelTurn: () => void;
   handleSkillInvoke: (skillName: string, args: string) => void;
+
+  /** 供 InteractionContext 更新消息列表（如 ask_user 状态） */
+  updateMessages: (updater: (prev: ChatMessage[]) => ChatMessage[]) => void;
 }
 
 const MessageCtx = createContext<MessageContextValue | null>(null);
@@ -552,6 +555,10 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     setIsTyping(false);
   }, [wsSend, sessionIdRef]);
 
+  const updateMessages = useCallback((updater: (prev: ChatMessage[]) => ChatMessage[]) => {
+    setMessages(updater);
+  }, []);
+
   const value: MessageContextValue = {
     messages,
     isTyping,
@@ -564,6 +571,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     sendMessage,
     cancelTurn,
     handleSkillInvoke,
+    updateMessages,
   };
 
   return <MessageCtx.Provider value={value}>{children}</MessageCtx.Provider>;

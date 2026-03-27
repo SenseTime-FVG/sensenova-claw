@@ -5,6 +5,8 @@ import { useNotification } from '@/hooks/useNotification';
 import { useWebSocket } from './WebSocketContext';
 import { useEventDispatcher } from './EventDispatcherContext';
 import { useSession } from './SessionContext';
+import { useMessages } from './MessageContext';
+import { attachAskUserToLatestToolMessage, updateAskUserToolState } from '@/lib/chatTypes';
 import type { PendingInteraction } from '@/components/chat/QuestionDialog';
 import type { WsInboundEvent } from '@/lib/wsEvents';
 
@@ -14,6 +16,12 @@ export interface InteractionContextValue {
   activeInteraction: PendingInteraction | null;
   interactionSubmitting: boolean;
   sendQuestionAnswer: (answer: string | string[] | null, cancelled: boolean) => void;
+  submitQuestionResponse: (params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => void;
   sendConfirmationResponse: (approved: boolean) => void;
   handleInteractionTimeout: () => void;
   /** 通知面板回答 ask_user 时同步解除阻塞 */
@@ -27,8 +35,9 @@ const InteractionCtx = createContext<InteractionContextValue | null>(null);
 export function InteractionProvider({ children }: { children: React.ReactNode }) {
   const { wsSend } = useWebSocket();
   const { subscribeCurrentSession } = useEventDispatcher();
-  const { pushCard, resolveCard } = useNotification();
+  const { pushCard, resolveCard, markCardPending } = useNotification();
   const { currentSessionId } = useSession();
+  const { updateMessages } = useMessages();
   const currentSessionIdRef = useRef<string | null>(null);
   currentSessionIdRef.current = currentSessionId;
 
@@ -142,6 +151,17 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
           // 重构前行为：enqueueInteraction 仅当前 session，pushCard 始终执行
           const isThisSession2 = sourceSessionId === currentSessionIdRef.current;
           if (isThisSession2) {
+            updateMessages((prev) => attachAskUserToLatestToolMessage(prev, {
+              questionId,
+              sourceSessionId,
+              sourceAgentId,
+              sourceAgentName,
+              question: question || '',
+              options: rawOptions,
+              multiSelect: Boolean(multiSelect),
+              pending: false,
+              resolved: false,
+            }));
             enqueueInteraction({
               kind: 'question',
               interactionId: questionId,
@@ -183,6 +203,10 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
         case 'user_question_answered_event': {
           const questionId = event.payload.question_id || '';
           if (questionId) {
+            updateMessages((prev) => updateAskUserToolState(prev, questionId, {
+              pending: false,
+              resolved: true,
+            }));
             resolveInteraction('question', questionId);
             resolveCard(`question_${questionId}`, 'answered');
           }
@@ -195,24 +219,43 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
           break;
       }
     });
-  }, [subscribeCurrentSession, enqueueInteraction, resolveInteraction, clearInteractions, pushCard, resolveCard]);
+  }, [subscribeCurrentSession, enqueueInteraction, resolveInteraction, clearInteractions, pushCard, resolveCard, updateMessages]);
 
   // ── 对外接口 ──
+
+  const submitQuestionResponse = useCallback((params: {
+    questionId: string;
+    sourceSessionId: string;
+    answer: string | string[] | null;
+    cancelled: boolean;
+  }) => {
+    const { questionId, sourceSessionId, answer, cancelled } = params;
+    if (!sourceSessionId) return;
+    setInteractionSubmitting(true);
+    updateMessages((prev) => updateAskUserToolState(prev, questionId, {
+      pending: true,
+      resolved: false,
+    }));
+    wsSend({
+      type: 'user_question_answered',
+      session_id: sourceSessionId,
+      payload: { question_id: questionId, answer, cancelled },
+      timestamp: Date.now() / 1000,
+    });
+    markCardPending(`question_${questionId}`, cancelled ? 'cancel' : 'answered');
+    resolveInteraction('question', questionId);
+  }, [markCardPending, wsSend, resolveInteraction, updateMessages]);
 
   const sendQuestionAnswer = useCallback((answer: string | string[] | null, cancelled: boolean) => {
     const interaction = activeInteractionRef.current;
     if (!interaction || interaction.kind !== 'question') return;
-    if (!interaction.sourceSessionId) return;
-    setInteractionSubmitting(true);
-    wsSend({
-      type: 'user_question_answered',
-      session_id: interaction.sourceSessionId,
-      payload: { question_id: interaction.interactionId, answer, cancelled },
-      timestamp: Date.now() / 1000,
+    submitQuestionResponse({
+      questionId: interaction.interactionId,
+      sourceSessionId: interaction.sourceSessionId,
+      answer,
+      cancelled,
     });
-    resolveCard(`question_${interaction.interactionId}`, cancelled ? 'cancel' : 'answered');
-    resolveInteraction('question', interaction.interactionId);
-  }, [wsSend, resolveCard, resolveInteraction]);
+  }, [submitQuestionResponse]);
 
   const sendConfirmationResponse = useCallback((approved: boolean) => {
     const interaction = activeInteractionRef.current;
@@ -238,6 +281,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
     activeInteraction,
     interactionSubmitting,
     sendQuestionAnswer,
+    submitQuestionResponse,
     sendConfirmationResponse,
     handleInteractionTimeout,
     resolveInteractionFromNotification: resolveInteraction,
