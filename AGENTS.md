@@ -1496,3 +1496,23 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `DashboardLayout` 会连带触发 `TodoDropdown`、侧边栏 agent 列表等外围请求；如果 e2e 只 mock 了 feature 页自身 API，而漏掉 `/api/todolist/**`、`/api/agents*` 这类布局层接口，`authFetch` 遇到 401 会直接把页面打回 `/login`，看起来像 workspace 页没加载，实际是测试夹具不完整。
 - 当前环境里 Playwright 浏览器访问 `localhost:3000`/`127.0.0.1:3000` 对“已挂死的 next dev”不会快速报错，而是长时间卡在 `page.goto(..., waitUntil='domcontentloaded')`；遇到这类超时，先用 `curl` 和 `ss -ltnp` 判定 3000 端口是否真在响应，再决定是改代码还是重启 dev server。
+
+### 2026-03-27 npm install 跨平台补充
+
+成功经验：
+- 对根目录 `npm install` 这类生命周期脚本，最稳的跨平台修复是把 `postinstall` 从 `bash` 切到 `node` 脚本；安装逻辑仍可复用原有 `uv sync + 子目录 npm install` 流程，但不会再要求 Windows 预装 Git Bash / WSL。
+- 若仓库里已经存在 `scripts/postinstall.sh` 之类的 Unix 入口，保留它作为薄包装并统一委托给新的 Node 实现，可以避免后续维护两份安装逻辑。
+- 这类安装链路回归适合双层测试：Python 测试锁住 `package.json` 和壳包装入口，`node --test` 锁住 Windows shell 分支和任务列表，成本低且足够防止再次回到 `bash ./xxx.sh`。
+
+失败/风险经验：
+- 当前修复只解决“生命周期脚本依赖 bash”的兼容性，不代表 `uv`、Node 原生模块或其他三方依赖在 Windows 上已经全部无差异可用；后续若继续报平台问题，需要按具体子依赖逐个排查。
+
+### 2026-03-27 npm 脚本 Python 命令补充
+
+成功经验：
+- 面向 Windows 的 npm 脚本不要硬编码 `python3`；对本仓库这类 `uv run ...` 场景，直接统一成 `uv run python -m ...` 最稳，既兼容 Windows 的 `python.exe`，也能在当前 Unix 环境正常解析。
+- 若某个子目录本身不是 npm package，但用户会自然地在该目录执行 `npm install`，补一个极小的包装 `package.json + Node postinstall` 比要求用户记住“必须切到更深一层目录”更可靠。
+- 对脚本兼容性改动，除了静态断言 `package.json`，再跑一次真实 `npm run dev -- --help` 或真实 `npm install` 很有价值，能直接验证 shell 解析和命令分发没有写错。
+
+失败/风险经验：
+- 在嵌套目录跑真实 `npm install` 时，npm 版本可能顺手重写下游 `package-lock.json` 的元数据；如果这些改动与需求无关，提交前应恢复，避免把环境噪音混进功能修复。
