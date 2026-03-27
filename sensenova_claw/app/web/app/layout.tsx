@@ -7,6 +7,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { ChatSessionProvider } from '@/contexts/ChatSessionContext';
 import { FilePanelProvider } from '@/contexts/FilePanelContext';
 import { UserPreferencesProvider } from '@/contexts/UserPreferencesContext';
+import { I18nProvider } from '@/contexts/I18nContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { cn } from "@/lib/utils";
 
@@ -32,9 +33,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <ChatSessionProvider>
                 <FilePanelProvider>
                   <UserPreferencesProvider>
-                    <ProtectedRoute>
-                      {children}
-                    </ProtectedRoute>
+                    <I18nProvider>
+                      <ProtectedRoute>
+                        {children}
+                      </ProtectedRoute>
+                    </I18nProvider>
                   </UserPreferencesProvider>
                 </FilePanelProvider>
               </ChatSessionProvider>

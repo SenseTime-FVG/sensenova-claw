@@ -14,6 +14,8 @@ export interface WebSocketContextValue {
   wsSend: (msg: Record<string, unknown>) => void;
   /** 订阅所有 WS 消息，返回取消订阅函数 */
   subscribe: (fn: WsSubscriber) => () => void;
+  /** 手动触发 WebSocket 重连 */
+  reconnect: () => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
@@ -22,7 +24,7 @@ const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 const WS_RECONNECT_INTERVAL_MS = 1000;
-const WS_MAX_RECONNECT_ATTEMPTS = 10;
+const WS_MAX_RECONNECT_ATTEMPTS = 50;
 const COOKIE_NAME = 'sensenova_claw_token';
 
 function getCookie(name: string): string | null {
@@ -41,6 +43,7 @@ export function WebSocketProvider({
   enabled?: boolean;
 }) {
   const [wsConnected, setWsConnected] = useState(false);
+  const [connectionNonce, setConnectionNonce] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -127,9 +130,25 @@ export function WebSocketProvider({
         activeSocket.close();
       }
     };
-  }, [enabled]);
+  }, [enabled, connectionNonce]);
 
-  const value: WebSocketContextValue = { wsConnected, wsSend, subscribe };
+  // 手动重连
+  const reconnect = useCallback(() => {
+    reconnectAttemptsRef.current = 0;
+    shouldReconnectRef.current = true;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setWsConnected(false);
+    setConnectionNonce((prev) => prev + 1);
+  }, []);
+
+  const value: WebSocketContextValue = { wsConnected, wsSend, subscribe, reconnect };
 
   return <WebSocketContext.Provider value={value}>{children}</WebSocketContext.Provider>;
 }

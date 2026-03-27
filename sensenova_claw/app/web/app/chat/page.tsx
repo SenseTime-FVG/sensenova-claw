@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import {
   Loader2, Bot, MessageSquare, Plus, Search, RefreshCw, Trash2,
   ChevronDown, ChevronRight, GitBranch,
@@ -10,14 +11,27 @@ import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { useFilePanel } from '@/contexts/FilePanelContext';
+import { useI18n } from '@/contexts/I18nContext';
 import { type SessionItem, type ContextFileRef, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
-import { MessageList } from '@/components/chat/MessageBubble';
-import { TypingIndicator } from '@/components/chat/TypingIndicator';
+import { MessageArea } from '@/components/chat/MessageArea';
 import { ChatInput } from '@/components/chat/ChatInput';
-import { SlideViewer, useSlideSet } from '@/components/ppt/PPTViewer';
+import { useSlideSet } from '@/components/ppt/PPTViewer';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { useResizablePreview } from '@/hooks/useResizablePreview';
 
+// Lazy load SlideViewer
+const SlideViewer = dynamic(
+  () => import('@/components/ppt/PPTViewer').then(mod => mod.SlideViewer),
+  {
+    loading: () => (
+      <div className="h-full flex items-center justify-center bg-muted/20">
+        <Loader2 className="animate-spin text-muted-foreground" />
+      </div>
+    ),
+    ssr: false,
+  },
+);
 
 /* ── workdir 根目录缓存 ── */
 let _workdirRootCache: string | null | undefined;
@@ -66,6 +80,7 @@ function AgentContactItem({
   hasUnread: boolean;
   onClick: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div
       onClick={onClick}
@@ -88,7 +103,7 @@ function AgentContactItem({
           <div className="flex items-center gap-1.5">
             <span className="font-semibold text-sm text-foreground truncate">{agent.name}</span>
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium shrink-0">
-              Agent
+              {t('common.agent')}
             </span>
           </div>
           {lastActiveDate && (
@@ -97,7 +112,7 @@ function AgentContactItem({
         </div>
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground truncate pr-2">
-            {lastSessionPreview || agent.description || '暂无对话'}
+            {lastSessionPreview || agent.description || t('chat.noConversation')}
           </p>
           {hasUnread && <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />}
         </div>
@@ -120,6 +135,7 @@ function SessionListItem({
   isLast?: boolean;
   noMargin?: boolean;
 }) {
+  const { locale, t } = useI18n();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleDelete = (e: React.MouseEvent) => {
@@ -163,8 +179,8 @@ function SessionListItem({
             isActive ? 'bg-violet-500' : 'bg-violet-300/60 dark:bg-violet-500/40',
           )} />
           <div className="flex-1 min-w-0">
-            <div className="truncate text-[11px] font-medium">{getTitle(session.meta)}</div>
-            <div className="text-[9px] text-muted-foreground/50 mt-0.5">{timeLabel(session.last_active)}</div>
+            <div className="truncate text-[11px] font-medium">{getTitle(session.meta, locale)}</div>
+            <div className="text-[9px] text-muted-foreground/50 mt-0.5">{timeLabel(session.last_active, locale)}</div>
           </div>
           <button
             onClick={handleDelete}
@@ -199,8 +215,8 @@ function SessionListItem({
         isActive ? 'text-blue-500' : 'text-muted-foreground',
       )} />
       <div className="flex-1 min-w-0">
-        <div className="truncate font-medium text-xs">{getTitle(session.meta)}</div>
-        <div className="text-[10px] text-muted-foreground mt-0.5">{timeLabel(session.last_active)}</div>
+        <div className="truncate font-medium text-xs">{getTitle(session.meta, locale)}</div>
+        <div className="text-[10px] text-muted-foreground mt-0.5">{timeLabel(session.last_active, locale)}</div>
       </div>
       <button
         onClick={handleDelete}
@@ -736,20 +752,18 @@ function ChatContent() {
                 </div>
               )}
               {/* 消息区 */}
-              <div className={cn("overflow-y-auto p-4 md:p-8", slideSet ? "min-h-0" : "", "flex-1")}>
-                {messages.length === 0 ? (
+              <MessageArea
+                messages={messages}
+                isTyping={isTyping}
+                currentSessionId={currentSessionId}
+                emptyState={
                   <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
                     <Bot size={32} className="text-primary/30" />
                     <p className="text-sm">开始与 {selectedAgent?.name || 'Agent'} 的对话</p>
                   </div>
-                ) : (
-                  <>
-                    <MessageList messages={messages} />
-                    {isTyping && <TypingIndicator />}
-                    <div ref={chatEndRef} />
-                  </>
-                )}
-              </div>
+                }
+              />
+              <div ref={chatEndRef} />
 
               {/* PPT 幻灯片内联预览（可拖拽调整高度） */}
               {slideSet && (

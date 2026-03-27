@@ -99,6 +99,9 @@ export interface ChatSessionContextValue {
   pendingPrefill: PrefillInputPayload | null;
   prefillInput: (value: string | PrefillInputPayload) => void;
   clearPendingPrefill: () => void;
+
+  // 手动触发 WebSocket 重连
+  reconnect: () => void;
 }
 
 // ── Provider 组合 ──
@@ -175,5 +178,8 @@ export function useChatSession(): ChatSessionContextValue {
     pendingPrefill: msg.pendingPrefill,
     prefillInput: msg.prefillInput,
     clearPendingPrefill: msg.clearPendingPrefill,
+
+    // 重连
+    reconnect: ws.reconnect,
   };
 }

@@ -12,6 +12,7 @@ import { FilePreview } from '@/components/files/FilePreview';
 import type { FilePreviewType } from '@/components/files/fileTypes';
 import { type ContextFileRef, getAgentId } from '@/lib/chatTypes';
 import { authFetch, API_BASE } from '@/lib/authFetch';
+import { useI18n } from '@/contexts/I18nContext';
 
 /* ── workdir 根目录缓存 ── */
 let _workdirRootCache: string | null | undefined;
@@ -47,6 +48,7 @@ export interface ChatPanelHandle {
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function ChatPanel({ defaultAgentId, emptyState, hideAgentSelector, lockAgent, returnToMainLabel }, ref) {
+  const { t } = useI18n();
   const {
     wsConnected,
     currentSessionId,
@@ -184,8 +186,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
       <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2 shadow-sm">
         <Bot size={32} />
       </div>
-      <h3 className="text-2xl font-bold text-foreground tracking-tight">How can I help you today?</h3>
-      <p className="text-sm leading-relaxed">Type a message below to start a new conversation with Sensenova-Claw.</p>
+      <h3 className="text-2xl font-bold text-foreground tracking-tight">{t('chat.emptyTitle')}</h3>
+      <p className="text-sm leading-relaxed">{t('chat.emptyDescription')}</p>
     </div>
   );
 

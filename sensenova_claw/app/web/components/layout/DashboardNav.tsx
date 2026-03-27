@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useCustomPages } from '@/hooks/useCustomPages';
 import { useSession } from '@/contexts/ws';
+import { useI18n } from '@/contexts/I18nContext';
 
 const iconMap: Record<string, LucideIcon> = {
   zap: Zap,
@@ -28,43 +29,67 @@ const iconMap: Record<string, LucideIcon> = {
   shield: Shield,
 };
 
-const mainNavItems: { path: string; label: string; exact?: boolean; icon?: string }[] = [
-  { path: '/', label: '工作台', exact: true, icon: 'zap' },
-  { path: '/ppt', label: 'PPT', icon: 'presentation' },
-  { path: '/chat', label: '消息', icon: 'message-circle' },
-  { path: '/office', label: '办公室', icon: 'home' },
+interface NavItem {
+  path: string;
+  label: string;
+  exact?: boolean;
+  icon?: string;
+}
+
+const mainNavItemDefs: { path: string; labelKey: string; exact?: boolean; icon?: string }[] = [
+  { path: '/', labelKey: 'nav.workspace', exact: true, icon: 'zap' },
+  { path: '/ppt', labelKey: 'nav.ppt', icon: 'presentation' },
+  { path: '/chat', labelKey: 'nav.chat', icon: 'message-circle' },
+  { path: '/office', labelKey: 'nav.office', icon: 'home' },
 ];
 
 export type SubNavGroup = 'features' | 'admin' | null;
 
-export const builtinFeatureNavItems = [
-  { path: '/research', label: '深度研究', icon: 'search' },
-  { path: '/automation', label: '自动化', icon: 'settings' },
+const builtinFeatureNavItemDefs: { path: string; labelKey: string; icon?: string }[] = [
+  { path: '/research', labelKey: 'nav.feature.research', icon: 'search' },
+  { path: '/automation', labelKey: 'nav.feature.automation', icon: 'settings' },
 ];
 
-export const adminNavItems = [
-  { path: '/agents', label: 'Agents', icon: 'users' },
-  { path: '/sessions', label: 'Sessions', icon: 'clock' },
-  { path: '/llms', label: 'LLMs', icon: 'brain' },
-  { path: '/gateway', label: 'Gateway', icon: 'server' },
-  { path: '/tools', label: 'Tools', icon: 'tool' },
-  { path: '/skills', label: 'Skills', icon: 'star' },
-  { path: '/acp', label: 'ACP', icon: 'shield' },
+const adminNavItemDefs: { path: string; labelKey: string; icon?: string }[] = [
+  { path: '/agents', labelKey: 'nav.adminItems.agents', icon: 'users' },
+  { path: '/sessions', labelKey: 'nav.adminItems.sessions', icon: 'clock' },
+  { path: '/llms', labelKey: 'nav.adminItems.llms', icon: 'brain' },
+  { path: '/gateway', labelKey: 'nav.adminItems.gateway', icon: 'server' },
+  { path: '/tools', labelKey: 'nav.adminItems.tools', icon: 'tool' },
+  { path: '/skills', labelKey: 'nav.adminItems.skills', icon: 'star' },
+  { path: '/acp', labelKey: 'nav.adminItems.acp', icon: 'shield' },
 ];
 
 export function useFeatureNavItems() {
+  const { t } = useI18n();
   const { pages } = useCustomPages();
   return useMemo(() => {
+    const builtinItems = builtinFeatureNavItemDefs.map((item) => ({
+      path: item.path,
+      label: t(item.labelKey),
+      icon: item.icon,
+    }));
     const customItems = pages.map(p => ({
       path: `/features/${p.slug}`,
       label: p.name,
     }));
     return [
-      ...builtinFeatureNavItems,
+      ...builtinItems,
       ...customItems,
-      { path: '/create-feature', label: '+ 创建' },
+      { path: '/create-feature', label: t('nav.feature.create') },
     ];
-  }, [pages]);
+  }, [pages, t]);
+}
+
+export function useAdminNavItems(): NavItem[] {
+  const { t } = useI18n();
+  return useMemo(() => (
+    adminNavItemDefs.map((item) => ({
+      path: item.path,
+      label: t(item.labelKey),
+      icon: item.icon,
+    }))
+  ), [t]);
 }
 
 export function NavIcon({ name }: { name?: string }) {
@@ -84,7 +109,17 @@ export function DashboardNav({
 }) {
   const pathname = usePathname();
   const featureNavItems = useFeatureNavItems();
+  const adminNavItems = useAdminNavItems();
+  const { t } = useI18n();
   const { startNewChat } = useSession();
+  const mainNavItems: NavItem[] = useMemo(() => (
+    mainNavItemDefs.map((item) => ({
+      path: item.path,
+      label: t(item.labelKey),
+      exact: item.exact,
+      icon: item.icon,
+    }))
+  ), [t]);
   const isActive = (item: { path: string; exact?: boolean }) => {
     if (item.exact) return pathname === item.path;
     return pathname?.startsWith(item.path);

@@ -7,7 +7,7 @@ import {
   DashboardNav,
   NavIcon,
   useFeatureNavItems,
-  adminNavItems,
+  useAdminNavItems,
   type SubNavGroup,
 } from './DashboardNav';
 import { Search } from 'lucide-react';
@@ -16,6 +16,7 @@ import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { cn } from '@/lib/utils';
 import { useSession } from '@/contexts/ws';
+import { useI18n } from '@/contexts/I18nContext';
 import { GlobalFilePanel } from '@/components/files/GlobalFilePanel';
 import { TodoDropdown } from '@/components/dashboard/TodoDropdown';
 import { NotificationDropdown } from '@/components/notification/NotificationDropdown';
@@ -32,7 +33,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const pathname = usePathname();
   const [manualGroup, setManualGroup] = useState<SubNavGroup>(null);
   const featureNavItems = useFeatureNavItems();
+  const adminNavItems = useAdminNavItems();
   const { startNewChat } = useSession();
+  const { t } = useI18n();
   const hideRightPanel = ADMIN_PATHS.some(p => pathname?.startsWith(p));
 
   const isFeatureActive = featureNavItems.some((item) =>
@@ -100,7 +103,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
                 <Input
                   type="search"
-                  placeholder="搜索..."
+                  placeholder={t('common.searchPlaceholder')}
                   className="w-52 h-8 pl-8 text-sm bg-transparent border-border/50 rounded-lg focus-visible:ring-1 focus-visible:ring-primary/30 focus-visible:border-primary/40 placeholder:text-muted-foreground/40"
                 />
               </div>

@@ -2,7 +2,6 @@
 
 import { Bot, Lightbulb, MessageCircleMore, MessageSquare, Search, Sparkles, Zap } from 'lucide-react';
 import { useState } from 'react';
-import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { getTone } from './widgetTones';
 import { SectionHeader } from './SectionHeader';
@@ -13,7 +12,7 @@ interface ProactiveAgentPanelProps {
   onItemClick?: (id: string) => void;
   // 推荐卡片
   recommendations?: RecommendationGroup[];
-  onRecommendationClick?: (sourceSessionId: string, prompt: string) => void;
+  onRecommendationClick?: (sourceSessionId: string, recommendationId: string, prompt: string) => void;
 }
 
 // 推荐卡片分类图标
@@ -100,15 +99,15 @@ export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRec
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         if (res.status === 409) {
-          toast.error('正在推送中，请稍后');
+          console.warn('正在推送中，请稍后');
         } else if (res.status === 400) {
-          toast.error('该功能已禁用');
+          console.warn('该功能已禁用');
         } else {
-          toast.error('触发失败，请稍后重试');
+          console.warn('触发失败，请稍后重试');
         }
       }
     } catch (err) {
-      toast.error('触发失败，请稍后重试');
+      console.warn('触发失败，请稍后重试');
     } finally {
       setIsTriggering(false);
     }
@@ -148,7 +147,7 @@ export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRec
                     <RecommendationCard
                       key={item.id}
                       item={item}
-                      onClick={() => onRecommendationClick?.(group.sourceSessionId, item.prompt)}
+                      onClick={() => onRecommendationClick?.(group.sourceSessionId, item.id, item.prompt)}
                     />
                   ))}
                 </div>

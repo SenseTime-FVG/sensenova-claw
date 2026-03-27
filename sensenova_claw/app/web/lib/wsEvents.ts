@@ -5,7 +5,7 @@
 export interface SessionCreatedEvent {
   type: 'session_created';
   session_id: string;
-  payload: { events?: Record<string, unknown>[] };
+  payload: { events?: Record<string, unknown>[]; request_id?: string };
 }
 
 export interface SessionLoadedEvent {
@@ -130,7 +130,7 @@ export interface UserQuestionAnsweredEvent {
 export interface TurnCompletedEvent {
   type: 'turn_completed';
   session_id: string;
-  payload: { turn_id?: string; final_response?: string };
+  payload: { turn_id?: string; final_response?: string; source?: string };
 }
 
 export interface TurnCancelledEvent {
@@ -177,6 +177,9 @@ export interface ProactiveResultEvent {
     job_name: string;
     result: string;
     session_id?: string;
+    source_session_id?: string;
+    recommendation_type?: string;
+    items?: Array<{ id: string; title: string; prompt: string; category?: string }>;
   };
 }
 

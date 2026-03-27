@@ -6,9 +6,10 @@ import { useDrop } from 'react-dnd';
 import { TargetSelector } from './TargetSelector';
 import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
 import { type ContextFileRef } from '@/lib/chatTypes';
-import { singleFileFlow, dirUploadFlow, type ProgressCallback } from '@/lib/fileUpload';
-import { UploadProgress, type UploadProgressItem } from './UploadProgress';
+import { UploadProgress } from './UploadProgress';
+import { useFileUpload } from '@/hooks/useFileUpload';
 import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useI18n } from '@/contexts/I18nContext';
 
 interface ChatInputProps {
   defaultAgentId: string;
@@ -22,6 +23,7 @@ interface ChatInputProps {
   handleSkillInvoke: (skillName: string, args: string) => void;
   hideAgentSelector?: boolean;
   lockAgent?: boolean;
+  onReconnect?: () => void;
 }
 
 export interface ChatInputHandle {
@@ -40,10 +42,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   handleSkillInvoke,
   hideAgentSelector,
   lockAgent,
+  onReconnect,
 }, ref) {
+  const { t } = useI18n();
   const [inputValue, setInputValue] = useState('');
   const [showUploadMenu, setShowUploadMenu] = useState(false);
-  const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
   const { pendingPrefill, clearPendingPrefill } = useChatSession();
   const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -120,77 +123,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }),
   }), [insertAtRef]);
 
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = e.target.files;
-    if (!selectedFiles || selectedFiles.length === 0) return;
-
-    const fileList = Array.from(selectedFiles);
-    const firstFile = fileList[0];
-    const relPath = (firstFile as File & { webkitRelativePath?: string }).webkitRelativePath;
-    const isFolder = Boolean(relPath);
-
-    if (isFolder) {
-      // 文件夹上传
-      const topFolder = relPath!.split('/')[0];
-      const itemId = `upload_${Date.now()}`;
-      const totalSize = fileList.reduce((sum, f) => sum + f.size, 0);
-      const showProgress = totalSize > 1024 * 1024;
-
-      setUploadItems(prev => [...prev, {
-        id: itemId, name: topFolder,
-        percent: showProgress ? 0 : null,
-        status: 'checking',
-      }]);
-
-      try {
-        const onProgress: ProgressCallback | undefined = showProgress
-          ? (loaded, total) => setUploadItems(prev =>
-              prev.map(it => it.id === itemId ? { ...it, percent: Math.round(loaded / total * 100), status: 'uploading' } : it))
-          : undefined;
-
-        const result = await dirUploadFlow(topFolder, fileList, selectedAgent, onProgress);
-        insertAtRef(result.path);
-        setUploadItems(prev => prev.map(it => it.id === itemId ? { ...it, status: 'done', percent: 100 } : it));
-      } catch (err) {
-        setUploadItems(prev => prev.map(it => it.id === itemId
-          ? { ...it, status: 'error', error: err instanceof Error ? err.message : '上传失败' } : it));
-      }
-    } else {
-      // 单文件或多文件上传
-      for (const file of fileList) {
-        const itemId = `upload_${Date.now()}_${file.name}`;
-        const showProgress = file.size > 1024 * 1024;
-
-        setUploadItems(prev => [...prev, {
-          id: itemId, name: file.name,
-          percent: showProgress ? 0 : null,
-          status: 'checking',
-        }]);
-
-        try {
-          const onProgress: ProgressCallback | undefined = showProgress
-            ? (loaded, total) => setUploadItems(prev =>
-                prev.map(it => it.id === itemId ? { ...it, percent: Math.round(loaded / total * 100), status: 'uploading' } : it))
-            : undefined;
-
-          const result = await singleFileFlow(file, selectedAgent, onProgress);
-          insertAtRef(result.path);
-          setUploadItems(prev => prev.map(it => it.id === itemId ? { ...it, status: 'done', percent: 100 } : it));
-        } catch (err) {
-          setUploadItems(prev => prev.map(it => it.id === itemId
-            ? { ...it, status: 'error', error: err instanceof Error ? err.message : '上传失败' } : it));
-        }
-      }
-    }
-
-    // 3秒后清除已完成的进度项
-    setTimeout(() => {
-      setUploadItems(prev => prev.filter(it => it.status !== 'done'));
-    }, 3000);
-
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (folderInputRef.current) folderInputRef.current.value = '';
-  }, [selectedAgent, insertAtRef]);
+  const { uploadItems, handleFileSelect } = useFileUpload({
+    selectedAgent,
+    onUploadSuccess: insertAtRef,
+  });
 
   const parseAtRefs = useCallback((content: string): ContextFileRef[] => {
     const refs: ContextFileRef[] = [];
@@ -243,14 +179,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   return (
     <div className="border-t bg-card/50 backdrop-blur-sm px-4 pt-2.5 pb-2 shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center gap-3 mb-2 pl-1">
+        <div className="flex items-center justify-between mb-2 pl-1">
+          <div className="flex items-center gap-3">
           {!hideAgentSelector && (
             <TargetSelector selectedAgent={selectedAgent} onSelectAgent={onSelectAgent} locked={lockAgent} />
           )}
           <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full border">
             <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
-            {wsConnected ? 'Connected' : 'Offline'}
+            {wsConnected ? t('chat.connected') : t('chat.disconnected')}
           </span>
+          </div>
+          {!wsConnected && onReconnect && (
+            <button
+              onClick={onReconnect}
+              className="text-[10px] text-primary hover:underline font-medium px-2"
+            >
+              {t('chat.reconnect')}
+            </button>
+          )}
         </div>
 
         <div
@@ -269,7 +215,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               onClick={() => setShowUploadMenu(v => !v)}
               disabled={!wsConnected || disabled}
               className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="添加文件引用"
+              title={t('chat.addFileReference')}
             >
               <Paperclip size={16} />
             </button>
@@ -280,14 +226,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   onClick={() => { fileInputRef.current?.click(); setShowUploadMenu(false); }}
                 >
                   <File size={14} className="text-muted-foreground" />
-                  <span>选择文件</span>
+                  <span>{t('chat.chooseFile')}</span>
                 </button>
                 <button
                   className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted transition-colors text-left"
                   onClick={() => { folderInputRef.current?.click(); setShowUploadMenu(false); }}
                 >
                   <FolderOpen size={14} className="text-muted-foreground" />
-                  <span>选择文件夹</span>
+                  <span>{t('chat.chooseFolder')}</span>
                 </button>
               </div>
             )}
@@ -306,8 +252,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               onCompositionEnd={() => { isComposingRef.current = false; }}
               placeholder={
                 wsConnected
-                  ? '输入消息… 拖拽文件插入 @引用 (Enter 发送)'
-                  : 'Waiting for connection...'
+                  ? t('chat.inputPlaceholder')
+                  : t('chat.waitingConnection')
               }
               disabled={!wsConnected || disabled}
               rows={1}
@@ -320,7 +266,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               data-testid="stop-button"
               onClick={onStop}
               className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-red-500 text-white hover:bg-red-600 flex items-center justify-center shrink-0 transition-all active:scale-90 shadow-md shadow-red-500/20"
-              title="停止生成"
+              title={t('chat.stopGeneration')}
             >
               <Square size={16} fill="currentColor" />
             </button>
@@ -329,6 +275,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               data-testid="send-button"
               onClick={handleSend}
               disabled={!inputValue.trim() || !wsConnected || disabled}
+              title={t('chat.sendMessage')}
+              aria-label={t('chat.sendMessage')}
               className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-md shadow-primary/20"
             >
               <Send size={20} className="ml-0.5" />
@@ -336,7 +284,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           )}
         </div>
         <div className="text-center mt-2 text-[10px] text-muted-foreground/70">
-          Sensenova-Claw can make mistakes. Consider verifying important information.
+          {t('chat.disclaimer')}
         </div>
       </div>
     </div>

@@ -933,7 +933,7 @@ function normalizeWizardState(input: any): ACPWizardState | null {
     },
     installers: Object.fromEntries(
       Object.entries(input.installers && typeof input.installers === 'object' ? input.installers : {}).map(([key, value]) => {
-        const installer = value && typeof value === 'object' ? value : {};
+        const installer = value && typeof value === 'object' ? value as Record<string, unknown> : {} as Record<string, unknown>;
         return [
           key,
           {
@@ -946,8 +946,8 @@ function normalizeWizardState(input: any): ACPWizardState | null {
         ];
       }),
     ),
-    agents: agents.map((item): ACPWizardAgent => {
-      const agent = item && typeof item === 'object' ? item : {};
+    agents: agents.map((item: unknown): ACPWizardAgent => {
+      const agent: Record<string, any> = item && typeof item === 'object' ? item as Record<string, any> : {};
       return {
         id: String(agent.id || ''),
         name: String(agent.name || ''),
@@ -1043,7 +1043,7 @@ function normalizeMiniAppsConfig(input: Record<string, any>): MiniAppsConfig {
     acp: {
       enabled: Boolean(acp.enabled),
       command: String(acp.command || ''),
-      args: Array.isArray(acp.args) ? acp.args.map(item => String(item)) : [],
+      args: Array.isArray(acp.args) ? acp.args.map((item: unknown) => String(item)) : [],
       env: Object.fromEntries(
         Object.entries(acp.env && typeof acp.env === 'object' ? acp.env : {}).map(([key, value]) => [key, String(value)])
       ),
