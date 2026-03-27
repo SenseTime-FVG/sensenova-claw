@@ -45,6 +45,22 @@ def _vendor_root() -> Path:
     return Path(__file__).resolve().parents[1] / "vendor" / "union-search-skill"
 
 
+def _resolve_env_file(env_file: str, vendor_root: Path) -> str:
+    candidate = Path(env_file).expanduser()
+    if candidate.is_absolute():
+        return str(candidate)
+
+    cwd_candidate = (Path.cwd() / candidate).resolve()
+    if cwd_candidate.exists():
+        return str(cwd_candidate)
+
+    vendor_candidate = (vendor_root / candidate).resolve()
+    if vendor_candidate.exists():
+        return str(vendor_candidate)
+
+    return str(cwd_candidate)
+
+
 def _flatten_items(data: dict[str, Any]) -> list[dict[str, Any]]:
     # 兼容 CLI envelope
     payload = data.get("data", data)
@@ -126,14 +142,44 @@ def run_union_search(
             "error": f"vendor path not found: {vendor_root}",
         }
 
-    cmd = _build_command(vendor_root, query, limit, timeout, env_file, group=group, platforms=platforms)
-    proc = subprocess.run(
-        cmd,
-        cwd=vendor_root,
-        capture_output=True,
-        text=True,
-        timeout=max(timeout + 10, 30),
+    resolved_env_file = _resolve_env_file(env_file, vendor_root)
+    cmd = _build_command(
+        vendor_root,
+        query,
+        limit,
+        timeout,
+        resolved_env_file,
+        group=group,
+        platforms=platforms,
     )
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=vendor_root,
+            capture_output=True,
+            text=True,
+            timeout=max(timeout + 10, 30),
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "success": False,
+            "provider": "union-search-plus",
+            "query": query,
+            "source": source_label,
+            "items": [],
+            "error": f"vendor command timeout after {exc.timeout} seconds",
+            "command": cmd,
+        }
+    except OSError as exc:
+        return {
+            "success": False,
+            "provider": "union-search-plus",
+            "query": query,
+            "source": source_label,
+            "items": [],
+            "error": str(exc).strip() or type(exc).__name__,
+            "command": cmd,
+        }
 
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"

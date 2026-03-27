@@ -128,3 +128,52 @@ def test_union_search_plus_adapts_vendor_envelope(monkeypatch) -> None:
     assert result["provider"] == "union-search-plus"
     assert result["summary"]["raw_items"] == 2
     assert result["summary"]["total_items"] == 1
+
+
+def test_union_search_plus_returns_structured_timeout(monkeypatch) -> None:
+    mod = _load_module("union_search_plus_timeout_test", "union_search_plus.py")
+
+    def _fake_run(*args, **kwargs):
+        raise mod.subprocess.TimeoutExpired(cmd=["vendor"], timeout=30)
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+
+    result = mod.run_union_search(
+        query="测试查询",
+        group="dev",
+        limit=1,
+        timeout=10,
+        env_file=".env",
+    )
+
+    assert result["success"] is False
+    assert result["provider"] == "union-search-plus"
+    assert "timeout" in result["error"].lower()
+
+
+def test_union_search_plus_resolves_env_file_from_caller_cwd(monkeypatch, tmp_path: Path) -> None:
+    mod = _load_module("union_search_plus_env_test", "union_search_plus.py")
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["cwd"] = kwargs.get("cwd")
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"success": True, "data": {"results": {}}}), stderr="")
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+
+    result = mod.run_union_search(
+        query="测试查询",
+        group="preferred",
+        limit=1,
+        timeout=10,
+        env_file=".env",
+    )
+
+    assert result["success"] is True
+    cmd = captured["cmd"]
+    assert isinstance(cmd, list)
+    env_index = cmd.index("--env-file") + 1
+    assert cmd[env_index] == str((tmp_path / ".env").resolve())

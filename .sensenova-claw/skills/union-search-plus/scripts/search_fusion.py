@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse, urlunparse
 import re
@@ -21,17 +20,6 @@ TRACKING_KEYS = {
     "gclid",
     "fbclid",
 }
-
-
-@dataclass
-class CoverageMetrics:
-    """搜索覆盖度指标。"""
-
-    source_count: int
-    topic_coverage: float
-    valid_evidence_count: int
-
-
 
 def normalize_title(value: str) -> str:
     """规范化标题，便于近似去重。"""
@@ -260,33 +248,31 @@ def assess_insufficiency(
         if isinstance(item, dict) and extract_title(item).strip() and extract_link(item).strip()
     ]
 
-    metrics = CoverageMetrics(
-        source_count=len(source_keys),
-        topic_coverage=_topic_coverage(valid_evidence, query),
-        valid_evidence_count=len(valid_evidence),
-    )
+    source_count = len(source_keys)
+    topic_coverage = _topic_coverage(valid_evidence, query)
+    valid_evidence_count = len(valid_evidence)
 
     insufficient_reasons: list[str] = []
-    if metrics.source_count < min_sources:
+    if source_count < min_sources:
         insufficient_reasons.append(
-            f"来源数不足: {metrics.source_count} < {min_sources}"
+            f"来源数不足: {source_count} < {min_sources}"
         )
-    if metrics.topic_coverage < min_topic_coverage:
+    if topic_coverage < min_topic_coverage:
         insufficient_reasons.append(
-            f"主题覆盖不足: {metrics.topic_coverage:.2f} < {min_topic_coverage:.2f}"
+            f"主题覆盖不足: {topic_coverage:.2f} < {min_topic_coverage:.2f}"
         )
-    if metrics.valid_evidence_count < min_valid_evidence:
+    if valid_evidence_count < min_valid_evidence:
         insufficient_reasons.append(
-            f"有效证据不足: {metrics.valid_evidence_count} < {min_valid_evidence}"
+            f"有效证据不足: {valid_evidence_count} < {min_valid_evidence}"
         )
 
     return {
         "is_insufficient": len(insufficient_reasons) > 0,
         "reasons": insufficient_reasons,
         "metrics": {
-            "source_count": metrics.source_count,
-            "topic_coverage": round(metrics.topic_coverage, 4),
-            "valid_evidence_count": metrics.valid_evidence_count,
+            "source_count": source_count,
+            "topic_coverage": round(topic_coverage, 4),
+            "valid_evidence_count": valid_evidence_count,
         },
         "thresholds": {
             "min_sources": min_sources,

@@ -1,12 +1,6 @@
 ---
 name: union-search-plus
-description: 当内置搜索工具（serper_search、brave_search 等）结果不足、缺少特定平台来源（社媒、开发者社区、视频平台）、或用户明确要求多平台搜索时使用。
-metadata:
-  sensenova-claw:
-    requires:
-      bins:
-        - python3
-        - bash
+description: 当内置搜索工具（serper_search、brave_search 等）结果不足、缺少特定平台来源（社媒、开发者社区、视频平台）、或用户明确要求多平台搜索时使用。也用于需要用本地脚本补充 union-search 多平台结果、做覆盖度评估、或把主链结果与补充结果去重合并的场景。
 ---
 
 # union-search-plus（补充搜索执行）
@@ -65,24 +59,50 @@ digraph when {
 
 ## 执行流程
 
+0. **先做自检** — 先确认依赖、`.env` 和可用平台，再决定是否真的执行搜索
 1. **评估主链结果**（可选）— 用 `assess_coverage.py` 判断是否需要补充
 2. **按需求选择 group 或平台** — 精准匹配，不要默认全量
 3. **执行搜索** — 调用 `union_search_plus.py`
 4. **合并去重** — 用 `merge_search_results.py` 将主链 + 补充结果统一去重重排
 5. **返回结果** — 说明覆盖范围和失败平台
 
+## 运行前提
+
+- 从当前工作目录先确认依赖和环境变量，不要跳过自检
+- `union_search_plus.py --env-file <path>` 中的相对路径按**当前执行目录**解析；如果不传，会优先尝试当前目录下的 `.env`
+- `doctor` 若提示缺少 `python-dotenv` 等依赖，先安装 `scripts/requirements.txt` 中的基础依赖，再执行搜索
+- 真实搜索依赖网络；部分平台还依赖 API key 或 Cookie。首次不要直接拿 `all` 做烟测
+
+基础自检：
+```bash
+python3 .sensenova-claw/skills/union-search-plus/vendor/union-search-skill/union_search_cli.py \
+  list --type groups --format json
+```
+
+依赖/凭据检查：
+```bash
+python3 .sensenova-claw/skills/union-search-plus/vendor/union-search-skill/union_search_cli.py \
+  doctor --env-file .env
+```
+
 ## 可调用脚本
+
+低风险烟测（先验证单平台链路，不要一上来跑多平台）：
+```bash
+python3 .sensenova-claw/skills/union-search-plus/scripts/union_search_plus.py \
+  "查询词" --platforms github --limit 3 --timeout 30 --env-file .env
+```
 
 统一搜索入口（按 group）：
 ```bash
 python3 .sensenova-claw/skills/union-search-plus/scripts/union_search_plus.py \
-  "查询词" --group dev --limit 5 --timeout 60
+  "查询词" --group dev --limit 5 --timeout 60 --env-file .env
 ```
 
 统一搜索入口（指定平台）：
 ```bash
 python3 .sensenova-claw/skills/union-search-plus/scripts/union_search_plus.py \
-  "查询词" --platforms zhihu bilibili github --limit 5 --timeout 60
+  "查询词" --platforms zhihu bilibili github --limit 5 --timeout 60 --env-file .env
 ```
 
 覆盖度评估（判断主链是否不足）：
@@ -101,7 +121,9 @@ python3 .sensenova-claw/skills/union-search-plus/scripts/merge_search_results.py
 
 ## 执行纪律
 
+- 第一次执行前，先跑 `list` 和 `doctor`
 - 按需求选择最精准的 group/平台，不要默认 all
+- 单平台烟测通过后，再扩大到 group；不要直接用 `dev/social/all` 判断脚本“坏了”
 - 平台失败 ≠ 搜索失败，保留成功平台结果，说明哪些失败
 - 不要把搜索结果当已验证事实
 - 不要在单点事实问题上走多平台大范围搜索
