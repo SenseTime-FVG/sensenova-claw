@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+import httpx
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from sensenova_claw.capabilities.miniapps.service import MiniAppService
@@ -57,6 +58,7 @@ class MiniAppInteractionRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     message: str = ""
     session_id: str = ""
+    refresh_mode: Literal["none", "background", "immediate"] = "none"
 
 
 class MiniAppActionRequest(BaseModel):
@@ -65,6 +67,7 @@ class MiniAppActionRequest(BaseModel):
     message: str = ""
     session_id: str = ""
     target: Literal["local", "server", "agent"] = "agent"
+    refresh_mode: Literal["none", "background", "immediate"] = "none"
 
 
 def _get_service(request: Request) -> MiniAppService:
@@ -90,6 +93,9 @@ def _get_service(request: Request) -> MiniAppService:
         gateway=gateway,
     )
     request.app.state.custom_page_service = service
+    if not getattr(request.app.state, "custom_page_service_shutdown_registered", False):
+        request.app.add_event_handler("shutdown", service.shutdown)
+        request.app.state.custom_page_service_shutdown_registered = True
     return service
 
 
@@ -210,6 +216,7 @@ async def dispatch_custom_page_interaction(
         payload=body.payload,
         message=body.message,
         session_id=body.session_id,
+        refresh_mode=body.refresh_mode,
     )
     return result
 
@@ -231,5 +238,61 @@ async def dispatch_custom_page_action(
         target=body.target,
         message=body.message,
         session_id=body.session_id,
+        refresh_mode=body.refresh_mode,
     )
     return result
+
+
+@router.api_route("/{page_id}/preview/", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
+@router.api_route("/{page_id}/preview/{subpath:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
+async def proxy_custom_page_preview(
+    request: Request,
+    page_id: str,
+    subpath: str = "",
+):
+    service = _get_service(request)
+    page = service.get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"custom page not found: {page_id}")
+
+    try:
+        preview = await service.ensure_preview_server(page_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"workspace preview server unavailable: {exc}")
+
+    base_url = str(preview["base_url"]).rstrip("/")
+    path = f"/{subpath}" if subpath else "/"
+    query = request.url.query
+    upstream_url = f"{base_url}{path}"
+    if query:
+        upstream_url = f"{upstream_url}?{query}"
+
+    body = await request.body()
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in {"host", "content-length", "connection"}
+    }
+
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        try:
+            upstream = await client.request(
+                request.method,
+                upstream_url,
+                content=body,
+                headers=headers,
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"workspace preview proxy failed: {exc}")
+
+    response_headers = {
+        key: value
+        for key, value in upstream.headers.items()
+        if key.lower() not in {"content-length", "connection", "transfer-encoding", "content-encoding"}
+    }
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=response_headers,
+        media_type=upstream.headers.get("content-type"),
+    )

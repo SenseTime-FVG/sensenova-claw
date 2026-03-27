@@ -167,7 +167,7 @@ export default function CreateFeaturePage() {
                     {name || '创建专属 Mini-App 工作区'}
                   </h1>
                   <p className="text-sm text-muted-foreground max-w-2xl">
-                    {description || '让 AI 为你生成一个可运行的前端工作区，并把它交给专属 Agent 持续维护。'}
+                    {description || '让 AI 为你生成一个自带 Web 服务端的 workspace。大部分交互在 workspace 自己的前后端内完成，Agent 只做最后兜底和后台补货。'}
                   </p>
                 </div>
               </div>
@@ -209,7 +209,7 @@ export default function CreateFeaturePage() {
                   id="goal"
                   value={generationPrompt}
                   onChange={e => setGenerationPrompt(e.target.value)}
-                  placeholder="例如：做一个研究任务工作台，复用固定页面结构和卡片组件，只在需要时让 Agent 生成或更新任务内容。"
+                  placeholder="例如：做一个自带 server 的学习工作区，预先准备 3 个单元；用户完成单元只记录到服务端；普通问答点按钮才发给 Agent，且不触发即时刷新；夜间再后台补充下一批内容。"
                   rows={6}
                   className="flex w-full rounded-xl border border-input bg-background px-3 py-3 text-sm leading-6 ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y"
                   data-testid="miniapp-prompt-input"
@@ -231,7 +231,7 @@ export default function CreateFeaturePage() {
                       )}
                     >
                       <div className="font-medium text-foreground mb-1">从零生成</div>
-                      <p className="text-sm text-muted-foreground">由 AI 直接生成全新的 mini-app 页面与交互逻辑。</p>
+                      <p className="text-sm text-muted-foreground">由 AI 直接生成全新的 workspace 前端、服务端接口与持久化状态结构。</p>
                     </button>
                     <button
                       type="button"
@@ -263,7 +263,7 @@ export default function CreateFeaturePage() {
                       )}
                     >
                       <div className="font-medium text-foreground mb-1">内置构建</div>
-                      <p className="text-sm text-muted-foreground">立即生成可运行初版，后续再交给 Agent 继续优化。</p>
+                      <p className="text-sm text-muted-foreground">立即生成可运行的 client-server 初版，包含 `server.py`、状态存储与独立预览。</p>
                     </button>
                     <button
                       type="button"
@@ -276,7 +276,7 @@ export default function CreateFeaturePage() {
                       )}
                     >
                       <div className="font-medium text-foreground mb-1">ACP 构建</div>
-                      <p className="text-sm text-muted-foreground">交给 Claude Code / Codex 一类 ACP coding agent 在后台编写。</p>
+                      <p className="text-sm text-muted-foreground">交给 Claude Code / Codex 一类 ACP coding agent 在后台编写完整 workspace 前后端。</p>
                     </button>
                   </div>
                 </div>
@@ -293,7 +293,7 @@ export default function CreateFeaturePage() {
                     data-testid="miniapp-source-path-input"
                   />
                   <p className="text-xs text-muted-foreground">
-                    会复制目录内容到 mini-app 工作区，并自动保留检测到的 LICENSE / NOTICE 文件。
+                    会复制目录内容到 mini-app 工作区；外层仍会补上统一的 workspace server 入口，并自动保留检测到的 LICENSE / NOTICE 文件。
                   </p>
                 </div>
               )}
@@ -324,7 +324,7 @@ export default function CreateFeaturePage() {
                   <div>
                     <div className="font-medium text-foreground">创建专属 Agent</div>
                     <p className="text-sm text-muted-foreground">
-                      推荐开启。系统会复制上面所选 Agent 的模型、工具和技能配置，并把当前 mini-app 目录设为它的工作目录。
+                      推荐开启。系统会复制上面所选 Agent 的模型、工具和技能配置，并把整个 workspace 根目录设为它的工作目录。
                     </p>
                   </div>
                 </label>
@@ -336,7 +336,7 @@ export default function CreateFeaturePage() {
                   id="prompt"
                   value={systemPrompt}
                   onChange={e => setSystemPrompt(e.target.value)}
-                  placeholder="补充这个工作区的业务规则、风格要求或领域约束"
+                  placeholder="补充这个 workspace 的业务规则、刷新策略、是否需要夜间 cron、哪些交互必须留在本地或服务端解决"
                   rows={3}
                   className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
                 />
@@ -424,10 +424,10 @@ export default function CreateFeaturePage() {
               <Card className="p-5">
                 <h2 className="text-base font-semibold mb-4">创建后会发生什么</h2>
                 <div className="space-y-3 text-sm text-muted-foreground">
-                  <p>1. 后端会为你创建一个工作区目录，并写入可直接运行的前端页面。</p>
-                  <p>2. 如果启用了专属 Agent，它会把这个工作区目录当成自己的主工作目录。</p>
-                  <p>3. 页面中的按钮和表单可以通过 `Sensenova-ClawMiniApp.emit()` 把事件回传给宿主，再转给 Agent。</p>
-                  <p>4. 如果你选择 ACP，后台还会记录构建日志，方便追踪 Claude Code / Codex 的编程状态。</p>
+                  <p>1. 后端会为你创建一个 workspace 目录，默认包含 `app/` 前端与 `server.py` 服务端入口。</p>
+                  <p>2. 如果启用了专属 Agent，它会把整个 workspace 根目录当成自己的主工作目录，而不只是单个前端页面目录。</p>
+                  <p>3. 生成 prompt 会强制要求：优先本地/服务端处理交互、Agent 作为最后兜底、普通问答不默认触发刷新、可选夜间 cron/后台补货。</p>
+                  <p>4. 如果你选择 ACP，后台还会记录构建日志，方便追踪 Claude Code / Codex 如何编写这个 workspace 的前后端。</p>
                 </div>
               </Card>
 
