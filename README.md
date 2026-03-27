@@ -86,8 +86,8 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/i
 
 > 详细说明见 [install/README.md](install/README.md)
 >
-> 如需验证某个发布分支或 tag，可在安装前指定 `SENSENOVA_CLAW_REPO_REF`，例如:
-> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_REPO_REF=v0.5.0 bash`
+> 如需验证某个发布分支或 tag，可在安装前指定 `SENSENOVA_CLAW_APP_BRANCH`，例如:
+> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_APP_BRANCH=v0.5.0 bash`
 
 ### Option B: 手动安装
 

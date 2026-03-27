@@ -356,6 +356,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境下 Playwright 即使能拉起 `next dev` 和 headless Chromium，也可能长时间卡住不返回最终结果；浏览器级回归要和进程内/单元测试分层看，不能把这类环境挂起误判成业务失败。
 
+### 2026-03-27 安装脚本 app 分支变量补充
+
+成功经验：
+- 对安装脚本这类 shell 逻辑，直接在 `tests/unit/test_install_scripts.py` 做脚本文本断言是最低成本回归方式，适合锁定环境变量优先级与关键日志文案。
+- `SENSENOVA_CLAW_APP_BRANCH` 这类更贴近业务语义的新变量，最好放在旧变量 `SENSENOVA_CLAW_REPO_REF` / `SENSENOVA_CLAW_REPO_BRANCH` 之前做兼容回退；这样既不破坏历史用法，也能让新入口更直观。
+- 当前仓库跑 pytest 前通常需要先执行 `UV_CACHE_DIR=/tmp/uv_cache uv sync --extra dev`，否则 `.venv` 和 `uv run` 都可能因缺少 `pytest` 直接失败。
+
+失败/风险经验：
+- 这次仅修改了 `install/install.sh` 和文档，`install/install.ps1` 仍沿用旧变量优先级；后续若要求跨平台一致，需要同步评估 PowerShell 脚本与文档示例。
+
 ### 2026-03-27 ask_user 消息内联补充
 
 成功经验：
