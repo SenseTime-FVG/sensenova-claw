@@ -27,7 +27,7 @@ import {
   useInteraction,
   useEventDispatcher,
 } from '@/contexts/ws';
-import type { GlobalAgentActivity, ProactiveResultItem } from '@/contexts/ws';
+import type { GlobalAgentActivity, ProactiveResultItem, PrefillInputPayload } from '@/contexts/ws';
 import type { PendingInteraction } from '@/components/chat/QuestionDialog';
 import type {
   ChatMessage,
@@ -94,6 +94,11 @@ export interface ChatSessionContextValue {
 
   // proactive 推送
   proactiveResults: ProactiveResultItem[];
+
+  // 推荐卡片预填
+  pendingPrefill: PrefillInputPayload | null;
+  prefillInput: (value: string | PrefillInputPayload) => void;
+  clearPendingPrefill: () => void;
 }
 
 // ── Provider 组合 ──
@@ -165,5 +170,10 @@ export function useChatSession(): ChatSessionContextValue {
     sendConfirmationResponse: interaction.sendConfirmationResponse,
     handleInteractionTimeout: interaction.handleInteractionTimeout,
     resolveInteractionFromNotification: interaction.resolveInteractionFromNotification,
+
+    // 推荐卡片预填
+    pendingPrefill: msg.pendingPrefill,
+    prefillInput: msg.prefillInput,
+    clearPendingPrefill: msg.clearPendingPrefill,
   };
 }

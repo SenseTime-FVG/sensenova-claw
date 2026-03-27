@@ -8,6 +8,7 @@ import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
 import { type ContextFileRef } from '@/lib/chatTypes';
 import { singleFileFlow, dirUploadFlow, type ProgressCallback } from '@/lib/fileUpload';
 import { UploadProgress, type UploadProgressItem } from './UploadProgress';
+import { useChatSession } from '@/contexts/ChatSessionContext';
 
 interface ChatInputProps {
   defaultAgentId: string;
@@ -43,6 +44,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [inputValue, setInputValue] = useState('');
   const [showUploadMenu, setShowUploadMenu] = useState(false);
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
+  const { pendingPrefill, clearPendingPrefill } = useChatSession();
   const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,6 +61,19 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showUploadMenu]);
+
+  useEffect(() => {
+    if (!pendingPrefill) return;
+    setInputValue(pendingPrefill.text);
+    clearPendingPrefill();
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 96) + 'px';
+        textareaRef.current.focus();
+      }
+    });
+  }, [pendingPrefill, clearPendingPrefill]);
 
   useImperativeHandle(ref, () => ({
     setInput: (text: string) => {

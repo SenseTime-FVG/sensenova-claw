@@ -4,7 +4,8 @@ import { useState, useCallback, useMemo, type RefObject } from 'react';
 import { ResponsiveGridLayout, useContainerWidth, type Layout, type LayoutItem, type ResponsiveLayouts } from 'react-grid-layout';
 import { GripHorizontal, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
 import { useDashboardData } from '@/hooks/useDashboardData';
-import { useSession } from '@/contexts/ws';
+import { useSession, useMessages } from '@/contexts/ws';
+import { useNotification } from '@/hooks/useNotification';
 import { SmartStack } from './SmartStack';
 import { RecentOutputs } from './RecentOutputs';
 import { ScheduledTasks } from './ScheduledTasks';
@@ -115,10 +116,13 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
     kanbanColumns,
     recentOutputs,
     proactiveOutputs,
+    recommendations,
     loading,
   } = useDashboardData();
 
   const { switchSession, createSession } = useSession();
+  const { prefillInput } = useMessages();
+  const { pushNotification } = useNotification();
 
   const { containerRef, width: containerWidth, mounted: containerMounted } = useContainerWidth({ initialWidth: 1200 });
 
@@ -171,6 +175,33 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
   const handleOutputClick = useCallback((sessionId: string) => {
     switchSession(sessionId);
   }, [switchSession]);
+
+  const handleRecommendationClick = useCallback(async (
+    sourceSessionId: string,
+    recommendationId: string,
+    prompt: string,
+  ) => {
+    try {
+      await switchSession(sourceSessionId);
+      prefillInput({
+        text: prompt,
+        recommendation: {
+          recommendationId,
+          sourceSessionId,
+        },
+      });
+    } catch {
+      pushNotification(
+        {
+          title: '会话切换失败',
+          body: '该推荐对应的会话暂时不可用，请稍后重试',
+          level: 'warning',
+          source: 'system',
+        },
+        { toast: true, browser: false },
+      );
+    }
+  }, [switchSession, prefillInput, pushNotification]);
 
   const handleLayoutChange = useCallback((_layout: Layout, allLayouts: Layouts) => {
     setLayouts(allLayouts);
@@ -322,7 +353,12 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
           {visibleWidgets.has('proactive') && (
             <div key="proactive">
               <WidgetCard>
-                <ProactiveAgentPanel items={proactiveOutputs} onItemClick={handleOutputClick} />
+                <ProactiveAgentPanel
+                  items={proactiveOutputs}
+                  onItemClick={handleOutputClick}
+                  recommendations={recommendations}
+                  onRecommendationClick={handleRecommendationClick}
+                />
               </WidgetCard>
             </div>
           )}

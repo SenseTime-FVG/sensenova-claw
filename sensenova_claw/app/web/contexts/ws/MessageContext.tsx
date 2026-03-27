@@ -30,9 +30,27 @@ export interface ProactiveResultItem {
   sessionId: string;
   result: string;
   receivedAt: number;
+  sourceSessionId?: string;
+  recommendationType?: string;
+  items?: Array<{
+    id: string;
+    title: string;
+    prompt: string;
+    category?: string;
+  }>;
 }
 
 // ── Context 类型 ──
+
+export interface RecommendationSendMeta {
+  recommendationId: string;
+  sourceSessionId: string;
+}
+
+export interface PrefillInputPayload {
+  text: string;
+  recommendation?: RecommendationSendMeta | null;
+}
 
 export interface MessageContextValue {
   messages: ChatMessage[];
@@ -40,6 +58,11 @@ export interface MessageContextValue {
   steps: StepItem[];
   taskProgress: TaskProgressItem[];
   proactiveResults: ProactiveResultItem[];
+
+  // 推荐卡片预填输入
+  pendingPrefill: PrefillInputPayload | null;
+  prefillInput: (value: string | PrefillInputPayload) => void;
+  clearPendingPrefill: () => void;
 
   sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string) => void;
   cancelTurn: () => void;
@@ -74,6 +97,24 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
   // proactive 推送
   const [proactiveResults, setProactiveResults] = useState<ProactiveResultItem[]>([]);
+
+  // 推荐卡片预填输入
+  const [pendingPrefill, setPendingPrefill] = useState<PrefillInputPayload | null>(null);
+
+  const prefillInput = useCallback((value: string | PrefillInputPayload) => {
+    if (typeof value === 'string') {
+      setPendingPrefill({ text: value, recommendation: null });
+      return;
+    }
+    setPendingPrefill({
+      text: value.text,
+      recommendation: value.recommendation || null,
+    });
+  }, []);
+
+  const clearPendingPrefill = useCallback(() => {
+    setPendingPrefill(null);
+  }, []);
 
   // Turn 追踪
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
@@ -265,6 +306,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           break;
         }
         case 'turn_completed': {
+          if (event.payload.source === 'recommendation') {
+            break;
+          }
           const final = event.payload.final_response || '';
           const completedTurnId = event.payload.turn_id || null;
           if (completedTurnId) {
@@ -378,11 +422,23 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         case 'proactive_result': {
           const { job_id: jobId, job_name: jobName, result: resultText } = event.payload;
           const resultSessionId = event.payload.session_id || event.session_id || '';
+          const sourceSessionId = event.payload.source_session_id ? String(event.payload.source_session_id) : undefined;
+          const recommendationType = event.payload.recommendation_type ? String(event.payload.recommendation_type) : undefined;
+          const items = Array.isArray(event.payload.items) ? event.payload.items : undefined;
+
+          const newItem: ProactiveResultItem = {
+            jobId, jobName, result: resultText,
+            sessionId: resultSessionId,
+            receivedAt: Date.now(),
+            sourceSessionId,
+            recommendationType,
+            items,
+          };
+
           if (resultText) {
             setProactiveResults(prev => {
-              if (prev.some(r => r.jobId === jobId && r.sessionId === resultSessionId)) return prev;
-              const next = [{ jobId, jobName, sessionId: resultSessionId, result: resultText, receivedAt: Date.now() }, ...prev];
-              return next.slice(0, 50);
+              const deduped = prev.filter(r => !(r.jobId === jobId && r.sessionId === resultSessionId));
+              return [newItem, ...deduped].slice(0, 50);
             });
             refreshTaskGroups();
             pushNotification({
@@ -502,6 +558,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     steps: rightSteps,
     taskProgress: rightTaskProgress,
     proactiveResults,
+    pendingPrefill,
+    prefillInput,
+    clearPendingPrefill,
     sendMessage,
     cancelTurn,
     handleSkillInvoke,

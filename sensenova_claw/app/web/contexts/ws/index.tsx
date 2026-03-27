@@ -10,7 +10,7 @@ export { SessionProvider, useSession } from './SessionContext';
 export type { SessionContextValue } from './SessionContext';
 
 export { MessageProvider, useMessages } from './MessageContext';
-export type { MessageContextValue, ProactiveResultItem } from './MessageContext';
+export type { MessageContextValue, ProactiveResultItem, PrefillInputPayload, RecommendationSendMeta } from './MessageContext';
 
 export { InteractionProvider, useInteraction } from './InteractionContext';
 export type { InteractionContextValue } from './InteractionContext';
