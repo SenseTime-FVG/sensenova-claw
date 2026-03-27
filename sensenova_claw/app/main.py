@@ -2,7 +2,7 @@
 """Sensenova-Claw 统一 CLI 入口
 
 用法:
-    sensenova-claw run [--port 8000] [--frontend-port 3000] [--no-frontend] [--dev]
+    sensenova-claw run [--port 8000] [--frontend-port 3000] [--no-frontend] [--dev] [--production]
     sensenova-claw cli [--host localhost] [--port 8000] [--agent default] [--session ID] [--debug] [-e MSG]
     sensenova-claw version
 """
@@ -56,7 +56,7 @@ def _find_node() -> str:
 
 
 def _build_frontend_dev_cmd(web_dir: Path, frontend_port: int) -> list[str]:
-    """优先直接启动 next，避免 Windows 下 npm 包装进程过早退出。"""
+    """优先直接启动 next dev，避免 Windows 下 npm 包装进程过早退出。"""
     next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
     node = _find_node()
     if node and next_cli.exists():
@@ -65,6 +65,23 @@ def _build_frontend_dev_cmd(web_dir: Path, frontend_port: int) -> list[str]:
     npm = _find_npm()
     if npm:
         return [npm, "run", "dev", "--", "-p", str(frontend_port)]
+    return []
+
+
+def _build_frontend_prod_cmd(web_dir: Path, frontend_port: int) -> list[str]:
+    """生产模式：使用 next start 启动预构建的前端。"""
+    # 检查是否已经 build 过
+    if not (web_dir / ".next").exists():
+        return []
+
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
+    node = _find_node()
+    if node and next_cli.exists():
+        return [node, str(next_cli), "start", "-p", str(frontend_port)]
+
+    npm = _find_npm()
+    if npm:
+        return [npm, "run", "start", "--", "-p", str(frontend_port)]
     return []
 
 
@@ -156,6 +173,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     frontend_port = args.frontend_port
     no_frontend = args.no_frontend
     dev_mode = args.dev
+    production_mode = args.production
 
     # --dev 模式：使用当前工作目录的代码
     if dev_mode:
@@ -203,10 +221,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     backend_cmd = [
         sys.executable, "-m", "uvicorn",
         "sensenova_claw.app.gateway.main:app",
-        "--reload",
         "--host", "0.0.0.0",
         "--port", str(backend_port),
     ]
+    if not production_mode:
+        backend_cmd.insert(4, "--reload")
     print(f"启动后端服务: http://localhost:{backend_port}")
     backend_proc = _spawn_managed_process(backend_cmd, cwd=str(project_root), env=env)
     procs.append(backend_proc)
@@ -220,7 +239,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     # 启动前端
     frontend_proc = None
     if not no_frontend:
-        frontend_cmd = _build_frontend_dev_cmd(web_dir, frontend_port)
+        if production_mode:
+            frontend_cmd = _build_frontend_prod_cmd(web_dir, frontend_port)
+            if not frontend_cmd:
+                print("警告: 前端未构建，请先执行 'npm run build' 或使用 --production 安装。回退到开发模式。", file=sys.stderr)
+                frontend_cmd = _build_frontend_dev_cmd(web_dir, frontend_port)
+        else:
+            frontend_cmd = _build_frontend_dev_cmd(web_dir, frontend_port)
         if not frontend_cmd:
             print("警告: 未找到可用的 Node.js/npm，跳过前端启动。安装 Node.js 后可使用前端 dashboard。", file=sys.stderr)
         elif not (web_dir / "node_modules").exists():
@@ -254,7 +279,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # 后端会在启动时打印 token URL，这里也提示用户
     print()
     print("=" * 50)
-    print(f"  Sensenova-Claw 已启动" + (" (dev mode)" if dev_mode else ""))
+    mode_label = " (dev mode)" if dev_mode else " (production)" if production_mode else ""
+    print(f"  Sensenova-Claw 已启动{mode_label}")
     print(f"  后端 API:    http://localhost:{backend_port}")
     if dev_mode:
         print(f"  代码目录:    {project_root}")
@@ -350,6 +376,7 @@ def main() -> int:
     run_parser.add_argument("--frontend-port", type=int, default=3000, help="前端端口 (默认 3000)")
     run_parser.add_argument("--no-frontend", action="store_true", help="仅启动后端，不启动前端")
     run_parser.add_argument("--dev", action="store_true", help="开发模式：使用当前目录的代码而非安装目录")
+    run_parser.add_argument("--production", action="store_true", help="生产模式：前端使用预构建版本(next start)，后端禁用热重载")
 
     # sensenova_claw cli
     cli_parser = subparsers.add_parser("cli", help="启动 CLI 交互客户端")
