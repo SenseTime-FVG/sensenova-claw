@@ -15,6 +15,8 @@ def test_install_sh_uses_editable_tool_install():
         in content
     )
     assert 'info "app 目录将使用仓库分支/引用: $REPO_REF"' in content
+    assert 'if [ "$DEV_MODE" != "true" ]; then' in content
+    assert "npm run build 2>&1 | tail -10" in content
 
 
 def test_install_ps1_uses_editable_tool_install():

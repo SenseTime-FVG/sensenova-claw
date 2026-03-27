@@ -366,6 +366,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 这次仅修改了 `install/install.sh` 和文档，`install/install.ps1` 仍沿用旧变量优先级；后续若要求跨平台一致，需要同步评估 PowerShell 脚本与文档示例。
 
+### 2026-03-27 PR171 同步补充
+
+成功经验：
+- 对“把某个既有 PR 的相关修改同步到当前分支”这类需求，先用 `gh pr view <id> --json commits,files` 和 `gh pr diff <id> --patch` 确认最终影响文件与提交顺序，再决定是 cherry-pick 整个序列还是手工摘取，能明显减少误带无关改动的风险。
+- 遇到 cherry-pick 冲突时，先保留当前分支独有改动，再仅引入 PR 冲突块里的最小增量，通常比整文件覆盖更稳，尤其是 `main.py` 这类在不同分支上都在演进的入口文件。
+- 给既有测试文件补新用例时必须先检查它是否已有历史断言；这次如果不先对照 `git show HEAD:<file>`，很容易误把原有进程管理测试覆盖掉。
+
+失败/风险经验：
+- `gh pr diff --patch` 展示的是 patch，不是“最终净效果说明”；如果直接照 patch 首个提交去整文件替换，容易把 PR 分支上的上下文改动一并带入当前分支。
+
 ### 2026-03-27 ask_user 消息内联补充
 
 成功经验：
