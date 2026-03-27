@@ -1,5 +1,17 @@
 import { expect, test } from '@playwright/test';
 
+async function waitForMockWebSocketReady(page: import('@playwright/test').Page) {
+  await page.waitForFunction(() => {
+    const ws = (window as {
+      __mockWs?: {
+        send?: unknown;
+        onmessage?: unknown;
+      };
+    }).__mockWs;
+    return typeof ws?.send === 'function' && typeof ws?.onmessage === 'function';
+  });
+}
+
 function installAskUserMockApp() {
   const NativeWebSocket = window.WebSocket;
   const nativeFetch = window.fetch.bind(window);
@@ -184,6 +196,7 @@ test('ask_user 长选项在通知提示框内换行，不应横向溢出', async
 
 test('ask_user 无选项时应在通知提示框显示输入框并提交回答', async ({ page }) => {
   await page.goto('/chat?token=e2e-sensenova-claw-token');
+  await waitForMockWebSocketReady(page);
 
   await page.evaluate(() => {
     const sent: string[] = [];
