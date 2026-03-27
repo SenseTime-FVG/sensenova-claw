@@ -369,6 +369,7 @@ function PPTWorkspace() {
                 <button
                   type="button"
                   onClick={() => { startNewChat(); createSession('ppt-agent'); }}
+                  data-testid="ppt-new-chat-button"
                   className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium text-primary hover:bg-primary/10 transition-colors"
                 >
                   <Plus className="w-3 h-3" />

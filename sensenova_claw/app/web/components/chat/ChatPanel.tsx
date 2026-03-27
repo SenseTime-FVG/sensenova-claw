@@ -38,6 +38,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     sessions,
     messages,
     isTyping,
+    activeInteraction,
+    interactionSubmitting,
     sendMessage,
     resetIfNeeded,
     startNewChat,
@@ -189,7 +191,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         onSend={handleSend}
         onSlashSubmit={() => false}
         onStop={cancelTurn}
-        disabled={isTyping}
+        disabled={interactionSubmitting || activeInteraction?.kind === 'confirmation' || (isTyping && activeInteraction?.kind !== 'question')}
         wsConnected={wsConnected}
         handleSkillInvoke={handleSkillInvoke}
         hideAgentSelector={hideAgentSelector}

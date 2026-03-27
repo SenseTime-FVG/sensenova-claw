@@ -52,7 +52,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [inputValue, setInputValue] = useState('');
   const [draftRecommendation, setDraftRecommendation] = useState<RecommendationSendMeta | null>(null);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
-  const { currentSessionId, pendingPrefill, clearPendingPrefill } = useChatSession();
+  const { currentSessionId, pendingPrefill, clearPendingPrefill, activeInteraction } = useChatSession();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -172,13 +172,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       return;
     }
 
-    setIsSubmitting(true);
+    const isQuestionReply = activeInteraction?.kind === 'question';
+    if (!isQuestionReply) {
+      setIsSubmitting(true);
+    }
     const contextFiles = parseAtRefs(content);
     onSend(content, contextFiles.length > 0 ? contextFiles : undefined, draftRecommendation);
     setDraftRecommendation(null);
     setInputValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [inputValue, wsConnected, disabled, isSubmitting, handleSlashSubmitHook, onSlashSubmit, onSend, parseAtRefs, draftRecommendation]);
+  }, [inputValue, wsConnected, disabled, isSubmitting, handleSlashSubmitHook, onSlashSubmit, onSend, parseAtRefs, draftRecommendation, activeInteraction]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing || isComposingRef.current) return;
