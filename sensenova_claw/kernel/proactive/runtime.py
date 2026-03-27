@@ -150,6 +150,18 @@ class ProactiveRuntime:
         """列出所有 proactive jobs。"""
         return list(self._jobs.values())
 
+    async def trigger_job(self, job_id: str, session_id: str | None = None) -> None:
+        """手动触发 proactive job。"""
+        job = self._jobs.get(job_id)
+        if not job:
+            raise ValueError(f"Job not found: {job_id}")
+        if not job.enabled:
+            raise ValueError(f"Job is disabled: {job_id}")
+        if job.id in self._executor._running_jobs:
+            raise ValueError(f"Job is already running: {job_id}")
+
+        await self._evaluate_and_execute(job, trigger_event=None)
+
     # ---------- 触发与执行 ----------
 
     async def _evaluate_and_execute(self, job: ProactiveJob, trigger_event: EventEnvelope | None = None) -> bool:
@@ -235,6 +247,7 @@ class ProactiveRuntime:
 
         logger.info("Loaded %d proactive jobs (%d from config)", len(self._jobs), len(config_jobs))
         self._register_builtin_recommendation_job()
+        self._register_builtin_interest_push_job()
 
     def _register_builtin_recommendation_job(self) -> None:
         """注册内置的 turn-end 推荐 job。"""
@@ -265,9 +278,9 @@ class ProactiveRuntime:
                 recommendation_type="turn_end",
             ),
             safety=SafetyConfig(
-                max_tool_calls=rec_cfg.get("max_tool_calls", 5),
-                max_llm_calls=rec_cfg.get("max_llm_calls", 3),
-                max_duration_ms=rec_cfg.get("max_duration_ms", 30000),
+                max_tool_calls=rec_cfg.get("max_tool_calls", 50),
+                max_llm_calls=rec_cfg.get("max_llm_calls", 25),
+                max_duration_ms=rec_cfg.get("max_duration_ms", 120000),
             ),
             state=JobState(),
             source="builtin",
@@ -293,7 +306,7 @@ class ProactiveRuntime:
             enabled=True,
             trigger=None,
             task=ProactiveTask(
-                prompt="探索我的记忆系统，找出我最可能感兴趣的领域，搜集相关领域的最新信息并整理成简洁的报告推荐.",
+                prompt="探索我的记忆系统，找出3-5条我可能感兴趣的信息或待办事项。输出简洁的要点列表。",
             ),
             delivery=DeliveryConfig(
                 channels=["web"],
