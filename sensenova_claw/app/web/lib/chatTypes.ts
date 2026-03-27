@@ -364,7 +364,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
       continue;
     }
 
-    if (eventType === 'user_question_asked') {
+    if (eventType === 'user_question_asked' || eventType === 'user.question_asked') {
       rebuilt = attachAskUserToLatestToolMessage(rebuilt, {
         questionId: String(payload.question_id || ''),
         sourceSessionId: String(payload.session_id || event.session_id || ''),
@@ -379,7 +379,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
       continue;
     }
 
-    if (eventType === 'user_question_answered_event') {
+    if (eventType === 'user_question_answered_event' || eventType === 'user.question_answered') {
       rebuilt = updateAskUserToolState(rebuilt, String(payload.question_id || ''), {
         pending: false,
         resolved: true,

@@ -367,6 +367,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 仅等待 `window.__mockWs` 存在不够，测试若在 `onmessage` 尚未挂好时就发事件，消息会被静默丢掉；需要等到 mock socket 的 `send` 和 `onmessage` 都可用后再注入事件。
 - `/sessions/[id]` 的 `Thinking` 分组如果默认折叠，会把 ask_user 内联表单藏起来；这类“消息内联交互”不能依赖用户先展开二级容器才能操作。
 
+### 2026-03-27 ask_user 历史恢复补充
+
+成功经验：
+- `/api/sessions/{id}/events` 返回的是仓库落盘后的内核事件名，例如 `user.question_asked`、`user.question_answered`，而不是前端实时 WebSocket 的 `user_question_asked`、`user_question_answered_event`；聊天历史重建必须同时兼容两套命名。
+- 对“切换会话回来 UI 丢状态”这类问题，最有效的 e2e 是直接 mock `/api/sessions/*/events` 返回历史事件，再通过真实的 session 切换操作验证恢复结果；这样能把“实时链路正常但历史恢复失效”单独钉住。
+
+失败/风险经验：
+- 如果只用实时 WebSocket 事件写回归，`ask_user` 看起来是好的，但一旦用户离开当前会话再回来，依赖历史事件重建的内联卡片仍会消失；这类功能必须区分“实时显示”和“历史恢复”两条路径分别覆盖。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：
@@ -1516,3 +1525,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 在嵌套目录跑真实 `npm install` 时，npm 版本可能顺手重写下游 `package-lock.json` 的元数据；如果这些改动与需求无关，提交前应恢复，避免把环境噪音混进功能修复。
+### 2026-03-27 PPT ask_user 发送按钮卡死补充
+
+成功经验：
+- 工作台类页面若复用 `ChatPanel`，其输入禁用条件必须与 `/chat` 主页面保持一致；像 `interactionSubmitting`、`activeInteraction.kind === 'confirmation'` 这类交互态如果漏传，`ask_user`/审批类流程就会在工作台里表现出与主聊天页不同的 bug。
+- `ChatInput` 的本地 `isSubmitting` 不能盲目覆盖所有发送场景；当主输入框实际上是在提交 `ask_user` 回复时，应跳过普通消息的本地提交锁，否则很容易在回复后把发送按钮永久卡成 disabled。
+- 这类“看起来像按钮坏了”的问题，最有效的前端回归是直接断言 WebSocket 出站序列：先验证第一条是 `user_question_answered`，再验证收到 `user_question_answered_event` 后第二条恢复为 `user_input`。
+- 对“旧会话 ask_user 未完成，点击新建后首条消息被劫持”的问题，不能只看 UI 状态；要额外锁住“点击新建后已经发出 `create_session`，则后续输入不得再走 `user_question_answered`”这条协议级约束。
+
+失败/风险经验：
+- 现有 `ask-user.spec.ts` 中部分旧用例对文案和 WebSocket 初始化时机依赖较强，补跑相邻回归时可能先撞到与本次修复无关的 strict mode 选择器冲突或 `__mockWs` 未就绪问题；验证本次改动时应优先使用更聚焦的新场景。
+- Playwright 在聊天页里若直接用 `getByText('E2E Session')` 这类宽泛选择器，容易同时命中 agent 列表和 session 列表；会话点击应优先收窄到 `getByTestId('session-list')`。
+- `/sessions/[id]` 这类页面的 mock WebSocket 挂载时机不一定和 `/chat` 一样快；凡是用 `page.evaluate(() => __mockWs.emit(...))` 的 session 场景，最好先显式 `waitForMockWebSocketReady(page)`，否则会偶发 `Cannot read properties of undefined (reading 'emit')`。
+- 工作台首页 `/`、PPT `/ppt`、研究页等复用 `ChatPanel` 的页面，只要 `ChatPanel` 的禁用逻辑和 `ChatInput` 的 `ask_user` 提交语义正确，这类“回复 ask_user 后发送按钮卡死”的问题就会一起收敛；验证时可以用一个根工作台页和一个专用工作台页做抽样回归。
+- `/ppt` 这类带全局通知浮层的页面，Playwright 直接点击右上角按钮可能被 toast 遮挡误伤；如果要验证按钮处理链本身，优先给目标按钮加 `data-testid`，必要时直接触发 DOM `click()`，否则很容易把“按钮没被真正点到”误判成业务状态机 bug。
