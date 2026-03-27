@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import os
-import signal
 import sys
 import time
 from pathlib import Path
 
 import pytest
 
+from sensenova_claw.app import main as app_main
 from sensenova_claw.app.main import _spawn_managed_process, _terminate_managed_process
+
+
+def _touch(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="该测试仅覆盖类 Unix 进程组行为")
@@ -62,3 +67,42 @@ def test_spawn_managed_process_creates_new_process_group(tmp_path: Path):
         assert os.getpgid(proc.pid) == proc.pid
     finally:
         _terminate_managed_process(proc, timeout=1)
+
+
+def test_build_frontend_dev_cmd_prefers_next_cli(tmp_path, monkeypatch):
+    web_dir = tmp_path / "web"
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
+    _touch(next_cli)
+
+    monkeypatch.setattr(app_main, "_find_node", lambda: "/usr/bin/node")
+    monkeypatch.setattr(app_main, "_find_npm", lambda: "/usr/bin/npm")
+
+    assert app_main._build_frontend_dev_cmd(web_dir, 3000) == [
+        "/usr/bin/node",
+        str(next_cli),
+        "dev",
+        "-p",
+        "3000",
+    ]
+
+
+def test_build_frontend_prod_cmd_requires_build_artifact(tmp_path, monkeypatch):
+    web_dir = tmp_path / "web"
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
+    _touch(next_cli)
+
+    monkeypatch.setattr(app_main, "_find_node", lambda: "")
+    monkeypatch.setattr(app_main, "_find_npm", lambda: "/usr/bin/npm")
+
+    assert app_main._build_frontend_prod_cmd(web_dir, 3000) == []
+
+    (web_dir / ".next").mkdir(parents=True, exist_ok=True)
+
+    assert app_main._build_frontend_prod_cmd(web_dir, 3000) == [
+        "/usr/bin/npm",
+        "run",
+        "start",
+        "--",
+        "-p",
+        "3000",
+    ]

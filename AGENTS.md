@@ -356,6 +356,26 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境下 Playwright 即使能拉起 `next dev` 和 headless Chromium，也可能长时间卡住不返回最终结果；浏览器级回归要和进程内/单元测试分层看，不能把这类环境挂起误判成业务失败。
 
+### 2026-03-27 安装脚本 app 分支变量补充
+
+成功经验：
+- 对安装脚本这类 shell 逻辑，直接在 `tests/unit/test_install_scripts.py` 做脚本文本断言是最低成本回归方式，适合锁定环境变量优先级与关键日志文案。
+- `SENSENOVA_CLAW_APP_BRANCH` 这类更贴近业务语义的新变量，最好放在旧变量 `SENSENOVA_CLAW_REPO_REF` / `SENSENOVA_CLAW_REPO_BRANCH` 之前做兼容回退；这样既不破坏历史用法，也能让新入口更直观。
+- 当前仓库跑 pytest 前通常需要先执行 `UV_CACHE_DIR=/tmp/uv_cache uv sync --extra dev`，否则 `.venv` 和 `uv run` 都可能因缺少 `pytest` 直接失败。
+
+失败/风险经验：
+- 这次仅修改了 `install/install.sh` 和文档，`install/install.ps1` 仍沿用旧变量优先级；后续若要求跨平台一致，需要同步评估 PowerShell 脚本与文档示例。
+
+### 2026-03-27 PR171 同步补充
+
+成功经验：
+- 对“把某个既有 PR 的相关修改同步到当前分支”这类需求，先用 `gh pr view <id> --json commits,files` 和 `gh pr diff <id> --patch` 确认最终影响文件与提交顺序，再决定是 cherry-pick 整个序列还是手工摘取，能明显减少误带无关改动的风险。
+- 遇到 cherry-pick 冲突时，先保留当前分支独有改动，再仅引入 PR 冲突块里的最小增量，通常比整文件覆盖更稳，尤其是 `main.py` 这类在不同分支上都在演进的入口文件。
+- 给既有测试文件补新用例时必须先检查它是否已有历史断言；这次如果不先对照 `git show HEAD:<file>`，很容易误把原有进程管理测试覆盖掉。
+
+失败/风险经验：
+- `gh pr diff --patch` 展示的是 patch，不是“最终净效果说明”；如果直接照 patch 首个提交去整文件替换，容易把 PR 分支上的上下文改动一并带入当前分支。
+
 ### 2026-03-27 ask_user 消息内联补充
 
 成功经验：

@@ -45,7 +45,44 @@ def _find_npm() -> str:
         return ""
     return npm
 
+def _find_node() -> str:
+    """查找 node 可执行文件路径。"""
+    import shutil
 
+    node = shutil.which("node")
+    if not node:
+        return ""
+    return node
+
+
+def _build_frontend_dev_cmd(web_dir: Path, frontend_port: int) -> list[str]:
+    """优先直接启动 next dev，避免 Windows 下 npm 包装进程过早退出。"""
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
+    node = _find_node()
+    if node and next_cli.exists():
+        return [node, str(next_cli), "dev", "-p", str(frontend_port)]
+
+    npm = _find_npm()
+    if npm:
+        return [npm, "run", "dev", "--", "-p", str(frontend_port)]
+    return []
+
+
+def _build_frontend_prod_cmd(web_dir: Path, frontend_port: int) -> list[str]:
+    """生产模式：使用 next start 启动预构建的前端。"""
+    # 检查是否已经 build 过
+    if not (web_dir / ".next").exists():
+        return []
+
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
+    node = _find_node()
+    if node and next_cli.exists():
+        return [node, str(next_cli), "start", "-p", str(frontend_port)]
+
+    npm = _find_npm()
+    if npm:
+        return [npm, "run", "start", "--", "-p", str(frontend_port)]
+    return []
 def _spawn_managed_process(
     cmd: list[str],
     *,
@@ -152,14 +189,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         # 将本地项目根目录置于 PYTHONPATH 最前，确保子进程优先导入本地代码
         env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
 
-    # 启动后端
+    # 启动后端：有 .next/ 预构建产物时认为是生产环境，不开启热重载
+    is_production = (web_dir / ".next").exists()
     backend_cmd = [
         sys.executable, "-m", "uvicorn",
         "sensenova_claw.app.gateway.main:app",
-        "--reload",
         "--host", "0.0.0.0",
         "--port", str(backend_port),
     ]
+    if not is_production:
+        backend_cmd.insert(4, "--reload")
     print(f"启动后端服务: http://localhost:{backend_port}")
     backend_proc = _spawn_managed_process(backend_cmd, cwd=str(project_root), env=env)
     procs.append(backend_proc)
@@ -170,12 +209,17 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("错误: 后端启动失败", file=sys.stderr)
         return 1
 
-    # 启动前端
+    # 启动前端：检测到 .next/ 目录（已 build）自动用 next start，否则回退 next dev
     frontend_proc = None
     if not no_frontend:
-        npm = _find_npm()
-        if not npm:
-            print("警告: 未找到 npm，跳过前端启动。安装 Node.js 后可使用前端 dashboard。", file=sys.stderr)
+        frontend_cmd = _build_frontend_prod_cmd(web_dir, frontend_port)
+        if frontend_cmd:
+            print("检测到前端预构建产物，使用 next start（生产模式）")
+        else:
+            print("未检测到前端预构建产物，使用 next dev（开发模式）")
+            frontend_cmd = _build_frontend_dev_cmd(web_dir, frontend_port)
+        if not frontend_cmd:
+            print("警告: 未找到可用的 Node.js/npm，跳过前端启动。安装 Node.js 后可使用前端 dashboard。", file=sys.stderr)
         elif not (web_dir / "node_modules").exists():
             print("警告: 前端依赖未安装，请先执行 'npm install'。跳过前端启动。", file=sys.stderr)
         else:
@@ -183,7 +227,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             frontend_env = env.copy()
             frontend_env["PORT"] = str(frontend_port)
             frontend_proc = _spawn_managed_process(
-                [npm, "run", "dev"],
+                frontend_cmd,
                 cwd=str(web_dir),
                 env=frontend_env,
             )
@@ -208,7 +252,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # 后端会在启动时打印 token URL，这里也提示用户
     print()
     print("=" * 50)
-    print(f"  Sensenova-Claw 已启动" + (" (dev mode)" if dev_mode else ""))
+    mode_label = " (dev mode)" if dev_mode else " (production)" if is_production else ""
+    print(f"  Sensenova-Claw 已启动{mode_label}")
     print(f"  后端 API:    http://localhost:{backend_port}")
     if dev_mode:
         print(f"  代码目录:    {project_root}")
