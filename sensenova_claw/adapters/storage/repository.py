@@ -275,24 +275,26 @@ class Repository:
         return sessions[:limit]
 
     async def create_turn(self, turn_id: str, session_id: str, user_input: str) -> None:
+        await asyncio.to_thread(self._sync_create_turn, turn_id, session_id, user_input)
+
+    def _sync_create_turn(self, turn_id: str, session_id: str, user_input: str) -> None:
         conn = self._conn()
         conn.execute(
             "INSERT INTO turns (turn_id, session_id, status, started_at, user_input) VALUES (?, ?, ?, ?, ?)",
             (turn_id, session_id, "started", time.time(), user_input),
         )
         conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def complete_turn(self, turn_id: str, agent_response: str) -> None:
+        await asyncio.to_thread(self._sync_complete_turn, turn_id, agent_response)
+
+    def _sync_complete_turn(self, turn_id: str, agent_response: str) -> None:
         conn = self._conn()
         conn.execute(
             "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
             ("completed", time.time(), agent_response, turn_id),
         )
         conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def update_turn_status(
         self,
@@ -301,14 +303,15 @@ class Repository:
         agent_response: str | None = None,
     ) -> None:
         """更新 turn 状态，必要时补充结束时间与最终输出。"""
+        await asyncio.to_thread(self._sync_update_turn_status, turn_id, status, agent_response)
+
+    def _sync_update_turn_status(self, turn_id: str, status: str, agent_response: str | None) -> None:
         conn = self._conn()
         conn.execute(
             "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
             (status, time.time(), agent_response, turn_id),
         )
         conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def log_event(self, event: EventEnvelope) -> None:
         await asyncio.to_thread(self._sync_log_event, event)
@@ -332,10 +335,11 @@ class Repository:
         conn.commit()
 
     async def get_session_events(self, session_id: str) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._sync_get_session_events, session_id)
+
+    def _sync_get_session_events(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp", (session_id,)).fetchall()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [dict(row) for row in rows]
 
     def _parse_payload_json(self, raw: str | bytes | None) -> dict[str, Any]:
@@ -458,13 +462,14 @@ class Repository:
         return pending
 
     async def get_session_turns(self, session_id: str) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._sync_get_session_turns, session_id)
+
+    def _sync_get_session_turns(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             "SELECT * FROM turns WHERE session_id = ? ORDER BY started_at",
             (session_id,),
         ).fetchall()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [dict(row) for row in rows]
 
     # ---------- Sessions 表迁移 ----------
@@ -596,13 +601,14 @@ class Repository:
 
     async def get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
         """获取会话的所有消息（按时间排序），返回 LLM 消息格式"""
+        return await asyncio.to_thread(self._sync_get_session_messages, session_id)
+
+    def _sync_get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             "SELECT role, content, tool_calls, tool_call_id, tool_name FROM messages WHERE session_id = ? ORDER BY created_at",
             (session_id,),
         ).fetchall()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         messages: list[dict[str, Any]] = []
         for row in rows:
             msg: dict[str, Any] = {"role": row[0]}
