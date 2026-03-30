@@ -306,7 +306,7 @@ class ProactiveRuntime:
             enabled=True,
             trigger=None,
             task=ProactiveTask(
-                prompt="探索我的记忆系统，找出3-5条我可能感兴趣的信息或待办事项。输出简洁的要点列表。",
+                prompt="探索我的记忆系统，找出我最可能感兴趣的领域，搜集相关领域的最新信息并整理成简洁的报告推荐.",
             ),
             delivery=DeliveryConfig(
                 channels=["web"],

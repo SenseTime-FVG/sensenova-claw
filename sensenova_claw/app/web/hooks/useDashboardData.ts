@@ -93,6 +93,7 @@ export interface RecommendationItem {
 
 export interface RecommendationGroup {
   sourceSessionId: string;
+  sourceSessionTitle: string;
   items: RecommendationItem[];
   receivedAt: number;
 }
@@ -189,6 +190,7 @@ export function aggregateRecommendations(proactiveResults: ProactiveResultItem[]
   return Array.from(latestBySession.entries())
     .map(([sourceSessionId, result]) => ({
       sourceSessionId,
+      sourceSessionTitle: sourceSessionId,
       receivedAt: result.receivedAt,
       items: (result.items || []).slice(0, 5).map(item => ({
         id: item.id,
@@ -337,8 +339,22 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
   // ── Proactive 输出（基于最近完成的 cron 和活跃会话生成建议） ──
   const proactiveItems: ProactiveItem[] = [];
   const recommendations = useMemo(
-    () => aggregateRecommendations(proactiveResults || []),
-    [proactiveResults],
+    () => {
+      const sessionTitleMap = new Map(
+        sessions.map((session: { session_id: string; meta: string }) => [session.session_id, getSessionTitle(session.meta)]),
+      );
+
+      return aggregateRecommendations(proactiveResults || []).map((group) => {
+        const sessionTitle = sessionTitleMap.get(group.sourceSessionId);
+        return {
+          ...group,
+          sourceSessionTitle: sessionTitle && sessionTitle !== '未命名会话'
+            ? sessionTitle
+            : group.sourceSessionId,
+        };
+      });
+    },
+    [proactiveResults, sessions],
   );
 
   // ── Proactive Agent 会话产出（session 派生 + 实时推送合并） ──
@@ -357,10 +373,10 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
     preview: (s.last_agent_response || '').slice(0, 150) || undefined,
   }));
 
-  // 合并实时推送结果：仅保留 session 列表中尚未出现的条目
+  // 合并实时推送结果：仅保留 session 列表中尚未出现的条目，排除推荐类型（推荐走独立卡片）
   const existingSessionIds = new Set(sessionDerivedOutputs.map(o => o.id));
   const realtimeOnly = (proactiveResults || [])
-    .filter(r => !existingSessionIds.has(r.sessionId))
+    .filter(r => !existingSessionIds.has(r.sessionId) && !r.recommendationType)
     .map((r, i): RecentOutput => ({
       id: r.sessionId || r.jobId,
       title: r.jobName || '主动推送',

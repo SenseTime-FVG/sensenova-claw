@@ -108,9 +108,9 @@ export function DashboardNav({
   onGroupToggle?: (group: SubNavGroup) => void;
 }) {
   const pathname = usePathname();
+  const { t } = useI18n();
   const featureNavItems = useFeatureNavItems();
   const adminNavItems = useAdminNavItems();
-  const { t } = useI18n();
   const { startNewChat } = useSession();
   const mainNavItems: NavItem[] = useMemo(() => (
     mainNavItemDefs.map((item) => ({
@@ -181,7 +181,7 @@ export function DashboardNav({
         )}
       >
         <Zap className="h-3.5 w-3.5" />
-        功能
+        {t('nav.features')}
         <ChevronDown
           className={cn(
             'h-3 w-3 transition-transform duration-200',
@@ -200,7 +200,7 @@ export function DashboardNav({
         )}
       >
         <Settings className="h-3.5 w-3.5" />
-        管理
+        {t('nav.admin')}
         <ChevronDown
           className={cn(
             'h-3 w-3 transition-transform duration-200',

@@ -2,34 +2,17 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Bot, ChevronLeft } from 'lucide-react';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 import { useFilePanel } from '@/contexts/FilePanelContext';
-import { MessageList } from './MessageBubble';
-import { TypingIndicator } from './TypingIndicator';
+import { MessageArea } from './MessageArea';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
-import { SlideViewer, useSlideSet } from '@/components/ppt/PPTViewer';
-import { FilePreview } from '@/components/files/FilePreview';
-import type { FilePreviewType } from '@/components/files/fileTypes';
+import { useSlideSet } from '@/components/ppt/PPTViewer';
+import { type FilePreviewType } from '@/components/files/fileTypes';
 import { type ContextFileRef, getAgentId } from '@/lib/chatTypes';
-import { authFetch, API_BASE } from '@/lib/authFetch';
+import { fetchWorkdirRoot } from '@/lib/utils';
+import { useResizablePreview } from '@/hooks/useResizablePreview';
+import { InlinePreview } from './InlinePreview';
 import { useI18n } from '@/contexts/I18nContext';
-
-/* ── workdir 根目录缓存 ── */
-let _workdirRootCache: string | null | undefined;
-async function fetchWorkdirRoot(): Promise<string | null> {
-  if (_workdirRootCache !== undefined) return _workdirRootCache as string | null;
-  let result: string | null = null;
-  try {
-    const res = await authFetch(`${API_BASE}/api/files/roots`);
-    if (res.ok) {
-      const data = await res.json();
-      const entry = (data.roots || []).find((r: { name: string }) => r.name === 'Agent 工作区');
-      result = entry?.path ?? null;
-    }
-  } catch { /* ignore */ }
-  _workdirRootCache = result;
-  return result;
-}
 
 interface ChatPanelProps {
   defaultAgentId: string;
@@ -60,34 +43,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     startNewChat,
     handleSkillInvoke,
     cancelTurn,
-    wsSend,
+    reconnect,
   } = useChatSession();
 
   const { openToPath } = useFilePanel();
   const [selectedAgent, setSelectedAgent] = useState(defaultAgentId);
   const [slidePreviewDir, setSlidePreviewDir] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<{ path: string; type: FilePreviewType } | null>(null);
-  const [previewHeight, setPreviewHeight] = useState(350);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  
+  const { previewHeight, onPreviewResize } = useResizablePreview();
   const chatInputRef = useRef<ChatInputHandle>(null);
-
   const slideSet = useSlideSet(slidePreviewDir);
-
-  const onPreviewResize = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startH = previewHeight;
-    const onMove = (ev: MouseEvent) => {
-      const delta = startY - ev.clientY;
-      setPreviewHeight(Math.max(180, Math.min(window.innerHeight * 0.8, startH + delta)));
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [previewHeight]);
 
   // 页面挂载时：通过 switchSession 跳转过来则保留会话，否则重置为干净状态
   useEffect(() => {
@@ -97,24 +63,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
   }, []);
 
   // 当切换 session 时，从 session meta 中提取 agent_id 并设置为当前选中的 agent
-  // lockAgent 模式下始终使用 defaultAgentId，不被会话实际 agent 覆盖
   useEffect(() => {
     if (lockAgent) return;
     if (currentSessionId) {
       const currentSession = sessions.find(s => s.session_id === currentSessionId);
       if (currentSession) {
         const agentId = getAgentId(currentSession.meta);
-        if (agentId) {
-          setSelectedAgent(agentId);
-        }
+        if (agentId) setSelectedAgent(agentId);
       }
     }
   }, [currentSessionId, sessions, lockAgent]);
-
-  // 自动滚动到底部
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
 
   // 监听消息中目录/幻灯片链接点击 → 内联预览 + 文件面板定位
   useEffect(() => {
@@ -140,40 +98,36 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
       }
 
       setSlidePreviewDir(resolvedDir);
-      setFilePreview(null); // 互斥：关闭文件预览
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      setFilePreview(null);
     };
 
     window.addEventListener('sensenova-claw:open-slide-preview', handler);
     return () => window.removeEventListener('sensenova-claw:open-slide-preview', handler);
   }, [defaultAgentId, currentSessionId, sessions, openToPath]);
 
-  // 切换会话时关闭预览
-  useEffect(() => {
-    setSlidePreviewDir(null);
-    setFilePreview(null);
-  }, [currentSessionId]);
-
   // 监听文件预览事件
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as { path: string; type: FilePreviewType };
       setFilePreview(detail);
-      setSlidePreviewDir(null); // 互斥：关闭 PPT 预览
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      setSlidePreviewDir(null);
     };
     window.addEventListener('sensenova-claw:open-file-preview', handler);
     return () => window.removeEventListener('sensenova-claw:open-file-preview', handler);
   }, []);
 
-  const handleSend = useCallback((content: string, contextFiles?: ContextFileRef[]) => {
-    sendMessage(content, contextFiles, selectedAgent);
-  }, [sendMessage, selectedAgent]);
+  useEffect(() => {
+    setSlidePreviewDir(null);
+    setFilePreview(null);
+  }, [currentSessionId]);
 
-  // 斜杠命令处理（不在 ChatInput 层处理的额外逻辑）
-  const handleSlashSubmit = useCallback((_content: string) => {
-    return false; // ChatInput 内部已处理
-  }, []);
+  const handleSend = useCallback((
+    content: string,
+    contextFiles?: ContextFileRef[],
+    recommendation?: RecommendationSendMeta | null,
+  ) => {
+    sendMessage(content, contextFiles, selectedAgent, recommendation);
+  }, [sendMessage, selectedAgent]);
 
   const fillInput = useCallback((text: string) => {
     chatInputRef.current?.setInput(text);
@@ -210,65 +164,38 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
           </button>
         </div>
       )}
-      {/* 消息区域 */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 min-h-0">
-        {messages.length === 0 && !currentSessionId ? (
-          resolvedEmptyState
-        ) : (
-          <>
-            <MessageList messages={messages} />
-            {isTyping && <TypingIndicator />}
-            <div ref={chatEndRef} />
-          </>
-        )}
-      </div>
 
-      {/* PPT 幻灯片内联预览（可拖拽调整高度） */}
-      {slideSet && (
-        <div className="shrink-0 flex flex-col" style={{ height: previewHeight }}>
-          <div
-            className="flex items-center justify-center h-2 cursor-ns-resize hover:bg-primary/20 transition-colors group border-t border-border/60"
-            onMouseDown={onPreviewResize}
-          >
-            <div className="w-8 h-0.5 rounded-full bg-border group-hover:bg-primary/50 transition-colors" />
-          </div>
-          <SlideViewer slideSet={slideSet} onClose={() => setSlidePreviewDir(null)} />
-        </div>
-      )}
+      <MessageArea 
+        messages={messages} 
+        isTyping={isTyping} 
+        currentSessionId={currentSessionId} 
+        emptyState={resolvedEmptyState}
+      />
 
-      {/* 文件内联预览（可拖拽调整高度） */}
-      {filePreview && !slideSet && (
-        <div className="shrink-0 flex flex-col" style={{ height: previewHeight }}>
-          <div
-            className="flex items-center justify-center h-2 cursor-ns-resize hover:bg-primary/20 transition-colors group border-t border-border/60"
-            onMouseDown={onPreviewResize}
-          >
-            <div className="w-8 h-0.5 rounded-full bg-border group-hover:bg-primary/50 transition-colors" />
-          </div>
-          <FilePreview
-            path={filePreview.path}
-            type={filePreview.type}
-            onClose={() => setFilePreview(null)}
-          />
-        </div>
-      )}
+      <InlinePreview
+        previewHeight={previewHeight}
+        onPreviewResize={onPreviewResize}
+        slideSet={slideSet}
+        onCloseSlides={() => setSlidePreviewDir(null)}
+        filePreview={filePreview}
+        onCloseFile={() => setFilePreview(null)}
+      />
 
-      {/* 底部输入区 */}
       <ChatInput
         ref={chatInputRef}
         defaultAgentId={defaultAgentId}
         selectedAgent={selectedAgent}
         onSelectAgent={setSelectedAgent}
         onSend={handleSend}
-        onSlashSubmit={handleSlashSubmit}
+        onSlashSubmit={() => false}
         onStop={cancelTurn}
         disabled={isTyping}
         wsConnected={wsConnected}
         handleSkillInvoke={handleSkillInvoke}
         hideAgentSelector={hideAgentSelector}
         lockAgent={lockAgent}
+        onReconnect={reconnect}
       />
-
     </div>
   );
 });

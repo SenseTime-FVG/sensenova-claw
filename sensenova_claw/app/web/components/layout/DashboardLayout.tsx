@@ -2,12 +2,10 @@
 
 import { ReactNode, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import {
   DashboardNav,
   NavIcon,
-  useFeatureNavItems,
-  useAdminNavItems,
   type SubNavGroup,
 } from './DashboardNav';
 import { Search } from 'lucide-react';
@@ -17,11 +15,16 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import { cn } from '@/lib/utils';
 import { useSession } from '@/contexts/ws';
 import { useI18n } from '@/contexts/I18nContext';
-import { GlobalFilePanel } from '@/components/files/GlobalFilePanel';
 import { TodoDropdown } from '@/components/dashboard/TodoDropdown';
 import { NotificationDropdown } from '@/components/notification/NotificationDropdown';
 import { UserDropdown } from './UserDropdown';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { useNavigation } from '@/hooks/useNavigation';
+
+const GlobalFilePanel = dynamic(() => import('@/components/files/GlobalFilePanel').then(mod => mod.GlobalFilePanel), {
+  loading: () => <div className="h-full bg-muted/10 animate-pulse" />,
+  ssr: false,
+});
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -30,38 +33,24 @@ interface DashboardLayoutProps {
 const ADMIN_PATHS = ['/agents', '/sessions', '/llms', '/gateway', '/tools', '/skills', '/settings', '/acp', '/office'];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
-  const pathname = usePathname();
   const [manualGroup, setManualGroup] = useState<SubNavGroup>(null);
-  const featureNavItems = useFeatureNavItems();
-  const adminNavItems = useAdminNavItems();
   const { startNewChat } = useSession();
   const { t } = useI18n();
-  const hideRightPanel = ADMIN_PATHS.some(p => pathname?.startsWith(p));
 
-  const isFeatureActive = featureNavItems.some((item) =>
-    pathname?.startsWith(item.path)
-  );
-  const isAdminActive = adminNavItems.some((item) =>
-    pathname?.startsWith(item.path)
-  );
+  const {
+    pathname,
+    visibleGroup,
+    subNavItems,
+  } = useNavigation(manualGroup);
 
-  const visibleGroup: SubNavGroup = useMemo(() => {
-    if (manualGroup) return manualGroup;
-    if (isFeatureActive) return 'features';
-    if (isAdminActive) return 'admin';
-    return null;
-  }, [manualGroup, isFeatureActive, isAdminActive]);
+  const hideRightPanel = useMemo(() => 
+    ADMIN_PATHS.some(p => pathname?.startsWith(p)),
+    [pathname]
+  );
 
   const handleGroupToggle = useCallback((group: SubNavGroup) => {
     setManualGroup(group);
   }, []);
-
-  const subNavItems =
-    visibleGroup === 'features'
-      ? featureNavItems
-      : visibleGroup === 'admin'
-        ? adminNavItems
-        : null;
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">

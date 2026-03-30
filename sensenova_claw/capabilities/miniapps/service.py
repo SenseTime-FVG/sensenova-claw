@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
 import shutil
+import socket
+import sys
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+import httpx
 
 from sensenova_claw.capabilities.agents.config import AgentConfig
 from sensenova_claw.platform.config.workspace import ensure_agent_workspace
@@ -26,6 +32,15 @@ LICENSE_FILENAMES = (
     "NOTICE",
     "NOTICE.txt",
 )
+
+
+@dataclass
+class PreviewServerHandle:
+    slug: str
+    port: int
+    process: asyncio.subprocess.Process
+    stdout_task: asyncio.Task[None] | None = None
+    stderr_task: asyncio.Task[None] | None = None
 
 
 def slugify(name: str) -> str:
@@ -51,6 +66,8 @@ class MiniAppService:
         self.gateway = gateway
         self._lock = asyncio.Lock()
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._preview_server_lock = asyncio.Lock()
+        self._preview_servers: dict[str, PreviewServerHandle] = {}
 
     @property
     def storage_path(self) -> Path:
@@ -82,6 +99,127 @@ class MiniAppService:
             if page.get("id") == page_id or page.get("slug") == page_id:
                 return page
         return None
+
+    async def shutdown(self) -> None:
+        async with self._preview_server_lock:
+            handles = list(self._preview_servers.values())
+            self._preview_servers.clear()
+        for handle in handles:
+            await self._stop_preview_server(handle)
+
+    async def ensure_preview_server(self, page_id: str) -> dict[str, Any]:
+        page = self.get_page(page_id)
+        if not page:
+            raise ValueError(f"custom page not found: {page_id}")
+
+        slug = str(page.get("slug") or "")
+        async with self._preview_server_lock:
+            handle = self._preview_servers.get(slug)
+            if handle and handle.process.returncode is None:
+                return {
+                    "slug": slug,
+                    "port": handle.port,
+                    "base_url": f"http://127.0.0.1:{handle.port}",
+                }
+
+            if handle:
+                await self._stop_preview_server(handle)
+                self._preview_servers.pop(slug, None)
+
+            new_handle = await self._start_preview_server(page)
+            self._preview_servers[slug] = new_handle
+            return {
+                "slug": slug,
+                "port": new_handle.port,
+                "base_url": f"http://127.0.0.1:{new_handle.port}",
+            }
+
+    async def _drop_preview_server(self, slug: str) -> None:
+        if not slug:
+            return
+        async with self._preview_server_lock:
+            handle = self._preview_servers.pop(slug, None)
+        if handle is not None:
+            await self._stop_preview_server(handle)
+
+    async def _start_preview_server(self, page: dict[str, Any]) -> PreviewServerHandle:
+        workspace_dir = self._workspace_abs_dir(page)
+        server_path = workspace_dir / "server.py"
+        if not server_path.exists():
+            raise FileNotFoundError(f"workspace server entry not found: {server_path}")
+
+        port = _pick_free_port()
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(server_path),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            cwd=str(workspace_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        handle = PreviewServerHandle(
+            slug=str(page.get("slug") or ""),
+            port=port,
+            process=proc,
+            stdout_task=asyncio.create_task(self._stream_preview_server_logs(str(page.get("slug") or ""), proc.stdout, "stdout")),
+            stderr_task=asyncio.create_task(self._stream_preview_server_logs(str(page.get("slug") or ""), proc.stderr, "stderr")),
+        )
+        await self._wait_preview_server_ready(handle)
+        logger.info("Mini-app preview server started: slug=%s port=%s", handle.slug, handle.port)
+        return handle
+
+    async def _stop_preview_server(self, handle: PreviewServerHandle) -> None:
+        for task in (handle.stdout_task, handle.stderr_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+        proc = handle.process
+        if proc.returncode is None:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+        logger.info("Mini-app preview server stopped: slug=%s port=%s", handle.slug, handle.port)
+
+    async def _wait_preview_server_ready(self, handle: PreviewServerHandle) -> None:
+        url = f"http://127.0.0.1:{handle.port}/health"
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            for _ in range(40):
+                if handle.process.returncode is not None:
+                    raise RuntimeError(
+                        f"workspace preview server exited early: slug={handle.slug} returncode={handle.process.returncode}"
+                    )
+                try:
+                    response = await client.get(url)
+                    if response.status_code == 200:
+                        return
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(0.2)
+        raise RuntimeError(f"workspace preview server start timeout: slug={handle.slug}")
+
+    async def _stream_preview_server_logs(
+        self,
+        slug: str,
+        stream: asyncio.StreamReader | None,
+        channel: str,
+    ) -> None:
+        if stream is None:
+            return
+        while True:
+            line = await stream.readline()
+            if not line:
+                return
+            text = line.decode("utf-8", errors="replace").strip()
+            if text:
+                logger.debug("Mini-app preview server [%s][%s]: %s", slug, channel, text)
 
     async def restore_dedicated_agents(self) -> None:
         for page in self.load_pages():
@@ -127,10 +265,15 @@ class MiniAppService:
                     or payload.get("name")
                     or ""
                 ).strip(),
+                "preview_mode": "server",
                 "workspace_root": self._workspace_rel_dir(effective_agent_id, slug),
                 "app_dir": f"{self._workspace_rel_dir(effective_agent_id, slug)}/app",
+                "server_entry_file_path": f"{self._workspace_rel_dir(effective_agent_id, slug)}/server.py",
                 "entry_file_path": f"{self._workspace_rel_dir(effective_agent_id, slug)}/app/index.html",
                 "bridge_script_path": f"{self._workspace_rel_dir(effective_agent_id, slug)}/app/sensenova_claw-bridge.js",
+                "server_start_command": sys.executable,
+                "server_start_args": ["server.py"],
+                "background_refresh_policy": "optional_cron",
                 "preserved_license_files": [],
                 "build_status": "pending",
                 "build_summary": "",
@@ -172,12 +315,17 @@ class MiniAppService:
                     "source_project_path",
                     "builder_type",
                     "generation_prompt",
+                    "preview_mode",
                     "build_status",
                     "build_summary",
                     "latest_run_id",
                     "last_interaction_session_id",
                     "preserved_license_files",
                     "entry_file_path",
+                    "server_entry_file_path",
+                    "server_start_command",
+                    "server_start_args",
+                    "background_refresh_policy",
                 }
                 for key, value in updates.items():
                     if key in mutable_keys and value is not None:
@@ -190,6 +338,10 @@ class MiniAppService:
     async def delete_page(self, page_id: str) -> bool:
         async with self._lock:
             pages = self.load_pages()
+            deleted_page = next(
+                (page for page in pages if page.get("id") == page_id or page.get("slug") == page_id),
+                None,
+            )
             new_pages = [
                 page
                 for page in pages
@@ -198,7 +350,9 @@ class MiniAppService:
             if len(new_pages) == len(pages):
                 return False
             self.save_pages(new_pages)
-            return True
+        if deleted_page:
+            await self._drop_preview_server(str(deleted_page.get("slug") or ""))
+        return True
 
     def list_runs(self, page_id: str) -> list[dict[str, Any]]:
         page = self.get_page(page_id)
@@ -267,6 +421,7 @@ class MiniAppService:
         payload: dict[str, Any],
         message: str = "",
         session_id: str = "",
+        refresh_mode: str = "none",
     ) -> dict[str, Any]:
         page = self.get_page(page_id)
         if not page:
@@ -288,7 +443,13 @@ class MiniAppService:
             session_id = str(created["session_id"])
         await self.update_page(page["slug"], {"last_interaction_session_id": session_id})
 
-        interaction_message = message.strip() or self._build_interaction_message(page, action, payload)
+        normalized_refresh_mode = _normalize_refresh_mode(refresh_mode)
+        interaction_message = message.strip() or self._build_interaction_message(
+            page,
+            action,
+            payload,
+            refresh_mode=normalized_refresh_mode,
+        )
         turn_id = await self.gateway.send_user_input(
             session_id=session_id,
             content=interaction_message,
@@ -304,6 +465,7 @@ class MiniAppService:
                 "payload": payload,
                 "session_id": session_id,
                 "turn_id": turn_id,
+                "refresh_mode": normalized_refresh_mode,
             },
         )
 
@@ -311,6 +473,8 @@ class MiniAppService:
             "ok": True,
             "session_id": session_id,
             "turn_id": turn_id,
+            "refresh_mode": normalized_refresh_mode,
+            "should_refresh_workspace": normalized_refresh_mode == "immediate",
         }
 
     async def dispatch_action(
@@ -322,12 +486,14 @@ class MiniAppService:
         target: str,
         message: str = "",
         session_id: str = "",
+        refresh_mode: str = "none",
     ) -> dict[str, Any]:
         page = self.get_page(page_id)
         if not page:
             raise ValueError(f"custom page not found: {page_id}")
 
         normalized_target = _normalize_action_target(target)
+        normalized_refresh_mode = _normalize_refresh_mode(refresh_mode)
         if normalized_target == "agent":
             result = await self.dispatch_interaction(
                 page_id,
@@ -335,6 +501,7 @@ class MiniAppService:
                 payload=payload,
                 message=message,
                 session_id=session_id,
+                refresh_mode=normalized_refresh_mode,
             )
             return {
                 **result,
@@ -352,6 +519,7 @@ class MiniAppService:
                 "message": message.strip(),
                 "session_id": "",
                 "turn_id": "",
+                "refresh_mode": normalized_refresh_mode,
             },
         )
         return {
@@ -360,6 +528,8 @@ class MiniAppService:
             "session_id": "",
             "turn_id": "",
             "logged_at": ts,
+            "refresh_mode": normalized_refresh_mode,
+            "should_refresh_workspace": normalized_refresh_mode == "immediate",
         }
 
     def _workspace_rel_dir(self, agent_id: str, slug: str) -> str:
@@ -378,6 +548,7 @@ class MiniAppService:
         workspace_dir = self._workspace_abs_dir(page)
         app_dir = self._app_abs_dir(page)
         (workspace_dir / "logs").mkdir(parents=True, exist_ok=True)
+        (workspace_dir / "data").mkdir(parents=True, exist_ok=True)
         app_dir.mkdir(parents=True, exist_ok=True)
 
     def _write_workspace_manifest(self, page: dict[str, Any]) -> None:
@@ -389,7 +560,12 @@ class MiniAppService:
             "agent_id": page["agent_id"],
             "workspace_mode": page["workspace_mode"],
             "builder_type": page["builder_type"],
+            "preview_mode": page.get("preview_mode", "server"),
             "entry_file_path": page["entry_file_path"],
+            "server_entry_file_path": page.get("server_entry_file_path", ""),
+            "server_start_command": page.get("server_start_command", sys.executable),
+            "server_start_args": page.get("server_start_args", ["server.py"]),
+            "background_refresh_policy": page.get("background_refresh_policy", "optional_cron"),
             "bridge_script_path": page["bridge_script_path"],
             "templates": page.get("templates", []),
             "preserved_license_files": page.get("preserved_license_files", []),
@@ -401,8 +577,16 @@ class MiniAppService:
         )
 
     def _write_placeholder_app(self, page: dict[str, Any]) -> None:
+        workspace_dir = self._workspace_abs_dir(page)
         app_dir = self._app_abs_dir(page)
         self._write_bridge_script(page)
+        (workspace_dir / "server.py").write_text(_standalone_workspace_server_py(), encoding="utf-8")
+        state_path = workspace_dir / "data" / "workspace_state.json"
+        if not state_path.exists():
+            state_path.write_text(
+                json.dumps(_default_workspace_state(page), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
         (app_dir / "styles.css").write_text(_placeholder_css(), encoding="utf-8")
         (app_dir / "app.js").write_text(_placeholder_js(page["name"]), encoding="utf-8")
         (app_dir / "index.html").write_text(_placeholder_html(page["name"]), encoding="utf-8")
@@ -428,7 +612,7 @@ class MiniAppService:
         if base_agent is None:
             raise RuntimeError("default agent not found")
 
-        workdir = str(self._app_abs_dir(page).resolve())
+        workdir = str(self._workspace_abs_dir(page).resolve())
         system_prompt = self._build_agent_system_prompt(page, base_agent.system_prompt)
         dedicated = AgentConfig.create(
             id=agent_id,
@@ -464,13 +648,16 @@ class MiniAppService:
             f"- 你负责维护 mini-app《{page['name']}》\n"
             f"- 当前 mini-app slug: {page['slug']}\n"
             f"- 当前 mini-app 描述: {page.get('description', '')}\n"
-            "- 你的工作目录就是该 mini-app 的 app 目录，默认直接在这里读写前端文件\n"
+            "- 你的工作目录就是该 mini-app 的 workspace 根目录，前端页面在 app/，服务端入口在 server.py，持久化数据在 data/\n"
             "- 当用户通过页面按钮、表单或课程结果触发交互时，系统会把事件整理成结构化消息发给你\n"
+            "- 先把工作区设计成自包含的 client-server 系统：大多数交互优先由浏览器本地逻辑或 workspace 自己的服务端接口完成，只有最后兜底才把消息发给 Agent\n"
+            "- 普通问答、笔记沉淀、答题记录和状态保存，不应默认触发整个工作区刷新；只有显式要求时才做即时刷新\n"
             "- 需要继续澄清需求时，优先使用 ask_user\n"
-            "- 需要调整页面时，直接修改当前工作目录中的 HTML/CSS/JS 文件\n"
+            "- 需要调整页面时，优先同时考虑 app/ 前端与 server.py 服务端的数据结构和接口，而不是只改单页 UI\n"
+            "- 若工作区需要补充下一批内容，优先做成后台/夜间 refresh、可选 cron 或队列式预生成，避免打断当前用户会话\n"
             f"{license_lines}\n"
             "- 任何复用现有项目的场景，都不要删除授权与归因文件\n"
-            "- 如果页面里要把交互发送回宿主页面，请使用 window.SensenovaClawMiniApp.emit(action, payload)"
+            "- 如果页面里要把交互发送回宿主页面，请使用 window.SensenovaClawMiniApp.emit(action, payload, options)，并明确 options.refreshMode"
         ).strip()
 
     def _append_run(self, page: dict[str, Any], run: dict[str, Any]) -> None:
@@ -540,7 +727,7 @@ class MiniAppService:
                 page["slug"],
                 {
                     "build_status": "ready",
-                    "build_summary": "mini-app 已生成，可直接预览并继续让 Agent 迭代",
+                    "build_summary": "workspace 已生成并接入独立 Web server，可直接预览；普通问答不会默认触发刷新",
                     "latest_run_id": run_id,
                 },
             )
@@ -590,7 +777,7 @@ class MiniAppService:
                 return
             self._log_run(page, run_id, "未找到可直接打开的入口，改为生成包装页面")
 
-        template_kind = "generic-workspace"
+        template_kind = "generic-workspace-server"
         self._log_run(page, run_id, f"使用内置模板: {template_kind}")
         (app_dir / "styles.css").write_text(_builtin_styles_css(), encoding="utf-8")
         (app_dir / "app.js").write_text(_generic_workspace_js(page), encoding="utf-8")
@@ -606,6 +793,7 @@ class MiniAppService:
         env = {str(k): str(v) for k, v in dict(acp_cfg.get("env") or {}).items()}
         startup_timeout = float(acp_cfg.get("startup_timeout_seconds", 20))
         request_timeout = float(acp_cfg.get("request_timeout_seconds", 180))
+        workspace_dir = self._workspace_abs_dir(page)
         app_dir = self._app_abs_dir(page)
         self._write_bridge_script(page)
 
@@ -622,7 +810,7 @@ class MiniAppService:
             command,
             args,
             env=env,
-            cwd=str(app_dir),
+            cwd=str(workspace_dir),
             startup_timeout_seconds=startup_timeout,
             request_timeout_seconds=request_timeout,
         ) as client:
@@ -633,7 +821,7 @@ class MiniAppService:
                 run_id,
                 f"ACP agent 已就绪: {((init_result or {}).get('agentInfo') or {}).get('name', 'unknown')}",
             )
-            session_id = await client.new_session(str(app_dir))
+            session_id = await client.new_session(str(workspace_dir))
             self._log_run(page, run_id, f"ACP session created: {session_id}")
             build_prompt = self._build_acp_prompt(page, prompt)
             result = await client.prompt(session_id, build_prompt, on_notification=on_notification)
@@ -641,16 +829,24 @@ class MiniAppService:
 
     def _build_acp_prompt(self, page: dict[str, Any], prompt: str) -> str:
         return (
-            f"请在当前工作目录中构建 mini-app《{page['name']}》。\n"
+            f"请在当前 workspace 中构建 mini-app《{page['name']}》。\n"
             f"需求描述：{page.get('description', '')}\n"
             f"用户最新要求：{prompt}\n"
             f"模板建议：{json.dumps(page.get('templates', []), ensure_ascii=False)}\n"
-            "要求：\n"
-            "1. 输出一个可直接打开的前端页面，默认入口为 index.html。\n"
-            "2. 若需要把页面交互发送给宿主系统，请使用 window.SensenovaClawMiniApp.emit(action, payload)。\n"
-            "3. 若复用了现有项目，请保留 LICENSE/NOTICE/ATTRIBUTIONS 文件。\n"
-            "4. 若需要拆分文件，可创建 styles.css、app.js 等辅助文件。\n"
-            "5. 生成完成后请保证页面可直接在静态文件服务器中运行。"
+            "当前目录约定：\n"
+            "- app/ 存放前端页面与静态资源\n"
+            "- server.py 是 workspace 自带的服务端入口\n"
+            "- data/ 用于保存持久化状态、待汇总问答、进度与预生成内容\n"
+            "强制要求：\n"
+            "1. 生成的是自包含 client-server 工作区，而不是只依赖宿主页面的单页静态壳。\n"
+            "2. 保留并继续使用 server.py 这类独立服务端入口；前端应优先通过自己的服务端接口读写状态。\n"
+            "3. 用户的大部分交互应在页面本地逻辑或 workspace 服务端内完成，只有最后兜底的求助、复杂问答或人工升级才发送给 Agent。\n"
+            "4. 不是所有发给 Agent 的消息都会触发 workspace refresh。普通问答、笔记记录、答题状态上报等默认不触发即时刷新。\n"
+            "5. 若需要补充下一批内容，优先设计后台/夜间 refresh、队列预生成或可选 cron 任务，避免打断当前用户会话。\n"
+            "6. 用户再次打开 workspace 时，应尽量已经看到准备好的内容，而不是先等待一次长时间刷新。\n"
+            "7. 若需要把交互发送给宿主系统，请使用 window.SensenovaClawMiniApp.emit(action, payload, options)，并通过 options.refreshMode 明确标注 none/background/immediate。\n"
+            "8. 若复用了现有项目，请保留 LICENSE/NOTICE/ATTRIBUTIONS 文件。\n"
+            "9. 最终保证 workspace 可通过自己的 Web server 提供页面和 API，而不只是依赖静态文件服务器。"
         )
 
     def _get_acp_config(self) -> dict[str, Any]:
@@ -748,13 +944,18 @@ class MiniAppService:
         page: dict[str, Any],
         action: str,
         payload: dict[str, Any],
+        *,
+        refresh_mode: str,
     ) -> str:
         return (
             f"【MiniApp 交互事件】\n"
             f"- 页面: {page.get('name')} ({page.get('slug')})\n"
             f"- 动作: {action}\n"
+            f"- refresh_mode: {refresh_mode}\n"
             f"- 载荷: {json.dumps(payload, ensure_ascii=False, indent=2)}\n"
             "请根据当前页面状态与用户操作继续推进任务。"
+            "优先把普通问答、记录、状态沉淀视为不打断工作区的轻量交互。"
+            "只有当 refresh_mode=immediate，或者你明确认为必须更新预生成内容时，才把它视为需要立即刷新工作区。"
             "如果需要改页面，请直接修改当前工作目录中的文件；如果需要澄清需求，请使用 ask_user。"
         )
 
@@ -805,6 +1006,20 @@ def _normalize_action_target(target: str) -> str:
     return "agent"
 
 
+def _normalize_refresh_mode(refresh_mode: str) -> str:
+    value = str(refresh_mode or "").strip().lower()
+    if value in {"none", "background", "immediate"}:
+        return value
+    return "none"
+
+
+def _pick_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        return int(sock.getsockname()[1])
+
+
 def _placeholder_html(name: str) -> str:
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -819,7 +1034,7 @@ def _placeholder_html(name: str) -> str:
       <div class="placeholder-card">
         <span class="eyebrow">Sensenova-Claw Mini-App</span>
         <h1>{name}</h1>
-        <p>正在初始化工作区与页面资源，请稍候刷新。</p>
+        <p>正在初始化自带 Web 服务的 workspace。页面数据、预生成内容和后台 refresh 队列会由 workspace 自己的 server 负责。</p>
         <div class="pulse-bar"><span></span></div>
       </div>
     </main>
@@ -895,6 +1110,9 @@ def _placeholder_css() -> str:
 
 def _placeholder_js(name: str) -> str:
     return f"""console.log("Mini-app placeholder ready: {name}");
+fetch("./api/workspace-state").catch(function(error) {{
+  console.warn("Workspace server is not ready yet", error);
+}});
 """
 
 
@@ -917,11 +1135,19 @@ def _bridge_js(slug: str) -> str:
   window.SensenovaClawMiniApp = {{
     emit: function(action, payload, options) {{
       var nextOptions = options || {{}};
-      return post("interaction", action, payload, nextOptions.target || "", nextOptions.meta || {{}});
+      var meta = Object.assign({{}}, nextOptions.meta || {{}});
+      if (nextOptions.refreshMode) {{
+        meta.refreshMode = nextOptions.refreshMode;
+      }}
+      return post("interaction", action, payload, nextOptions.target || "", meta);
     }},
     emitTo: function(target, action, payload, options) {{
       var nextOptions = options || {{}};
-      return post("interaction", action, payload, target || "", nextOptions.meta || {{}});
+      var meta = Object.assign({{}}, nextOptions.meta || {{}});
+      if (nextOptions.refreshMode) {{
+        meta.refreshMode = nextOptions.refreshMode;
+      }}
+      return post("interaction", action, payload, target || "", meta);
     }},
     configureActionRouting: function(config) {{
       var nextConfig = config || {{}};
@@ -938,6 +1164,272 @@ def _bridge_js(slug: str) -> str:
     }},
   }};
 }})();
+"""
+
+
+def _default_workspace_state(page: dict[str, Any]) -> dict[str, Any]:
+    templates = _normalize_templates(page)
+    prepared_units = []
+    source_items = templates or [
+        {"title": "今日任务 1", "desc": "完成一轮自检并记录关键结论。"},
+        {"title": "今日任务 2", "desc": "处理一个需要状态保存的交互流程。"},
+        {"title": "今日任务 3", "desc": "确认哪些问题必须升级给 Agent，哪些应在本地或服务端解决。"},
+    ]
+    for index, item in enumerate(source_items[:6], start=1):
+        prepared_units.append(
+            {
+                "id": f"unit_{index}",
+                "title": str(item.get("title") or f"预置单元 {index}"),
+                "desc": str(item.get("desc") or "完成后会记录到服务端状态中。"),
+                "status": "ready",
+                "score": None,
+            }
+        )
+
+    return {
+        "workspace_name": page.get("name") or "Mini-App Workspace",
+        "workspace_slug": page.get("slug") or "",
+        "prepared_units": prepared_units,
+        "pending_agent_items": 0,
+        "saved_notes": [],
+        "qa_history": [],
+        "activity_log": [
+            {
+                "ts": int(time.time() * 1000),
+                "type": "system",
+                "message": "workspace 已初始化，优先使用本地逻辑与服务端接口处理交互。",
+            }
+        ],
+        "refresh": {
+            "queued": False,
+            "mode": "nightly_cron",
+            "reason": "",
+            "last_materialized_at": int(time.time() * 1000),
+            "recommended_window": "00:00",
+        },
+    }
+
+
+def _standalone_workspace_server_py() -> str:
+    return """from __future__ import annotations
+
+import argparse
+import json
+import time
+from http import HTTPStatus
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlparse
+
+ROOT = Path(__file__).resolve().parent
+APP_DIR = ROOT / "app"
+DATA_DIR = ROOT / "data"
+STATE_PATH = DATA_DIR / "workspace_state.json"
+INBOX_PATH = DATA_DIR / "agent_inbox.jsonl"
+
+
+def _default_state() -> dict:
+    return {
+        "workspace_name": ROOT.name,
+        "workspace_slug": ROOT.name,
+        "prepared_units": [],
+        "pending_agent_items": 0,
+        "saved_notes": [],
+        "qa_history": [],
+        "activity_log": [],
+        "refresh": {
+            "queued": False,
+            "mode": "nightly_cron",
+            "reason": "",
+            "last_materialized_at": int(time.time() * 1000),
+            "recommended_window": "00:00",
+        },
+    }
+
+
+def load_state() -> dict:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not STATE_PATH.exists():
+        state = _default_state()
+        save_state(state)
+        return state
+    try:
+        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        state = _default_state()
+        save_state(state)
+        return state
+
+
+def save_state(state: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def append_inbox(record: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with INBOX_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\\n")
+
+
+class Handler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(APP_DIR), **kwargs)
+
+    def log_message(self, format: str, *args) -> None:
+        print("[workspace-server]", format % args, flush=True)
+
+    def _read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length") or "0")
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except Exception:
+            return {}
+
+    def _send_json(self, payload: dict, *, status: int = 200) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:
+        path = urlparse(self.path).path
+        if path == "/health":
+            self._send_json({"ok": True, "ts": int(time.time() * 1000)})
+            return
+        if path == "/api/workspace-state":
+            self._send_json(load_state())
+            return
+        super().do_GET()
+
+    def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        state = load_state()
+        payload = self._read_json()
+        now = int(time.time() * 1000)
+
+        if path == "/api/units/complete":
+            unit_id = str(payload.get("unit_id") or "")
+            answer = str(payload.get("answer") or "").strip()
+            score = payload.get("score")
+            for item in state.get("prepared_units", []):
+                if str(item.get("id")) != unit_id:
+                    continue
+                item["status"] = "completed"
+                item["answered_at"] = now
+                if answer:
+                    item["last_answer"] = answer
+                item["score"] = score
+                break
+            remaining = [item for item in state.get("prepared_units", []) if item.get("status") != "completed"]
+            if not remaining:
+                refresh = state.setdefault("refresh", {})
+                refresh["queued"] = True
+                refresh["mode"] = "nightly_cron"
+                refresh["reason"] = "prepared_units_exhausted"
+            state.setdefault("activity_log", []).insert(0, {
+                "ts": now,
+                "type": "unit_completed",
+                "message": f"完成单元: {unit_id}",
+            })
+            save_state(state)
+            self._send_json({
+                "ok": True,
+                "state": state,
+                "should_refresh_workspace": False,
+            })
+            return
+
+        if path == "/api/agent-inbox":
+            record = {
+                "ts": now,
+                "kind": str(payload.get("kind") or "note"),
+                "content": payload,
+            }
+            append_inbox(record)
+            state["pending_agent_items"] = int(state.get("pending_agent_items") or 0) + 1
+            if record["kind"] == "note":
+                state.setdefault("saved_notes", []).insert(0, {
+                    "ts": now,
+                    "text": str(payload.get("text") or "").strip(),
+                })
+            if record["kind"] == "qa":
+                state.setdefault("qa_history", []).insert(0, {
+                    "ts": now,
+                    "question": str(payload.get("question") or "").strip(),
+                })
+            state.setdefault("activity_log", []).insert(0, {
+                "ts": now,
+                "type": "agent_inbox",
+                "message": f"记录到 Agent inbox: {record['kind']}",
+            })
+            save_state(state)
+            self._send_json({
+                "ok": True,
+                "state": state,
+                "should_refresh_workspace": False,
+            })
+            return
+
+        if path == "/api/workspace-events":
+            event_type = str(payload.get("event_type") or "workspace_event")
+            state.setdefault("activity_log", []).insert(0, {
+                "ts": now,
+                "type": event_type,
+                "message": str(payload.get("message") or "记录一条工作区事件"),
+            })
+            save_state(state)
+            self._send_json({
+                "ok": True,
+                "state": state,
+                "should_refresh_workspace": False,
+            })
+            return
+
+        if path == "/api/refresh-requests":
+            refresh = state.setdefault("refresh", {})
+            refresh["queued"] = True
+            refresh["mode"] = str(payload.get("mode") or "background")
+            refresh["reason"] = str(payload.get("reason") or "manual_request")
+            state.setdefault("activity_log", []).insert(0, {
+                "ts": now,
+                "type": "refresh_request",
+                "message": f"已排入后台 refresh: {refresh['reason']}",
+            })
+            save_state(state)
+            self._send_json({
+                "ok": True,
+                "state": state,
+                "should_refresh_workspace": False,
+            })
+            return
+
+        self._send_json({"ok": False, "detail": f"unknown path: {path}"}, status=HTTPStatus.NOT_FOUND)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Mini-app workspace server")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args()
+
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not STATE_PATH.exists():
+        save_state(_default_state())
+
+    httpd = ThreadingHTTPServer((args.host, args.port), Handler)
+    print(f"[workspace-server] listening on http://{args.host}:{args.port}", flush=True)
+    httpd.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
 """
 
 
@@ -1132,6 +1624,39 @@ def _builtin_styles_css() -> str:
   font-weight: 600;
 }
 
+.composer {
+  width: 100%;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  padding: 14px;
+  resize: vertical;
+  min-height: 120px;
+  background: #fff;
+}
+
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.meta-pill {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.08);
+  color: #115e59;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.empty-state {
+  padding: 18px;
+  border-radius: 18px;
+  background: #f8fafc;
+  color: #475569;
+}
+
 @media (max-width: 960px) {
   .hero,
   .section-grid {
@@ -1153,37 +1678,43 @@ def _generic_workspace_html(page: dict[str, Any]) -> str:
     <main class="miniapp-shell">
       <section class="hero">
         <div class="card hero-main">
-          <div class="hero-kicker">Workspace App</div>
+          <div class="hero-kicker">Standalone Workspace Server</div>
           <h1 class="hero-title">{page['name']}</h1>
-          <p class="hero-desc">{page.get('description') or '一个可以和专属 Agent 协同工作的工作区页面。'}</p>
+          <p class="hero-desc">{page.get('description') or '一个自带服务端、尽量少打断用户的工作区。绝大多数交互在本地和 workspace server 内完成，Agent 只处理最后兜底的问题。'}</p>
+          <div class="meta-row">
+            <span class="meta-pill">大多数交互: 本地 / Server</span>
+            <span class="meta-pill">Agent 问答: 不默认刷新工作区</span>
+            <span class="meta-pill">补充内容: 后台 / 夜间 refresh</span>
+          </div>
           <div class="hero-actions">
             <button class="btn btn-primary" id="save-server-btn">保存当前状态</button>
-            <button class="btn btn-secondary" id="refine-page-btn">请求 Agent 优化</button>
+            <button class="btn btn-secondary" id="queue-refresh-btn">排入夜间补充</button>
           </div>
         </div>
 
         <aside class="card stats-card">
-          <div class="hero-kicker">工作台状态</div>
+          <div class="hero-kicker">服务端状态</div>
           <div class="stats-grid">
-            <div class="stat"><span>模块</span><strong id="card-count">0</strong></div>
-            <div class="stat"><span>互动</span><strong id="interaction-count">0</strong></div>
-            <div class="stat"><span>模板</span><strong id="template-count">0</strong></div>
-            <div class="stat"><span>最近同步</span><strong id="last-sync">--</strong></div>
+            <div class="stat"><span>预置单元</span><strong id="card-count">0</strong></div>
+            <div class="stat"><span>已完成</span><strong id="interaction-count">0</strong></div>
+            <div class="stat"><span>待汇总 Agent 项</span><strong id="pending-agent-count">0</strong></div>
+            <div class="stat"><span>补货窗口</span><strong id="last-sync">--</strong></div>
           </div>
         </aside>
       </section>
 
       <section class="section-grid">
         <section class="card section-card">
-          <div class="hero-kicker">任务卡片</div>
+          <div class="hero-kicker">已准备单元</div>
           <div class="list" id="task-list"></div>
         </section>
 
         <section class="card section-card">
-          <div class="hero-kicker">自由输入</div>
-          <textarea id="freeform-input" rows="9" style="width: 100%; border-radius: 18px; border: 1px solid rgba(15, 23, 42, 0.1); padding: 14px; resize: vertical;" placeholder="在这里写你想让 Agent 继续处理的内容"></textarea>
+          <div class="hero-kicker">问题与笔记</div>
+          <textarea id="freeform-input" class="composer" placeholder="大部分内容先记到 workspace server；只有确实需要时，再点按钮向 Agent 提问"></textarea>
           <div class="hero-actions">
-            <button class="btn btn-primary" id="submit-note-btn">提交给 Agent</button>
+            <button class="btn btn-secondary" id="save-note-btn">仅记录到服务端</button>
+            <button class="btn btn-primary" id="ask-agent-btn">最后兜底，询问 Agent</button>
           </div>
         </section>
       </section>
@@ -1202,108 +1733,231 @@ def _generic_workspace_html(page: dict[str, Any]) -> str:
 
 
 def _generic_workspace_js(page: dict[str, Any]) -> str:
-    templates = json.dumps(_normalize_templates(page), ensure_ascii=False)
-    return f"""const templates = {templates};
-let interactionCount = 0;
-const actionRouting = {{
-  defaultTarget: "agent",
-  routes: {{
-    task_card_selected: "local",
+    script = """let workspaceState = null;
+const actionRouting = {
+  defaultTarget: "server",
+  routes: {
+    unit_completed: "server",
     save_workspace_snapshot: "server",
-    request_page_refine: "agent",
-    freeform_note_submitted: "agent",
-  }},
-}};
+    workspace_refresh_requested: "server",
+    workspace_agent_question: "agent",
+  },
+};
 
-function emitLog(text) {{
+function emitLog(text) {
   const host = document.getElementById("event-log");
   const item = document.createElement("div");
   item.className = "event-pill";
   item.textContent = text;
   host.prepend(item);
-}}
+}
 
-function notifyAgent(action, payload) {{
-  interactionCount += 1;
-  document.getElementById("interaction-count").textContent = String(interactionCount);
-  document.getElementById("last-sync").textContent = new Date().toLocaleTimeString("zh-CN");
-  if (window.SensenovaClawMiniApp) {{
-    window.SensenovaClawMiniApp.emit(action, payload);
-  }}
-  emitLog(`[Agent] ${{action}} -> ${{JSON.stringify(payload)}}`);
-}}
+async function requestJson(path, options) {
+  const response = await fetch(path, Object.assign({
+    headers: {
+      "Content-Type": "application/json",
+    },
+  }, options || {}));
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return response.json();
+}
 
-function emitWorkspaceAction(action, payload, targetLabel) {{
-  interactionCount += 1;
-  document.getElementById("interaction-count").textContent = String(interactionCount);
-  document.getElementById("last-sync").textContent = new Date().toLocaleTimeString("zh-CN");
-  if (window.SensenovaClawMiniApp) {{
-    window.SensenovaClawMiniApp.emit(action, payload);
-  }}
-  emitLog(`[${{targetLabel}}] ${{action}} -> ${{JSON.stringify(payload)}}`);
-}}
+function completedUnits() {
+  if (!workspaceState) return 0;
+  return (workspaceState.prepared_units || []).filter((item) => item.status === "completed").length;
+}
 
-function renderTasks() {{
+function syncStats() {
+  const preparedUnits = (workspaceState && workspaceState.prepared_units) || [];
+  document.getElementById("card-count").textContent = String(preparedUnits.length);
+  document.getElementById("interaction-count").textContent = String(completedUnits());
+  document.getElementById("pending-agent-count").textContent = String((workspaceState && workspaceState.pending_agent_items) || 0);
+  document.getElementById("last-sync").textContent = ((workspaceState && workspaceState.refresh) || {}).recommended_window || "--";
+}
+
+function renderTasks() {
   const host = document.getElementById("task-list");
-  const items = templates.length > 0 ? templates : [
-    {{ title: "整理需求", desc: "把当前工作流拆成清晰的步骤和交付物。" }},
-    {{ title: "快速试验", desc: "先做最小可运行版本，再逐步增强。" }},
-    {{ title: "继续迭代", desc: "把页面事件和 Agent 响应串起来。" }},
-  ];
-  document.getElementById("card-count").textContent = String(items.length);
-  document.getElementById("template-count").textContent = String(items.length);
+  const items = (workspaceState && workspaceState.prepared_units) || [];
   host.innerHTML = "";
-  items.forEach((item) => {{
+  if (items.length === 0) {
+    host.innerHTML = '<div class="empty-state">当前没有预生成内容，建议由后台 refresh 补充下一批单元。</div>';
+    return;
+  }
+  items.forEach((item) => {
     const node = document.createElement("div");
     node.className = "list-item";
-    node.innerHTML = `<h3>${{item.title}}</h3><p>${{item.desc || ""}}</p><button class="btn btn-secondary" data-title="${{item.title}}">执行这个动作</button>`;
+    const statusLabel = item.status === "completed" ? "已完成" : "待完成";
+    node.innerHTML = `
+      <h3>${item.title}</h3>
+      <p>${item.desc || ""}</p>
+      <div class="meta-row">
+        <span class="meta-pill">${statusLabel}</span>
+      </div>
+      <div class="hero-actions">
+        <button class="btn btn-secondary" data-complete-id="${item.id}" ${item.status === "completed" ? "disabled" : ""}>完成并记录</button>
+      </div>
+    `;
     host.appendChild(node);
-  }});
-}}
+  });
+}
 
-document.getElementById("task-list").addEventListener("click", (event) => {{
+function renderActivityLog() {
+  const host = document.getElementById("event-log");
+  const items = (workspaceState && workspaceState.activity_log) || [];
+  host.innerHTML = "";
+  items.slice(0, 8).forEach((item) => {
+    const node = document.createElement("div");
+    node.className = "event-pill";
+    node.textContent = item.message || item.type || "workspace event";
+    host.appendChild(node);
+  });
+}
+
+function syncState(nextState) {
+  workspaceState = nextState;
+  syncStats();
+  renderTasks();
+  renderActivityLog();
+  if (window.SensenovaClawMiniApp && window.SensenovaClawMiniApp.updateState) {
+    window.SensenovaClawMiniApp.updateState({
+      prepared_unit_count: (workspaceState.prepared_units || []).length,
+      completed_unit_count: completedUnits(),
+      refresh_queued: !!((workspaceState.refresh || {}).queued),
+    });
+  }
+}
+
+async function loadState() {
+  const data = await requestJson("./api/workspace-state");
+  syncState(data);
+}
+
+document.getElementById("task-list").addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
-  if (!target.dataset.title) return;
-  emitWorkspaceAction("task_card_selected", {{
-    page: "{page['slug']}",
-    title: target.dataset.title,
-  }}, "Local");
-}});
+  if (!target.dataset.completeId) return;
+  const data = await requestJson("./api/units/complete", {
+    method: "POST",
+    body: JSON.stringify({
+      unit_id: target.dataset.completeId,
+      answer: "用户已在 workspace 内完成此单元",
+      score: 1,
+    }),
+  });
+  syncState(data.state || workspaceState);
+  emitLog(`[Server] unit_completed -> ${target.dataset.completeId}`);
+  if (window.SensenovaClawMiniApp && workspaceState && workspaceState.refresh && workspaceState.refresh.queued) {
+    window.SensenovaClawMiniApp.emitTo("server", "workspace_refresh_requested", {
+      page: "__PAGE_SLUG__",
+      reason: workspaceState.refresh.reason || "prepared_units_exhausted",
+    }, {
+      refreshMode: "background",
+    });
+  }
+});
 
-document.getElementById("save-server-btn").addEventListener("click", () => {{
-  emitWorkspaceAction("save_workspace_snapshot", {{
-    page: "{page['slug']}",
-    summary: "用户在页面上保存了当前工作区状态",
-  }}, "Server");
-}});
+document.getElementById("save-server-btn").addEventListener("click", async () => {
+  const data = await requestJson("./api/workspace-events", {
+    method: "POST",
+    body: JSON.stringify({
+      event_type: "workspace_snapshot",
+      message: "用户在 workspace 内保存了一次当前状态",
+    }),
+  });
+  syncState(data.state || workspaceState);
+  if (window.SensenovaClawMiniApp) {
+    window.SensenovaClawMiniApp.emitTo("server", "save_workspace_snapshot", {
+      page: "__PAGE_SLUG__",
+      summary: "用户在 workspace 内保存了当前状态",
+    }, {
+      refreshMode: "none",
+    });
+  }
+  emitLog("[Server] save_workspace_snapshot");
+});
 
-document.getElementById("refine-page-btn").addEventListener("click", () => {{
-  emitWorkspaceAction("request_page_refine", {{
-    page: "{page['slug']}",
-    request: "请根据当前使用体验优化页面布局和交互",
-  }}, "Agent");
-}});
+document.getElementById("queue-refresh-btn").addEventListener("click", async () => {
+  const data = await requestJson("./api/refresh-requests", {
+    method: "POST",
+    body: JSON.stringify({
+      reason: "manual_background_refresh",
+      mode: "background",
+    }),
+  });
+  syncState(data.state || workspaceState);
+  if (window.SensenovaClawMiniApp) {
+    window.SensenovaClawMiniApp.emitTo("server", "workspace_refresh_requested", {
+      page: "__PAGE_SLUG__",
+      reason: "manual_background_refresh",
+    }, {
+      refreshMode: "background",
+    });
+  }
+  emitLog("[Background] 已排入后台补充");
+});
 
-document.getElementById("submit-note-btn").addEventListener("click", () => {{
+document.getElementById("save-note-btn").addEventListener("click", async () => {
   const text = document.getElementById("freeform-input").value.trim();
-  if (!text) {{
-    emitLog("请先输入一些内容");
+  if (!text) {
+    emitLog("请先输入需要记录的笔记");
     return;
-  }}
-  emitWorkspaceAction("freeform_note_submitted", {{
-    page: "{page['slug']}",
-    note: text,
-  }}, "Agent");
-}});
+  }
+  const data = await requestJson("./api/agent-inbox", {
+    method: "POST",
+    body: JSON.stringify({
+      kind: "note",
+      text: text,
+    }),
+  });
+  syncState(data.state || workspaceState);
+  document.getElementById("freeform-input").value = "";
+  emitLog("[Server] 已记录到待汇总笔记");
+});
 
-if (window.SensenovaClawMiniApp && window.SensenovaClawMiniApp.configureActionRouting) {{
+document.getElementById("ask-agent-btn").addEventListener("click", async () => {
+  const text = document.getElementById("freeform-input").value.trim();
+  if (!text) {
+    emitLog("请先输入你想让 Agent 回答的问题");
+    return;
+  }
+  const data = await requestJson("./api/agent-inbox", {
+    method: "POST",
+    body: JSON.stringify({
+      kind: "qa",
+      question: text,
+    }),
+  });
+  syncState(data.state || workspaceState);
+  if (window.SensenovaClawMiniApp) {
+    window.SensenovaClawMiniApp.emitTo("agent", "workspace_agent_question", {
+      page: "__PAGE_SLUG__",
+      question: text,
+      note: "回答问题即可，不要默认刷新整个 workspace。",
+    }, {
+      refreshMode: "none",
+      meta: {
+        channel: "qa",
+      },
+    });
+  }
+  document.getElementById("freeform-input").value = "";
+  emitLog("[Agent] 已发送兜底问题，不触发即时刷新");
+});
+
+if (window.SensenovaClawMiniApp && window.SensenovaClawMiniApp.configureActionRouting) {
   window.SensenovaClawMiniApp.configureActionRouting(actionRouting);
-}}
+}
 
-renderTasks();
-emitLog("Workspace app 已初始化。");
+loadState().then(function() {
+  emitLog("Workspace server 已连接，优先在本地与服务端内完成交互。");
+}).catch(function(error) {
+  emitLog(`Workspace server 尚未就绪: ${error instanceof Error ? error.message : error}`);
+});
+
 """
+    return script.replace("__PAGE_SLUG__", str(page.get("slug") or ""))
 
 
 def _reuse_wrapper_html(page: dict[str, Any], source: Path) -> str:

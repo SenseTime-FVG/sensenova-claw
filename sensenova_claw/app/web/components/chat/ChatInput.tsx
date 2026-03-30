@@ -8,14 +8,18 @@ import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
 import { type ContextFileRef } from '@/lib/chatTypes';
 import { UploadProgress } from './UploadProgress';
 import { useFileUpload } from '@/hooks/useFileUpload';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 import { useI18n } from '@/contexts/I18nContext';
 
 interface ChatInputProps {
   defaultAgentId: string;
   selectedAgent: string;
   onSelectAgent: (id: string) => void;
-  onSend: (content: string, contextFiles?: ContextFileRef[]) => void;
+  onSend: (
+    content: string,
+    contextFiles?: ContextFileRef[],
+    recommendation?: RecommendationSendMeta | null,
+  ) => void;
   onSlashSubmit: (content: string) => boolean;
   onStop?: () => void;
   disabled: boolean;
@@ -46,13 +50,20 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 }, ref) {
   const { t } = useI18n();
   const [inputValue, setInputValue] = useState('');
+  const [draftRecommendation, setDraftRecommendation] = useState<RecommendationSendMeta | null>(null);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
-  const { pendingPrefill, clearPendingPrefill } = useChatSession();
+  const { currentSessionId, pendingPrefill, clearPendingPrefill } = useChatSession();
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
+
+  // 当外部 disabled 改变（通常是 isTyping 结束）时，重置本地提交状态
+  useEffect(() => {
+    if (!disabled) setIsSubmitting(false);
+  }, [disabled]);
 
   useEffect(() => {
     if (!showUploadMenu) return;
@@ -68,6 +79,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   useEffect(() => {
     if (!pendingPrefill) return;
     setInputValue(pendingPrefill.text);
+    setDraftRecommendation(pendingPrefill.recommendation || null);
     clearPendingPrefill();
     setTimeout(() => {
       if (textareaRef.current) {
@@ -78,22 +90,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     });
   }, [pendingPrefill, clearPendingPrefill]);
 
-  useImperativeHandle(ref, () => ({
-    setInput: (text: string) => {
-      setInputValue(text);
-      setTimeout(() => {
-        if (textareaRef.current) {
-          textareaRef.current.style.height = 'auto';
-          textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 96) + 'px';
-          textareaRef.current.focus();
-        }
-      });
-    },
-  }), []);
-
-  const { showMenu, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmitHook } = useSlashCommand(
-    inputValue, setInputValue, handleSkillInvoke,
-  );
+  useEffect(() => {
+    if (draftRecommendation && currentSessionId && draftRecommendation.sourceSessionId !== currentSessionId) {
+      setDraftRecommendation(null);
+    }
+  }, [currentSessionId, draftRecommendation]);
 
   const resizeTextarea = useCallback(() => {
     setTimeout(() => {
@@ -128,6 +129,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     onUploadSuccess: insertAtRef,
   });
 
+  useImperativeHandle(ref, () => ({
+    setInput: (text: string) => {
+      setInputValue(text);
+      resizeTextarea();
+    },
+  }), [resizeTextarea]);
+
+  const { showMenu, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmitHook } = useSlashCommand(
+    inputValue, setInputValue, handleSkillInvoke,
+  );
+
   const parseAtRefs = useCallback((content: string): ContextFileRef[] => {
     const refs: ContextFileRef[] = [];
     const regex = /@(\S+)/g;
@@ -144,25 +156,29 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const handleSend = useCallback(() => {
     const content = inputValue.trim();
-    if (!content || !wsConnected || disabled) return;
+    if (!content || !wsConnected || disabled || isSubmitting) return;
 
     if (handleSlashSubmitHook(content)) {
+      setDraftRecommendation(null);
       setInputValue('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
 
     if (onSlashSubmit(content)) {
+      setDraftRecommendation(null);
       setInputValue('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
 
+    setIsSubmitting(true);
     const contextFiles = parseAtRefs(content);
-    onSend(content, contextFiles.length > 0 ? contextFiles : undefined);
+    onSend(content, contextFiles.length > 0 ? contextFiles : undefined, draftRecommendation);
+    setDraftRecommendation(null);
     setInputValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [inputValue, wsConnected, disabled, handleSlashSubmitHook, onSlashSubmit, onSend, parseAtRefs]);
+  }, [inputValue, wsConnected, disabled, isSubmitting, handleSlashSubmitHook, onSlashSubmit, onSend, parseAtRefs, draftRecommendation]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing || isComposingRef.current) return;
@@ -171,6 +187,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value);
+    if (!e.target.value.trim()) {
+      setDraftRecommendation(null);
+    }
     const ta = e.target;
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 96) + 'px';
@@ -181,13 +200,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-2 pl-1">
           <div className="flex items-center gap-3">
-          {!hideAgentSelector && (
-            <TargetSelector selectedAgent={selectedAgent} onSelectAgent={onSelectAgent} locked={lockAgent} />
-          )}
-          <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full border">
-            <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
-            {wsConnected ? t('chat.connected') : t('chat.disconnected')}
-          </span>
+            {!hideAgentSelector && (
+              <TargetSelector selectedAgent={selectedAgent} onSelectAgent={onSelectAgent} locked={lockAgent} />
+            )}
+            <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full border">
+              <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
+              {wsConnected ? t('chat.connected') : t('chat.disconnected')}
+            </span>
           </div>
           {!wsConnected && onReconnect && (
             <button
@@ -274,7 +293,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             <button
               data-testid="send-button"
               onClick={handleSend}
-              disabled={!inputValue.trim() || !wsConnected || disabled}
+              disabled={!inputValue.trim() || !wsConnected || disabled || isSubmitting}
               title={t('chat.sendMessage')}
               aria-label={t('chat.sendMessage')}
               className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-md shadow-primary/20"

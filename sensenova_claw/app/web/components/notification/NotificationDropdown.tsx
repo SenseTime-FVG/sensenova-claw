@@ -259,7 +259,7 @@ export function NotificationDropdown() {
   } = useNotification();
   const { sessions, switchSession } = useSession();
   const { wsSend } = useWebSocket();
-  const { resolveInteractionFromNotification } = useInteraction();
+  const { submitQuestionResponse, resolveInteractionFromNotification } = useInteraction();
 
   // 点击外部关闭
   useEffect(() => {
@@ -307,15 +307,11 @@ export function NotificationDropdown() {
       // 判断是取消还是正常回答
       const isCancelled = action === '__cancelled__';
       // 发送问题回答
-      wsSend({
-        type: 'user_question_answered',
-        session_id: card.sessionId,
-        payload: {
-          question_id: card.interactionId,
-          answer: isCancelled ? null : (inputValue ?? action ?? ''),
-          cancelled: isCancelled,
-        },
-        timestamp: Date.now() / 1000,
+      submitQuestionResponse({
+        questionId: card.interactionId,
+        sourceSessionId: card.sessionId,
+        answer: isCancelled ? null : (inputValue ?? action ?? ''),
+        cancelled: isCancelled,
       });
       markCardPending(cardId, action);
     } else if (action === 'view_session' && card.sessionId) {
@@ -324,7 +320,7 @@ export function NotificationDropdown() {
       resolveCard(cardId, action);
       return;
     }
-  }, [cards, wsSend, markCardPending, resolveCard, handleNavigate]);
+  }, [cards, wsSend, markCardPending, resolveCard, handleNavigate, submitQuestionResponse]);
 
   // 用 ref 持有最新 handleResolve，避免 useEffect 因 handleResolve 变化反复调用
   // setOnActionToastAction 导致无限循环

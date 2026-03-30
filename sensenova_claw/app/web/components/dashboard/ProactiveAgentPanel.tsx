@@ -3,6 +3,8 @@
 import { Bot, Lightbulb, MessageCircleMore, MessageSquare, Search, Sparkles, Zap } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useNotification } from '@/hooks/useNotification';
+import { authFetch, API_BASE } from '@/lib/authFetch';
 import { getTone } from './widgetTones';
 import { SectionHeader } from './SectionHeader';
 import type { RecentOutput, RecommendationGroup, RecommendationItem } from '@/hooks/useDashboardData';
@@ -40,17 +42,32 @@ function RecommendationCard({
   return (
     <button
       type="button"
+      data-testid="next-question-recommendation-item"
       onClick={onClick}
-      className="group w-full text-left px-2.5 py-2 rounded-lg hover:bg-white/10 dark:hover:bg-white/5 transition-colors flex items-start gap-2"
+      className="group w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-left transition-all hover:-translate-y-0.5 hover:bg-white/10 dark:hover:bg-white/5"
     >
-      <span className="mt-0.5 shrink-0 rounded-md border border-[var(--glass-border)] bg-[var(--glass-bg-heavy)] p-1">
-        <Icon className="h-3.5 w-3.5 text-violet-500" />
-      </span>
-      <span className="text-[12px] leading-[1.4] text-[var(--glass-text)] group-hover:text-foreground line-clamp-2">
-        {item.title}
+      <span className="flex items-start gap-2">
+        <span className="mt-0.5 shrink-0 rounded-md border border-[var(--glass-border)] bg-[var(--glass-bg-heavy)] p-1">
+          <Icon className="h-3.5 w-3.5 text-violet-500" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-[12px] font-medium leading-[1.4] text-[var(--glass-text)] group-hover:text-foreground line-clamp-2">
+            {item.title}
+          </span>
+          <span className="mt-1 block text-[10px] leading-[1.4] text-[var(--glass-text-muted)] line-clamp-2">
+            {item.prompt}
+          </span>
+        </span>
       </span>
     </button>
   );
+}
+
+function formatSessionIdBadge(sessionId: string): string {
+  if (sessionId.length <= 16) {
+    return sessionId;
+  }
+  return `${sessionId.slice(0, 8)}...${sessionId.slice(-4)}`;
 }
 
 function ProactiveCard({ item, onClick }: { item: RecentOutput; onClick?: () => void }) {
@@ -86,28 +103,48 @@ function ProactiveCard({ item, onClick }: { item: RecentOutput; onClick?: () => 
 
 export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRecommendationClick }: ProactiveAgentPanelProps) {
   const [isTriggering, setIsTriggering] = useState(false);
+  const { pushNotification } = useNotification();
 
   const handleInterestPush = async () => {
     setIsTriggering(true);
     try {
-      const res = await fetch('/api/proactive/jobs/builtin-interest-push/trigger', {
+      const res = await authFetch(`${API_BASE}/api/proactive/jobs/builtin-interest-push/trigger`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: null }),
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         if (res.status === 409) {
-          console.warn('正在推送中，请稍后');
+          pushNotification({
+            title: '兴趣推送进行中',
+            body: '正在推送中，请稍后',
+            level: 'warning',
+            source: 'proactive',
+          });
         } else if (res.status === 400) {
-          console.warn('该功能已禁用');
+          pushNotification({
+            title: '兴趣推送不可用',
+            body: '该功能已禁用',
+            level: 'warning',
+            source: 'proactive',
+          });
         } else {
-          console.warn('触发失败，请稍后重试');
+          pushNotification({
+            title: '兴趣推送触发失败',
+            body: '请稍后重试',
+            level: 'error',
+            source: 'proactive',
+          });
         }
       }
-    } catch (err) {
-      console.warn('触发失败，请稍后重试');
+    } catch {
+      pushNotification({
+        title: '兴趣推送触发失败',
+        body: '请稍后重试',
+        level: 'error',
+        source: 'proactive',
+      });
     } finally {
       setIsTriggering(false);
     }
@@ -137,35 +174,69 @@ export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRec
           }
         />
 
-        {recommendations && recommendations.length > 0 && (
-          <div className="mb-3 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg-light)] p-2.5">
-            <div className="mb-1.5 px-0.5 text-[11px] font-medium text-[var(--glass-text-muted)]">推荐操作</div>
-            <div className="space-y-2">
-              {recommendations.map(group => (
-                <div key={group.sourceSessionId} className="space-y-1">
-                  {group.items.map(item => (
-                    <RecommendationCard
-                      key={item.id}
-                      item={item}
-                      onClick={() => onRecommendationClick?.(group.sourceSessionId, item.id, item.prompt)}
-                    />
-                  ))}
+        <div
+          data-testid="proactive-panel-scroll"
+          className="flex-1 min-h-0 overflow-auto thin-scrollbar"
+        >
+          {recommendations && recommendations.length > 0 && (
+            <section
+              data-testid="next-question-recommendations"
+              className="mb-3 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg-light)] p-2.5"
+            >
+              <div className="mb-2 flex items-center gap-2 px-0.5">
+                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg-heavy)] shadow-sm">
+                  <Sparkles className="h-3.5 w-3.5 text-violet-500" />
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+                <div className="min-w-0">
+                  <div className="text-[11px] font-semibold text-[var(--glass-text)]">下一问推荐</div>
+                  <div className="text-[10px] text-[var(--glass-text-muted)]">基于最近完成的对话，帮你继续往下问</div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {recommendations.map(group => (
+                  <div
+                    key={group.sourceSessionId}
+                    data-testid="next-question-recommendation-group"
+                    className="space-y-1 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)]/70 p-2"
+                  >
+                    <div className="flex items-start justify-between gap-2 px-0.5">
+                      <div className="min-w-0">
+                        <div className="text-[9px] font-medium uppercase tracking-[0.18em] text-[var(--glass-text-muted)]">
+                          来源会话
+                        </div>
+                        <div
+                          data-testid="next-question-recommendation-group-title"
+                          className="truncate text-[11px] font-semibold text-[var(--glass-text)]"
+                        >
+                          {group.sourceSessionTitle}
+                        </div>
+                      </div>
+                      <div className="shrink-0 rounded-full border border-[var(--glass-border)] bg-[var(--glass-bg-heavy)] px-2 py-0.5 text-[9px] text-[var(--glass-text-muted)]">
+                        {formatSessionIdBadge(group.sourceSessionId)}
+                      </div>
+                    </div>
+                    {group.items.map(item => (
+                      <RecommendationCard
+                        key={item.id}
+                        item={item}
+                        onClick={() => onRecommendationClick?.(group.sourceSessionId, item.id, item.prompt)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
-        {items.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-[var(--glass-bg-light)]">
-            <div className="flex flex-col items-center gap-1.5">
-              <Bot className="h-6 w-6 text-muted-foreground/30" />
-              <span className="text-[11px] text-muted-foreground">暂无主动产出</span>
+          {items.length === 0 ? (
+            <div className="flex min-h-[180px] items-center justify-center rounded-xl border border-dashed border-border bg-[var(--glass-bg-light)]">
+              <div className="flex flex-col items-center gap-1.5">
+                <Bot className="h-6 w-6 text-muted-foreground/30" />
+                <span className="text-[11px] text-muted-foreground">暂无主动产出</span>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex-1 min-h-0 overflow-auto thin-scrollbar">
-            <div className="space-y-2">
+          ) : (
+            <div data-testid="proactive-panel-output-list" className="space-y-2">
               {items.map(item => (
                 <ProactiveCard
                   key={item.id}
@@ -174,8 +245,8 @@ export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRec
                 />
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

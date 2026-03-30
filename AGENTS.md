@@ -369,12 +369,12 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-27 PR171 同步补充
 
 成功经验：
-- 对“把某个既有 PR 的相关修改同步到当前分支”这类需求，先用 `gh pr view <id> --json commits,files` 和 `gh pr diff <id> --patch` 确认最终影响文件与提交顺序，再决定是 cherry-pick 整个序列还是手工摘取，能明显减少误带无关改动的风险。
+- 对”把某个既有 PR 的相关修改同步到当前分支”这类需求，先用 `gh pr view <id> --json commits,files` 和 `gh pr diff <id> --patch` 确认最终影响文件与提交顺序，再决定是 cherry-pick 整个序列还是手工摘取，能明显减少误带无关改动的风险。
 - 遇到 cherry-pick 冲突时，先保留当前分支独有改动，再仅引入 PR 冲突块里的最小增量，通常比整文件覆盖更稳，尤其是 `main.py` 这类在不同分支上都在演进的入口文件。
 - 给既有测试文件补新用例时必须先检查它是否已有历史断言；这次如果不先对照 `git show HEAD:<file>`，很容易误把原有进程管理测试覆盖掉。
 
 失败/风险经验：
-- `gh pr diff --patch` 展示的是 patch，不是“最终净效果说明”；如果直接照 patch 首个提交去整文件替换，容易把 PR 分支上的上下文改动一并带入当前分支。
+- `gh pr diff --patch` 展示的是 patch，不是”最终净效果说明”；如果直接照 patch 首个提交去整文件替换，容易把 PR 分支上的上下文改动一并带入当前分支。
 
 ### 2026-03-27 ask_user 消息内联补充
 
@@ -1390,6 +1390,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `sensenova_claw/app/web/e2e/tool-confirmation-resolution.spec.ts` 里的 session 弹窗用例当前在本机仍会失败，现象是 `/sessions/[id]` 路径下拿不到 `tool-confirmation-dialog`；这和本次 toast 自动消失改动无直接证据关联，提交前需明确区分“本次新增回归通过”与“仓库既有用例仍失败”。
 
+### 2026-03-26 ask_user 消息内联补充
+
+成功经验：
+- `ask_user` 想同时显示在通知和聊天工具卡片里时，把问题元数据挂到工具消息本身最稳；仅靠通知中心状态，很难把”对应哪一个 ask_user 工具块”这件事关联准确。
+- `/chat` 页的前端 e2e 不能只 mock `auth/status` 和 `sessions`；当前工作台初始化还会请求 `agents`、`custom-pages`、`files/roots`、`todolist` 等接口，不补齐会让测试在真正进入聊天区前就偏到登录页或空态。
+- Mock WebSocket 时只拦业务 `localhost:8000/ws`，保留 Next dev 的 HMR socket；全量替换 `window.WebSocket` 会把页面自身运行搞崩，表面看像业务回归，实际是测试夹具问题。
+
+失败/风险经验：
+- 旧 `ask-user.spec.ts` 夹具和当前鉴权/工作台初始化流程已经漂移，新增聊天区行为回归前要先修测试基建，否则失败点会落在登录和页面初始化，而不是 `ask_user` 本身。
+
 ### 2026-03-26 Proactive 推荐看板补充
 
 成功经验：
@@ -1495,12 +1505,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 如果后续继续在 `MessageBubble.tsx` 做更大重构，要记得同步审视 `globals.css` 里的历史聊天样式块；只改 JSX 很容易留下“视觉上看起来像 bug、但类型和逻辑都正常”的残留问题。
-### 2026-03-26 ask_user 消息内联补充
+
+### 2026-03-25 Mini-App Workspace Server 化补充
 
 成功经验：
-- `ask_user` 想同时显示在通知和聊天工具卡片里时，把问题元数据挂到工具消息本身最稳；仅靠通知中心状态，很难把“对应哪一个 ask_user 工具块”这件事关联准确。
-- `/chat` 页的前端 e2e 不能只 mock `auth/status` 和 `sessions`；当前工作台初始化还会请求 `agents`、`custom-pages`、`files/roots`、`todolist` 等接口，不补齐会让测试在真正进入聊天区前就偏到登录页或空态。
-- Mock WebSocket 时只拦业务 `localhost:8000/ws`，保留 Next dev 的 HMR socket；全量替换 `window.WebSocket` 会把页面自身运行搞崩，表面看像业务回归，实际是测试夹具问题。
+- 把 mini-app 从”单页静态 HTML”提升为”`workspace_root/app + server.py + data/`”之后，最小可行预览链路不是直接暴露工作目录文件，而是由后端提供 `custom-pages/{slug}/preview` 反向代理到独立 workspace server；这样后续无论是 FastAPI、Flask 还是任意轻量 server，都能统一挂到现有工作区入口。
+- 为 workspace 动作显式补 `refresh_mode = none/background/immediate` 很关键；只要把”普通问答/记笔记/状态落盘”默认收敛到 `none`，把”夜间补课/静默补内容”归到 `background`，前端就能避免每次给 Agent 发消息都强刷整个 workspace。
+- 前端 Playwright 对这种纯 mock 的页面回归，`webServer` 应只启动 `app/web` 自己的 `next dev`；若沿用仓库级 `npm run dev`，会把后端和其他 watcher 一起拉起来，3000 端口很容易被拖挂，导致浏览器始终停在 `about:blank`。
 
 失败/风险经验：
-- 旧 `ask-user.spec.ts` 夹具和当前鉴权/工作台初始化流程已经漂移，新增聊天区行为回归前要先修测试基建，否则失败点会落在登录和页面初始化，而不是 `ask_user` 本身。
+- `DashboardLayout` 会连带触发 `TodoDropdown`、侧边栏 agent 列表等外围请求；如果 e2e 只 mock 了 feature 页自身 API，而漏掉 `/api/todolist/**`、`/api/agents*` 这类布局层接口，`authFetch` 遇到 401 会直接把页面打回 `/login`，看起来像 workspace 页没加载，实际是测试夹具不完整。
+- 当前环境里 Playwright 浏览器访问 `localhost:3000`/`127.0.0.1:3000` 对”已挂死的 next dev”不会快速报错，而是长时间卡在 `page.goto(..., waitUntil='domcontentloaded')`；遇到这类超时，先用 `curl` 和 `ss -ltnp` 判定 3000 端口是否真在响应，再决定是改代码还是重启 dev server。

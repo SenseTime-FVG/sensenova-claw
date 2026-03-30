@@ -2,7 +2,7 @@ export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';
 
 export interface ToolInfo {
   name: string;
-  arguments: unknown;
+  arguments: Record<string, unknown>;
   result?: unknown;
   success?: boolean;
   error?: string;

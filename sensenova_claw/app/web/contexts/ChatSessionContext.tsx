@@ -27,7 +27,7 @@ import {
   useInteraction,
   useEventDispatcher,
 } from '@/contexts/ws';
-import type { GlobalAgentActivity, ProactiveResultItem, PrefillInputPayload } from '@/contexts/ws';
+import type { GlobalAgentActivity, ProactiveResultItem, PrefillInputPayload, RecommendationSendMeta } from '@/contexts/ws';
 import type { PendingInteraction } from '@/components/chat/QuestionDialog';
 import type {
   ChatMessage,
@@ -40,7 +40,7 @@ import type {
 
 // ── 导出类型（保持向后兼容） ──
 
-export type { GlobalAgentActivity, ProactiveResultItem };
+export type { GlobalAgentActivity, ProactiveResultItem, RecommendationSendMeta, PrefillInputPayload };
 
 export interface ChatSessionContextValue {
   // 连接
@@ -58,7 +58,12 @@ export interface ChatSessionContextValue {
   // 消息
   messages: ChatMessage[];
   isTyping: boolean;
-  sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string) => void;
+  sendMessage: (
+    content: string,
+    contextFiles?: ContextFileRef[],
+    agentId?: string,
+    recommendation?: RecommendationSendMeta | null,
+  ) => void;
 
   // 任务列表
   sessions: SessionItem[];
