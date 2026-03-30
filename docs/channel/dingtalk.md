@@ -1,56 +1,37 @@
-# 接入 DingTalk 机器人
+# 怎么创建钉钉机器人
 
-### 1. 安装依赖
+## 1. 创建应用
+- 打开[钉钉开发者平台](https://open-dev.dingtalk.com/)
+- 点击`应用开发` 
+- 选择`企业内部应用`下的`钉钉应用`
+- 点击`创建应用`，填写应用名称和描述
+![创建应用](./images/dingtalk1.png)
 
-```bash
-conda activate base
-uv sync --extra dev
-```
+## 2. 配置机器人权限
+- `添加应用能力` - 添加`机器人`
+![添加机器人能力](./images/dingtalk2.png)
+- 在侧边栏选择`机器人`
+- 开启`机器人配置`
+- ![机器人配置](./images/dingtalk3.png)
+- 拉到最底下，`消息接收模式`选择`Stream模式`
+- 点击`发布`
+![发布机器人配置](./images/dingtalk4.png)
+- 配置权限  
+在 权限管理 页面，搜索并添加以下三个必要权限：
+  - `Card.Streaming.Write`: 向 AI Card 推送流式内容（打字机效果必需）
+  - `Card.Instance.Write`: 创建和更新 AI Card 实例
+  - `qyapi_robot_sendmsg`: 机器人发送消息
 
-确保环境中包含 `dingtalk-stream`。
+## 3. 发布应用
+- 在 `版本管理与发布` 页面点击 `创建新版本`
+- 填写版本说明后提交
+- 选择应用可见范围（建议先设为 全员 进行测试）
+- 点击 `保存`
+- 点击 `确认发布`
 
-### 2. 创建钉钉机器人应用
+## 4. 获取 `client_id` & `client_secret`
+- 应用侧边栏选择 `凭证与基础信息`
+![id&secret](./images/dingtalk5.png)
 
-在钉钉开放平台创建机器人应用，拿到：
 
-- `client_id`
-- `client_secret`
 
-当前插件基于官方 `dingtalk-stream-sdk-python`，使用 Stream 模式接收消息。
-
-### 3. 配置 `config.yml`
-
-```yaml
-plugins:
-  dingtalk:
-    enabled: true
-    client_id: "dingxxxx"
-    client_secret: "xxxx"
-    dm_policy: open
-    group_policy: open
-    require_mention: true
-    allowlist: []
-    group_allowlist: []
-    reply_to_sender: false
-    show_tool_progress: false
-```
-
-### 4. 目标 ID 规则
-
-`message` 工具和 `Gateway.send_outbound()` 对钉钉支持两种目标格式：
-
-- `user:<staff_id>`：主动发给指定用户
-- `conversation:<open_conversation_id>`：主动发给指定群会话
-
-### 5. 当前能力
-
-- 私聊文本入站
-- 群聊文本入站
-- `mention` 控制
-- `ask_user` 问答回传
-- `message` 工具主动发文本
-
-### 6. 当前限制
-
-- 仅处理文本消息
-- 目前未实现卡片消息、配对码和 richer onboarding
