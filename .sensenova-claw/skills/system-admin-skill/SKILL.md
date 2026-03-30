@@ -218,6 +218,22 @@ tools:
     password: ${EMAIL_PASSWORD}
 ```
 
+### Obsidian 工具
+
+```yaml
+tools:
+  obsidian:
+    enabled: true                          # 启用后注册 obsidian 相关工具
+    vaults:                                # 本地 vault 路径列表
+      - ~/Documents/MyVault
+    remote:                                # 远程 vault（需 Local REST API 插件）
+      - name: remote-vault
+        url: http://192.168.1.100:27123
+        api_key: your-api-key
+```
+
+**注意**：`vaults` 是列表格式。未配置时会自动检测常见位置（`~/Documents/Obsidian`、`~/Obsidian` 等）。
+
 ### 检查配置状态
 
 ```bash

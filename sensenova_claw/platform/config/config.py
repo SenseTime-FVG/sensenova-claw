@@ -170,6 +170,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "max_attachment_size_mb": 10,
             "timeout": 30,
         },
+        "obsidian": {
+            "enabled": False,
+            "vaults": [],                             # 本地 vault 路径列表，如 ["~/Documents/MyVault"]
+            "remote": [],                             # 远程 vault 列表，如 [{"name": "xx", "url": "http://...", "api_key": "..."}]
+        },
         "ask_user": {"enabled": True, "timeout": 300},
         "result_truncation": {
             "max_tokens": 8000,
