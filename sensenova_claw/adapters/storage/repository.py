@@ -182,6 +182,9 @@ class Repository:
 
         注意：threading.local 已保证每个线程独占一个连接，连接永远不会跨线程共享，
         因此不需要也不应该设置 check_same_thread=False（保持默认 True 以保留安全检查）。
+
+        TODO: Task 2-6 完成后，所有 async 方法将迁移至 asyncio.to_thread + _sync_* 模式，
+        届时业务方法中的 conn.close() + self._local.conn = None 均可删除（连接将持久复用）。
         """
         conn = getattr(self._local, "conn", None)
         if conn is None:
