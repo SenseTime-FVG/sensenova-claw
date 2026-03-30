@@ -6,7 +6,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { WorkbenchShell } from '@/components/workbench/WorkbenchShell';
 import { MiniAppBuildFeed } from '@/components/workbench/MiniAppBuildFeed';
 import { ChatPanel } from '@/components/chat/ChatPanel';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession, useMessages } from '@/contexts/ws';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -228,11 +228,8 @@ export default function DynamicFeaturePage() {
   const router = useRouter();
   const slug = params.slug as string;
 
-  const {
-    sendMessage,
-    switchSession,
-    currentSessionId,
-  } = useChatSession();
+  const { switchSession, currentSessionId } = useSession();
+  const { sendMessage } = useMessages();
 
   const [page, setPage] = useState<CustomPageData | null>(null);
   const [loading, setLoading] = useState(true);

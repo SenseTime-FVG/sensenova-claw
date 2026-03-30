@@ -46,9 +46,10 @@ def _find_npm() -> str:
         return ""
     return npm
 
-
 def _find_node() -> str:
     """查找 node 可执行文件路径。"""
+    import shutil
+
     node = shutil.which("node")
     if not node:
         return ""

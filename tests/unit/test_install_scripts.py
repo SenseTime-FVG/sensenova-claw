@@ -11,7 +11,13 @@ def test_install_sh_uses_editable_tool_install():
     content = (ROOT / "install" / "install.sh").read_text(encoding="utf-8")
 
     assert "uv tool install --editable --from . --force sensenova-claw" in content
-    assert 'REPO_REF="${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-dev}}"' in content
+    assert (
+        'REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-dev}}}"'
+        in content
+    )
+    assert 'info "app 目录将使用仓库分支/引用: $REPO_REF"' in content
+    assert 'if [ "$DEV_MODE" != "true" ]; then' in content
+    assert "npm run build 2>&1 | tail -10" in content
 
 
 def test_install_ps1_uses_editable_tool_install():

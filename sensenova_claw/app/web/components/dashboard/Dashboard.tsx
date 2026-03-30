@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo, type RefObject } from 'react';
 import { ResponsiveGridLayout, useContainerWidth, type Layout, type LayoutItem, type ResponsiveLayouts } from 'react-grid-layout';
 import { GripHorizontal, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
 import { useDashboardData } from '@/hooks/useDashboardData';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession, useMessages } from '@/contexts/ws';
 import { useNotification } from '@/hooks/useNotification';
 import { SmartStack } from './SmartStack';
 import { RecentOutputs } from './RecentOutputs';
@@ -120,7 +120,8 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
     loading,
   } = useDashboardData();
 
-  const { switchSession, createSession, prefillInput } = useChatSession();
+  const { switchSession, createSession } = useSession();
+  const { prefillInput } = useMessages();
   const { pushNotification } = useNotification();
 
   const { containerRef, width: containerWidth, mounted: containerMounted } = useContainerWidth({ initialWidth: 1200 });

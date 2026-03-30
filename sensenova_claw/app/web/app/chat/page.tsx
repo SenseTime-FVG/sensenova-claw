@@ -11,21 +11,27 @@ import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 import { useFilePanel } from '@/contexts/FilePanelContext';
-import { type SessionItem, type ContextFileRef, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
 import { useI18n } from '@/contexts/I18nContext';
+import { type SessionItem, type ContextFileRef, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
 import { MessageArea } from '@/components/chat/MessageArea';
 import { ChatInput } from '@/components/chat/ChatInput';
+import { useSlideSet } from '@/components/ppt/PPTViewer';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useResizablePreview } from '@/hooks/useResizablePreview';
 
 // Lazy load SlideViewer
-const SlideViewer = dynamic(() => import('@/components/ppt/PPTViewer').then(mod => mod.SlideViewer), {
-  loading: () => <div className="h-full flex items-center justify-center bg-muted/20"><Loader2 className="animate-spin text-muted-foreground" /></div>,
-  ssr: false
-});
-
-import { useSlideSet } from '@/components/ppt/PPTViewer';
+const SlideViewer = dynamic(
+  () => import('@/components/ppt/PPTViewer').then(mod => mod.SlideViewer),
+  {
+    loading: () => (
+      <div className="h-full flex items-center justify-center bg-muted/20">
+        <Loader2 className="animate-spin text-muted-foreground" />
+      </div>
+    ),
+    ssr: false,
+  },
+);
 
 /* ── workdir 根目录缓存 ── */
 let _workdirRootCache: string | null | undefined;
@@ -127,7 +133,7 @@ function SessionListItem({
   isLast?: boolean;
   noMargin?: boolean;
 }) {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleDelete = (e: React.MouseEvent) => {

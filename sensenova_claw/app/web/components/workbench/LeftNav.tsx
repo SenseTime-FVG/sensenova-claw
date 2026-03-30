@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authFetch, authGet, API_BASE } from '@/lib/authFetch';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession } from '@/contexts/ws';
 import { type SessionItem, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
 import type { CronJob } from '@/hooks/useDashboardData';
 
@@ -233,7 +233,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
     startNewChat,
     refreshTaskGroups,
     loadingSessions,
-  } = useChatSession();
+  } = useSession();
 
   const [agentMap, setAgentMap] = useState<Record<string, string>>({});
   const [loadingAgents, setLoadingAgents] = useState(true);
@@ -451,7 +451,7 @@ function proactiveTimeLabel(ts: number): string {
 }
 
 function ProactiveSidebarPanel() {
-  const { sessions, switchSession } = useChatSession();
+  const { sessions, switchSession } = useSession();
 
   const proactiveSessions = [...sessions]
     .filter(s => {

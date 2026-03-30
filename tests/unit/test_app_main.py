@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import signal
 import sys
 import time
 from pathlib import Path
@@ -17,6 +16,11 @@ from sensenova_claw.app.main import (
     _terminate_managed_process,
     _wait_for_port_listen,
 )
+
+
+def _touch(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="该测试仅覆盖类 Unix 进程组行为")
