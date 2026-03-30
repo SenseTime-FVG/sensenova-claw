@@ -140,6 +140,10 @@ class TestLifecycle:
         await channel.start()
 
         assert bridge.started is True
+        assert channel._sensenova_claw_status == {
+            "status": "failed",
+            "error": "WhatsApp sidecar command timed out: start",
+        }
         assert channel._runtime_state.connected is False
         assert channel._runtime_state.state == "error"
         assert channel._runtime_state.last_error == "WhatsApp sidecar command timed out: start"
@@ -159,6 +163,10 @@ class TestLifecycle:
         await channel.start()
 
         assert bridge.started is True
+        assert channel._sensenova_claw_status == {
+            "status": "failed",
+            "error": "WhatsApp sidecar command timed out: start",
+        }
         assert channel._runtime_state.state == "error"
         assert channel._runtime_state.last_error == "WhatsApp sidecar command timed out: start"
         assert channel._runtime_state.debug_message == "auth state loaded"

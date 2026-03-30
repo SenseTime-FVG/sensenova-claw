@@ -193,6 +193,7 @@ tools:
 | **飞书** | 企业 IM 集成，支持私聊/群聊 | `config.yml` plugins.feishu |
 | **Telegram** | Telegram Bot Channel，支持私聊/群组消息接入 | `config.yml` plugins.telegram |
 | **企微** | 企业微信消息 Channel，支持私聊/群聊接入 | `config.yml` plugins.wecom |
+| **DingTalk** | 钉钉 Stream Bot Channel，支持私聊/群聊文本消息接入 | `config.yml` plugins.dingtalk |
 | **WhatsApp** | 核心版 WhatsApp Web 文本接入 | `config.yml` plugins.whatsapp |
 
 <details>
@@ -287,6 +288,32 @@ plugins:
 [怎么创建企微bot](docs/channel/wecom.md)
 
 启动 Gateway 后会使用企微官方 WebSocket 地址建立连接；需要先在企微侧创建机器人并获取 `bot_id` 与 `secret`。
+
+</details>
+
+<details>
+<summary><b>DingTalk 配置</b></summary>
+
+```yaml
+plugins:
+  dingtalk:
+    enabled: true
+    client_id: "dingxxxx"
+    client_secret: "xxxx"
+    dm_policy: "open"          # open / allowlist / disabled
+    group_policy: "open"       # open / allowlist / disabled
+    allowlist: []              # 私聊允许名单，支持 staff_id
+    group_allowlist: []        # 群聊允许名单，支持 staff_id
+    require_mention: true      # 群聊中是否必须 @bot
+    show_tool_progress: false
+    reply_to_sender: false
+```
+
+[怎么创建钉钉机器人 / 获取 client_id 与 client_secret](docs/channel/dingtalk.md)
+
+启动gateway后钉钉机器人自动连接
+
+如何使用钉钉机器人：钉钉机器人默认不能在搜索栏搜到，只能在群聊里设置里在`机器人`添加，然后在群里@，或直接点进去私聊
 
 </details>
 

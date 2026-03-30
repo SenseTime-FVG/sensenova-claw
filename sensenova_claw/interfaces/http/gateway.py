@@ -27,6 +27,18 @@ def _normalize_channel_status(value: object) -> str:
 
 def _read_channel_runtime_state(channel: object) -> tuple[str, str]:
     """从 channel 自身或其内部 runtime/client 上提取统一状态与错误。"""
+    whatsapp_runtime = getattr(channel, "_runtime_state", None)
+    if whatsapp_runtime is not None:
+        state = str(getattr(whatsapp_runtime, "state", "") or "").strip().lower()
+        connected = bool(getattr(whatsapp_runtime, "connected", False))
+        error = _normalize_error_message(getattr(whatsapp_runtime, "last_error", ""))
+        if connected or state in {"ready", "connected"}:
+            return "connected", ""
+        if state in {"error", "failed", "closed"} or error:
+            return "failed", error
+        if state in {"connecting", "refreshing_qr", "booting"}:
+            return "connecting", ""
+
     status_sources = (
         getattr(channel, "_sensenova_claw_status", None),
         getattr(getattr(channel, "_runtime", None), "_sensenova_claw_status", None),

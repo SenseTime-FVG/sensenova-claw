@@ -69,6 +69,12 @@ class _FakeTelegramRuntime:
         return {"success": True, "message_id": f"msg:{chat_id}"}
 
 
+class _FailingTelegramRuntime(_FakeTelegramRuntime):
+    async def start(self) -> None:
+        self.started = True
+        raise RuntimeError("telegram auth failed")
+
+
 def _make_channel(
     *,
     dm_policy: str = "open",
@@ -111,6 +117,23 @@ class TestLifecycle:
         assert runtime.started is True
         assert runtime.stopped is True
         assert runtime.handler is not None
+
+    @pytest.mark.asyncio
+    async def test_start_failure_marks_channel_failed(self):
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus=bus)
+        gateway = Gateway(publisher=publisher)
+        runtime = _FailingTelegramRuntime()
+        channel = TelegramChannel(
+            config=TelegramConfig(enabled=True, bot_token="123:abc"),
+            plugin_api=_SimplePluginApi(gateway=gateway),
+            runtime=runtime,
+        )
+
+        with pytest.raises(RuntimeError, match="telegram auth failed"):
+            await channel.start()
+
+        assert channel._sensenova_claw_status == {"status": "failed", "error": "telegram auth failed"}
 
 
 class TestShouldRespond:

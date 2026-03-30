@@ -364,6 +364,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         case 'user_question_asked':
           if (!event.session_id || event.session_id === currentSessionIdRef.current) setIsTyping(false);
           break;
+        case 'user_question_answered_event':
+          if (!event.session_id || event.session_id === currentSessionIdRef.current) setIsTyping(false);
+          break;
       }
     });
   }, [subscribeCurrentSession, resetTurnTracking]);

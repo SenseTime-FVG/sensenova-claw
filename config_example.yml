@@ -398,6 +398,17 @@ plugins:
     require_mention: true  # 群里即使用户和频道都满足，还必须 @bot 才会响应
     show_tool_progress: false
     reply_in_thread: true
+  dingtalk:
+    enabled: false
+    client_id: "${DINGTALK_CLIENT_ID}"
+    client_secret: "${DINGTALK_CLIENT_SECRET}"
+    dm_policy: "open"  # open | allowlist | disabled
+    group_policy: "open"  # open | allowlist | disabled
+    allowlist: []
+    group_allowlist: []
+    require_mention: true
+    show_tool_progress: false
+    reply_to_sender: false
   whatsapp:
     enabled: false
     auth_dir: "~/.sensenova-claw/data/plugins/whatsapp/auth"

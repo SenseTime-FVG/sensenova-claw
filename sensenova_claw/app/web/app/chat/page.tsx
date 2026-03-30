@@ -400,12 +400,12 @@ function ChatContent() {
     contextFiles?: ContextFileRef[],
     recommendation?: RecommendationSendMeta | null,
   ) => {
-    if (activeInteraction?.kind === 'question') {
+    if (activeInteraction?.kind === 'question' && activeInteraction.sourceSessionId === currentSessionId) {
       sendQuestionAnswer(content, false);
     } else {
       sendMessage(content, contextFiles, selectedAgentId || 'default', recommendation);
     }
-  }, [activeInteraction, sendMessage, sendQuestionAnswer, selectedAgentId]);
+  }, [activeInteraction, currentSessionId, sendMessage, sendQuestionAnswer, selectedAgentId]);
 
   const emptyState = useMemo(() => (
     <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground animate-in fade-in zoom-in-95 duration-500">
@@ -419,6 +419,8 @@ function ChatContent() {
       </p>
     </div>
   ), [agents, selectedAgentId, t]);
+  const isCurrentSessionQuestionInteraction =
+    activeInteraction?.kind === 'question' && activeInteraction.sourceSessionId === currentSessionId;
 
   return (
     <ResizablePanelGroup orientation="horizontal" className="h-full overflow-hidden gap-3 bg-slate-50/50 dark:bg-slate-900/20">
@@ -495,7 +497,7 @@ function ChatContent() {
               onSend={handleSend}
               onSlashSubmit={() => false}
               onStop={cancelTurn}
-              disabled={interactionSubmitting || activeInteraction?.kind === 'confirmation' || (isTyping && activeInteraction?.kind !== 'question')}
+              disabled={activeInteraction?.kind === 'confirmation' || (isTyping && !isCurrentSessionQuestionInteraction)}
               wsConnected={wsConnected}
               handleSkillInvoke={handleSkillInvoke}
               hideAgentSelector

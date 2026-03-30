@@ -46,6 +46,7 @@ class WecomChannel(Channel):
         super().__init__()
         self._config = config
         self._plugin_api = plugin_api
+        self._sensenova_claw_status = {"status": "initialized", "error": ""}
         self._client = client or WecomToolClient(
             config=config,
             on_text_message=self._on_client_text_message,
@@ -74,11 +75,19 @@ class WecomChannel(Channel):
             del self._chat_sessions[key]
 
     async def start(self) -> None:
-        await self._client.start()
+        self._sensenova_claw_status = {"status": "connecting", "error": ""}
+        try:
+            await self._client.start()
+        except Exception as exc:
+            self._sensenova_claw_status = {"status": "failed", "error": str(exc).strip() or type(exc).__name__}
+            logger.exception("WecomChannel start failed")
+            raise
+        self._sensenova_claw_status = {"status": "connected", "error": ""}
         logger.info("WecomChannel started")
 
     async def stop(self) -> None:
         await self._client.stop()
+        self._sensenova_claw_status = {"status": "stopped", "error": ""}
         logger.info("WecomChannel stopped")
 
     async def send_event(self, event: EventEnvelope) -> None:
