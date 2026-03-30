@@ -1580,3 +1580,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 如果只修主输入消费条件而不修完成事件清理逻辑，表面上“在会话2发消息不会被旧 ask_user 吃掉”会通过，但用户一旦让会话2真正跑完一轮，旧会话 ask_user 还是会被后台 silently 清掉，属于半修状态。
+
+### 2026-03-30 DingTalk 原生插件接入补充
+
+成功经验：
+- 钉钉原生接入在当前仓库里最稳的落点仍然是 `plugin/config/models/runtime/channel` 五层结构，直接复用 `telegram/discord` 的测试与会话路由模式，能很快把新 channel 拉到可维护状态。
+- 官方 `dingtalk-stream` 包的 PyPI 名称是 `dingtalk-stream`，实际导入名是 `dingtalk_stream`；插件缺依赖提示和 `pyproject.toml` 依赖声明必须分别对应这两个名字。
+- 官方 Stream SDK 回调分发调用的是 handler 的 `raw_process()`，不是直接调 `process()`；如果只实现 `process()`，真实连上后会在首条消息回调阶段失效。
+- 钉钉主动发送文本消息可先统一收敛为 `user:<staff_id>` 与 `conversation:<open_conversation_id>` 两种 target 语义，方便直接复用现有 `MessageTool` 抽象。
+
+失败/风险经验：
+- 官方 SDK 自带的便捷方法更偏“回复当前会话”，对任意目标主动发文本没有现成高层封装；这类能力需要在 runtime 层自行补 HTTP API 封装，不能假设 SDK 已经全包。
+- 当前实现只稳定覆盖文本消息；图片、富文本、AI Card 与更复杂的钉钉机器人特性仍需后续按真实接口继续补齐。

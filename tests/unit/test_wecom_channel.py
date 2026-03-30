@@ -41,6 +41,12 @@ class _FakeWecomClient:
         return {"success": True, "message_id": f"msg:{target}"}
 
 
+class _FailingWecomClient(_FakeWecomClient):
+    async def start(self) -> None:
+        self.started = True
+        raise RuntimeError("wecom auth failed")
+
+
 def _make_channel(
     *,
     dm_policy: str = "open",
@@ -70,6 +76,23 @@ def _make_channel(
 
 
 class TestShouldRespond:
+    @pytest.mark.asyncio
+    async def test_start_failure_marks_channel_failed(self):
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus=bus)
+        gateway = Gateway(publisher=publisher)
+        client = _FailingWecomClient()
+        channel = WecomChannel(
+            config=WecomConfig(enabled=True, bot_id="bot_001", secret="secret_001"),
+            plugin_api=_SimplePluginApi(gateway=gateway),
+            client=client,
+        )
+
+        with pytest.raises(RuntimeError, match="wecom auth failed"):
+            await channel.start()
+
+        assert channel._sensenova_claw_status == {"status": "failed", "error": "wecom auth failed"}
+
     def test_p2p_open_policy(self):
         channel, _, _, _ = _make_channel(dm_policy="open")
         assert channel._should_respond("p2p", "user-1", "chat-1") is True
