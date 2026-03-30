@@ -36,6 +36,26 @@ from sensenova_claw.capabilities.tools.secret_tools import GetSecretTool, WriteS
 from sensenova_claw.platform.config.config import config
 
 
+# 工具名 → config.yml 中 enabled 字段的映射
+# 同一分组的工具共享一个 enabled 开关
+_TOOL_CONFIG_KEY_MAP: dict[str, str] = {
+    "read_file": "tools.file_operations.enabled",
+    "write_file": "tools.file_operations.enabled",
+    "edit": "tools.file_operations.enabled",
+    "apply_patch": "tools.file_operations.enabled",
+}
+
+
+def _is_tool_config_enabled(tool_name: str) -> bool:
+    """根据 config.yml 中 tools.<name>.enabled 判断工具是否启用。
+
+    优先查询 _TOOL_CONFIG_KEY_MAP 中的映射（支持分组开关），
+    未映射的工具按 tools.<name>.enabled 查找，默认启用。
+    """
+    config_key = _TOOL_CONFIG_KEY_MAP.get(tool_name, f"tools.{tool_name}.enabled")
+    return bool(config.get(config_key, True))
+
+
 class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Tool] = {}
@@ -93,6 +113,9 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def _is_llm_exposed(self, tool: Tool) -> bool:
+        # 全局 enabled 开关检查（来自 config.yml）
+        if not _is_tool_config_enabled(tool.name):
+            return False
         provider_name, _model_id = config.resolve_model(config.get("llm.default_model"))
         if provider_name == "mock":
             return True

@@ -8,10 +8,6 @@ import uuid
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from sensenova_claw.capabilities.agents.preferences import (
-    load_preferences,
-    resolve_tool_enabled_from_prefs,
-)
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
@@ -30,7 +26,6 @@ from sensenova_claw.kernel.events.types import (
 )
 from sensenova_claw.kernel.events.bus import PrivateEventBus
 from sensenova_claw.kernel.runtime.state import TurnState
-from sensenova_claw.kernel.runtime.context_builder import resolve_sensenova_claw_home_default
 from sensenova_claw.kernel.runtime.workers.base import SessionWorker
 
 if TYPE_CHECKING:
@@ -123,7 +118,7 @@ class AgentSessionWorker(SessionWorker):
 
     def _get_filtered_tools(self) -> list[dict]:
         """根据 Agent 配置过滤可用工具"""
-        all_tools = self.rt.tool_registry.as_llm_tools()
+        all_tools = self.rt.tool_registry.as_llm_tools()  # 已含 config enabled 过滤
         if not self.agent_config or not self.agent_config.tools:
             tools = all_tools  # 空列表 = 全部工具
         else:
@@ -134,16 +129,6 @@ class AgentSessionWorker(SessionWorker):
             tools = [t for t in all_tools if t["name"] in allowed]
         if self.agent_config and self.agent_config.can_delegate_to is None:
             tools = [t for t in tools if t["name"] != "send_message"]
-        if self.agent_config:
-            home = (
-                self.rt.context_builder.sensenova_claw_home
-                or str(resolve_sensenova_claw_home_default())
-            )
-            prefs = load_preferences(home)
-            tools = [
-                t for t in tools
-                if resolve_tool_enabled_from_prefs(prefs, self.agent_config.id, t["name"], default=True)
-            ]
 
         # 仅对 proactive 会话应用安全限制
         if self._session_meta and self._session_meta.get("proactive_job_id"):
@@ -326,6 +311,9 @@ class AgentSessionWorker(SessionWorker):
     async def _handle_user_input(self, event: EventEnvelope) -> None:
         content = str(event.payload.get("content", ""))
         turn_id = event.turn_id or f"turn_{uuid.uuid4().hex[:12]}"
+        # 每轮重置安全计数，避免跨 turn 累计导致提前触发限制
+        self._llm_call_count = 0
+        self._tool_call_count = 0
         self._current_turn_meta_source = _extract_meta_source(event.payload)
 
         await self.rt.repo.create_session(self.session_id, meta={"title": content[:20] or "新会话"})
