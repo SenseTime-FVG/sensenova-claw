@@ -499,25 +499,6 @@ class Repository:
         except (json.JSONDecodeError, TypeError, ValueError):
             return False
         return str(meta.get("visibility", "")).strip().lower() == "hidden"
-        # 回填：从 meta JSON 中提取 agent_id 写入 agent_id 列（修复历史数据）
-        rows = conn.execute(
-            "SELECT session_id, meta FROM sessions WHERE agent_id IS NULL OR agent_id = 'default'"
-        ).fetchall()
-        for row in rows:
-            meta_str = row[1]
-            if not meta_str:
-                continue
-            try:
-                meta = json.loads(meta_str)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            aid = meta.get("agent_id")
-            if aid and aid != "default":
-                conn.execute(
-                    "UPDATE sessions SET agent_id = ? WHERE session_id = ?",
-                    (aid, row[0]),
-                )
-        conn.commit()
 
     def _migrate_agent_messages_table(self, conn: sqlite3.Connection) -> None:
         """为 agent_messages 表补充新增列（兼容旧库）。"""
