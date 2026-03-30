@@ -1549,3 +1549,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 - `/sessions/[id]` 这类页面的 mock WebSocket 挂载时机不一定和 `/chat` 一样快；凡是用 `page.evaluate(() => __mockWs.emit(...))` 的 session 场景，最好先显式 `waitForMockWebSocketReady(page)`，否则会偶发 `Cannot read properties of undefined (reading 'emit')`。
 - 工作台首页 `/`、PPT `/ppt`、研究页等复用 `ChatPanel` 的页面，只要 `ChatPanel` 的禁用逻辑和 `ChatInput` 的 `ask_user` 提交语义正确，这类“回复 ask_user 后发送按钮卡死”的问题就会一起收敛；验证时可以用一个根工作台页和一个专用工作台页做抽样回归。
 - `/ppt` 这类带全局通知浮层的页面，Playwright 直接点击右上角按钮可能被 toast 遮挡误伤；如果要验证按钮处理链本身，优先给目标按钮加 `data-testid`，必要时直接触发 DOM `click()`，否则很容易把“按钮没被真正点到”误判成业务状态机 bug。
+
+### 2026-03-28 npm run dev 误判生产构建补充
+
+成功经验：
+- 根启动器判断 Next 前端是否可走 `next start` 时，不能只看 `web/.next` 目录是否存在；开发态缓存或半成品构建也会留下 `.next`，最稳的最小判定是检查 `web/.next/BUILD_ID` 是否存在且非空。
+- 这类启动问题最有效的复现方式就是直接跑真实 `npm run dev`，并同时观察前端日志；本次就是通过 Next 的明确报错 `Could not find a production build in the '.next' directory` 快速定位到了错误分支。
+- 对启动器修复，单测应直接锁住“有 `.next` 但无 `BUILD_ID` 时必须回退 `next dev`，有 `BUILD_ID` 时才允许 `next start`”这两个分支，能精确防止回归。
+
+失败/风险经验：
+- 用 `timeout npm run dev` 做 smoke test 可能留下 `next dev` 孤儿进程，因为外层超时信号不一定能完整传递到总控脚本管理的整个子进程树；验证启动器时，最好使用可交互会话并显式发送 `Ctrl+C` 收尾，再检查 3000/8000 端口是否释放。
+- 当前仓库默认 `uv run python -m pytest ...` 依赖先执行 `uv sync --extra dev`；如果环境里还没同步 `pytest`，测试失败会先表现为“环境缺依赖”而不是业务回归。

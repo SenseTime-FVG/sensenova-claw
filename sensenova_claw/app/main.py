@@ -70,8 +70,11 @@ def _build_frontend_dev_cmd(web_dir: Path, frontend_port: int) -> list[str]:
 
 def _build_frontend_prod_cmd(web_dir: Path, frontend_port: int) -> list[str]:
     """生产模式：使用 next start 启动预构建的前端。"""
-    # 检查是否已经 build 过
-    if not (web_dir / ".next").exists():
+    # 仅在存在有效生产构建标记时才允许 next start，避免把 dev/.next 缓存误判成可启动产物。
+    build_id = web_dir / ".next" / "BUILD_ID"
+    if not build_id.exists():
+        return []
+    if not build_id.read_text(encoding="utf-8").strip():
         return []
 
     next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
@@ -216,8 +219,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         # 将本地项目根目录置于 PYTHONPATH 最前，确保子进程优先导入本地代码
         env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
 
-    # 启动后端：有 .next/ 预构建产物时认为是生产环境，不开启热重载
-    is_production = (web_dir / ".next").exists()
+    # 启动后端：仅在前端存在有效生产构建时才视为生产模式。
+    is_production = bool(_build_frontend_prod_cmd(web_dir, frontend_port))
     backend_cmd = [
         sys.executable, "-m", "uvicorn",
         "sensenova_claw.app.gateway.main:app",
