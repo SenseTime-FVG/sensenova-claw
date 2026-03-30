@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sensenova_claw.capabilities.agents.preferences import (
-    load_preferences,
-    resolve_tool_enabled_from_prefs,
-)
+from sensenova_claw.capabilities.tools.registry import _is_tool_config_enabled
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.bus import PrivateEventBus
 from sensenova_claw.kernel.events.envelope import EventEnvelope
@@ -26,6 +23,7 @@ from sensenova_claw.kernel.events.types import (
     TOOL_CONFIRMATION_RESOLVED,
     USER_QUESTION_ASKED,
     USER_QUESTION_ANSWERED,
+    USER_TURN_CANCEL_REQUESTED,
 )
 from sensenova_claw.capabilities.tools.base import Tool
 from sensenova_claw.kernel.runtime.workers.base import SessionWorker
@@ -42,6 +40,11 @@ class ToolSessionWorker(SessionWorker):
     def __init__(self, session_id: str, private_bus: PrivateEventBus, runtime: ToolRuntime):
         super().__init__(session_id, private_bus)
         self.rt = runtime
+        # ── 任务生命周期管理 ──────────────────────────────
+        # 所有活跃的工具执行 Task（与 LLMSessionWorker 对齐）
+        self._active_tasks: set[asyncio.Task[None]] = set()
+        # 按 turn_id 分组的 Task 集合，用于按 turn 精确取消
+        self._turn_tasks: dict[str, set[asyncio.Task[None]]] = {}
         # 挂起中的确认请求：tool_call_id → asyncio.Event
         self._pending_confirmations: dict[str, asyncio.Event] = {}
         # 确认结果缓存：tool_call_id → bool
@@ -53,11 +56,83 @@ class ToolSessionWorker(SessionWorker):
 
     async def _handle(self, event: EventEnvelope) -> None:
         if event.type == TOOL_CALL_REQUESTED:
-            asyncio.create_task(self._handle_tool_requested(event))
+            self._start_tool_task(event)
         elif event.type == TOOL_CONFIRMATION_RESPONSE:
             await self._handle_confirmation_response(event)
         elif event.type == USER_QUESTION_ANSWERED:
             self._resolve_question(event)
+        elif event.type == USER_TURN_CANCEL_REQUESTED:
+            self._cancel_turn_tasks(event)
+
+    # ── 任务生命周期管理 ──────────────────────────────
+
+    def _start_tool_task(self, event: EventEnvelope) -> None:
+        """创建工具执行 Task 并注册到跟踪集合"""
+        task = asyncio.create_task(self._run_tool_task(event))
+        self._active_tasks.add(task)
+        if event.turn_id:
+            self._turn_tasks.setdefault(event.turn_id, set()).add(task)
+        task.add_done_callback(
+            lambda done_task, turn_id=event.turn_id: self._cleanup_task(turn_id, done_task)
+        )
+
+    async def _run_tool_task(self, event: EventEnvelope) -> None:
+        """工具执行 Task 包装器：捕获 CancelledError 并记录日志"""
+        try:
+            await self._handle_tool_requested(event)
+        except asyncio.CancelledError:
+            logger.info(
+                "cancel tool request task session=%s turn=%s tool_call_id=%s",
+                event.session_id,
+                event.turn_id,
+                event.payload.get("tool_call_id"),
+            )
+        except Exception:
+            logger.exception(
+                "tool request task crashed session=%s turn=%s tool_call_id=%s",
+                event.session_id,
+                event.turn_id,
+                event.payload.get("tool_call_id"),
+            )
+
+    def _cleanup_task(self, turn_id: str | None, task: asyncio.Task[None]) -> None:
+        """Task 完成后的清理回调"""
+        self._active_tasks.discard(task)
+        if not turn_id:
+            return
+        tasks = self._turn_tasks.get(turn_id)
+        if not tasks:
+            return
+        tasks.discard(task)
+        if not tasks:
+            self._turn_tasks.pop(turn_id, None)
+
+    def _resolve_turn_id(self, event: EventEnvelope) -> str | None:
+        """解析 turn_id：优先取事件自身携带的，否则查 state_store 最新 turn"""
+        if event.turn_id:
+            return event.turn_id
+        state_store = getattr(self.rt, "state_store", None)
+        if state_store is None:
+            return None
+        latest_turn = state_store.latest_turn(event.session_id)
+        return latest_turn.turn_id if latest_turn else None
+
+    def _cancel_turn_tasks(self, event: EventEnvelope) -> None:
+        """响应 USER_TURN_CANCEL_REQUESTED：按 turn_id 取消该 turn 的所有工具 Task"""
+        turn_id = self._resolve_turn_id(event)
+        if not turn_id:
+            return
+        tasks = list(self._turn_tasks.get(turn_id, ()))
+        if not tasks:
+            return
+        logger.info(
+            "cancel active tool tasks session=%s turn=%s count=%s",
+            event.session_id,
+            turn_id,
+            len(tasks),
+        )
+        for task in tasks:
+            task.cancel()
 
     def _is_turn_cancelled(self, event: EventEnvelope) -> bool:
         if not event.turn_id:
@@ -105,18 +180,9 @@ class ToolSessionWorker(SessionWorker):
         auto_levels = config.get("tools.permission.auto_approve_levels", ["low"])
         return tool.risk_level.value not in auto_levels
 
-    def _tool_preferences_home(self) -> Path:
-        """解析工具偏好文件所在目录。"""
-        runtime_home = getattr(self.rt, "sensenova_claw_home", None)
-        if runtime_home:
-            return Path(runtime_home)
-        from sensenova_claw.platform.config.workspace import resolve_sensenova_claw_home
-        return resolve_sensenova_claw_home(config)
-
     def _is_tool_enabled_for_agent(self, agent_id: str, tool_name: str) -> bool:
-        """按当前 agent 的有效偏好判断工具是否启用。"""
-        prefs = load_preferences(self._tool_preferences_home())
-        return resolve_tool_enabled_from_prefs(prefs, agent_id, tool_name, default=True)
+        """根据 config.yml 中的 enabled 开关判断工具是否启用。"""
+        return _is_tool_config_enabled(tool_name)
 
     async def _publish_confirmation_resolved(
         self,
@@ -286,8 +352,11 @@ class ToolSessionWorker(SessionWorker):
                 future.set_result({"success": True, "answer": event.payload.get("answer", "")})
 
     async def stop(self) -> None:
-        """停止时取消所有挂起的问题，并唤醒所有挂起的确认等待"""
-        # 唤醒 block 模式下挂起的确认等待
+        """停止时取消所有运行中的工具 Task、挂起的问题和确认等待"""
+        # ① 取消所有活跃的工具执行 Task
+        for task in list(self._active_tasks):
+            task.cancel()
+        # ② 唤醒 block 模式下挂起的确认等待
         for wait_event in self._pending_confirmations.values():
             wait_event.set()
         self._pending_confirmations.clear()
@@ -297,7 +366,14 @@ class ToolSessionWorker(SessionWorker):
             if not future.done():
                 future.cancel()
         self._pending_questions.clear()
+        # ③ 停止 worker 主循环
         await super().stop()
+        # ④ 等待所有工具 Task 完成（它们已被 cancel，这里确保清理完毕）
+        for task in list(self._active_tasks):
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._active_tasks.clear()
+        self._turn_tasks.clear()
 
     async def _handle_confirmation_response(self, event: EventEnvelope) -> None:
         """处理用户确认响应，唤醒挂起的任务"""
