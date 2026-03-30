@@ -491,6 +491,30 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     setInteractionSubmitting(false);
   };
 
+  const clearInteractionsForSession = useCallback((sourceSessionId: string) => {
+    if (!sourceSessionId) return;
+
+    const active = activeInteractionRef.current;
+    const queue = interactionQueueRef.current;
+    const filteredQueue = queue.filter((item) => item.sourceSessionId !== sourceSessionId);
+
+    if (active?.sourceSessionId === sourceSessionId) {
+      interactionQueueRef.current = filteredQueue;
+      const next = filteredQueue[0] ?? null;
+      if (next) {
+        interactionQueueRef.current = filteredQueue.slice(1);
+      }
+      activeInteractionRef.current = next;
+      setActiveInteraction(next);
+      setInteractionSubmitting(false);
+      return;
+    }
+
+    if (filteredQueue.length !== queue.length) {
+      interactionQueueRef.current = filteredQueue;
+    }
+  }, []);
+
   // ── WebSocket 消息处理 ──
 
   const handleWsMessage = (data: Record<string, unknown>) => {
@@ -729,7 +753,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           return prev;
         });
         setIsTyping(false);
-        clearInteractions();
+        if (incomingSessionId) {
+          clearInteractionsForSession(incomingSessionId);
+        } else {
+          clearInteractions();
+        }
         // 推送任务完成通知卡片
         const completedSessionId = incomingSessionId || '';
         if (completedSessionId) {
@@ -754,7 +782,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
           }
         }
         setIsTyping(false);
-        clearInteractions();
+        if (incomingSessionId) {
+          clearInteractionsForSession(incomingSessionId);
+        } else {
+          clearInteractions();
+        }
         break;
       }
       case 'title_updated': {
@@ -784,7 +816,11 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       case 'error':
         addMsg('system', String(payload.user_message || payload.message || payload.error_type || 'Unknown Error'));
         setIsTyping(false);
-        clearInteractions();
+        if (incomingSessionId) {
+          clearInteractionsForSession(incomingSessionId);
+        } else {
+          clearInteractions();
+        }
         break;
       case 'notification': {
         const title = String(payload.title || 'Notification');
@@ -1198,7 +1234,12 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
     const interaction = activeInteractionRef.current;
     const hasPendingCreatedSession = Boolean(pendingCreateIdRef.current);
-    if (interaction?.kind === 'question' && sessionIdRef.current && !hasPendingCreatedSession) {
+    if (
+      interaction?.kind === 'question'
+      && sessionIdRef.current
+      && interaction.sourceSessionId === sessionIdRef.current
+      && !hasPendingCreatedSession
+    ) {
       submitQuestionResponse({
         questionId: interaction.interactionId,
         sourceSessionId: interaction.sourceSessionId,

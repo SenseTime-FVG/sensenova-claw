@@ -1560,3 +1560,23 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 用 `timeout npm run dev` 做 smoke test 可能留下 `next dev` 孤儿进程，因为外层超时信号不一定能完整传递到总控脚本管理的整个子进程树；验证启动器时，最好使用可交互会话并显式发送 `Ctrl+C` 收尾，再检查 3000/8000 端口是否释放。
 - 当前仓库默认 `uv run python -m pytest ...` 依赖先执行 `uv sync --extra dev`；如果环境里还没同步 `pytest`，测试失败会先表现为“环境缺依赖”而不是业务回归。
+
+### 2026-03-30 ask_user 跨会话主输入修复补充
+
+成功经验：
+- “主输入首条消息可直接回答 ask_user” 的判定必须同时满足两点：`activeInteraction.kind == "question"` 且 `activeInteraction.sourceSessionId == 当前会话 sessionId`；只判断前者会导致切换会话后旧问题继续劫持新会话输入。
+- 这类问题最有效的回归不是只测正向“当前会话可回答”，而是必须补反向用例：`会话1收到 ask_user -> 切到会话2 -> 在会话2发送首条消息`，断言 `user_question_answered` 不出现且 `user_input` 发往会话2。
+- `/ppt` 和工作台首页复用了 `ChatSessionContext.sendMessage()`，在共享层收紧“当前会话匹配”后，两处页面可以一起修复；但 `/chat` 页还有本地 `handleSend` 的短路分支，也必须同步加同样的 session 校验，否则会绕过共享层。
+
+失败/风险经验：
+- Playwright 在当前环境经常被残留的 `next dev -p 3000` 进程干扰；若直接报 `localhost:3000 is already used`，应先清理监听 3000 端口的进程再重跑，不要把它误判成功能回归。
+
+### 2026-03-30 ask_user 跨会话完成事件补充
+
+成功经验：
+- 跨会话 ask_user 不能在共享上下文里被任意会话的 `turn_completed` / `turn_cancelled` / `error` 全量 `clearInteractions()` 清掉；正确做法是按 `incomingSessionId` 只移除对应 `sourceSessionId` 的交互。
+- 这类问题必须补“会话1收到 ask_user -> 切到会话2发普通消息并完成 -> 切回会话1继续回答”的回归；只测“切走时不误吃消息”不够，必须同时锁住“切回来仍能继续答”。
+- `clearInteractionsForSession(sessionId)` 这类按会话定向清理 helper 比在各事件分支里手写条件更稳，也更不容易后续在 `error`、`turn_cancelled` 等平行分支里漏修。
+
+失败/风险经验：
+- 如果只修主输入消费条件而不修完成事件清理逻辑，表面上“在会话2发消息不会被旧 ask_user 吃掉”会通过，但用户一旦让会话2真正跑完一轮，旧会话 ask_user 还是会被后台 silently 清掉，属于半修状态。

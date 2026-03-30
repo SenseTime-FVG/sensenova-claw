@@ -909,7 +909,7 @@ export default function SessionDetailPage() {
 
     if (activeInteraction?.kind === 'confirmation') return;
 
-    if (activeInteraction?.kind === 'question') {
+    if (activeInteraction?.kind === 'question' && activeInteraction.sourceSessionId === sessionId) {
       submitQuestionResponse({
         questionId: activeInteraction.interactionId,
         sourceSessionId: activeInteraction.sourceSessionId,

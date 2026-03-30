@@ -394,12 +394,12 @@ function ChatContent() {
     contextFiles?: ContextFileRef[],
     recommendation?: RecommendationSendMeta | null,
   ) => {
-    if (activeInteraction?.kind === 'question') {
+    if (activeInteraction?.kind === 'question' && activeInteraction.sourceSessionId === currentSessionId) {
       sendQuestionAnswer(content, false);
     } else {
       sendMessage(content, contextFiles, selectedAgentId || 'default', recommendation);
     }
-  }, [activeInteraction, sendMessage, sendQuestionAnswer, selectedAgentId]);
+  }, [activeInteraction, currentSessionId, sendMessage, sendQuestionAnswer, selectedAgentId]);
 
   const emptyState = useMemo(() => (
     <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground animate-in fade-in zoom-in-95 duration-500">
