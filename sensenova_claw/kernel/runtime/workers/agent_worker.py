@@ -516,7 +516,42 @@ class AgentSessionWorker(SessionWorker):
                 )
             return
 
-        # 没有工具调用，结束本轮对话
+        # 没有工具调用 — 如果 content 为空且本轮有工具执行记录，
+        # 追加一轮 LLM 调用要求生成文字总结，避免返回空响应给用户。
+        # 仅重试一次，防止无限循环。
+        if not content and state.tool_results and not getattr(state, "_summary_retry", False):
+            state._summary_retry = True  # type: ignore[attr-defined]
+            state.messages.append({
+                "role": "user",
+                "content": (
+                    "你刚才执行了一系列操作但没有给出文字回复。"
+                    "请根据上面的工具执行结果，向用户总结你完成了什么、"
+                    "生成的文件路径，以及后续可以做什么。"
+                ),
+            })
+            llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
+            self._llm_call_count += 1
+            await self.bus.publish(
+                EventEnvelope(
+                    type=LLM_CALL_REQUESTED,
+                    session_id=event.session_id,
+                    turn_id=event.turn_id,
+                    trace_id=llm_call_id,
+                    source="agent",
+                    payload={
+                        "llm_call_id": llm_call_id,
+                        "provider": self._get_provider(),
+                        "model": self._get_model(),
+                        "messages": state.messages,
+                        "tools": self._get_filtered_tools(),
+                        "temperature": self._get_temperature(),
+                        "max_tokens": self._get_max_tokens(),
+                        "extra_body": self._get_extra_body(),
+                    },
+                )
+            )
+            return
+
         # 后处理：将回复中的相对路径改写为绝对路径
         from sensenova_claw.platform.config.workspace import resolve_agent_workdir, resolve_sensenova_claw_home
         from sensenova_claw.kernel.runtime.path_rewriter import rewrite_relative_paths

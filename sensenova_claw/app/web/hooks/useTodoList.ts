@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { authGet, authPost, authPut, authDelete, API_BASE } from '@/lib/authFetch';
-import { useOptionalWebSocket } from '@/contexts/WebSocketContext';
+import { useEventDispatcher } from '@/contexts/ws';
+import type { WsInboundEvent } from '@/lib/wsEvents';
 
 export interface TodoItem {
   id: string;
@@ -28,9 +29,6 @@ export function useTodoList(date?: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
-  const ws = useOptionalWebSocket();
-  const lastMessage = ws?.lastMessage ?? null;
-
   const fetchItems = useCallback(async () => {
     try {
       const data = await authGet<{ date: string; items: TodoItem[] }>(
@@ -62,15 +60,16 @@ export function useTodoList(date?: string) {
   }, [fetchItems]);
 
   // 监听 WebSocket todolist_updated 事件，收到后立即刷新
+  const { subscribeGlobal } = useEventDispatcher();
   useEffect(() => {
-    if (!lastMessage) return;
-    if ((lastMessage as any).type === 'todolist_updated') {
-      const eventDate = (lastMessage as any).payload?.date;
-      if (!eventDate || eventDate === dateStr) {
-        fetchItems();
+    return subscribeGlobal((event: WsInboundEvent) => {
+      if (event.type === 'todolist_updated') {
+        if (!event.payload.date || event.payload.date === dateStr) {
+          fetchItems();
+        }
       }
-    }
-  }, [lastMessage, dateStr, fetchItems]);
+    });
+  }, [subscribeGlobal, dateStr, fetchItems]);
 
   const addItem = useCallback(async (
     title: string,

@@ -933,7 +933,7 @@ function normalizeWizardState(input: any): ACPWizardState | null {
     },
     installers: Object.fromEntries(
       Object.entries(input.installers && typeof input.installers === 'object' ? input.installers : {}).map(([key, value]) => {
-        const installer = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+        const installer = value && typeof value === 'object' ? value as Record<string, unknown> : {} as Record<string, unknown>;
         return [
           key,
           {
@@ -947,7 +947,7 @@ function normalizeWizardState(input: any): ACPWizardState | null {
       }),
     ),
     agents: agents.map((item: unknown): ACPWizardAgent => {
-      const agent = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+      const agent: Record<string, any> = item && typeof item === 'object' ? item as Record<string, any> : {};
       const runtime = agent.runtime && typeof agent.runtime === 'object' ? agent.runtime as Record<string, unknown> : {};
       const recommendedConfig = agent.recommended_config && typeof agent.recommended_config === 'object' ? agent.recommended_config as Record<string, unknown> : {};
       return {

@@ -356,6 +356,26 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境下 Playwright 即使能拉起 `next dev` 和 headless Chromium，也可能长时间卡住不返回最终结果；浏览器级回归要和进程内/单元测试分层看，不能把这类环境挂起误判成业务失败。
 
+### 2026-03-27 安装脚本 app 分支变量补充
+
+成功经验：
+- 对安装脚本这类 shell 逻辑，直接在 `tests/unit/test_install_scripts.py` 做脚本文本断言是最低成本回归方式，适合锁定环境变量优先级与关键日志文案。
+- `SENSENOVA_CLAW_APP_BRANCH` 这类更贴近业务语义的新变量，最好放在旧变量 `SENSENOVA_CLAW_REPO_REF` / `SENSENOVA_CLAW_REPO_BRANCH` 之前做兼容回退；这样既不破坏历史用法，也能让新入口更直观。
+- 当前仓库跑 pytest 前通常需要先执行 `UV_CACHE_DIR=/tmp/uv_cache uv sync --extra dev`，否则 `.venv` 和 `uv run` 都可能因缺少 `pytest` 直接失败。
+
+失败/风险经验：
+- 这次仅修改了 `install/install.sh` 和文档，`install/install.ps1` 仍沿用旧变量优先级；后续若要求跨平台一致，需要同步评估 PowerShell 脚本与文档示例。
+
+### 2026-03-27 PR171 同步补充
+
+成功经验：
+- 对”把某个既有 PR 的相关修改同步到当前分支”这类需求，先用 `gh pr view <id> --json commits,files` 和 `gh pr diff <id> --patch` 确认最终影响文件与提交顺序，再决定是 cherry-pick 整个序列还是手工摘取，能明显减少误带无关改动的风险。
+- 遇到 cherry-pick 冲突时，先保留当前分支独有改动，再仅引入 PR 冲突块里的最小增量，通常比整文件覆盖更稳，尤其是 `main.py` 这类在不同分支上都在演进的入口文件。
+- 给既有测试文件补新用例时必须先检查它是否已有历史断言；这次如果不先对照 `git show HEAD:<file>`，很容易误把原有进程管理测试覆盖掉。
+
+失败/风险经验：
+- `gh pr diff --patch` 展示的是 patch，不是”最终净效果说明”；如果直接照 patch 首个提交去整文件替换，容易把 PR 分支上的上下文改动一并带入当前分支。
+
 ### 2026-03-27 ask_user 消息内联补充
 
 成功经验：
@@ -1382,7 +1402,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-26 ask_user 消息内联补充
 
 成功经验：
-- `ask_user` 想同时显示在通知和聊天工具卡片里时，把问题元数据挂到工具消息本身最稳；仅靠通知中心状态，很难把“对应哪一个 ask_user 工具块”这件事关联准确。
+- `ask_user` 想同时显示在通知和聊天工具卡片里时，把问题元数据挂到工具消息本身最稳；仅靠通知中心状态，很难把”对应哪一个 ask_user 工具块”这件事关联准确。
 - `/chat` 页的前端 e2e 不能只 mock `auth/status` 和 `sessions`；当前工作台初始化还会请求 `agents`、`custom-pages`、`files/roots`、`todolist` 等接口，不补齐会让测试在真正进入聊天区前就偏到登录页或空态。
 - Mock WebSocket 时只拦业务 `localhost:8000/ws`，保留 Next dev 的 HMR socket；全量替换 `window.WebSocket` 会把页面自身运行搞崩，表面看像业务回归，实际是测试夹具问题。
 
@@ -1498,13 +1518,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-25 Mini-App Workspace Server 化补充
 
 成功经验：
-- 把 mini-app 从“单页静态 HTML”提升为“`workspace_root/app + server.py + data/`”之后，最小可行预览链路不是直接暴露工作目录文件，而是由后端提供 `custom-pages/{slug}/preview` 反向代理到独立 workspace server；这样后续无论是 FastAPI、Flask 还是任意轻量 server，都能统一挂到现有工作区入口。
-- 为 workspace 动作显式补 `refresh_mode = none/background/immediate` 很关键；只要把“普通问答/记笔记/状态落盘”默认收敛到 `none`，把“夜间补课/静默补内容”归到 `background`，前端就能避免每次给 Agent 发消息都强刷整个 workspace。
+- 把 mini-app 从”单页静态 HTML”提升为”`workspace_root/app + server.py + data/`”之后，最小可行预览链路不是直接暴露工作目录文件，而是由后端提供 `custom-pages/{slug}/preview` 反向代理到独立 workspace server；这样后续无论是 FastAPI、Flask 还是任意轻量 server，都能统一挂到现有工作区入口。
+- 为 workspace 动作显式补 `refresh_mode = none/background/immediate` 很关键；只要把”普通问答/记笔记/状态落盘”默认收敛到 `none`，把”夜间补课/静默补内容”归到 `background`，前端就能避免每次给 Agent 发消息都强刷整个 workspace。
 - 前端 Playwright 对这种纯 mock 的页面回归，`webServer` 应只启动 `app/web` 自己的 `next dev`；若沿用仓库级 `npm run dev`，会把后端和其他 watcher 一起拉起来，3000 端口很容易被拖挂，导致浏览器始终停在 `about:blank`。
 
 失败/风险经验：
 - `DashboardLayout` 会连带触发 `TodoDropdown`、侧边栏 agent 列表等外围请求；如果 e2e 只 mock 了 feature 页自身 API，而漏掉 `/api/todolist/**`、`/api/agents*` 这类布局层接口，`authFetch` 遇到 401 会直接把页面打回 `/login`，看起来像 workspace 页没加载，实际是测试夹具不完整。
-- 当前环境里 Playwright 浏览器访问 `localhost:3000`/`127.0.0.1:3000` 对“已挂死的 next dev”不会快速报错，而是长时间卡在 `page.goto(..., waitUntil='domcontentloaded')`；遇到这类超时，先用 `curl` 和 `ss -ltnp` 判定 3000 端口是否真在响应，再决定是改代码还是重启 dev server。
+- 当前环境里 Playwright 浏览器访问 `localhost:3000`/`127.0.0.1:3000` 对”已挂死的 next dev”不会快速报错，而是长时间卡在 `page.goto(..., waitUntil='domcontentloaded')`；遇到这类超时，先用 `curl` 和 `ss -ltnp` 判定 3000 端口是否真在响应，再决定是改代码还是重启 dev server。
 
 ### 2026-03-27 npm install 跨平台补充
 
@@ -1514,13 +1534,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 这类安装链路回归适合双层测试：Python 测试锁住 `package.json` 和壳包装入口，`node --test` 锁住 Windows shell 分支和任务列表，成本低且足够防止再次回到 `bash ./xxx.sh`。
 
 失败/风险经验：
-- 当前修复只解决“生命周期脚本依赖 bash”的兼容性，不代表 `uv`、Node 原生模块或其他三方依赖在 Windows 上已经全部无差异可用；后续若继续报平台问题，需要按具体子依赖逐个排查。
+- 当前修复只解决”生命周期脚本依赖 bash”的兼容性，不代表 `uv`、Node 原生模块或其他三方依赖在 Windows 上已经全部无差异可用；后续若继续报平台问题，需要按具体子依赖逐个排查。
 
 ### 2026-03-27 npm 脚本 Python 命令补充
 
 成功经验：
 - 面向 Windows 的 npm 脚本不要硬编码 `python3`；对本仓库这类 `uv run ...` 场景，直接统一成 `uv run python -m ...` 最稳，既兼容 Windows 的 `python.exe`，也能在当前 Unix 环境正常解析。
-- 若某个子目录本身不是 npm package，但用户会自然地在该目录执行 `npm install`，补一个极小的包装 `package.json + Node postinstall` 比要求用户记住“必须切到更深一层目录”更可靠。
+- 若某个子目录本身不是 npm package，但用户会自然地在该目录执行 `npm install`，补一个极小的包装 `package.json + Node postinstall` 比要求用户记住”必须切到更深一层目录”更可靠。
 - 对脚本兼容性改动，除了静态断言 `package.json`，再跑一次真实 `npm run dev -- --help` 或真实 `npm install` 很有价值，能直接验证 shell 解析和命令分发没有写错。
 
 失败/风险经验：
@@ -1529,33 +1549,34 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-27 dev 启动器进程树补充
 
 成功经验：
-- 像 `npm run dev -> uv run python -m sensenova_claw.app.main run` 这类总控启动器，不能只盯包装进程 pid；更稳的启动成功判定是“端口开始监听”，否则在 Windows 下很容易因为 `npm`/批处理包装层提前退出而误判失败。
+- 像 `npm run dev -> uv run python -m sensenova_claw.app.main run` 这类总控启动器，不能只盯包装进程 pid；更稳的启动成功判定是”端口开始监听”，否则在 Windows 下很容易因为 `npm`/批处理包装层提前退出而误判失败。
 - 前端开发服务优先直接启动 `node node_modules/next/dist/bin/next dev -p <port>`，比从父进程里再套一层 `npm run dev` 更稳定，也更不容易出现包装进程退出后子服务残留的问题。
 - Windows 清理子进程树时，单纯 `proc.terminate()` 不够；要准备 `taskkill /PID <pid> /T /F` 兜底，真实 smoke test 里再检查 8000/3000 端口是否释放，才能确认没有孤儿进程。
 
 失败/风险经验：
-- `Ctrl+C` 下 `uv run ...` 的顶层退出码不一定等于子脚本的返回码；判断“是否正常收尾”时不能只看 shell 退出码，还要同时看端口释放和后台进程是否残留。
+- `Ctrl+C` 下 `uv run ...` 的顶层退出码不一定等于子脚本的返回码；判断”是否正常收尾”时不能只看 shell 退出码，还要同时看端口释放和后台进程是否残留。
+
 ### 2026-03-27 PPT ask_user 发送按钮卡死补充
 
 成功经验：
 - 工作台类页面若复用 `ChatPanel`，其输入禁用条件必须与 `/chat` 主页面保持一致；像 `interactionSubmitting`、`activeInteraction.kind === 'confirmation'` 这类交互态如果漏传，`ask_user`/审批类流程就会在工作台里表现出与主聊天页不同的 bug。
 - `ChatInput` 的本地 `isSubmitting` 不能盲目覆盖所有发送场景；当主输入框实际上是在提交 `ask_user` 回复时，应跳过普通消息的本地提交锁，否则很容易在回复后把发送按钮永久卡成 disabled。
-- 这类“看起来像按钮坏了”的问题，最有效的前端回归是直接断言 WebSocket 出站序列：先验证第一条是 `user_question_answered`，再验证收到 `user_question_answered_event` 后第二条恢复为 `user_input`。
-- 对“旧会话 ask_user 未完成，点击新建后首条消息被劫持”的问题，不能只看 UI 状态；要额外锁住“点击新建后已经发出 `create_session`，则后续输入不得再走 `user_question_answered`”这条协议级约束。
+- 这类”看起来像按钮坏了”的问题，最有效的前端回归是直接断言 WebSocket 出站序列：先验证第一条是 `user_question_answered`，再验证收到 `user_question_answered_event` 后第二条恢复为 `user_input`。
+- 对”旧会话 ask_user 未完成，点击新建后首条消息被劫持”的问题，不能只看 UI 状态；要额外锁住”点击新建后已经发出 `create_session`，则后续输入不得再走 `user_question_answered`”这条协议级约束。
 
 失败/风险经验：
 - 现有 `ask-user.spec.ts` 中部分旧用例对文案和 WebSocket 初始化时机依赖较强，补跑相邻回归时可能先撞到与本次修复无关的 strict mode 选择器冲突或 `__mockWs` 未就绪问题；验证本次改动时应优先使用更聚焦的新场景。
 - Playwright 在聊天页里若直接用 `getByText('E2E Session')` 这类宽泛选择器，容易同时命中 agent 列表和 session 列表；会话点击应优先收窄到 `getByTestId('session-list')`。
 - `/sessions/[id]` 这类页面的 mock WebSocket 挂载时机不一定和 `/chat` 一样快；凡是用 `page.evaluate(() => __mockWs.emit(...))` 的 session 场景，最好先显式 `waitForMockWebSocketReady(page)`，否则会偶发 `Cannot read properties of undefined (reading 'emit')`。
-- 工作台首页 `/`、PPT `/ppt`、研究页等复用 `ChatPanel` 的页面，只要 `ChatPanel` 的禁用逻辑和 `ChatInput` 的 `ask_user` 提交语义正确，这类“回复 ask_user 后发送按钮卡死”的问题就会一起收敛；验证时可以用一个根工作台页和一个专用工作台页做抽样回归。
-- `/ppt` 这类带全局通知浮层的页面，Playwright 直接点击右上角按钮可能被 toast 遮挡误伤；如果要验证按钮处理链本身，优先给目标按钮加 `data-testid`，必要时直接触发 DOM `click()`，否则很容易把“按钮没被真正点到”误判成业务状态机 bug。
+- 工作台首页 `/`、PPT `/ppt`、研究页等复用 `ChatPanel` 的页面，只要 `ChatPanel` 的禁用逻辑和 `ChatInput` 的 `ask_user` 提交语义正确，这类”回复 ask_user 后发送按钮卡死”的问题就会一起收敛；验证时可以用一个根工作台页和一个专用工作台页做抽样回归。
+- `/ppt` 这类带全局通知浮层的页面，Playwright 直接点击右上角按钮可能被 toast 遮挡误伤；如果要验证按钮处理链本身，优先给目标按钮加 `data-testid`，必要时直接触发 DOM `click()`，否则很容易把”按钮没被真正点到”误判成业务状态机 bug。
 
 ### 2026-03-28 npm run dev 误判生产构建补充
 
 成功经验：
 - 根启动器判断 Next 前端是否可走 `next start` 时，不能只看 `web/.next` 目录是否存在；开发态缓存或半成品构建也会留下 `.next`，最稳的最小判定是检查 `web/.next/BUILD_ID` 是否存在且非空。
 - 这类启动问题最有效的复现方式就是直接跑真实 `npm run dev`，并同时观察前端日志；本次就是通过 Next 的明确报错 `Could not find a production build in the '.next' directory` 快速定位到了错误分支。
-- 对启动器修复，单测应直接锁住“有 `.next` 但无 `BUILD_ID` 时必须回退 `next dev`，有 `BUILD_ID` 时才允许 `next start`”这两个分支，能精确防止回归。
+- 对启动器修复，单测应直接锁住”有 `.next` 但无 `BUILD_ID` 时必须回退 `next dev`，有 `BUILD_ID` 时才允许 `next start`”这两个分支，能精确防止回归。
 
 失败/风险经验：
 - 用 `timeout npm run dev` 做 smoke test 可能留下 `next dev` 孤儿进程，因为外层超时信号不一定能完整传递到总控脚本管理的整个子进程树；验证启动器时，最好使用可交互会话并显式发送 `Ctrl+C` 收尾，再检查 3000/8000 端口是否释放。
@@ -1592,3 +1613,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 官方 SDK 自带的便捷方法更偏“回复当前会话”，对任意目标主动发文本没有现成高层封装；这类能力需要在 runtime 层自行补 HTTP API 封装，不能假设 SDK 已经全包。
 - 当前实现只稳定覆盖文本消息；图片、富文本、AI Card 与更复杂的钉钉机器人特性仍需后续按真实接口继续补齐。
+
+### 2026-03-30 dev 合并到 wdh/dev 收口补充
+
+成功经验：
+- `dev` 的前端重构分支与 `wdh/dev` 的 ask_user 修复发生冲突时，优先保留 `contexts/ws/*` 新架构，再把旧 `ChatSessionContext` 中的行为补丁迁回 `InteractionContext` / `ChatInput`，比把旧大文件硬合回去更稳。
+- `/sessions/*` 这类 `DashboardLayout` 的 `hideRightPanel` 分支如果也会渲染 `ChatInput` / `useDrop()`，`DndProvider` 必须放到两条布局分支的共同外层；否则只在 session 页才会炸 `Expected drag drop context`，很容易被主聊天页验证漏掉。
+- `tests/e2e/test_ask_user_core_flow.py` 这类自定义 provider 注入测试要跟上 `LLMProvider.call(..., extra_body=...)` 新签名，否则会触发错误回退链，表面看像“功能逻辑变了”，实际只是测试替身失效。
+
+失败/风险经验：
+- 当前仍有一个前端残余问题：`sensenova_claw/app/web/e2e/ask-user.spec.ts` 中“session 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input”持续失败，表现为答完问题后 `chat-input` 仍被禁用；说明 `/sessions/[id]` 页面在 `ask_user` 收口后仍有额外状态没释放，不能宣称该路径已完全回归。

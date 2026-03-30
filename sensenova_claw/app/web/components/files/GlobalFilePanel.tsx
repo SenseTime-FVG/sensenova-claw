@@ -12,7 +12,7 @@ import { useDrag } from 'react-dnd';
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useFilePanel } from '@/contexts/FilePanelContext';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession, useMessages } from '@/contexts/ws';
 import { useFeatureNavItems } from '@/components/layout/DashboardNav';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
@@ -217,7 +217,8 @@ const FEATURE_ICONS: Record<string, React.ReactNode> = {
 const pptEntry = { path: '/ppt', label: 'PPT' };
 
 function AIWorkspace() {
-  const { currentSessionId, taskProgress } = useChatSession();
+  const { currentSessionId } = useSession();
+  const { taskProgress } = useMessages();
   const featureNavItems = useFeatureNavItems();
   const mergedProgress = useMemo(() => mergeProgress(taskProgress), [taskProgress]);
   const allItems = useMemo(() => [pptEntry, ...featureNavItems], [featureNavItems]);

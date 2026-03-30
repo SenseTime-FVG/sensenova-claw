@@ -52,7 +52,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [inputValue, setInputValue] = useState('');
   const [draftRecommendation, setDraftRecommendation] = useState<RecommendationSendMeta | null>(null);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
-  const { currentSessionId, pendingPrefill, clearPendingPrefill, activeInteraction } = useChatSession();
+  const {
+    currentSessionId,
+    pendingPrefill,
+    clearPendingPrefill,
+    activeInteraction,
+    sendQuestionAnswer,
+  } = useChatSession();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -172,7 +178,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       return;
     }
 
-    const isQuestionReply = activeInteraction?.kind === 'question';
+    const isQuestionReply = activeInteraction?.kind === 'question'
+      && activeInteraction.sourceSessionId === currentSessionId;
+    if (isQuestionReply) {
+      sendQuestionAnswer(content, false);
+      setDraftRecommendation(null);
+      setInputValue('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      return;
+    }
+
     if (!isQuestionReply) {
       setIsSubmitting(true);
     }
@@ -181,7 +196,20 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     setDraftRecommendation(null);
     setInputValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [inputValue, wsConnected, disabled, isSubmitting, handleSlashSubmitHook, onSlashSubmit, onSend, parseAtRefs, draftRecommendation, activeInteraction]);
+  }, [
+    inputValue,
+    wsConnected,
+    disabled,
+    isSubmitting,
+    handleSlashSubmitHook,
+    onSlashSubmit,
+    onSend,
+    parseAtRefs,
+    draftRecommendation,
+    activeInteraction,
+    currentSessionId,
+    sendQuestionAnswer,
+  ]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing || isComposingRef.current) return;

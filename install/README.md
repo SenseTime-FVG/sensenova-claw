@@ -19,11 +19,12 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/i
 ### 指定安装版本
 
 安装脚本默认拉取 `dev` 分支，也支持通过环境变量显式指定分支或 tag，便于发布验证与回滚。
+Linux / macOS 安装脚本优先读取 `SENSENOVA_CLAW_APP_BRANCH`，未设置时再回退到兼容变量 `SENSENOVA_CLAW_REPO_REF` / `SENSENOVA_CLAW_REPO_BRANCH`。
 
 Linux / macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_REPO_REF=v0.5.0 bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_APP_BRANCH=v0.5.0 bash
 ```
 
 Windows（PowerShell）:

@@ -75,7 +75,7 @@ const ToolCallItem = memo(function ToolCallItem({ msg }: { msg: ChatMessage }) {
       {inlineAskUser && (
         <div
           data-testid={`inline-ask-user-${inlineAskUser.questionId}`}
-          className="ml-5 mt-2 rounded-xl border border-sky-200/60 bg-sky-50/50 px-3 py-3"
+          className="ml-5 mt-2 rounded-xl border border-sky-200/60 bg-sky-50/50 dark:border-sky-800/40 dark:bg-sky-950/30 px-3 py-3"
         >
           <AskUserResponseForm
             value={{

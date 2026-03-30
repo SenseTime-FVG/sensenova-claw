@@ -59,7 +59,8 @@ const PAGE_TYPE_COLORS: Record<string, string> = {
   closing:    'bg-rose-500/15 text-rose-600 dark:text-rose-400',
 };
 
-function pageTypeColor(type: string): string {
+function pageTypeColor(type: string | undefined): string {
+  if (!type) return 'bg-muted text-muted-foreground';
   const key = type.toLowerCase();
   for (const [k, v] of Object.entries(PAGE_TYPE_COLORS)) {
     if (key.includes(k)) return v;

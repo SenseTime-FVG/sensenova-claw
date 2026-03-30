@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { authGet, API_BASE } from '@/lib/authFetch';
-import { useChatSession } from '@/contexts/ChatSessionContext';
-import type { ProactiveResultItem } from '@/contexts/ChatSessionContext';
+import { useSession, useMessages } from '@/contexts/ws';
+import type { ProactiveResultItem } from '@/contexts/ws/MessageContext';
 
 // ── 类型定义 ──
 
@@ -176,18 +176,10 @@ export function aggregateRecommendations(proactiveResults: ProactiveResultItem[]
 
   for (const result of proactiveResults) {
     const sourceSessionId = result.sourceSessionId || result.sessionId;
-    if (!sourceSessionId) {
-      continue;
-    }
-    if (result.recommendationType !== 'turn_end') {
-      continue;
-    }
-    if (!Array.isArray(result.items) || result.items.length === 0) {
-      continue;
-    }
-    if (result.receivedAt < cutoff) {
-      continue;
-    }
+    if (!sourceSessionId) continue;
+    if (result.recommendationType !== 'turn_end') continue;
+    if (!Array.isArray(result.items) || result.items.length === 0) continue;
+    if (result.receivedAt < cutoff) continue;
 
     const existing = latestBySession.get(sourceSessionId);
     if (!existing || result.receivedAt > existing.receivedAt) {
@@ -216,7 +208,8 @@ export function aggregateRecommendations(proactiveResults: ProactiveResultItem[]
 // ── Hook ──
 
 export function useDashboardData(): DashboardData & { refresh: () => void } {
-  const { sessions, proactiveResults } = useChatSession();
+  const { sessions } = useSession();
+  const { proactiveResults } = useMessages();
 
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
@@ -348,7 +341,7 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
   const recommendations = useMemo(
     () => {
       const sessionTitleMap = new Map(
-        sessions.map((session) => [session.session_id, getSessionTitle(session.meta)]),
+        sessions.map((session: { session_id: string; meta: string }) => [session.session_id, getSessionTitle(session.meta)]),
       );
 
       return aggregateRecommendations(proactiveResults || []).map((group) => {
