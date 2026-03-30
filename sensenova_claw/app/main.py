@@ -13,6 +13,8 @@ import asyncio
 import contextlib
 import os
 import signal
+import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -39,11 +41,52 @@ def _resolve_web_dir(project_root: Path) -> Path:
 
 def _find_npm() -> str:
     """查找 npm 可执行文件路径"""
-    import shutil
     npm = shutil.which("npm")
     if not npm:
         return ""
     return npm
+
+def _find_node() -> str:
+    """查找 node 可执行文件路径。"""
+    import shutil
+
+    node = shutil.which("node")
+    if not node:
+        return ""
+    return node
+
+
+def _build_frontend_dev_cmd(web_dir: Path, frontend_port: int) -> list[str]:
+    """优先直接启动 next dev，避免 Windows 下 npm 包装进程过早退出。"""
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
+    node = _find_node()
+    if node and next_cli.exists():
+        return [node, str(next_cli), "dev", "-p", str(frontend_port)]
+
+    npm = _find_npm()
+    if npm:
+        return [npm, "run", "dev", "--", "-p", str(frontend_port)]
+    return []
+
+
+def _build_frontend_prod_cmd(web_dir: Path, frontend_port: int) -> list[str]:
+    """生产模式：使用 next start 启动预构建的前端。"""
+    # 仅在存在有效生产构建标记时才允许 next start，避免把 dev/.next 缓存误判成可启动产物。
+    build_id = web_dir / ".next" / "BUILD_ID"
+    if not build_id.exists():
+        return []
+    if not build_id.read_text(encoding="utf-8").strip():
+        return []
+
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
+    node = _find_node()
+    if node and next_cli.exists():
+        return [node, str(next_cli), "start", "-p", str(frontend_port)]
+
+    npm = _find_npm()
+    if npm:
+        return [npm, "run", "start", "--", "-p", str(frontend_port)]
+    return []
 
 
 def _spawn_managed_process(
@@ -71,7 +114,10 @@ def _terminate_managed_process(proc: subprocess.Popen, timeout: float = 5) -> No
 
     try:
         if os.name == "nt":
-            proc.terminate()
+            ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
+            if ctrl_break is not None:
+                with contextlib.suppress(OSError, ValueError):
+                    proc.send_signal(ctrl_break)
         else:
             os.killpg(proc.pid, signal.SIGTERM)
     except OSError:
@@ -85,7 +131,12 @@ def _terminate_managed_process(proc: subprocess.Popen, timeout: float = 5) -> No
 
     try:
         if os.name == "nt":
-            proc.kill()
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
         else:
             os.killpg(proc.pid, signal.SIGKILL)
     except OSError:
@@ -99,7 +150,6 @@ def _terminate_managed_process(proc: subprocess.Popen, timeout: float = 5) -> No
 
 def _check_port(port: int) -> bool:
     """检查端口是否可用（尝试连接，连上说明被占用）"""
-    import socket
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         try:
@@ -107,6 +157,18 @@ def _check_port(port: int) -> bool:
             return False  # 连上了，说明已被占用
         except (ConnectionRefusedError, OSError):
             return True  # 连不上，说明空闲
+
+
+def _wait_for_port_listen(port: int, *, timeout: float, proc: subprocess.Popen | None = None) -> bool:
+    """等待端口开始监听；若进程提前退出则立即失败。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _check_port(port):
+            return True
+        if proc is not None and proc.poll() is not None:
+            return False
+        time.sleep(0.2)
+    return False
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -138,13 +200,19 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     procs: list[subprocess.Popen] = []
+    shutdown_requested = False
 
-    def cleanup(signum=None, frame=None):
+    def cleanup():
         for p in procs:
             _terminate_managed_process(p, timeout=5)
 
-    signal.signal(signal.SIGINT, cleanup)
-    signal.signal(signal.SIGTERM, cleanup)
+    def handle_signal(signum=None, frame=None):
+        nonlocal shutdown_requested
+        shutdown_requested = True
+        cleanup()
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
 
     # 构建子进程环境变量
     env = os.environ.copy()
@@ -152,30 +220,37 @@ def cmd_run(args: argparse.Namespace) -> int:
         # 将本地项目根目录置于 PYTHONPATH 最前，确保子进程优先导入本地代码
         env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
 
-    # 启动后端
+    # 启动后端：仅在前端存在有效生产构建时才视为生产模式。
+    is_production = bool(_build_frontend_prod_cmd(web_dir, frontend_port))
     backend_cmd = [
         sys.executable, "-m", "uvicorn",
         "sensenova_claw.app.gateway.main:app",
-        "--reload",
         "--host", "0.0.0.0",
         "--port", str(backend_port),
     ]
+    if not is_production:
+        backend_cmd.insert(4, "--reload")
     print(f"启动后端服务: http://localhost:{backend_port}")
     backend_proc = _spawn_managed_process(backend_cmd, cwd=str(project_root), env=env)
     procs.append(backend_proc)
 
-    # 等待后端启动
-    time.sleep(2)
-    if backend_proc.poll() is not None:
+    # 等待后端启动，避免仅依赖包装进程 pid
+    if not _wait_for_port_listen(backend_port, timeout=15, proc=backend_proc):
         print("错误: 后端启动失败", file=sys.stderr)
+        cleanup()
         return 1
 
-    # 启动前端
+    # 启动前端：检测到 .next/ 目录（已 build）自动用 next start，否则回退 next dev
     frontend_proc = None
     if not no_frontend:
-        npm = _find_npm()
-        if not npm:
-            print("警告: 未找到 npm，跳过前端启动。安装 Node.js 后可使用前端 dashboard。", file=sys.stderr)
+        frontend_cmd = _build_frontend_prod_cmd(web_dir, frontend_port)
+        if frontend_cmd:
+            print("检测到前端预构建产物，使用 next start（生产模式）")
+        else:
+            print("未检测到前端预构建产物，使用 next dev（开发模式）")
+            frontend_cmd = _build_frontend_dev_cmd(web_dir, frontend_port)
+        if not frontend_cmd:
+            print("警告: 未找到可用的 Node.js/npm，跳过前端启动。安装 Node.js 后可使用前端 dashboard。", file=sys.stderr)
         elif not (web_dir / "node_modules").exists():
             print("警告: 前端依赖未安装，请先执行 'npm install'。跳过前端启动。", file=sys.stderr)
         else:
@@ -183,14 +258,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             frontend_env = env.copy()
             frontend_env["PORT"] = str(frontend_port)
             frontend_proc = _spawn_managed_process(
-                [npm, "run", "dev"],
+                frontend_cmd,
                 cwd=str(web_dir),
                 env=frontend_env,
             )
             procs.append(frontend_proc)
 
-            time.sleep(2)
-            if frontend_proc.poll() is not None:
+            if not _wait_for_port_listen(frontend_port, timeout=20, proc=frontend_proc):
                 print("错误: 前端启动失败", file=sys.stderr)
                 cleanup()
                 return 1
@@ -208,7 +282,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # 后端会在启动时打印 token URL，这里也提示用户
     print()
     print("=" * 50)
-    print(f"  Sensenova-Claw 已启动" + (" (dev mode)" if dev_mode else ""))
+    mode_label = " (dev mode)" if dev_mode else " (production)" if is_production else ""
+    print(f"  Sensenova-Claw 已启动{mode_label}")
     print(f"  后端 API:    http://localhost:{backend_port}")
     if dev_mode:
         print(f"  代码目录:    {project_root}")
@@ -229,6 +304,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # 监控子进程
     try:
         while True:
+            if shutdown_requested:
+                return 0
             if backend_proc.poll() is not None:
                 print("后端进程退出，正在停止所有服务。")
                 cleanup()
@@ -239,10 +316,10 @@ def cmd_run(args: argparse.Namespace) -> int:
                 return 1
             time.sleep(1)
     except KeyboardInterrupt:
-        pass
+        shutdown_requested = True
     finally:
         cleanup()
-    return 0
+    return 0 if shutdown_requested else 1
 
 
 # ── sensenova_claw cli ──────────────────────────────────────

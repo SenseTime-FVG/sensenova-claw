@@ -12,7 +12,7 @@ import { useDrag } from 'react-dnd';
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useFilePanel } from '@/contexts/FilePanelContext';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession, useMessages } from '@/contexts/ws';
 import { useFeatureNavItems } from '@/components/layout/DashboardNav';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
@@ -30,11 +30,12 @@ function norm(p: string): string {
 
 /* ── 文件树节点 ── */
 
-function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu }: {
+function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu, onFileClick }: {
   item: FileItem;
   depth?: number;
   expandToPath?: string | null;
   onContextMenu?: (e: React.MouseEvent, item: FileItem, children: FileItem[] | null) => void;
+  onFileClick?: (item: FileItem) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileItem[] | null>(null);
@@ -96,16 +97,19 @@ function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu }: {
     if (isTarget && el) (itemRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
   }, [dragRef, isTarget]);
 
-  const toggleFolder = async () => {
-    if (!isFolder) return;
-    if (expanded) {
-      userCollapsed.current = true;
-      setExpanded(false);
-      return;
+  const handleClick = async () => {
+    if (isFolder) {
+      if (expanded) {
+        userCollapsed.current = true;
+        setExpanded(false);
+        return;
+      }
+      userCollapsed.current = false;
+      if (!children) await loadChildren();
+      setExpanded(true);
+    } else {
+      onFileClick?.(item);
     }
-    userCollapsed.current = false;
-    if (!children) await loadChildren();
-    setExpanded(true);
   };
 
   return (
@@ -114,10 +118,11 @@ function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu }: {
         ref={setRefs}
         className={cn(
           'flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-muted cursor-grab active:cursor-grabbing text-sm transition-colors',
+          !isFolder && 'cursor-pointer',
           isTarget && 'bg-primary/10 text-primary font-semibold ring-1 ring-primary/30',
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
-        onClick={toggleFolder}
+        onClick={handleClick}
         onContextMenu={(e) => onContextMenu?.(e, item, children)}
       >
         {isFolder && (expanded
@@ -140,7 +145,7 @@ function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu }: {
       {isFolder && expanded && children && (
         <div>
           {children.map(child => (
-            <FileTreeItem key={child.path} item={child} depth={depth + 1} expandToPath={expandToPath} onContextMenu={onContextMenu} />
+            <FileTreeItem key={child.path} item={child} depth={depth + 1} expandToPath={expandToPath} onContextMenu={onContextMenu} onFileClick={onFileClick} />
           ))}
           {children.length === 0 && (
             <div className="text-[10px] text-muted-foreground/50 py-1" style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}>
@@ -212,7 +217,8 @@ const FEATURE_ICONS: Record<string, React.ReactNode> = {
 const pptEntry = { path: '/ppt', label: 'PPT' };
 
 function AIWorkspace() {
-  const { currentSessionId, taskProgress } = useChatSession();
+  const { currentSessionId } = useSession();
+  const { taskProgress } = useMessages();
   const featureNavItems = useFeatureNavItems();
   const mergedProgress = useMemo(() => mergeProgress(taskProgress), [taskProgress]);
   const allItems = useMemo(() => [pptEntry, ...featureNavItems], [featureNavItems]);
@@ -326,6 +332,18 @@ export function GlobalFilePanel() {
 
   const bestRoot = bestMatchRoot(roots, focusPath);
 
+  const handleFileClick = useCallback((item: FileItem) => {
+    if (isPreviewable(item.name)) {
+      const previewType = getFilePreviewType(item.name);
+      window.dispatchEvent(new CustomEvent('sensenova-claw:open-file-preview', {
+        detail: { path: item.path, type: previewType },
+      }));
+    } else {
+      const downloadUrl = `${API_BASE}/api/files/download?path=${encodeURIComponent(item.path)}&inline=false`;
+      window.open(downloadUrl, '_blank');
+    }
+  }, []);
+
   const handleContextMenu = useCallback(async (
     e: React.MouseEvent,
     item: FileItem,
@@ -425,6 +443,7 @@ export function GlobalFilePanel() {
                   item={r}
                   expandToPath={bestRoot === norm(r.path) ? focusPath : null}
                   onContextMenu={handleContextMenu}
+                  onFileClick={handleFileClick}
                 />
               ))}
               {roots.length === 0 && (

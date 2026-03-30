@@ -138,12 +138,16 @@ class WebSocketChannel(Channel):
         if msg_type == "create_session":
             agent_id = payload.get("agent_id", "default")
             meta = payload.get("meta", {})
+            request_id = payload.get("request_id")
             result = await gw.create_session(agent_id=agent_id, meta=meta, channel_id=self._channel_id)
             sid = result["session_id"]
             self.bind_session(sid, websocket)
+            response_payload = {"created_at": result["created_at"]}
+            if isinstance(request_id, str) and request_id.strip():
+                response_payload["request_id"] = request_id
             await self.send_json(websocket, {
                 "type": "session_created", "session_id": sid,
-                "payload": {"created_at": result["created_at"]}, "timestamp": time.time(),
+                "payload": response_payload, "timestamp": time.time(),
             })
             return
 
@@ -183,6 +187,7 @@ class WebSocketChannel(Channel):
                 content=payload.get("content", ""),
                 attachments=payload.get("attachments", []),
                 context_files=payload.get("context_files", []),
+                meta=payload.get("meta") if isinstance(payload.get("meta"), dict) else None,
                 source="websocket",
             )
             return
@@ -305,8 +310,13 @@ class WebSocketChannel(Channel):
             await self._send_to_websockets(self._connections, mapped)
             return
 
+        # proactive 推荐是全局工作台数据，需要所有连接都能收到
+        if event.type == PROACTIVE_RESULT:
+            await self._send_to_websockets(self._connections, mapped)
+            return
+
         # 通知/cron 事件：有 session 则路由到绑定连接，否则广播
-        if event.type in {CRON_DELIVERY_REQUESTED, NOTIFICATION_PUSH, PROACTIVE_RESULT}:
+        if event.type in {CRON_DELIVERY_REQUESTED, NOTIFICATION_PUSH}:
             if event.session_id and event.session_id != "system":
                 await self._send_to_websockets(self._session_bindings.get(event.session_id, set()), mapped)
             else:
@@ -415,13 +425,16 @@ class WebSocketChannel(Channel):
                 "timestamp": event.ts,
             }
         if event.type == AGENT_STEP_COMPLETED:
+            tc_payload: dict[str, Any] = {
+                "turn_id": event.turn_id,
+                "final_response": event.payload.get("result", {}).get("content", ""),
+            }
+            if event.payload.get("source"):
+                tc_payload["source"] = event.payload["source"]
             return {
                 "type": "turn_completed",
                 "session_id": event.session_id,
-                "payload": {
-                    "turn_id": event.turn_id,
-                    "final_response": event.payload.get("result", {}).get("content", ""),
-                },
+                "payload": tc_payload,
                 "timestamp": event.ts,
             }
         if event.type == ERROR_RAISED:
@@ -537,6 +550,10 @@ class WebSocketChannel(Channel):
                     "job_name": event.payload.get("job_name"),
                     "result": event.payload.get("result", ""),
                     "session_id": event.payload.get("session_id"),
+                    "recommendation_type": event.payload.get("recommendation_type"),
+                    "items": event.payload.get("items"),
+                    "source_session_id": event.payload.get("source_session_id"),
+                    "scratch_session_id": event.payload.get("scratch_session_id"),
                 },
                 "timestamp": event.ts,
             }

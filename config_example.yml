@@ -203,7 +203,7 @@ agents:
     name: Proactive Agent
     description: 自主执行定时任务和信息推送的 agent
     temperature: 1.0
-    tools: ["send_message", "fetch_url", "read_file", "write_file", "bash_command", "serper_search", "memory_search", "list_proactive_jobs", "create_proactive_job", "manage_proactive_job"]
+    tools: []
     skills: []
     max_send_depth: 2
     max_pingpong_turns: 10
@@ -259,7 +259,7 @@ agents:
     description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
     temperature: 1.0
     tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search", "get_secret", "write_secret"]
-    skills: ["mineru-document-extractor", "research-union", "union-search-plus"]
+    skills: ["mineru-document-extractor", "research-union", "union-search-skill"]
     max_send_depth: 2
     enabled: true
 
@@ -398,6 +398,17 @@ plugins:
     require_mention: true  # 群里即使用户和频道都满足，还必须 @bot 才会响应
     show_tool_progress: false
     reply_in_thread: true
+  dingtalk:
+    enabled: false
+    client_id: "${DINGTALK_CLIENT_ID}"
+    client_secret: "${DINGTALK_CLIENT_SECRET}"
+    dm_policy: "open"  # open | allowlist | disabled
+    group_policy: "open"  # open | allowlist | disabled
+    allowlist: []
+    group_allowlist: []
+    require_mention: true
+    show_tool_progress: false
+    reply_to_sender: false
   whatsapp:
     enabled: false
     auth_dir: "~/.sensenova-claw/data/plugins/whatsapp/auth"

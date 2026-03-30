@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Bot, ChevronDown, Check } from 'lucide-react';
 import { type AgentOption } from '@/lib/chatTypes';
 import { authFetch, API_BASE } from '@/lib/authFetch';
+import { useI18n } from '@/contexts/I18nContext';
 
 export function TargetSelector({
   selectedAgent,
@@ -14,6 +15,7 @@ export function TargetSelector({
   onSelectAgent: (id: string) => void;
   locked?: boolean;
 }) {
+  const { t } = useI18n();
   const [agents, setAgents] = useState<AgentOption[]>([]);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -30,7 +32,9 @@ export function TargetSelector({
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const currentLabel = agents.find(a => a.id === selectedAgent)?.name || selectedAgent || 'Default Agent';
+  const currentLabel =
+    agents.find(a => a.id === selectedAgent)?.name ||
+    (selectedAgent && selectedAgent !== 'default' ? selectedAgent : t('chat.defaultAgent'));
 
   if (locked) {
     return (
@@ -57,12 +61,12 @@ export function TargetSelector({
         <div className="absolute bottom-full left-0 mb-2 w-72 bg-popover border rounded-xl shadow-lg z-50 overflow-hidden">
           <div className="flex border-b">
             <div className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-foreground border-b-2 border-primary">
-              <Bot size={14} /> Available Agents
+              <Bot size={14} /> {t('chat.availableAgents')}
             </div>
           </div>
           <div className="max-h-60 overflow-auto p-2">
             {agents.length === 0 ? (
-              <div className="text-center text-muted-foreground text-xs py-6">No Agents Found</div>
+              <div className="text-center text-muted-foreground text-xs py-6">{t('chat.noAgentsFound')}</div>
             ) : agents.map(a => (
               <button
                 key={a.id}

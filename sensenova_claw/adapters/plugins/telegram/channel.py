@@ -46,6 +46,7 @@ class TelegramChannel(Channel):
         self._config = config
         self._plugin_api = plugin_api
         self._runtime = runtime or TelegramRuntime(config)
+        self._sensenova_claw_status = {"status": "initialized", "error": ""}
         self._chat_sessions: dict[str, str] = {}
         self._session_meta: dict[str, TelegramSessionMeta] = {}
         self._pending_questions: dict[str, TelegramPendingQuestion] = {}
@@ -61,11 +62,19 @@ class TelegramChannel(Channel):
 
     async def start(self) -> None:
         self._runtime.set_message_handler(self.handle_incoming_message)
-        await self._runtime.start()
+        self._sensenova_claw_status = {"status": "connecting", "error": ""}
+        try:
+            await self._runtime.start()
+        except Exception as exc:
+            self._sensenova_claw_status = {"status": "failed", "error": str(exc).strip() or type(exc).__name__}
+            logger.exception("TelegramChannel start failed")
+            raise
+        self._sensenova_claw_status = {"status": "connected", "error": ""}
         logger.info("TelegramChannel started")
 
     async def stop(self) -> None:
         await self._runtime.stop()
+        self._sensenova_claw_status = {"status": "stopped", "error": ""}
         logger.info("TelegramChannel stopped")
 
     async def handle_incoming_message(self, message: TelegramInboundMessage) -> None:

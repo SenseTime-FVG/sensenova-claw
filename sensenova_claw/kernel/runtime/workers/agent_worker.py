@@ -40,6 +40,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _extract_meta_source(payload: dict) -> str | None:
+    """从 USER_INPUT payload 中提取 meta.source。"""
+    meta = payload.get("meta")
+    if isinstance(meta, dict):
+        return meta.get("source")
+    return None
+
+
 class AgentSessionWorker(SessionWorker):
     """Agent 会话级 Worker：编排对话流程
 
@@ -182,18 +190,25 @@ class AgentSessionWorker(SessionWorker):
             if state:
                 new_messages = state.messages[state.history_offset:]
                 self.rt.state_store.append_to_history(session_id, new_messages)
+        limit_payload: dict = {
+            "step_type": "final",
+            "result": {"content": msg},
+            "next_action": "end",
+            "exceeded_limit": limit_type,
+        }
+        if getattr(self, '_current_turn_meta_source', None):
+            limit_payload["source"] = self._current_turn_meta_source
+        if self._session_meta and self._session_meta.get("parent_session_id"):
+            limit_payload["is_delegated"] = True
+        if self._is_proactive_session():
+            limit_payload["is_proactive"] = True
         await self.bus.publish(
             EventEnvelope(
                 type=AGENT_STEP_COMPLETED,
                 session_id=session_id,
                 turn_id=turn_id,
                 source="agent",
-                payload={
-                    "step_type": "final",
-                    "result": {"content": msg},
-                    "next_action": "end",
-                    "exceeded_limit": limit_type,
-                },
+                payload=limit_payload,
             )
         )
 
@@ -311,6 +326,7 @@ class AgentSessionWorker(SessionWorker):
     async def _handle_user_input(self, event: EventEnvelope) -> None:
         content = str(event.payload.get("content", ""))
         turn_id = event.turn_id or f"turn_{uuid.uuid4().hex[:12]}"
+        self._current_turn_meta_source = _extract_meta_source(event.payload)
 
         await self.rt.repo.create_session(self.session_id, meta={"title": content[:20] or "新会话"})
         await self.rt.repo.update_session_activity(self.session_id)
@@ -500,7 +516,42 @@ class AgentSessionWorker(SessionWorker):
                 )
             return
 
-        # 没有工具调用，结束本轮对话
+        # 没有工具调用 — 如果 content 为空且本轮有工具执行记录，
+        # 追加一轮 LLM 调用要求生成文字总结，避免返回空响应给用户。
+        # 仅重试一次，防止无限循环。
+        if not content and state.tool_results and not getattr(state, "_summary_retry", False):
+            state._summary_retry = True  # type: ignore[attr-defined]
+            state.messages.append({
+                "role": "user",
+                "content": (
+                    "你刚才执行了一系列操作但没有给出文字回复。"
+                    "请根据上面的工具执行结果，向用户总结你完成了什么、"
+                    "生成的文件路径，以及后续可以做什么。"
+                ),
+            })
+            llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
+            self._llm_call_count += 1
+            await self.bus.publish(
+                EventEnvelope(
+                    type=LLM_CALL_REQUESTED,
+                    session_id=event.session_id,
+                    turn_id=event.turn_id,
+                    trace_id=llm_call_id,
+                    source="agent",
+                    payload={
+                        "llm_call_id": llm_call_id,
+                        "provider": self._get_provider(),
+                        "model": self._get_model(),
+                        "messages": state.messages,
+                        "tools": self._get_filtered_tools(),
+                        "temperature": self._get_temperature(),
+                        "max_tokens": self._get_max_tokens(),
+                        "extra_body": self._get_extra_body(),
+                    },
+                )
+            )
+            return
+
         # 后处理：将回复中的相对路径改写为绝对路径
         from sensenova_claw.platform.config.workspace import resolve_agent_workdir, resolve_sensenova_claw_home
         from sensenova_claw.kernel.runtime.path_rewriter import rewrite_relative_paths
@@ -522,17 +573,24 @@ class AgentSessionWorker(SessionWorker):
         if self.rt.context_compressor:
             asyncio.create_task(self._compress_history_safe(event.session_id))
 
+        step_completed_payload: dict = {
+            "step_type": "final",
+            "result": {"content": content},
+            "next_action": "end",
+        }
+        if getattr(self, '_current_turn_meta_source', None):
+            step_completed_payload["source"] = self._current_turn_meta_source
+        if self._session_meta and self._session_meta.get("parent_session_id"):
+            step_completed_payload["is_delegated"] = True
+        if self._is_proactive_session():
+            step_completed_payload["is_proactive"] = True
         await self.bus.publish(
             EventEnvelope(
                 type=AGENT_STEP_COMPLETED,
                 session_id=event.session_id,
                 turn_id=event.turn_id,
                 source="agent",
-                payload={
-                    "step_type": "final",
-                    "result": {"content": content},
-                    "next_action": "end",
-                },
+                payload=step_completed_payload,
             )
         )
 

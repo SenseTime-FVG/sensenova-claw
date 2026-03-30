@@ -12,6 +12,7 @@ from sensenova_claw.app.gateway import main as gateway_main
 from sensenova_claw.adapters.channels.websocket_channel import WebSocketChannel
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
+    PROACTIVE_RESULT,
     TOOL_CONFIRMATION_REQUESTED,
     TOOL_CONFIRMATION_RESOLVED,
     USER_INPUT,
@@ -24,10 +25,27 @@ class _FakeGateway:
     def __init__(self):
         self.bind_calls: list[tuple[str, str]] = []
         self.published: list[EventEnvelope] = []
+        self.create_session_calls: list[dict[str, object]] = []
         self.agent_registry = types.SimpleNamespace(get=lambda _aid: None)
 
     def bind_session(self, session_id: str, channel_id: str) -> None:
         self.bind_calls.append((session_id, channel_id))
+
+    async def create_session(
+        self,
+        agent_id: str = "default",
+        meta: dict | None = None,
+        channel_id: str = "",
+    ) -> dict:
+        self.create_session_calls.append({
+            "agent_id": agent_id,
+            "meta": meta or {},
+            "channel_id": channel_id,
+        })
+        return {
+            "session_id": f"sess_created_{len(self.create_session_calls)}",
+            "created_at": 1700000000.0,
+        }
 
     async def publish_from_channel(self, event: EventEnvelope) -> None:
         self.published.append(event)
@@ -38,6 +56,7 @@ class _FakeGateway:
         content: str,
         attachments: list | None = None,
         context_files: list | None = None,
+        meta: dict | None = None,
         source: str = "websocket",
     ) -> str:
         _ = (attachments, context_files, source)
@@ -46,7 +65,10 @@ class _FakeGateway:
                 type=USER_INPUT,
                 session_id=session_id,
                 source="test",
-                payload={"content": content},
+                payload={
+                    "content": content,
+                    **({"meta": meta} if meta else {}),
+                },
             )
         )
         return "turn_test"
@@ -161,6 +183,35 @@ async def test_user_input_with_existing_session_auto_binds_websocket(ws_env):
     assert ("sess_old", "websocket") in ws_env.gateway.bind_calls
     assert "sess_old" in ws_env.ws_channel._session_bindings
     assert any(e.type == USER_INPUT and e.session_id == "sess_old" for e in ws_env.gateway.published)
+
+
+@pytest.mark.asyncio
+async def test_create_session_echoes_request_id_to_frontend(ws_env):
+    ws = _FakeWebSocket(
+        messages=[
+            {
+                "type": "create_session",
+                "payload": {
+                    "agent_id": "research",
+                    "meta": {"title": "调试会话"},
+                    "request_id": "req_create_123",
+                },
+            }
+        ]
+    )
+
+    await gateway_main.websocket_endpoint(ws)
+
+    assert ws.accepted is True
+    assert ws.sent_json[0]["type"] == "session_created"
+    assert ws.sent_json[0]["payload"]["request_id"] == "req_create_123"
+    assert ws_env.gateway.create_session_calls == [
+        {
+            "agent_id": "research",
+            "meta": {"title": "调试会话"},
+            "channel_id": "websocket",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -385,3 +436,45 @@ async def test_tool_confirmation_resolved_broadcasts_to_all_connections(ws_env):
     assert ws2.sent_json[0]["type"] == "tool_confirmation_resolved"
     assert ws1.sent_json[0]["payload"]["reason"] == "timeout_approved"
     assert ws2.sent_json[0]["payload"]["tool_call_id"] == "tc_child_2"
+
+
+@pytest.mark.asyncio
+async def test_proactive_result_broadcasts_to_all_connections_for_dashboard(ws_env):
+    """proactive 推荐需要让工作台连接也能收到，而不依赖 session 绑定。"""
+    ws1 = _FakeWebSocket(messages=[])
+    ws2 = _FakeWebSocket(messages=[])
+    await ws_env.ws_channel.connect(ws1)
+    await ws_env.ws_channel.connect(ws2)
+
+    event = EventEnvelope(
+        type=PROACTIVE_RESULT,
+        session_id="sess_recommendation",
+        source="proactive",
+        payload={
+            "job_id": "builtin-turn-end-recommendation",
+            "job_name": "会话推荐",
+            "session_id": "sess_recommendation",
+            "source_session_id": "sess_recommendation",
+            "scratch_session_id": "sess_recommendation_scratch",
+            "recommendation_type": "turn_end",
+            "result": '{"recommendations":[{"id":"rec_1","title":"继续追问","prompt":"请继续分析","category":"follow-up"}]}',
+            "items": [
+                {
+                    "id": "rec_1",
+                    "title": "继续追问",
+                    "prompt": "请继续分析",
+                    "category": "follow-up",
+                }
+            ],
+        },
+    )
+
+    await ws_env.ws_channel.send_event(event)
+
+    assert len(ws1.sent_json) == 1
+    assert len(ws2.sent_json) == 1
+    assert ws1.sent_json[0]["type"] == "proactive_result"
+    assert ws2.sent_json[0]["type"] == "proactive_result"
+    assert ws1.sent_json[0]["payload"]["recommendation_type"] == "turn_end"
+    assert ws2.sent_json[0]["payload"]["items"][0]["id"] == "rec_1"
+    assert ws1.sent_json[0]["payload"]["scratch_session_id"] == "sess_recommendation_scratch"

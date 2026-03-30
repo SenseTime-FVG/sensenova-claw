@@ -5,7 +5,7 @@
 // 只要有任意 agent 在工作就显示工作界面
 
 import { useRef } from 'react';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useMessages, useEventDispatcher } from '@/contexts/ws';
 import type { OfficeStateName, OfficeState } from '@/components/office/types';
 
 const SEARCH_TOOLS = ['serper_search', 'brave_search', 'baidu_search', 'tavily_search'];
@@ -61,7 +61,8 @@ function deriveState(
  * 改进：只要有任意 agent 在工作（跨会话），就显示工作状态。
  */
 export function useOfficeState(): OfficeState {
-  const { isTyping, steps, messages, globalActivity } = useChatSession();
+  const { isTyping, steps, messages } = useMessages();
+  const { globalActivity } = useEventDispatcher();
   const prevRef = useRef<OfficeState>({ state: 'idle', detail: '' });
 
   const next = deriveState(globalActivity.anyWorking, globalActivity.lastToolName, isTyping, steps, messages);

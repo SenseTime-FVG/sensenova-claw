@@ -17,7 +17,7 @@ export default defineConfig({
   timeout: 60000,
   retries: 0,
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://127.0.0.1:3000',
     headless: true,
     launchOptions: chromeExecutablePath
       ? {
@@ -26,9 +26,9 @@ export default defineConfig({
       : undefined,
   },
   webServer: {
-    command: 'cd .. && npm run dev',
+    command: 'npm run dev',
     port: 3000,
     timeout: 120000,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
   },
 });

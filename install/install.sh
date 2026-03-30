@@ -7,7 +7,7 @@
 # 或本地执行:
 #   bash install/install.sh
 #
-# 开发模式（跳过克隆，使用当前目录代码）:
+# 开发模式（跳过克隆，使用当前目录代码，不构建前端）:
 #   bash install/install.sh --dev
 #
 set -euo pipefail
@@ -17,7 +17,8 @@ set -euo pipefail
 SENSENOVA_CLAW_HOME="${SENSENOVA_CLAW_HOME:-$HOME/.sensenova-claw}"
 APP_DIR="$SENSENOVA_CLAW_HOME/app"
 REPO_URL="${SENSENOVA_CLAW_REPO_URL:-https://github.com/SenseTime-FVG/sensenova-claw.git}"
-REPO_REF="${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-dev}}"
+# app 目录 clone/update 使用的仓库分支或 tag，兼容旧变量名
+REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-dev}}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
 DEV_MODE=false
@@ -275,6 +276,8 @@ install_node() {
 # ── 步骤 4: 克隆/更新仓库 ──
 
 setup_repo() {
+  info "app 目录将使用仓库分支/引用: $REPO_REF"
+
   if [ -d "$APP_DIR/.git" ]; then
     info "更新 Sensenova-Claw ($REPO_REF)..."
     cd "$APP_DIR"
@@ -328,8 +331,16 @@ install_deps() {
   info "安装前端依赖..."
   cd "$APP_DIR/sensenova_claw/app/web"
   npm install 2>&1 | tail -5
-  cd "$APP_DIR"
   log "前端依赖安装完成"
+
+  # 4) 构建前端（--dev 模式跳过）
+  if [ "$DEV_MODE" != "true" ]; then
+    info "构建前端生产版本..."
+    npm run build 2>&1 | tail -10
+    log "前端生产构建完成"
+  fi
+
+  cd "$APP_DIR"
 }
 
 # ── 步骤 5b: 构建 SENSENOVA_CLAW_HOME 目录结构 ──
@@ -441,6 +452,7 @@ print_success() {
     echo "  模式:     开发模式"
     echo "  代码目录: $APP_DIR"
   else
+    echo "  模式:     生产模式（前端已预构建）"
     echo "  安装目录: $APP_DIR"
     echo "  安装来源: $REPO_URL@$REPO_REF"
   fi

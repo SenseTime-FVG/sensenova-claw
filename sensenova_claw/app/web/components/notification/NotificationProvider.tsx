@@ -328,9 +328,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         ? { ...t, pending: true, pendingAction: actionValue }
         : t
     ));
-    markCardPending(cardId, actionValue);
     // 触发回调（发送 WebSocket 响应）
     onActionToastAction?.(cardId, actionValue, inputValue);
+    if (!onActionToastAction) {
+      markCardPending(cardId, actionValue);
+    }
   }, [clearActionToastTimer, markCardPending, onActionToastAction]);
 
   // 操作弹窗：用户关闭（不操作）

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { X, FileText, Image as ImageIcon, Code, FileType, AlertCircle } from 'lucide-react';
 import { API_BASE, authFetch } from '@/lib/authFetch';
 import { type FilePreviewType, guessLanguage } from './fileTypes';
-import { MarkdownContent } from '@/components/chat/MarkdownContent';
+import { Markdown } from '@/components/ui/Markdown';
 
 const MAX_TEXT_SIZE = 1024 * 1024; // 1MB
 
@@ -126,8 +126,8 @@ function MarkdownPreview({ path }: { path: string }) {
           文件过大，仅展示前 1MB
         </div>
       )}
-      <div className="p-4 prose prose-sm max-w-none dark:prose-invert">
-        <MarkdownContent content={content} />
+      <div className="p-4">
+        <Markdown content={content} />
       </div>
     </div>
   );

@@ -43,6 +43,7 @@ class PluginRegistry:
 - `wecom`
 - `whatsapp`
 - `discord`
+- `dingtalk`
 
 ### FeishuChannel 插件
 
@@ -61,6 +62,15 @@ Discord Bot 接入插件，提供以下功能：
 - 支持群聊 `mention` 触发与线程级会话路由
 - 支持 `ask_user` 问答回传和通用 `MessageTool` 主动出站
 - 为 slash command、线程绑定增强等后续特性预留扩展接口
+
+### DingtalkChannel 插件
+
+钉钉机器人接入插件，提供以下功能：
+
+- 基于官方 `dingtalk-stream-sdk-python` 接收钉钉 Stream 文本消息
+- 支持私聊、群聊和 `mention` 触发
+- 支持 `ask_user` 问答回传和通用 `MessageTool` 主动出站
+- 支持 `user:<staff_id>` 与 `conversation:<open_conversation_id>` 两种主动发送目标
 
 ---
 
@@ -147,6 +157,16 @@ plugins:
     channel_allowlist: ["234567890123456789", "345678901234567890"]
     require_mention: true
     reply_in_thread: true
+  dingtalk:
+    enabled: true
+    client_id: "dingxxxx"
+    client_secret: "xxxx"
+    dm_policy: open
+    group_policy: open
+    require_mention: true
+    allowlist: []
+    group_allowlist: []
+    reply_to_sender: false
   my_plugin:
     enabled: true
     # 插件自定义配置...

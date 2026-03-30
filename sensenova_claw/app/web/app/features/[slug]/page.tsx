@@ -6,7 +6,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { WorkbenchShell } from '@/components/workbench/WorkbenchShell';
 import { MiniAppBuildFeed } from '@/components/workbench/MiniAppBuildFeed';
 import { ChatPanel } from '@/components/chat/ChatPanel';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession, useMessages } from '@/contexts/ws';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +23,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 
 type ActionTarget = 'local' | 'server' | 'agent';
+type RefreshMode = 'none' | 'background' | 'immediate';
 type WorkspaceTab = 'workspace' | 'runs' | 'details';
 type ChatDockMode = 'hidden' | 'floating' | 'pinned';
 type WorkspaceOverlayTab = WorkspaceTab | null;
@@ -66,7 +67,12 @@ interface CustomPageData {
   source_project_path?: string;
   builder_type?: 'builtin' | 'acp';
   generation_prompt?: string;
+  preview_mode?: 'static' | 'server';
   entry_file_path?: string;
+  server_entry_file_path?: string;
+  server_start_command?: string;
+  server_start_args?: string[];
+  background_refresh_policy?: string;
   bridge_script_path?: string;
   preserved_license_files?: string[];
   build_status?: 'pending' | 'queued' | 'running' | 'ready' | 'failed';
@@ -89,6 +95,8 @@ interface MiniAppPostMessagePayload {
   meta?: {
     defaultTarget?: ActionTarget | string;
     routes?: Record<string, ActionTarget | string>;
+    refreshMode?: RefreshMode | string;
+    [key: string]: unknown;
   };
 }
 
@@ -145,7 +153,7 @@ function ChatEmptyState({
       </div>
       <h3 className="text-xl font-semibold text-foreground mb-2">{page.name} Agent</h3>
       <p className="text-sm text-muted-foreground max-w-md mb-6">
-        你可以直接要求它继续修改当前 mini-app。页面动作也可以按 local、server、agent 分流，只有真正需要判断或改造时才进入 Agent。
+        这个 workspace 默认应先依靠自身前端和服务端处理大多数交互；只有最后兜底的问题、复杂问答或明确要求重构时，才把消息交给 Agent。
       </p>
       {page.templates.length > 0 && (
         <div className="grid gap-3 w-full max-w-lg">
@@ -153,7 +161,7 @@ function ChatEmptyState({
             <Card
               key={`${template.title}-${index}`}
               className="p-4 text-left cursor-pointer hover:border-primary/30 transition-colors"
-              onClick={() => onQuickTask(`请围绕「${template.title}」继续改进这个 mini-app。${template.desc || ''}`)}
+              onClick={() => onQuickTask(`请围绕「${template.title}」改进这个自带服务端的 workspace。优先保持自包含、少刷新、Agent 兜底。${template.desc || ''}`)}
             >
               <div className="font-medium text-foreground">{template.title}</div>
               {template.desc && <p className="mt-1 text-sm text-muted-foreground">{template.desc}</p>}
@@ -220,11 +228,8 @@ export default function DynamicFeaturePage() {
   const router = useRouter();
   const slug = params.slug as string;
 
-  const {
-    sendMessage,
-    switchSession,
-    currentSessionId,
-  } = useChatSession();
+  const { switchSession, currentSessionId } = useSession();
+  const { sendMessage } = useMessages();
 
   const [page, setPage] = useState<CustomPageData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -274,8 +279,12 @@ export default function DynamicFeaturePage() {
   }, [page, loadPage]);
 
   const previewUrl = useMemo(() => {
-    if (!page?.entry_file_path) return '';
+    if (!page) return '';
     const version = page.updated_at || Date.now();
+    if (page.preview_mode === 'server' || page.server_entry_file_path) {
+      return `${API_BASE}/api/custom-pages/${encodeURIComponent(page.slug)}/preview/?v=${version}`;
+    }
+    if (!page.entry_file_path) return '';
     return `${API_BASE}/api/files/workdir/${page.entry_file_path}?v=${version}`;
   }, [page]);
 
@@ -319,10 +328,11 @@ export default function DynamicFeaturePage() {
     action: string,
     payload: Record<string, unknown>,
     target: ActionTarget,
+    refreshMode: RefreshMode,
   ) => {
     if (!page) return;
     const label = target === 'local' ? '本地动作' : target === 'server' ? '服务动作' : 'Agent 动作';
-    appendLocalEvent(label, `${action} -> ${JSON.stringify(payload)}`);
+    appendLocalEvent(label, `${action} [refresh=${refreshMode}] -> ${JSON.stringify(payload)}`);
 
     if (target === 'local') {
       return;
@@ -337,6 +347,7 @@ export default function DynamicFeaturePage() {
           action,
           payload,
           target,
+          refresh_mode: refreshMode,
           session_id: target === 'agent' ? (currentSessionId || page.last_interaction_session_id || '') : '',
         }),
       });
@@ -348,7 +359,12 @@ export default function DynamicFeaturePage() {
       if (target === 'agent' && data.session_id && data.session_id !== currentSessionId) {
         await switchSession(data.session_id);
       }
-      await loadPage(true);
+      if (target === 'agent' && data.session_id) {
+        setPage(prev => prev ? { ...prev, last_interaction_session_id: data.session_id } : prev);
+      }
+      if (data.should_refresh_workspace) {
+        await loadPage(true);
+      }
     } finally {
       setInteractionSubmitting(false);
     }
@@ -361,6 +377,13 @@ export default function DynamicFeaturePage() {
     return runtimeRouting.routes[action] || runtimeRouting.defaultTarget || 'agent';
   }, [runtimeRouting]);
 
+  const resolveRefreshMode = useCallback((explicitRefreshMode?: string): RefreshMode => {
+    if (explicitRefreshMode === 'none' || explicitRefreshMode === 'background' || explicitRefreshMode === 'immediate') {
+      return explicitRefreshMode;
+    }
+    return 'none';
+  }, []);
+
   const toggleOverlayTab = useCallback((nextTab: WorkspaceTab) => {
     setActiveTab(prev => (prev === nextTab ? null : nextTab));
   }, []);
@@ -372,7 +395,8 @@ export default function DynamicFeaturePage() {
 
       if (data.kind === 'interaction' && data.action) {
         const target = resolveActionTarget(data.action, typeof data.target === 'string' ? data.target : '');
-        await dispatchAction(data.action, (data.payload || {}) as Record<string, unknown>, target);
+        const refreshMode = resolveRefreshMode(typeof data.meta?.refreshMode === 'string' ? data.meta.refreshMode : '');
+        await dispatchAction(data.action, (data.payload || {}) as Record<string, unknown>, target, refreshMode);
         return;
       }
 
@@ -406,7 +430,7 @@ export default function DynamicFeaturePage() {
 
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [appendLocalEvent, dispatchAction, resolveActionTarget, slug]);
+  }, [appendLocalEvent, dispatchAction, resolveActionTarget, resolveRefreshMode, slug]);
 
   if (loading) {
     return (
@@ -569,6 +593,7 @@ export default function DynamicFeaturePage() {
           <div className="flex flex-wrap gap-2 px-4 text-xs text-muted-foreground">
             <span>Agent: {page.agent_id}</span>
             <span>工作区: {page.workspace_root || '--'}</span>
+            <span>预览: {page.preview_mode === 'server' || page.server_entry_file_path ? '独立 Web server' : '静态页面'}</span>
             <span>默认路由: {runtimeRouting.defaultTarget}</span>
           </div>
         </StageFloatingCard>
@@ -615,7 +640,7 @@ export default function DynamicFeaturePage() {
                 onChange={e => setBuildPrompt(e.target.value)}
                 rows={10}
                 className="flex w-full rounded-xl border border-input bg-background px-3 py-3 text-sm leading-6 ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y"
-                placeholder="输入新的构建要求，例如：把这套工作区改成更偏项目管理，加入状态面板和周报生成。"
+                placeholder="输入新的构建要求，例如：把这套 workspace 改成自带服务端的学习面板，预生成 3 节课，只在用户点“向 Agent 提问”时才联系 Agent，并把夜间补货做成后台 refresh。"
                 data-testid="miniapp-build-prompt"
               />
             </div>
@@ -624,7 +649,7 @@ export default function DynamicFeaturePage() {
                 {buildSubmitting ? '提交中...' : '重新生成'}
               </Button>
               <span className="text-xs text-muted-foreground">
-                粗粒度修改走这里重新构建；细粒度迭代更适合打开聊天窗直接要求 Agent 调整。
+                粗粒度改造走这里重建 workspace；轻量问答、记笔记和状态同步应优先留在 workspace 自己的前后端里。
               </span>
             </div>
           </Card>
@@ -686,6 +711,9 @@ export default function DynamicFeaturePage() {
               <div><span className="text-muted-foreground">Builder：</span><span className="text-foreground">{page.builder_type || 'builtin'}</span></div>
               <div><span className="text-muted-foreground">来源模式：</span><span className="text-foreground">{page.workspace_mode === 'reuse' ? '复用现有项目' : '从零生成'}</span></div>
               <div><span className="text-muted-foreground">基础 Agent：</span><span className="text-foreground">{page.base_agent_id || page.agent_id}</span></div>
+              <div><span className="text-muted-foreground">预览模式：</span><span className="text-foreground">{page.preview_mode === 'server' || page.server_entry_file_path ? '独立 Web server' : '静态文件'}</span></div>
+              <div className="break-all"><span className="text-muted-foreground">服务端入口：</span><span className="text-foreground">{page.server_entry_file_path || '--'}</span></div>
+              <div className="break-all"><span className="text-muted-foreground">后台 refresh：</span><span className="text-foreground">{page.background_refresh_policy || '--'}</span></div>
               {page.source_project_path && (
                 <div className="break-all"><span className="text-muted-foreground">来源目录：</span><span className="text-foreground">{page.source_project_path}</span></div>
               )}
@@ -720,7 +748,7 @@ export default function DynamicFeaturePage() {
                       <button
                         key={`${template.title}-${index}`}
                         type="button"
-                        onClick={() => sendMessage(`请围绕「${template.title}」继续改造这个 mini-app。${template.desc || ''}`, undefined, page.agent_id)}
+                        onClick={() => sendMessage(`请围绕「${template.title}」继续改造这个 workspace。保持自带 server、自包含逻辑、少刷新、Agent 兜底。${template.desc || ''}`, undefined, page.agent_id)}
                         className="rounded-xl border border-border bg-background px-3 py-3 text-left hover:border-primary/30 transition-colors"
                       >
                         <div className="font-medium text-foreground">{template.title}</div>

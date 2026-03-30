@@ -72,6 +72,35 @@ def test_parse_duration_ms():
         parse_duration_ms("invalid")
 
 
+def test_delivery_config_recommendation_type_roundtrip():
+    from sensenova_claw.kernel.proactive.models import _delivery_to_dict, _delivery_from_dict
+    dc = DeliveryConfig(channels=["web"], recommendation_type="turn_end")
+    d = _delivery_to_dict(dc)
+    assert d["recommendation_type"] == "turn_end"
+    restored = _delivery_from_dict(d)
+    assert restored.recommendation_type == "turn_end"
+
+
+def test_delivery_config_recommendation_type_default_none():
+    from sensenova_claw.kernel.proactive.models import _delivery_to_dict, _delivery_from_dict
+    dc = DeliveryConfig(channels=["web"])
+    assert dc.recommendation_type is None
+    d = _delivery_to_dict(dc)
+    restored = _delivery_from_dict(d)
+    assert restored.recommendation_type is None
+
+
+def test_event_trigger_exclude_payload_roundtrip():
+    t = EventTrigger(
+        event_type="agent.step_completed",
+        exclude_payload={"source": "recommendation"},
+    )
+    raw = trigger_to_json(t)
+    restored = trigger_from_json(raw)
+    assert restored == t
+    assert restored.exclude_payload == {"source": "recommendation"}
+
+
 # ---------- DB 操作测试 ----------
 
 import asyncio
