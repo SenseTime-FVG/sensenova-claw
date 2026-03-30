@@ -654,6 +654,9 @@ class Repository:
 
     async def delete_session_cascade(self, session_id: str) -> None:
         """级联删除会话及关联的 turns, messages, events"""
+        await asyncio.to_thread(self._sync_delete_session_cascade, session_id)
+
+    def _sync_delete_session_cascade(self, session_id: str) -> None:
         conn = self._conn()
         conn.execute(
             "DELETE FROM agent_messages WHERE parent_session_id = ? OR child_session_id = ?",
@@ -664,8 +667,6 @@ class Repository:
         conn.execute("DELETE FROM turns WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
         conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     # ---------- Agent Messages 表操作 ----------
 
@@ -766,36 +767,41 @@ class Repository:
 
     async def prune_sessions(self, max_age_days: int = 30) -> int:
         """删除超期未活跃的会话及关联数据，返回删除数量"""
+        return await asyncio.to_thread(self._sync_prune_sessions, max_age_days)
+
+    def _sync_prune_sessions(self, max_age_days: int) -> int:
         cutoff = time.time() - max_age_days * 86400
         conn = self._conn()
+        # 注意：必须先 fetchall() 拿到全部结果，再进入循环执行 DELETE。
+        # 如果使用游标懒迭代，后续的 DELETE + commit 会使游标失效。
         rows = conn.execute(
             "SELECT session_id FROM sessions WHERE last_active < ?", (cutoff,)
         ).fetchall()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         count = 0
         for row in rows:
-            await self.delete_session_cascade(row[0])
+            # _sync_delete_session_cascade 与本方法在同一线程执行（threading.local 保证），
+            # 复用同一个 conn 对象，串行调用安全。
+            self._sync_delete_session_cascade(row[0])
             count += 1
         return count
 
     async def cap_sessions(self, max_count: int = 500) -> int:
         """限制会话总数，淘汰最旧的，返回删除数量"""
+        return await asyncio.to_thread(self._sync_cap_sessions, max_count)
+
+    def _sync_cap_sessions(self, max_count: int) -> int:
         conn = self._conn()
         total = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
         if total <= max_count:
-            conn.close()
-            self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
             return 0
         overflow = total - max_count
+        # 同 _sync_prune_sessions：先 fetchall() 后再循环 DELETE
         rows = conn.execute(
             "SELECT session_id FROM sessions ORDER BY last_active ASC LIMIT ?", (overflow,)
         ).fetchall()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         count = 0
         for row in rows:
-            await self.delete_session_cascade(row[0])
+            self._sync_delete_session_cascade(row[0])
             count += 1
         return count
 
