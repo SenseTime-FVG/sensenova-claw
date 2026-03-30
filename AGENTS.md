@@ -396,6 +396,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 如果只用实时 WebSocket 事件写回归，`ask_user` 看起来是好的，但一旦用户离开当前会话再回来，依赖历史事件重建的内联卡片仍会消失；这类功能必须区分“实时显示”和“历史恢复”两条路径分别覆盖。
 
+### 2026-03-30 WhatsApp 428 断线补充
+
+成功经验：
+- 先查 `~/.sensenova-claw/logs/system.log*` 再猜原因最有效；这次日志明确显示链路是 `booting -> connecting -> ready -> 约 2 分钟后 428 Connection Terminated`，根本不是 sidecar 没启动。
+- 对 WhatsApp 登录故障，先验证 `auth_dir` 是否真的可写很关键；本次 `~/.sensenova-claw/data/plugins/whatsapp/auth` 可正常创建/更新 `creds.json` 和 `session-*.json`，因此可以快速排除目录权限问题。
+- Baileys 的 `DisconnectReason.connectionClosed = 428` 应走自动重连，不应直接留在 failed；给 sidecar runtime 补一条 `428 -> reconnect` 的 `node:test` 回归最直接。
+
+失败/风险经验：
+- 仅看到页面上的 `statusCode=428 / connection closed before ready` 容易误判为“旧登录态损坏必须先删目录”；实际上 428 也可能是已登录连接被服务端主动关闭，应该先尝试重连。
+- 当前 `creds.json` 出现 `me/account` 已存在但 `registered=false` 的半登录态迹象；如果补了自动重连后仍持续 428，再考虑人工清理 `auth_dir` 重扫，不要一上来就删缓存。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：
