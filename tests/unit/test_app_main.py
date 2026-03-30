@@ -12,6 +12,7 @@ import pytest
 import sensenova_claw.app.main as app_main
 from sensenova_claw.app.main import (
     _build_frontend_dev_cmd,
+    _build_frontend_prod_cmd,
     _spawn_managed_process,
     _terminate_managed_process,
     _wait_for_port_listen,
@@ -83,6 +84,43 @@ def test_build_frontend_dev_cmd_prefers_direct_next(monkeypatch: pytest.MonkeyPa
     cmd = _build_frontend_dev_cmd(web_dir, 3456)
 
     assert cmd == ["/usr/bin/node", str(next_cli / "next"), "dev", "-p", "3456"]
+
+
+def test_build_frontend_prod_cmd_requires_build_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    web_dir = tmp_path / "web"
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin"
+    next_cli.mkdir(parents=True)
+    (next_cli / "next").write_text("", encoding="utf-8")
+    (web_dir / ".next").mkdir(parents=True)
+
+    monkeypatch.setattr(app_main, "_find_node", lambda: "/usr/bin/node")
+    monkeypatch.setattr(app_main, "_find_npm", lambda: "/usr/bin/npm")
+
+    assert _build_frontend_prod_cmd(web_dir, 3000) == []
+
+
+def test_build_frontend_prod_cmd_uses_direct_next_when_build_id_exists(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    web_dir = tmp_path / "web"
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin"
+    next_cli.mkdir(parents=True)
+    (next_cli / "next").write_text("", encoding="utf-8")
+    build_id = web_dir / ".next" / "BUILD_ID"
+    build_id.parent.mkdir(parents=True)
+    build_id.write_text("build-123", encoding="utf-8")
+
+    monkeypatch.setattr(app_main, "_find_node", lambda: "/usr/bin/node")
+    monkeypatch.setattr(app_main, "_find_npm", lambda: "/usr/bin/npm")
+
+    assert _build_frontend_prod_cmd(web_dir, 3000) == [
+        "/usr/bin/node",
+        str(next_cli / "next"),
+        "start",
+        "-p",
+        "3000",
+    ]
 
 
 def test_wait_for_port_listen_fails_when_process_exits_early(monkeypatch: pytest.MonkeyPatch):
