@@ -311,6 +311,9 @@ class AgentSessionWorker(SessionWorker):
     async def _handle_user_input(self, event: EventEnvelope) -> None:
         content = str(event.payload.get("content", ""))
         turn_id = event.turn_id or f"turn_{uuid.uuid4().hex[:12]}"
+        # 每轮重置安全计数，避免跨 turn 累计导致提前触发限制
+        self._llm_call_count = 0
+        self._tool_call_count = 0
         self._current_turn_meta_source = _extract_meta_source(event.payload)
 
         await self.rt.repo.create_session(self.session_id, meta={"title": content[:20] or "新会话"})
