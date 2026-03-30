@@ -139,6 +139,7 @@ async def test_prune_sessions(repo):
     conn.execute("UPDATE sessions SET last_active = ? WHERE session_id = ?", (old_time, old_session))
     conn.commit()
     conn.close()
+    repo._local.conn = None  # 关闭后清除缓存，使下次 _conn() 重建连接
 
     # 创建一个新会话
     new_session = "sess_new"

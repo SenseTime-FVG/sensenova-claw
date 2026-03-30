@@ -184,13 +184,6 @@ class Repository:
         因此不需要也不应该设置 check_same_thread=False（保持默认 True 以保留安全检查）。
         """
         conn = getattr(self._local, "conn", None)
-        # 检测连接是否已关闭（如 init() 调用 close() 后需重建）
-        if conn is not None:
-            try:
-                conn.execute("SELECT 1")
-            except Exception:
-                conn = None
-                self._local.conn = None
         if conn is None:
             conn = sqlite3.connect(self.db_path)  # 默认 check_same_thread=True，保留驱动安全检查
             conn.row_factory = sqlite3.Row
@@ -207,6 +200,7 @@ class Repository:
         self._migrate_agent_messages_table(conn)
         self._migrate_cron_runs_table(conn)
         conn.close()
+        self._local.conn = None  # 清除线程本地缓存，使下次 _conn() 重建连接
 
     async def create_session(self, session_id: str, meta: dict[str, Any] | None = None) -> None:
         now = time.time()
@@ -219,12 +213,14 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def update_session_activity(self, session_id: str) -> None:
         conn = self._conn()
         conn.execute("UPDATE sessions SET last_active = ? WHERE session_id = ?", (time.time(), session_id))
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def update_session_title(self, session_id: str, title: str) -> None:
         conn = self._conn()
@@ -236,6 +232,7 @@ class Repository:
             conn.execute("UPDATE sessions SET meta = ? WHERE session_id = ?", (json.dumps(meta, ensure_ascii=False), session_id))
             conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def list_sessions(
         self,
@@ -263,6 +260,7 @@ class Repository:
             """,
         ).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         sessions = [dict(row) for row in rows]
         if not include_hidden:
             sessions = [row for row in sessions if not self._is_hidden_session(row.get("meta"))]
@@ -276,6 +274,7 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def complete_turn(self, turn_id: str, agent_response: str) -> None:
         conn = self._conn()
@@ -285,6 +284,7 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def update_turn_status(
         self,
@@ -300,6 +300,7 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def log_event(self, event: EventEnvelope) -> None:
         conn = self._conn()
@@ -319,11 +320,13 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def get_session_events(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp", (session_id,)).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [dict(row) for row in rows]
 
     def _parse_payload_json(self, raw: str | bytes | None) -> dict[str, Any]:
@@ -442,6 +445,7 @@ class Repository:
                 break
 
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return pending
 
     async def get_session_turns(self, session_id: str) -> list[dict[str, Any]]:
@@ -451,6 +455,7 @@ class Repository:
             (session_id,),
         ).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [dict(row) for row in rows]
 
     # ---------- Sessions 表迁移 ----------
@@ -538,6 +543,7 @@ class Repository:
         conn = self._conn()
         row = conn.execute("SELECT meta FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         if not row or not row[0]:
             return None
         return json.loads(row[0])
@@ -563,6 +569,7 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
         """获取会话的所有消息（按时间排序），返回 LLM 消息格式"""
@@ -572,6 +579,7 @@ class Repository:
             (session_id,),
         ).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         messages: list[dict[str, Any]] = []
         for row in rows:
             msg: dict[str, Any] = {"role": row[0]}
@@ -600,6 +608,7 @@ class Repository:
             conn.execute("UPDATE sessions SET model = ? WHERE session_id = ?", (model, session_id))
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def increment_message_count(self, session_id: str) -> None:
         """递增会话消息计数"""
@@ -610,6 +619,7 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def delete_session_cascade(self, session_id: str) -> None:
         """级联删除会话及关联的 turns, messages, events"""
@@ -624,6 +634,7 @@ class Repository:
         conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     # ---------- Agent Messages 表操作 ----------
 
@@ -663,6 +674,7 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def update_message_record(self, record: MessageRecord) -> None:
         """更新 Agent-to-Agent 消息记录。"""
@@ -676,6 +688,7 @@ class Repository:
             (record_id,),
         ).fetchone()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         if not row:
             return None
         return MessageRecord.from_mapping(dict(row))
@@ -696,6 +709,7 @@ class Repository:
             (child_session_id,),
         ).fetchone()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         if not row:
             return None
         return MessageRecord.from_mapping(dict(row))
@@ -716,6 +730,7 @@ class Repository:
             (parent_session_id,),
         ).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [MessageRecord.from_mapping(dict(row)) for row in rows]
 
     async def prune_sessions(self, max_age_days: int = 30) -> int:
@@ -726,6 +741,7 @@ class Repository:
             "SELECT session_id FROM sessions WHERE last_active < ?", (cutoff,)
         ).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         count = 0
         for row in rows:
             await self.delete_session_cascade(row[0])
@@ -738,12 +754,14 @@ class Repository:
         total = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
         if total <= max_count:
             conn.close()
+            self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
             return 0
         overflow = total - max_count
         rows = conn.execute(
             "SELECT session_id FROM sessions ORDER BY last_active ASC LIMIT ?", (overflow,)
         ).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         count = 0
         for row in rows:
             await self.delete_session_cascade(row[0])
@@ -775,12 +793,14 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def get_cron_job(self, job_id: str) -> dict[str, Any] | None:
         """按 ID 查询单条 cron job"""
         conn = self._conn()
         row = conn.execute("SELECT * FROM cron_jobs WHERE id = ?", (job_id,)).fetchone()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return dict(row) if row else None
 
     async def list_cron_jobs(self, enabled_only: bool = False) -> list[dict[str, Any]]:
@@ -791,6 +811,7 @@ class Repository:
         else:
             rows = conn.execute("SELECT * FROM cron_jobs ORDER BY created_at_ms").fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [dict(row) for row in rows]
 
     async def update_cron_job(self, job_id: str, updates: dict[str, Any]) -> None:
@@ -803,6 +824,7 @@ class Repository:
         conn.execute(f"UPDATE cron_jobs SET {', '.join(set_parts)} WHERE id = ?", values)
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def delete_cron_job(self, job_id: str, *, keep_runs: bool = False) -> None:
         """删除 cron job。keep_runs=True 时保留 runs 历史（用于自动删除场景）。"""
@@ -812,6 +834,7 @@ class Repository:
         conn.execute("DELETE FROM cron_jobs WHERE id = ?", (job_id,))
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def get_runnable_cron_jobs(self, now_ms: int) -> list[dict[str, Any]]:
         """返回到期且未在执行中的 enabled jobs"""
@@ -821,6 +844,7 @@ class Repository:
             (now_ms,),
         ).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [dict(row) for row in rows]
 
     async def update_cron_job_state(self, job_id: str, state_updates: dict[str, Any]) -> None:
@@ -833,6 +857,7 @@ class Repository:
         conn.execute("UPDATE cron_jobs SET running_at_ms = NULL WHERE running_at_ms IS NOT NULL")
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     # ---------- Cron Runs 表操作 ----------
 
@@ -855,6 +880,7 @@ class Repository:
         run_id = cursor.lastrowid
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return run_id
 
     async def update_cron_run(self, run_id: int, updates: dict[str, Any]) -> None:
@@ -867,6 +893,7 @@ class Repository:
         conn.execute(f"UPDATE cron_runs SET {', '.join(set_parts)} WHERE id = ?", values)
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def list_cron_runs(self, job_id: str, limit: int = 50) -> list[dict[str, Any]]:
         """按 started_at_ms 倒序列出 job 运行历史。"""
@@ -876,6 +903,7 @@ class Repository:
             (job_id, limit),
         ).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [dict(row) for row in rows]
 
     async def list_all_cron_runs(self, limit: int = 50, status: str | None = None) -> list[dict[str, Any]]:
@@ -894,6 +922,7 @@ class Repository:
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [dict(row) for row in rows]
 
     # ---------- Proactive Jobs 表操作 ----------
@@ -917,12 +946,14 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def get_proactive_job(self, job_id: str) -> dict[str, Any] | None:
         """按 ID 查询单条 proactive job"""
         conn = self._conn()
         row = conn.execute("SELECT * FROM proactive_jobs WHERE id = ?", (job_id,)).fetchone()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return dict(row) if row else None
 
     async def list_proactive_jobs(self, enabled_only: bool = False) -> list[dict[str, Any]]:
@@ -935,6 +966,7 @@ class Repository:
         else:
             rows = conn.execute("SELECT * FROM proactive_jobs ORDER BY created_at_ms").fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [dict(row) for row in rows]
 
     async def update_proactive_job(self, job_id: str, updates: dict[str, Any]) -> None:
@@ -947,6 +979,7 @@ class Repository:
         conn.execute(f"UPDATE proactive_jobs SET {', '.join(set_parts)} WHERE id = ?", values)
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def delete_proactive_job(self, job_id: str) -> None:
         """删除 proactive job 及其 runs"""
@@ -955,6 +988,7 @@ class Repository:
         conn.execute("DELETE FROM proactive_jobs WHERE id = ?", (job_id,))
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     # ---------- Proactive Runs 表操作 ----------
 
@@ -974,6 +1008,7 @@ class Repository:
         )
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def update_proactive_run(self, run_id: str, updates: dict[str, Any]) -> None:
         """更新 proactive_runs 记录"""
@@ -985,6 +1020,7 @@ class Repository:
         conn.execute(f"UPDATE proactive_runs SET {', '.join(set_parts)} WHERE id = ?", values)
         conn.commit()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def list_proactive_runs(self, job_id: str, limit: int = 50) -> list[dict[str, Any]]:
         """按 started_at_ms 倒序列出 job 运行历史"""
@@ -994,6 +1030,7 @@ class Repository:
             (job_id, limit),
         ).fetchall()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return [dict(row) for row in rows]
 
     async def get_proactive_run(self, run_id: str) -> dict[str, Any] | None:
@@ -1001,4 +1038,5 @@ class Repository:
         conn = self._conn()
         row = conn.execute("SELECT * FROM proactive_runs WHERE id = ?", (run_id,)).fetchone()
         conn.close()
+        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         return dict(row) if row else None
