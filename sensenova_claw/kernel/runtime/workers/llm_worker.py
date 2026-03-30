@@ -267,18 +267,23 @@ def _first_available_llm_target(
 
 
 def _fallback_targets(provider_name: str, model: str) -> list[tuple[str, str]]:
-    """构造受控回退链路：当前模型 -> default model -> 第一个可用 LLM -> mock。"""
-    targets: list[tuple[str, str]] = [(provider_name, model)]
-    default_target = config.resolve_model(config.get("llm.default_model", "mock"))
-    mock_target = config.resolve_model("mock")
+    """构造受控回退链路：当前模型 -> default model -> 第一个可用 LLM。
 
-    if default_target not in targets:
+    不会自动回退到 mock provider——当所有真实 provider 不可用时，
+    应明确报错而非返回无意义的 mock 响应。
+    """
+    targets: list[tuple[str, str]] = []
+    # mock 不作为回退目标——生产环境下静默返回 mock 文案会破坏正确性
+    if provider_name != "mock":
+        targets.append((provider_name, model))
+    default_target = config.resolve_model(config.get("llm.default_model", "mock"))
+
+    # 仅当 default_model 不是 mock 时才加入回退链
+    if default_target[0] != "mock" and default_target not in targets:
         targets.append(default_target)
     available_target = _first_available_llm_target(set(targets))
     if available_target and available_target not in targets:
         targets.append(available_target)
-    if mock_target not in targets:
-        targets.append(mock_target)
     return targets
 
 
@@ -864,7 +869,7 @@ class LLMSessionWorker(SessionWorker):
         input_data: dict[str, Any],
         stream: bool = False,
     ) -> _RequestBlockSuccess | _RequestBlockFailure:
-        """按 current -> default -> mock 顺序执行多个请求块。"""
+        """按 current -> default -> 其他可用模型 顺序执行多个请求块。"""
         last_failure: _RequestBlockFailure | None = None
 
         for index, (provider_name, model) in enumerate(fallback_targets):
@@ -908,6 +913,27 @@ class LLMSessionWorker(SessionWorker):
                     body=(
                         f"已回退到 {_format_target(fallback_provider, fallback_model)}。"
                     ),
+                )
+            else:
+                # 所有 provider 均已失败，发出最终通知
+                await _publish_session_notification(
+                    self.bus,
+                    session_id=event.session_id,
+                    turn_id=event.turn_id,
+                    trace_id=llm_call_id,
+                    title="LLM 调用失败",
+                    body=(
+                        f"{_format_target(result.provider_name, result.model)} 调用失败："
+                        f"{result.normalized_error['user_message']}"
+                    ),
+                )
+                await _publish_session_notification(
+                    self.bus,
+                    session_id=event.session_id,
+                    turn_id=event.turn_id,
+                    trace_id=llm_call_id,
+                    title="无可用 LLM",
+                    body="当前没有可用的 LLM，请前往「配置」页面添加至少一个可用的大模型，然后联系运维工程师完成其余配置。",
                 )
 
         if last_failure is None:
@@ -978,10 +1004,40 @@ class LLMSessionWorker(SessionWorker):
             "stream": stream,
         }
 
+        targets = _fallback_targets(provider_name, model)
+        if not targets:
+            # 所有解析出的 provider 都是 mock，没有可用的真实 LLM
+            logger.error(
+                "无可用的真实 LLM provider，当前解析结果为 mock | session=%s turn=%s",
+                event.session_id, event.turn_id,
+            )
+            await _publish_session_notification(
+                self.bus,
+                session_id=event.session_id,
+                turn_id=event.turn_id,
+                trace_id=llm_call_id,
+                title="无可用 LLM",
+                body="当前没有可用的 LLM，请前往「配置」页面添加至少一个可用的大模型。",
+            )
+            await _publish_llm_error(
+                self.bus,
+                session_id=event.session_id,
+                turn_id=event.turn_id,
+                trace_id=llm_call_id,
+                llm_call_id=llm_call_id,
+                exc=RuntimeError("no real LLM provider available"),
+                normalized_error={
+                    "error_type": "no_provider",
+                    "user_message": "当前没有可用的 LLM，请检查配置。",
+                },
+                error_message="no real LLM provider available",
+            )
+            return
+
         result = await self._run_fallback_chain(
             event=event,
             llm_call_id=llm_call_id,
-            fallback_targets=_fallback_targets(provider_name, model),
+            fallback_targets=targets,
             messages=messages,
             tools=tools,
             temperature=temperature,

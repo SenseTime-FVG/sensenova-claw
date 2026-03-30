@@ -80,7 +80,29 @@ class EmbeddingService:
         model_id = self._model_id
 
         def _call() -> list[list[float]]:
-            response = self._client.embeddings.create(input=texts, model=model_id)
-            return [item.embedding for item in response.data]
+            # 使用 httpx 直接调用，避免某些兼容 API 返回非标准格式
+            # 导致 OpenAI SDK 解析失败（如 data[*] 为 str 而非 object）
+            import httpx
+
+            base = self._client.base_url
+            url = f"{str(base).rstrip('/')}/embeddings"
+            headers = {
+                "Authorization": f"Bearer {self._client.api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {"input": texts, "model": model_id}
+            resp = httpx.post(url, json=payload, headers=headers, timeout=60)
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+            results: list[list[float]] = []
+            for item in data:
+                if isinstance(item, dict):
+                    results.append(item["embedding"])
+                elif isinstance(item, list):
+                    # 某些 API 直接返回向量列表
+                    results.append(item)
+                else:
+                    raise ValueError(f"无法解析 embedding 响应: {type(item)}")
+            return results
 
         return await asyncio.to_thread(_call)

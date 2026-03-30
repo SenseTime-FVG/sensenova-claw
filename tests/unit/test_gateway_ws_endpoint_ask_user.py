@@ -31,6 +31,9 @@ class _FakeGateway:
     def bind_session(self, session_id: str, channel_id: str) -> None:
         self.bind_calls.append((session_id, channel_id))
 
+    def unbind_session(self, session_id: str, channel_id: str | None = None) -> None:
+        pass
+
     async def create_session(
         self,
         agent_id: str = "default",
@@ -181,7 +184,7 @@ async def test_user_input_with_existing_session_auto_binds_websocket(ws_env):
 
     assert ws.accepted is True
     assert ("sess_old", "websocket") in ws_env.gateway.bind_calls
-    assert "sess_old" in ws_env.ws_channel._session_bindings
+    # WebSocket 断开后，session 绑定已被清理，这里只验证绑定操作发生过
     assert any(e.type == USER_INPUT and e.session_id == "sess_old" for e in ws_env.gateway.published)
 
 

@@ -179,12 +179,24 @@ class OpenAIProvider(LLMProvider):
             "tool_calls": assembled_tool_calls,
         }
 
+    # 默认启用 thinking 的 source_type（这些模型的 API 要求 assistant tool_call 消息携带 reasoning_content）
+    _THINKING_SOURCE_TYPES = {"kimi"}
+
     def _normalize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # 检测对话中是否启用了 thinking：
+        # 1. source_type 为已知 thinking 模型
+        # 2. 或对话历史中任意 assistant 消息含 reasoning_content/reasoning_details
+        has_thinking = self.source_type in self._THINKING_SOURCE_TYPES or any(
+            msg.get("role") == "assistant"
+            and (msg.get("reasoning_content") or msg.get("reasoning_details"))
+            for msg in messages
+        )
+
         normalized: list[dict[str, Any]] = []
         for message in messages:
             role = message.get("role")
             if role == "assistant" and isinstance(message.get("tool_calls"), list):
-                normalized.append(self._normalize_assistant_message(message))
+                normalized.append(self._normalize_assistant_message(message, has_thinking))
                 continue
             if role == "tool":
                 normalized.append(self._normalize_tool_message(message))
@@ -192,10 +204,29 @@ class OpenAIProvider(LLMProvider):
             normalized.append(dict(message))
         return normalized
 
-    def _normalize_assistant_message(self, message: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_assistant_message(
+        self, message: dict[str, Any], has_thinking: bool = False,
+    ) -> dict[str, Any]:
         next_message = dict(message)
         tool_calls = next_message.get("tool_calls") or []
         next_message["tool_calls"] = [self._normalize_tool_call(tc) for tc in tool_calls]
+
+        # 从 reasoning_details 还原 reasoning_content（Kimi/DeepSeek 等需要）
+        reasoning_details = next_message.pop("reasoning_details", None)
+        if reasoning_details and "reasoning_content" not in next_message:
+            for detail in reasoning_details:
+                if isinstance(detail, dict) and detail.get("type") == "thinking":
+                    next_message["reasoning_content"] = detail.get("thinking", "")
+                    break
+
+        # 当对话启用了 thinking 时，确保所有带 tool_calls 的 assistant 消息都有 reasoning_content
+        # （Kimi 等模型要求：thinking is enabled 时 assistant tool call 消息必须携带此字段）
+        if has_thinking and "reasoning_content" not in next_message:
+            next_message["reasoning_content"] = ""
+
+        # 清理非标准字段，避免被 OpenAI 兼容 API 拒绝
+        next_message.pop("provider_specific_fields", None)
+
         return next_message
 
     def _normalize_tool_call(self, tool_call: dict[str, Any]) -> dict[str, Any]:
