@@ -289,7 +289,7 @@ class TestOnMessageAsync:
         assert len(gateway._session_bindings) == 1
         session_id = list(gateway._session_bindings.keys())[0]
         assert session_id.startswith("feishu_")
-        assert gateway._session_bindings[session_id] == "feishu"
+        assert gateway._session_bindings[session_id] == {"feishu"}
 
         # 应发布 user.input 事件
         assert len(collected) == 1

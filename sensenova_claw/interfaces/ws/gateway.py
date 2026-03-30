@@ -30,8 +30,11 @@ class Gateway:
         self.agent_registry = agent_registry
         self.bus_router = bus_router
         self._channels: dict[str, Channel] = {}
-        self._session_bindings: dict[str, str] = {}  # session_id -> channel_id
+        self._session_bindings: dict[str, set[str]] = {}  # session_id -> set of channel_ids
         self._task: asyncio.Task | None = None
+        # BusRouter GC 销毁 session 时联动清理 Gateway 绑定和 Channel 内部映射
+        if bus_router:
+            bus_router.on_destroy(self.on_session_destroyed)
 
     # ── Channel 管理 ──────────────────────────────────
 
@@ -43,12 +46,33 @@ class Gateway:
         logger.info(f"Registered channel: {channel_id}")
 
     def bind_session(self, session_id: str, channel_id: str) -> None:
-        """绑定 session 到 Channel"""
-        self._session_bindings[session_id] = channel_id
+        """绑定 session 到 Channel（支持多 Channel 同时绑定）"""
+        self._session_bindings.setdefault(session_id, set()).add(channel_id)
 
-    def unbind_session(self, session_id: str) -> None:
-        """解绑 session"""
-        self._session_bindings.pop(session_id, None)
+    def unbind_session(self, session_id: str, channel_id: str | None = None) -> None:
+        """解绑 session。指定 channel_id 时只移除该绑定，否则移除全部。"""
+        if channel_id is None:
+            self._session_bindings.pop(session_id, None)
+        else:
+            bindings = self._session_bindings.get(session_id)
+            if bindings:
+                bindings.discard(channel_id)
+                if not bindings:
+                    del self._session_bindings[session_id]
+
+    async def on_session_destroyed(self, session_id: str) -> None:
+        """BusRouter GC 销毁 session 时的回调：清理绑定并通知相关 Channel。"""
+        channel_ids = self._session_bindings.pop(session_id, None)
+        if not channel_ids:
+            return
+        for channel_id in channel_ids:
+            channel = self._channels.get(channel_id)
+            if channel:
+                try:
+                    channel.on_session_expired(session_id)
+                except Exception:
+                    logger.exception("Channel %s on_session_expired failed for %s", channel_id, session_id)
+        logger.debug("Gateway cleaned up session %s (channels: %s)", session_id, channel_ids)
 
     # ── 会话管理 ──────────────────────────────────────
 
@@ -246,10 +270,12 @@ class Gateway:
                 break
 
             chain.append(parent_session_id)
-            inherited_channel = self._session_bindings.get(parent_session_id)
-            if inherited_channel:
+            parent_bindings = self._session_bindings.get(parent_session_id)
+            if parent_bindings:
+                inherited_channel = next(iter(parent_bindings))
                 for sid in chain[:-1]:
-                    if self._session_bindings.get(sid) != inherited_channel:
+                    existing = self._session_bindings.get(sid)
+                    if not existing or inherited_channel not in existing:
                         self.bind_session(sid, inherited_channel)
                         cache_hit = True
                 break
@@ -258,14 +284,14 @@ class Gateway:
         return inherited_channel, immediate_parent, chain, cache_hit
 
     async def _dispatch_event(self, event: EventEnvelope) -> None:
-        """将事件分发到对应的 Channel（支持事件过滤）"""
+        """将事件分发到对应的 Channel（支持事件过滤，支持多 Channel）"""
         if not event.session_id:
             return
 
-        channel_id = self._session_bindings.get(event.session_id)
-        if not channel_id:
+        channel_ids = self._session_bindings.get(event.session_id)
+        if not channel_ids:
             (
-                channel_id,
+                resolved_channel_id,
                 immediate_parent,
                 parent_chain,
                 cache_hit,
@@ -275,24 +301,26 @@ class Gateway:
                 event.session_id,
                 immediate_parent,
                 " -> ".join(parent_chain),
-                channel_id or "none",
+                resolved_channel_id or "none",
                 cache_hit,
             )
-            if not channel_id:
+            if not resolved_channel_id:
                 return
+            channel_ids = {resolved_channel_id}
 
-        channel = self._channels.get(channel_id)
-        if not channel:
-            return
+        for channel_id in list(channel_ids):
+            channel = self._channels.get(channel_id)
+            if not channel:
+                continue
 
-        event_types = channel.event_filter()
-        if event_types is not None and event.type not in event_types:
-            return
+            event_types = channel.event_filter()
+            if event_types is not None and event.type not in event_types:
+                continue
 
-        try:
-            await channel.send_event(event)
-        except Exception as exc:
-            logger.error(f"Failed to send event to channel {channel_id}: {exc}")
+            try:
+                await channel.send_event(event)
+            except Exception as exc:
+                logger.error(f"Failed to send event to channel {channel_id}: {exc}")
 
     # ── 主动消息 ──────────────────────────────────────
 

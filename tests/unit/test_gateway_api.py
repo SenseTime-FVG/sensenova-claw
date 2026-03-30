@@ -71,7 +71,7 @@ def test_gateway_stats_with_sessions(client, app):
 
     # 向 gateway 绑定 session（模拟 channel 注册）
     gw = app.state.services.gateway
-    gw._session_bindings["sess_a"] = "websocket_1"
+    gw._session_bindings["sess_a"] = {"websocket_1"}
 
     resp = client.get("/api/gateway/stats")
     assert resp.status_code == 200

@@ -62,10 +62,18 @@ class WebSocketChannel(Channel):
         self._connections.add(websocket)
 
     def disconnect(self, websocket: WebSocket) -> None:
-        """断开 WebSocket 连接"""
+        """断开 WebSocket 连接，清理 session 绑定"""
         self._connections.discard(websocket)
-        for conns in self._session_bindings.values():
+        empty_sids: list[str] = []
+        for sid, conns in self._session_bindings.items():
             conns.discard(websocket)
+            if not conns:
+                empty_sids.append(sid)
+        for sid in empty_sids:
+            del self._session_bindings[sid]
+            # 该 session 不再有任何 WebSocket 连接，从 Gateway 解绑本 channel
+            if self.gateway:
+                self.gateway.unbind_session(sid, self._channel_id)
 
     def bind_session(self, session_id: str, websocket: WebSocket) -> None:
         """绑定 session 到 WebSocket"""

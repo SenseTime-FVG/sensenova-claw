@@ -63,6 +63,16 @@ class WecomChannel(Channel):
             types.add(TOOL_CALL_STARTED)
         return types
 
+    def on_session_expired(self, session_id: str) -> None:
+        """BusRouter GC 清理 session 后，移除内部映射，下次消息自动新建。"""
+        self._session_meta.pop(session_id, None)
+        self._pending_questions.pop(session_id, None)
+        keys_to_remove = [
+            key for key, sid in self._chat_sessions.items() if sid == session_id
+        ]
+        for key in keys_to_remove:
+            del self._chat_sessions[key]
+
     async def start(self) -> None:
         await self._client.start()
         logger.info("WecomChannel started")
