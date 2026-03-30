@@ -24,6 +24,7 @@ description: 将 deck_dir 中的 HTML 页面导出为可编辑的 PPTX 文件，
 
 - `deck_dir`：必须已存在，且 `pages/` 目录下至少有一个 `page_*.html` 文件。
 - `review.md` 或 `review.json`：必须存在；如果 review 标记为阻塞，或根本没有 review 工件，不得继续导出。
+- 必须先确认 `review.md` 或 `review.json` 存在。
 - `style-spec.json`（可选）：全局配色和字体，用于增强输出质量。
 - `storyboard.json`（可选）：PPT 标题，用于增强输出质量。
 
@@ -42,6 +43,7 @@ description: 将 deck_dir 中的 HTML 页面导出为可编辑的 PPTX 文件，
 1. `deck_dir` 已存在，且 `pages/` 目录下至少有一个 `page_*.html` 文件。
 2. 依赖已安装（首次使用需执行 `cd .sensenova-claw/skills/ppt-export-pptx && npm install`）。
 3. `review.md` 或 `review.json` 存在且未标记为阻塞。
+   - 如果 review 标记为阻塞，不得继续导出。
 4. 如果 `style-spec.json`/`storyboard.json` 声明了背景或前景 motif recipe，页面 HTML 中必须存在对应的 `data-layer="bg-motif"`、`data-layer="fg-motif"` 与 `data-motif-key` 标记。
 5. 如果 `storyboard.json`/`asset-plan.json` 显示某页仍有必需 `real-photo` 槽位未兑现，或 HTML 中仍保留明显图片 placeholder，不得继续导出。
 

@@ -5,13 +5,13 @@ description: 当 `ppt-task-pack` 判定存在内容缺口、`task-pack.json.rese
 
 # PPT 研究包
 
-为后续 `ppt-storyboard` 提供经过结构化整理的"可上页内容池"，而非简单摘要。
+为后续 `ppt-info-pack` 提供经过结构化整理的"可上页内容池"，而非简单摘要。
 
 ## 目标
 
 - 必须先读取 `task-pack.json`，按其中 `research_required` 字段决定是否执行研究。
-- 产出 `research-pack.md` 或 `research-pack.json`，作为 `ppt-storyboard` 的内容依据。
-- research 不是摘要——它是带有稳定 ID 的结构化"可上页内容池"，供 `ppt-storyboard` 的 `source_claim_ids` / `source_evidence_ids` 回指。
+- 产出 `research-pack.md` 或 `research-pack.json`，作为 `ppt-info-pack` 的内容依据。
+- research 不是摘要——它是带有稳定 ID 的结构化"可上页内容池"，先供 `ppt-info-pack` 汇总，再供 `ppt-storyboard` 的 `source_claim_ids` / `source_evidence_ids` 回指。
 
 ## 触发条件
 
@@ -53,7 +53,7 @@ description: 当 `ppt-task-pack` 判定存在内容缺口、`task-pack.json.rese
 ### 稳定 ID 要求
 
 - `Claim` 必须拥有 `claim_id`，`EvidencePoint` 必须拥有 `evidence_id`，`PageworthyChunk` 必须拥有 `chunk_id`。
-- 这些稳定 ID 供 `ppt-storyboard` 的 `source_claim_ids` / `source_evidence_ids` 回指，不允许只靠自然语言主题词做弱关联。
+- 这些稳定 ID 先供 `ppt-info-pack` 汇总，再供 `ppt-storyboard` 的 `source_claim_ids` / `source_evidence_ids` 回指，不允许只靠自然语言主题词做弱关联。
 
 ## 数据结构
 
@@ -88,18 +88,23 @@ class ResearchPack:
 
 ## 用户回显
 
-- **开始**：说明正在补充研究或提炼上传资料，并指出会产出 `research-pack`。
-- **完成**：总结核心结论、仍然缺失的信息和下一步要落到哪个工件。
+- **开始反馈**：说明正在补充研究或提炼上传资料，并指出会产出 `research-pack`。
+- **完成反馈**：总结核心结论、仍然缺失的信息和 `下一步` 要落到哪个工件。
 - 如果外部检索结果不稳定、证据不足或存在冲突，要在反馈里显式提示不确定性。
 
 ## 关键原则
 
 - 必须先读取 `task-pack.json`。
 - research 不是默认第一步；是否运行取决于 `task-pack.json.research_required`。
+- 是否运行 research 取决于 `task-pack.json.research_required`。
+- 先进入 `ppt-task-pack`。
+- 上传报告、事实数据案例和长文档只是 `task-pack` 计算 `research_required` 的信号。
+- 由 `task-pack.json.research_required` 决定是否进入 `ppt-research-pack`。
 - 上传报告、事实数据案例、长文档等都只是 `ppt-task-pack` 的研究信号。
+- 这些稳定 ID 供 storyboard 的 `source_claim_ids` / `source_evidence_ids` 回指。
 - 研究包是内容依据，不是页面大纲。
 - research 不是摘要，而是"可上页内容池"。
-- `pageworthy_chunks` 是 `ppt-storyboard` 的上游输入。
+- `pageworthy_chunks` 是 `ppt-info-pack` 的上游输入。
 - `risks_or_uncertainties` 统一承接信息缺口与证据不确定性，不再额外拆成另一套"已知信息缺口"字段。
 
 ## 禁止事项
