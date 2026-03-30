@@ -133,14 +133,14 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       </header>
 
       {/* ── 主内容区 ── */}
-      {hideRightPanel ? (
-        <div className="flex-1 overflow-auto bg-muted/20 p-2.5">
-          <div className="h-full rounded-[var(--panel-radius)] bg-background border border-border/40 overflow-auto shadow-sm">
-            {children}
+      <DndProvider backend={HTML5Backend}>
+        {hideRightPanel ? (
+          <div className="flex-1 overflow-auto bg-muted/20 p-2.5">
+            <div className="h-full rounded-[var(--panel-radius)] bg-background border border-border/40 overflow-auto shadow-sm">
+              {children}
+            </div>
           </div>
-        </div>
-      ) : (
-        <DndProvider backend={HTML5Backend}>
+        ) : (
           <ResizablePanelGroup
             orientation="horizontal"
             className="flex-1 p-2.5 gap-2.5 bg-muted/20"
@@ -166,8 +166,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               <GlobalFilePanel />
             </ResizablePanel>
           </ResizablePanelGroup>
-        </DndProvider>
-      )}
+        )}
+      </DndProvider>
     </div>
   );
 }

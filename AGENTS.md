@@ -396,6 +396,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 如果只用实时 WebSocket 事件写回归，`ask_user` 看起来是好的，但一旦用户离开当前会话再回来，依赖历史事件重建的内联卡片仍会消失；这类功能必须区分“实时显示”和“历史恢复”两条路径分别覆盖。
 
+### 2026-03-30 WhatsApp 428 断线补充
+
+成功经验：
+- 先查 `~/.sensenova-claw/logs/system.log*` 再猜原因最有效；这次日志明确显示链路是 `booting -> connecting -> ready -> 约 2 分钟后 428 Connection Terminated`，根本不是 sidecar 没启动。
+- 对 WhatsApp 登录故障，先验证 `auth_dir` 是否真的可写很关键；本次 `~/.sensenova-claw/data/plugins/whatsapp/auth` 可正常创建/更新 `creds.json` 和 `session-*.json`，因此可以快速排除目录权限问题。
+- Baileys 的 `DisconnectReason.connectionClosed = 428` 应走自动重连，不应直接留在 failed；给 sidecar runtime 补一条 `428 -> reconnect` 的 `node:test` 回归最直接。
+
+失败/风险经验：
+- 仅看到页面上的 `statusCode=428 / connection closed before ready` 容易误判为“旧登录态损坏必须先删目录”；实际上 428 也可能是已登录连接被服务端主动关闭，应该先尝试重连。
+- 当前 `creds.json` 出现 `me/account` 已存在但 `registered=false` 的半登录态迹象；如果补了自动重连后仍持续 428，再考虑人工清理 `auth_dir` 重扫，不要一上来就删缓存。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：
@@ -1592,3 +1603,46 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前环境下 `tests/unit/test_app_main.py` 里的 `test_terminate_managed_process_kills_child_process_tree` 仍会偶发失败，和本次端口探测修复无关；验证启动器改动时，应优先补并运行更聚焦的用例，避免被既有进程组问题干扰结论。
+- 当前仓库默认 `uv run python -m pytest ...` 依赖先执行 `uv sync --extra dev`；如果环境里还没同步 `pytest`，测试失败会先表现为“环境缺依赖”而不是业务回归。
+
+### 2026-03-30 ask_user 跨会话主输入修复补充
+
+成功经验：
+- “主输入首条消息可直接回答 ask_user” 的判定必须同时满足两点：`activeInteraction.kind == "question"` 且 `activeInteraction.sourceSessionId == 当前会话 sessionId`；只判断前者会导致切换会话后旧问题继续劫持新会话输入。
+- 这类问题最有效的回归不是只测正向“当前会话可回答”，而是必须补反向用例：`会话1收到 ask_user -> 切到会话2 -> 在会话2发送首条消息`，断言 `user_question_answered` 不出现且 `user_input` 发往会话2。
+- `/ppt` 和工作台首页复用了 `ChatSessionContext.sendMessage()`，在共享层收紧“当前会话匹配”后，两处页面可以一起修复；但 `/chat` 页还有本地 `handleSend` 的短路分支，也必须同步加同样的 session 校验，否则会绕过共享层。
+
+失败/风险经验：
+- Playwright 在当前环境经常被残留的 `next dev -p 3000` 进程干扰；若直接报 `localhost:3000 is already used`，应先清理监听 3000 端口的进程再重跑，不要把它误判成功能回归。
+
+### 2026-03-30 ask_user 跨会话完成事件补充
+
+成功经验：
+- 跨会话 ask_user 不能在共享上下文里被任意会话的 `turn_completed` / `turn_cancelled` / `error` 全量 `clearInteractions()` 清掉；正确做法是按 `incomingSessionId` 只移除对应 `sourceSessionId` 的交互。
+- 这类问题必须补“会话1收到 ask_user -> 切到会话2发普通消息并完成 -> 切回会话1继续回答”的回归；只测“切走时不误吃消息”不够，必须同时锁住“切回来仍能继续答”。
+- `clearInteractionsForSession(sessionId)` 这类按会话定向清理 helper 比在各事件分支里手写条件更稳，也更不容易后续在 `error`、`turn_cancelled` 等平行分支里漏修。
+
+失败/风险经验：
+- 如果只修主输入消费条件而不修完成事件清理逻辑，表面上“在会话2发消息不会被旧 ask_user 吃掉”会通过，但用户一旦让会话2真正跑完一轮，旧会话 ask_user 还是会被后台 silently 清掉，属于半修状态。
+
+### 2026-03-30 DingTalk 原生插件接入补充
+
+成功经验：
+- 钉钉原生接入在当前仓库里最稳的落点仍然是 `plugin/config/models/runtime/channel` 五层结构，直接复用 `telegram/discord` 的测试与会话路由模式，能很快把新 channel 拉到可维护状态。
+- 官方 `dingtalk-stream` 包的 PyPI 名称是 `dingtalk-stream`，实际导入名是 `dingtalk_stream`；插件缺依赖提示和 `pyproject.toml` 依赖声明必须分别对应这两个名字。
+- 官方 Stream SDK 回调分发调用的是 handler 的 `raw_process()`，不是直接调 `process()`；如果只实现 `process()`，真实连上后会在首条消息回调阶段失效。
+- 钉钉主动发送文本消息可先统一收敛为 `user:<staff_id>` 与 `conversation:<open_conversation_id>` 两种 target 语义，方便直接复用现有 `MessageTool` 抽象。
+
+失败/风险经验：
+- 官方 SDK 自带的便捷方法更偏“回复当前会话”，对任意目标主动发文本没有现成高层封装；这类能力需要在 runtime 层自行补 HTTP API 封装，不能假设 SDK 已经全包。
+- 当前实现只稳定覆盖文本消息；图片、富文本、AI Card 与更复杂的钉钉机器人特性仍需后续按真实接口继续补齐。
+
+### 2026-03-30 dev 合并到 wdh/dev 收口补充
+
+成功经验：
+- `dev` 的前端重构分支与 `wdh/dev` 的 ask_user 修复发生冲突时，优先保留 `contexts/ws/*` 新架构，再把旧 `ChatSessionContext` 中的行为补丁迁回 `InteractionContext` / `ChatInput`，比把旧大文件硬合回去更稳。
+- `/sessions/*` 这类 `DashboardLayout` 的 `hideRightPanel` 分支如果也会渲染 `ChatInput` / `useDrop()`，`DndProvider` 必须放到两条布局分支的共同外层；否则只在 session 页才会炸 `Expected drag drop context`，很容易被主聊天页验证漏掉。
+- `tests/e2e/test_ask_user_core_flow.py` 这类自定义 provider 注入测试要跟上 `LLMProvider.call(..., extra_body=...)` 新签名，否则会触发错误回退链，表面看像“功能逻辑变了”，实际只是测试替身失效。
+
+失败/风险经验：
+- 当前仍有一个前端残余问题：`sensenova_claw/app/web/e2e/ask-user.spec.ts` 中“session 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input”持续失败，表现为答完问题后 `chat-input` 仍被禁用；说明 `/sessions/[id]` 页面在 `ask_user` 收口后仍有额外状态没释放，不能宣称该路径已完全回归。

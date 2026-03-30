@@ -96,6 +96,30 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
     setInteractionSubmitting(false);
   }, []);
 
+  const clearInteractionsForSession = useCallback((sourceSessionId: string) => {
+    if (!sourceSessionId) return;
+
+    const active = activeInteractionRef.current;
+    const queue = interactionQueueRef.current;
+    const filteredQueue = queue.filter((item) => item.sourceSessionId !== sourceSessionId);
+
+    if (active?.sourceSessionId === sourceSessionId) {
+      interactionQueueRef.current = filteredQueue;
+      const next = filteredQueue[0] ?? null;
+      if (next) {
+        interactionQueueRef.current = filteredQueue.slice(1);
+      }
+      activeInteractionRef.current = next;
+      setActiveInteraction(next);
+      setInteractionSubmitting(false);
+      return;
+    }
+
+    if (filteredQueue.length !== queue.length) {
+      interactionQueueRef.current = filteredQueue;
+    }
+  }, []);
+
   // ── 监听当前 session 事件 ──
 
   useEffect(() => {
@@ -207,6 +231,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
               pending: false,
               resolved: true,
             }));
+            setInteractionSubmitting(false);
             resolveInteraction('question', questionId);
             resolveCard(`question_${questionId}`, 'answered');
           }
@@ -214,12 +239,27 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
         }
         case 'turn_completed':
         case 'turn_cancelled':
-        case 'error':
-          clearInteractions();
+        case 'error': {
+          const sourceSessionId = event.session_id || '';
+          if (sourceSessionId) {
+            clearInteractionsForSession(sourceSessionId);
+          } else {
+            clearInteractions();
+          }
           break;
+        }
       }
     });
-  }, [subscribeCurrentSession, enqueueInteraction, resolveInteraction, clearInteractions, pushCard, resolveCard, updateMessages]);
+  }, [
+    subscribeCurrentSession,
+    enqueueInteraction,
+    resolveInteraction,
+    clearInteractions,
+    clearInteractionsForSession,
+    pushCard,
+    resolveCard,
+    updateMessages,
+  ]);
 
   // ── 对外接口 ──
 

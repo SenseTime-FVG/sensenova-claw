@@ -408,8 +408,8 @@ export class WhatsAppRuntime {
           return;
         }
 
-        if (statusCode === 408 && !this._isReconnecting) {
-          void this._reconnectAfterTimeout();
+        if ((statusCode === 408 || statusCode === 428) && !this._isReconnecting) {
+          void this._reconnectAfterDisconnect(statusCode);
           return;
         }
 
@@ -659,16 +659,17 @@ export class WhatsAppRuntime {
     }
   }
 
-  async _reconnectAfterTimeout() {
+  async _reconnectAfterDisconnect(statusCode) {
     if (!this._authDir) {
       return;
     }
     if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+      const reason = statusCode === 428 ? "connection closed" : "connection timed out";
       this._status = {
         ...this._status,
         state: "reconnect_exhausted",
         connected: false,
-        lastError: `WhatsApp reconnect exhausted after ${this._reconnectAttempts} attempts.`,
+        lastError: `WhatsApp reconnect exhausted after ${this._reconnectAttempts} attempts (${reason}, statusCode=${statusCode}).`,
         lastEvent: "reconnect_exhausted",
         lastEventAt: Date.now() / 1000,
         debugMessage: "connection closed before ready",
@@ -688,19 +689,20 @@ export class WhatsAppRuntime {
 
     this._isReconnecting = true;
     this._reconnectAttempts += 1;
+    const reason = statusCode === 428 ? "connection closed" : "connection timed out";
     this._emit({
       type: "status",
       payload: {
         ...this._status,
         state: "reconnecting",
         connected: false,
-        debugMessage: `connection timed out, reconnecting (${this._reconnectAttempts}/${this._maxReconnectAttempts})`,
+        debugMessage: `${reason}, reconnecting (${this._reconnectAttempts}/${this._maxReconnectAttempts})`,
       },
     });
     this._emit({
       type: "error",
       payload: {
-        message: `WhatsApp connection timed out (statusCode=408), reconnecting (${this._reconnectAttempts}/${this._maxReconnectAttempts}).`,
+        message: `WhatsApp ${reason} (statusCode=${statusCode}), reconnecting (${this._reconnectAttempts}/${this._maxReconnectAttempts}).`,
       },
     });
 
@@ -718,6 +720,10 @@ export class WhatsAppRuntime {
     } finally {
       this._isReconnecting = false;
     }
+  }
+
+  async _reconnectAfterTimeout() {
+    await this._reconnectAfterDisconnect(408);
   }
 
   async _refreshQrAfterTimeout() {
