@@ -208,6 +208,9 @@ class Repository:
         self._migrate_cron_runs_table(conn)
 
     async def create_session(self, session_id: str, meta: dict[str, Any] | None = None) -> None:
+        await asyncio.to_thread(self._sync_create_session, session_id, meta)
+
+    def _sync_create_session(self, session_id: str, meta: dict[str, Any] | None) -> None:
         now = time.time()
         meta = meta or {}
         agent_id = meta.get("agent_id", "default")
@@ -217,8 +220,6 @@ class Repository:
             (session_id, now, now, json.dumps(meta, ensure_ascii=False), agent_id),
         )
         conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def update_session_activity(self, session_id: str) -> None:
         await asyncio.to_thread(self._sync_update_session_activity, session_id)
@@ -229,16 +230,16 @@ class Repository:
         conn.commit()
 
     async def update_session_title(self, session_id: str, title: str) -> None:
+        await asyncio.to_thread(self._sync_update_session_title, session_id, title)
+
+    def _sync_update_session_title(self, session_id: str, title: str) -> None:
         conn = self._conn()
-        # 获取当前 meta
         row = conn.execute("SELECT meta FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
         if row:
             meta = json.loads(row[0]) if row[0] else {}
             meta["title"] = title
             conn.execute("UPDATE sessions SET meta = ? WHERE session_id = ?", (json.dumps(meta, ensure_ascii=False), session_id))
             conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def list_sessions(
         self,
@@ -246,6 +247,9 @@ class Repository:
         *,
         include_hidden: bool = False,
     ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._sync_list_sessions, limit, include_hidden)
+
+    def _sync_list_sessions(self, limit: int, include_hidden: bool) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             """
@@ -265,8 +269,6 @@ class Repository:
             ORDER BY s.last_active DESC
             """,
         ).fetchall()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         sessions = [dict(row) for row in rows]
         if not include_hidden:
             sessions = [row for row in sessions if not self._is_hidden_session(row.get("meta"))]
@@ -547,10 +549,11 @@ class Repository:
 
     async def get_session_meta(self, session_id: str) -> dict[str, Any] | None:
         """获取会话的 meta 信息（含 agent_id 等）"""
+        return await asyncio.to_thread(self._sync_get_session_meta, session_id)
+
+    def _sync_get_session_meta(self, session_id: str) -> dict[str, Any] | None:
         conn = self._conn()
         row = conn.execute("SELECT meta FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
         if not row or not row[0]:
             return None
         return json.loads(row[0])
@@ -621,14 +624,15 @@ class Repository:
         model: str | None = None,
     ) -> None:
         """更新会话的 channel 和 model 信息"""
+        await asyncio.to_thread(self._sync_update_session_info, session_id, channel, model)
+
+    def _sync_update_session_info(self, session_id: str, channel: str | None, model: str | None) -> None:
         conn = self._conn()
         if channel is not None:
             conn.execute("UPDATE sessions SET channel = ? WHERE session_id = ?", (channel, session_id))
         if model is not None:
             conn.execute("UPDATE sessions SET model = ? WHERE session_id = ?", (model, session_id))
         conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def increment_message_count(self, session_id: str) -> None:
         """递增会话消息计数"""
