@@ -210,6 +210,26 @@ def test_list_channels_marks_feishu_failed_when_channel_has_error(client, app):
     assert data[0]["status"] == "failed"
 
 
+def test_list_channels_marks_whatsapp_failed_when_runtime_state_has_error(client, app):
+    gw = app.state.services.gateway
+
+    class _Channel:
+        _runtime_state = WhatsAppRuntimeState(
+            state="error",
+            connected=False,
+            last_error="bridge start failed",
+        )
+
+    gw._channels["whatsapp"] = _Channel()
+
+    resp = client.get("/api/gateway/channels")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["id"] == "whatsapp"
+    assert data[0]["status"] == "failed"
+    assert data[0]["error"] == "bridge start failed"
+
+
 def test_list_channels_includes_enabled_plugin_when_dependency_missing(client, app):
     app.state.config.data["plugins"]["discord"] = {"enabled": True}
     app.state.plugin_registry = type(

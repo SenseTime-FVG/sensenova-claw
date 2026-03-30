@@ -47,6 +47,7 @@ class WhatsAppChannel(Channel):
         self._config = config
         self._plugin_api = plugin_api
         self._bridge = bridge or self._build_default_bridge(config)
+        self._sensenova_claw_status = {"status": "initialized", "error": ""}
         self._chat_sessions: dict[str, str] = {}
         self._session_meta: dict[str, WhatsAppSessionMeta] = {}
         self._pending_questions: dict[str, WhatsAppPendingQuestion] = {}
@@ -77,6 +78,7 @@ class WhatsAppChannel(Channel):
         self._bridge.set_message_handler(self.handle_incoming_message)
         if hasattr(self._bridge, "set_event_handler"):
             self._bridge.set_event_handler(self._handle_bridge_event)
+        self._sensenova_claw_status = {"status": "connecting", "error": ""}
         try:
             await self._bridge.start()
         except Exception as exc:
@@ -86,12 +88,15 @@ class WhatsAppChannel(Channel):
             self._runtime_state.last_event = "start_failed"
             self._runtime_state.last_event_at = time.time()
             self._runtime_state.debug_message = self._runtime_state.debug_message or "bridge start failed"
+            self._sensenova_claw_status = {"status": "failed", "error": self._runtime_state.last_error}
             logger.exception("WhatsAppChannel start failed")
             return
+        self._sensenova_claw_status = {"status": "connected", "error": ""}
         logger.info("WhatsAppChannel started")
 
     async def stop(self) -> None:
         await self._bridge.stop()
+        self._sensenova_claw_status = {"status": "stopped", "error": ""}
         logger.info("WhatsAppChannel stopped")
 
     async def handle_incoming_message(self, message: WhatsAppInboundMessage) -> None:
@@ -226,6 +231,7 @@ class WhatsAppChannel(Channel):
                 self._runtime_state.connected,
                 self._runtime_state.phone,
             )
+            self._sync_channel_status_from_runtime_state()
         elif event_type == "qr":
             self._runtime_state.last_qr = payload.get("text")
             self._runtime_state.last_qr_data_url = payload.get("data_url")
@@ -240,11 +246,25 @@ class WhatsAppChannel(Channel):
             self._runtime_state.last_event_at = time.time()
             self._runtime_state.debug_message = payload.get("debug_message", self._runtime_state.debug_message)
             logger.error("WhatsApp runtime error: %s", self._runtime_state.last_error)
+            self._sync_channel_status_from_runtime_state()
         elif event_type == "debug":
             self._runtime_state.last_event = "debug"
             self._runtime_state.last_event_at = time.time()
             self._runtime_state.debug_message = payload.get("message")
             logger.debug("WhatsApp runtime debug: %s", self._runtime_state.debug_message)
+
+    def _sync_channel_status_from_runtime_state(self) -> None:
+        """将 bridge runtime 状态映射为 Gateway 统一状态。"""
+        state = str(self._runtime_state.state or "").strip().lower()
+        error = str(self._runtime_state.last_error or "").strip()
+        if self._runtime_state.connected or state in {"ready", "connected"}:
+            self._sensenova_claw_status = {"status": "connected", "error": ""}
+            return
+        if state in {"error", "failed", "closed"} or error:
+            self._sensenova_claw_status = {"status": "failed", "error": error}
+            return
+        if state in {"connecting", "refreshing_qr", "booting"}:
+            self._sensenova_claw_status = {"status": "connecting", "error": ""}
 
     def _build_session_key(self, chat_type: str, chat_jid: str, sender_jid: str) -> str:
         if chat_type == "p2p":
