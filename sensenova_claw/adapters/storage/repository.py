@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import threading
@@ -196,14 +197,15 @@ class Repository:
         return conn
 
     async def init(self) -> None:
+        await asyncio.to_thread(self._sync_init)
+
+    def _sync_init(self) -> None:
         conn = self._conn()
         conn.executescript(SCHEMA_SQL)
         conn.commit()
         self._migrate_sessions_table(conn)
         self._migrate_agent_messages_table(conn)
         self._migrate_cron_runs_table(conn)
-        conn.close()
-        self._local.conn = None  # 清除线程本地缓存，使下次 _conn() 重建连接
 
     async def create_session(self, session_id: str, meta: dict[str, Any] | None = None) -> None:
         now = time.time()
@@ -219,11 +221,12 @@ class Repository:
         self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def update_session_activity(self, session_id: str) -> None:
+        await asyncio.to_thread(self._sync_update_session_activity, session_id)
+
+    def _sync_update_session_activity(self, session_id: str) -> None:
         conn = self._conn()
         conn.execute("UPDATE sessions SET last_active = ? WHERE session_id = ?", (time.time(), session_id))
         conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def update_session_title(self, session_id: str, title: str) -> None:
         conn = self._conn()
@@ -306,6 +309,9 @@ class Repository:
         self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def log_event(self, event: EventEnvelope) -> None:
+        await asyncio.to_thread(self._sync_log_event, event)
+
+    def _sync_log_event(self, event: EventEnvelope) -> None:
         conn = self._conn()
         conn.execute(
             """INSERT INTO events (event_id, session_id, turn_id, event_type, timestamp, source, trace_id, payload_json)
@@ -322,8 +328,6 @@ class Repository:
             ),
         )
         conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def get_session_events(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
@@ -564,6 +568,21 @@ class Repository:
         tool_name: str | None = None,
     ) -> None:
         """保存单条消息到 messages 表"""
+        await asyncio.to_thread(
+            self._sync_save_message,
+            session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name,
+        )
+
+    def _sync_save_message(
+        self,
+        session_id: str,
+        turn_id: str,
+        role: str,
+        content: str | None,
+        tool_calls: str | None,
+        tool_call_id: str | None,
+        tool_name: str | None,
+    ) -> None:
         conn = self._conn()
         conn.execute(
             """INSERT INTO messages (session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name, created_at)
@@ -571,8 +590,6 @@ class Repository:
             (session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name, time.time()),
         )
         conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
         """获取会话的所有消息（按时间排序），返回 LLM 消息格式"""
@@ -615,14 +632,15 @@ class Repository:
 
     async def increment_message_count(self, session_id: str) -> None:
         """递增会话消息计数"""
+        await asyncio.to_thread(self._sync_increment_message_count, session_id)
+
+    def _sync_increment_message_count(self, session_id: str) -> None:
         conn = self._conn()
         conn.execute(
             "UPDATE sessions SET message_count = COALESCE(message_count, 0) + 1 WHERE session_id = ?",
             (session_id,),
         )
         conn.commit()
-        conn.close()
-        self._local.conn = None  # 关闭后清除缓存，避免下次 _conn() 返回已关闭连接
 
     async def delete_session_cascade(self, session_id: str) -> None:
         """级联删除会话及关联的 turns, messages, events"""
