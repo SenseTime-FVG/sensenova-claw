@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -174,10 +175,28 @@ class Repository:
             db_path = str(resolve_sensenova_claw_home(config) / "data" / "sensenova-claw.db")
         self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._local = threading.local()  # 线程本地连接存储
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
+        """返回当前线程的 SQLite 连接（线程本地复用，首次创建时启用 WAL 模式）
+
+        注意：threading.local 已保证每个线程独占一个连接，连接永远不会跨线程共享，
+        因此不需要也不应该设置 check_same_thread=False（保持默认 True 以保留安全检查）。
+        """
+        conn = getattr(self._local, "conn", None)
+        # 检测连接是否已关闭（如 init() 调用 close() 后需重建）
+        if conn is not None:
+            try:
+                conn.execute("SELECT 1")
+            except Exception:
+                conn = None
+                self._local.conn = None
+        if conn is None:
+            conn = sqlite3.connect(self.db_path)  # 默认 check_same_thread=True，保留驱动安全检查
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")   # 读写并发，减少锁竞争
+            conn.execute("PRAGMA synchronous=NORMAL")  # 降低 fsync 频率，性能与安全的平衡
+            self._local.conn = conn
         return conn
 
     async def init(self) -> None:
