@@ -282,7 +282,7 @@ function Setup-HomeDir {
 # ── 步骤 6: 初始化配置文件 ──
 
 function Setup-Config {
-    $configFile = "$APP_DIR\config.yml"
+    $configFile = "$SENSENOVA_CLAW_HOME\config.yml"
     $exampleFile = "$APP_DIR\config_example.yml"
 
     if (Test-Path $configFile) {
