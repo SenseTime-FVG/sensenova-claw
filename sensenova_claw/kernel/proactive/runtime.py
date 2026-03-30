@@ -306,7 +306,7 @@ class ProactiveRuntime:
             enabled=True,
             trigger=None,
             task=ProactiveTask(
-                prompt="探索我的记忆系统，找出我最可能感兴趣的领域，搜集相关领域的最新信息并整理成简洁的报告推荐.",
+                prompt="探索我的记忆系统，找出我最可能感兴趣的领域，深度搜集相关领域的最新的有价值的信息并整理成清晰的报告，必须有关键信息的引用。优先 paper、release notes、官方文档、深度技术分析、关键新闻、材料清单等",
             ),
             delivery=DeliveryConfig(
                 channels=["web"],

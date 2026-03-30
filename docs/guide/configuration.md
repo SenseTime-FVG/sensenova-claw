@@ -169,7 +169,9 @@ tools:
   fetch_url:
     enabled: true
     # 请求超时（秒）
-    timeout: 30
+    timeout: 15
+    # 文本响应最大返回大小（MB）
+    max_response_mb: 10
 
   file_operations:
     enabled: true
@@ -205,7 +207,8 @@ tools:
 | `research_union` | `min_valid_evidence` | int | `6` | 最少有效证据条数（title+link） |
 | `research_union` | `union_timeout` | int | `90` | union 补充阶段超时（秒） |
 | `fetch_url` | `enabled` | bool | `true` | 是否启用网页抓取 |
-| `fetch_url` | `timeout` | int | `30` | 请求超时时间（秒） |
+| `fetch_url` | `timeout` | int | `15` | 请求超时时间（秒） |
+| `fetch_url` | `max_response_mb` | int | `10` | 文本响应最大返回大小（MB） |
 | `file_operations` | `enabled` | bool | `true` | 是否启用文件读写 |
 
 #### 搜索工具 API Key 获取方式
