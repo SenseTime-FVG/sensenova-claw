@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -190,10 +191,8 @@ async def lifespan(app: FastAPI):
             db_path=mem_db_path,
             llm_factory=llm_factory,
         )
-        await memory_manager.sync_index()
-
-        # 为已有的 chunks 生成嵌入向量
-        await memory_manager.embed_pending_chunks()
+        # 后台异步同步索引 + 嵌入，避免阻塞启动（sync_index 内部已包含 embed_pending_chunks）
+        asyncio.create_task(memory_manager.sync_index())
 
         if mem_config.search.enabled:
             tool_registry.register(MemorySearchTool(memory_manager))
@@ -304,7 +303,6 @@ async def lifespan(app: FastAPI):
     await heartbeat_runtime.start()
 
     # 配置变更监听
-    import asyncio
     asyncio.create_task(llm_factory.start_config_listener(bus))
     asyncio.create_task(agent_registry.start_config_listener(bus, config))
     if memory_manager:
