@@ -17,7 +17,8 @@ set -euo pipefail
 SENSENOVA_CLAW_HOME="${SENSENOVA_CLAW_HOME:-$HOME/.sensenova-claw}"
 APP_DIR="$SENSENOVA_CLAW_HOME/app"
 REPO_URL="${SENSENOVA_CLAW_REPO_URL:-https://github.com/SenseTime-FVG/sensenova-claw.git}"
-REPO_REF="${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-dev}}"
+# app 目录 clone/update 使用的仓库分支或 tag，兼容旧变量名
+REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-dev}}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
 DEV_MODE=false
@@ -275,6 +276,8 @@ install_node() {
 # ── 步骤 4: 克隆/更新仓库 ──
 
 setup_repo() {
+  info "app 目录将使用仓库分支/引用: $REPO_REF"
+
   if [ -d "$APP_DIR/.git" ]; then
     info "更新 Sensenova-Claw ($REPO_REF)..."
     cd "$APP_DIR"

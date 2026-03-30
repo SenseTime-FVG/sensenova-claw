@@ -13,13 +13,13 @@ import { Input } from '@/components/ui/input';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { cn } from '@/lib/utils';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession } from '@/contexts/ws';
+import { useI18n } from '@/contexts/I18nContext';
 import { TodoDropdown } from '@/components/dashboard/TodoDropdown';
 import { NotificationDropdown } from '@/components/notification/NotificationDropdown';
 import { UserDropdown } from './UserDropdown';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useNavigation } from '@/hooks/useNavigation';
-import { useI18n } from '@/contexts/I18nContext';
 
 const GlobalFilePanel = dynamic(() => import('@/components/files/GlobalFilePanel').then(mod => mod.GlobalFilePanel), {
   loading: () => <div className="h-full bg-muted/10 animate-pulse" />,
@@ -34,9 +34,9 @@ const ADMIN_PATHS = ['/agents', '/sessions', '/llms', '/gateway', '/tools', '/sk
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [manualGroup, setManualGroup] = useState<SubNavGroup>(null);
-  const { startNewChat } = useChatSession();
+  const { startNewChat } = useSession();
   const { t } = useI18n();
-  
+
   const {
     pathname,
     visibleGroup,

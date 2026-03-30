@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { AskUserResponseForm } from '@/components/chat/AskUserResponseForm';
 import { useNotification } from '@/hooks/useNotification';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession, useWebSocket, useInteraction } from '@/contexts/ws';
 import { getAgentId } from '@/lib/chatTypes';
 import type { NotificationCard, NotificationCardKind } from '@/components/notification/NotificationProvider';
 
@@ -218,8 +218,8 @@ function NotificationCardItem({
             </div>
           )}
 
-          {/* 跳转到会话 */}
-          {card.sessionId && !card.resolved && !card.pending && (
+          {/* 跳转到会话（交互类卡片未处理时不显示，避免用户误点跳转） */}
+          {card.sessionId && !(card.kind === 'tool_confirmation' || card.kind === 'user_question') && !card.resolved && !card.pending && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onNavigate(card.sessionId!); }}
@@ -257,12 +257,9 @@ export function NotificationDropdown() {
     clearAllCards,
     setOnActionToastAction,
   } = useNotification();
-  const {
-    sessions,
-    switchSession,
-    wsSend,
-    submitQuestionResponse,
-  } = useChatSession();
+  const { sessions, switchSession } = useSession();
+  const { wsSend } = useWebSocket();
+  const { submitQuestionResponse, resolveInteractionFromNotification } = useInteraction();
 
   // 点击外部关闭
   useEffect(() => {
@@ -316,6 +313,7 @@ export function NotificationDropdown() {
         answer: isCancelled ? null : (inputValue ?? action ?? ''),
         cancelled: isCancelled,
       });
+      markCardPending(cardId, action);
     } else if (action === 'view_session' && card.sessionId) {
       // 导航到对应会话
       handleNavigate(card.sessionId);

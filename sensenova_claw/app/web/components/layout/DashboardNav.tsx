@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useCustomPages } from '@/hooks/useCustomPages';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession } from '@/contexts/ws';
 import { useI18n } from '@/contexts/I18nContext';
 
 const iconMap: Record<string, LucideIcon> = {
@@ -111,8 +111,8 @@ export function DashboardNav({
   const { t } = useI18n();
   const featureNavItems = useFeatureNavItems();
   const adminNavItems = useAdminNavItems();
-  const { startNewChat } = useChatSession();
-  const mainNavItems = useMemo(() => (
+  const { startNewChat } = useSession();
+  const mainNavItems: NavItem[] = useMemo(() => (
     mainNavItemDefs.map((item) => ({
       path: item.path,
       label: t(item.labelKey),

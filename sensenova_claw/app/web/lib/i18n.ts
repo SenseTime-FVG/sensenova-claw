@@ -98,6 +98,10 @@ const messages: Record<Locale, MessageValue> = {
       emptyTitle: 'How can I help you today?',
       emptyDescription: '在下方输入消息，开始与 Sensenova-Claw 的新对话。',
       chooseAgentSession: '选择一个 Agent 后开始聊天',
+      loadSessionFailed: '加载会话失败',
+      backToSessions: '返回会话列表',
+      sessionDetail: '会话详情',
+      createdAt: '创建于 {time}',
     },
     time: {
       justNow: '刚刚',
@@ -196,6 +200,10 @@ const messages: Record<Locale, MessageValue> = {
       emptyTitle: 'How can I help you today?',
       emptyDescription: 'Type a message below to start a new conversation with Sensenova-Claw.',
       chooseAgentSession: 'Choose a conversation to start chatting',
+      loadSessionFailed: 'Failed to load session',
+      backToSessions: 'Back to sessions',
+      sessionDetail: 'Session detail',
+      createdAt: 'Created {time}',
     },
     time: {
       justNow: 'just now',
