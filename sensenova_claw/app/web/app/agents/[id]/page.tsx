@@ -155,18 +155,18 @@ export default function AgentDetailPage() {
 
   // Workspace 文件操作
   const loadWsFiles = useCallback(() => {
-    authFetch(`${API_BASE}/api/workspace/files`)
+    authFetch(`${API_BASE}/api/workspace/files?agent_id=${agentId}`)
       .then(res => res.json())
       .then(data => setWsFiles(data))
       .catch(() => setWsFiles([]));
-  }, []);
+  }, [agentId]);
 
   useEffect(() => { if (activeTab === 'files') loadWsFiles(); }, [activeTab, loadWsFiles]);
 
   const loadFile = async (name: string) => {
     setSelectedFile(name); setFileLoading(true); setFileSaveMsg('');
     try {
-      const res = await authFetch(`${API_BASE}/api/workspace/files/${name}`);
+      const res = await authFetch(`${API_BASE}/api/workspace/files/${name}?agent_id=${agentId}`);
       const data = await res.json();
       setFileContent(data.content || '');
     } catch { setFileContent(''); }
@@ -177,7 +177,7 @@ export default function AgentDetailPage() {
     if (!selectedFile) return;
     setFileSaving(true); setFileSaveMsg('');
     try {
-      await authFetch(`${API_BASE}/api/workspace/files/${selectedFile}`, {
+      await authFetch(`${API_BASE}/api/workspace/files/${selectedFile}?agent_id=${agentId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: fileContent }),
       });
@@ -189,7 +189,7 @@ export default function AgentDetailPage() {
   const deleteFile = async (name: string) => {
     if (!confirm(`确定要删除 ${name} 吗?`)) return;
     try {
-      const res = await authFetch(`${API_BASE}/api/workspace/files/${name}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE}/api/workspace/files/${name}?agent_id=${agentId}`, { method: 'DELETE' });
       if (res.ok) { if (selectedFile === name) { setSelectedFile(null); setFileContent(''); } loadWsFiles(); }
     } catch { /* ignore */ }
   };
@@ -199,7 +199,7 @@ export default function AgentDetailPage() {
     if (!fname) return;
     if (!fname.endsWith('.md')) fname += '.md';
     try {
-      await authFetch(`${API_BASE}/api/workspace/files/${fname}`, {
+      await authFetch(`${API_BASE}/api/workspace/files/${fname}?agent_id=${agentId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: `# ${fname.replace('.md', '')}\n\n` }),
       });
