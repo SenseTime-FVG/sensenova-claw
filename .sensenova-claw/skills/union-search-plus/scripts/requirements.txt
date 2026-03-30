@@ -1,5 +1,0 @@
-# union-search-plus 最小依赖（首版）
-# 说明：vendor 内部分平台脚本可能需要额外依赖；以下仅覆盖通用与核心链路。
-requests>=2.31.0
-python-dotenv>=1.0.1
-lxml>=5.2.0

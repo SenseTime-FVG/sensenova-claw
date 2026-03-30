@@ -338,7 +338,7 @@ PLATFORM_MODULES = {
 
     # === 无需 API Key 搜索引擎 ===
     "baidu_direct": {
-        "module": "no_api_key_search.engines.baidu_engine",
+        "module": "baidu.baidu_no_api",
         "function": "search_baidu",
         "description": "百度搜索（无需 API Key）",
         "default_limit": 10,
@@ -346,7 +346,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "bing_cn_direct": {
-        "module": "no_api_key_search.engines.bing_cn_engine",
+        "module": "bing.bing_cn_no_api",
         "function": "search_bing_cn",
         "description": "Bing 中国（无需 API Key）",
         "default_limit": 10,
@@ -354,7 +354,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "bing_int_direct": {
-        "module": "no_api_key_search.engines.bing_int_engine",
+        "module": "bing.bing_int_no_api",
         "function": "search_bing_int",
         "description": "Bing 国际（无需 API Key）",
         "default_limit": 10,
@@ -362,7 +362,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "so360_direct": {
-        "module": "no_api_key_search.engines.so360_engine",
+        "module": "so360.so360_no_api",
         "function": "search_so360",
         "description": "360 搜索（无需 API Key）",
         "default_limit": 10,
@@ -370,7 +370,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "sogou_direct": {
-        "module": "no_api_key_search.engines.sogou_engine",
+        "module": "sogou.sogou_no_api",
         "function": "search_sogou",
         "description": "搜狗搜索（无需 API Key）",
         "default_limit": 10,
@@ -378,7 +378,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "wechat_direct": {
-        "module": "no_api_key_search.engines.wechat_engine",
+        "module": "wechat.wechat_no_api",
         "function": "search_wechat",
         "description": "微信搜索（无需 API Key）",
         "default_limit": 10,
@@ -386,7 +386,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "toutiao_direct": {
-        "module": "no_api_key_search.engines.toutiao_engine",
+        "module": "toutiao.toutiao_no_api",
         "function": "search_toutiao",
         "description": "头条搜索（无需 API Key）",
         "default_limit": 10,
@@ -394,7 +394,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "jisilu_direct": {
-        "module": "no_api_key_search.engines.jisilu_engine",
+        "module": "jisilu.jisilu_no_api",
         "function": "search_jisilu",
         "description": "集思录搜索（无需 API Key）",
         "default_limit": 10,
@@ -402,7 +402,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "google_direct": {
-        "module": "no_api_key_search.engines.google_engine",
+        "module": "google_search.google_no_api",
         "function": "search_google",
         "description": "Google 搜索（无需 API Key）",
         "default_limit": 10,
@@ -410,7 +410,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "google_hk_direct": {
-        "module": "no_api_key_search.engines.google_hk_engine",
+        "module": "google_search.google_hk_no_api",
         "function": "search_google_hk",
         "description": "Google 香港（无需 API Key）",
         "default_limit": 10,
@@ -418,7 +418,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "duckduckgo_html": {
-        "module": "no_api_key_search.engines.duckduckgo_html_engine",
+        "module": "duckduckgo.duckduckgo_no_api",
         "function": "search_duckduckgo_html",
         "description": "DuckDuckGo HTML（无需 API Key）",
         "default_limit": 10,
@@ -426,7 +426,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "startpage_direct": {
-        "module": "no_api_key_search.engines.startpage_engine",
+        "module": "startpage.startpage_no_api",
         "function": "search_startpage",
         "description": "Startpage 隐私搜索（无需 API Key）",
         "default_limit": 10,
@@ -434,7 +434,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "brave_direct": {
-        "module": "no_api_key_search.engines.brave_engine",
+        "module": "brave.brave_no_api",
         "function": "search_brave",
         "description": "Brave 搜索（无需 API Key）",
         "default_limit": 10,
@@ -442,7 +442,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "yahoo_direct": {
-        "module": "no_api_key_search.engines.yahoo_engine",
+        "module": "yahoo.yahoo_no_api",
         "function": "search_yahoo",
         "description": "Yahoo 搜索（无需 API Key）",
         "default_limit": 10,
@@ -450,7 +450,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "ecosia_direct": {
-        "module": "no_api_key_search.engines.ecosia_engine",
+        "module": "ecosia.ecosia_no_api",
         "function": "search_ecosia",
         "description": "Ecosia 环保搜索（无需 API Key）",
         "default_limit": 10,
@@ -458,7 +458,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "qwant_direct": {
-        "module": "no_api_key_search.engines.qwant_engine",
+        "module": "qwant.qwant_no_api",
         "function": "search_qwant",
         "description": "Qwant 欧洲搜索（无需 API Key）",
         "default_limit": 10,
@@ -466,7 +466,7 @@ PLATFORM_MODULES = {
         "group": "no_api_key"
     },
     "wolfram_direct": {
-        "module": "no_api_key_search.engines.wolfram_engine",
+        "module": "wolfram.wolfram_no_api",
         "function": "search_wolfram",
         "description": "WolframAlpha 知识计算（无需 API Key）",
         "default_limit": 1,
@@ -525,6 +525,27 @@ PLATFORM_GROUPS = {
     ],
 
     "all": [p for p in PLATFORM_MODULES.keys() if p != "xiaohongshu"]
+}
+
+
+NO_API_KEY_PLATFORM_NAMES = {
+    "baidu_direct",
+    "bing_cn_direct",
+    "bing_int_direct",
+    "so360_direct",
+    "sogou_direct",
+    "wechat_direct",
+    "toutiao_direct",
+    "jisilu_direct",
+    "google_direct",
+    "google_hk_direct",
+    "duckduckgo_html",
+    "startpage_direct",
+    "brave_direct",
+    "yahoo_direct",
+    "ecosia_direct",
+    "qwant_direct",
+    "wolfram_direct",
 }
 
 
@@ -646,6 +667,8 @@ def search_platform(
             result["items"] = _search_volcengine(keyword, limit, **kwargs)
         elif platform == "baidu":
             result["items"] = _search_baidu(keyword, limit, **kwargs)
+        elif platform in NO_API_KEY_PLATFORM_NAMES:
+            result["items"] = _search_no_api_platform(platform, keyword, limit, **kwargs)
         else:
             result["error"] = f"Unknown platform: {platform}"
             logger.error(result["error"])
@@ -678,6 +701,29 @@ def search_platform(
         logger.error(f"平台 {platform} 搜索失败: {e}")
 
     return platform, result
+
+
+def _search_no_api_platform(platform: str, keyword: str, limit: Optional[int], **kwargs) -> List[Dict]:
+    """统一调度无需 API Key 的直连搜索脚本。"""
+    meta = PLATFORM_MODULES.get(platform)
+    if not meta:
+        raise Exception(f"Unknown no-api platform: {platform}")
+
+    module_name = str(meta.get("module", "")).strip()
+    if not module_name:
+        raise Exception(f"Invalid no-api platform metadata: {platform}")
+
+    script_path = Path(__file__).parent.parent / Path(module_name.replace(".", "/")).with_suffix(".py")
+    cmd = [sys.executable, str(script_path), keyword, "--json"]
+    if limit is not None:
+        cmd.extend(["-m", str(limit)])
+    proxy = kwargs.get("proxy")
+    if proxy:
+        cmd.extend(["--proxy", str(proxy)])
+
+    data = _run_platform_json_command(cmd, timeout=int(kwargs.get("timeout", 30) or 30), platform=platform)
+    items = data.get("results", []) if isinstance(data, dict) else []
+    return items if isinstance(items, list) else []
 
 
 # =============================================================================

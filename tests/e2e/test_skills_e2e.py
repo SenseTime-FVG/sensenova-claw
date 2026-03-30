@@ -49,8 +49,8 @@ if __name__ == "__main__":
     test_skills_integration()
 
 
-def test_research_union_builtin_skills_in_prompt():
-    """验证内置 research-union / union-search-plus 能被注入 prompt。"""
+def test_research_union_builtin_skill_in_prompt():
+    """验证内置 research-union 能被注入 prompt，且旧 skill 不再暴露。"""
     project_root = Path(__file__).resolve().parents[2]
     builtin_dir = project_root / ".sensenova-claw" / "skills"
 
@@ -66,7 +66,7 @@ def test_research_union_builtin_skills_in_prompt():
         system_msg = messages[0]["content"]
 
         assert "research-union" in system_msg
-        assert "union-search-plus" in system_msg
+        assert "union-search-plus" not in system_msg
 
 
 def test_mineru_choice_builtin_skill_in_prompt():

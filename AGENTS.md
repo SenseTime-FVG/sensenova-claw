@@ -387,6 +387,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 仅等待 `window.__mockWs` 存在不够，测试若在 `onmessage` 尚未挂好时就发事件，消息会被静默丢掉；需要等到 mock socket 的 `send` 和 `onmessage` 都可用后再注入事件。
 - `/sessions/[id]` 的 `Thinking` 分组如果默认折叠，会把 ask_user 内联表单藏起来；这类“消息内联交互”不能依赖用户先展开二级容器才能操作。
 
+### 2026-03-27 ask_user 历史恢复补充
+
+成功经验：
+- `/api/sessions/{id}/events` 返回的是仓库落盘后的内核事件名，例如 `user.question_asked`、`user.question_answered`，而不是前端实时 WebSocket 的 `user_question_asked`、`user_question_answered_event`；聊天历史重建必须同时兼容两套命名。
+- 对“切换会话回来 UI 丢状态”这类问题，最有效的 e2e 是直接 mock `/api/sessions/*/events` 返回历史事件，再通过真实的 session 切换操作验证恢复结果；这样能把“实时链路正常但历史恢复失效”单独钉住。
+
+失败/风险经验：
+- 如果只用实时 WebSocket 事件写回归，`ask_user` 看起来是好的，但一旦用户离开当前会话再回来，依赖历史事件重建的内联卡片仍会消失；这类功能必须区分“实时显示”和“历史恢复”两条路径分别覆盖。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：
@@ -1516,3 +1525,59 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `DashboardLayout` 会连带触发 `TodoDropdown`、侧边栏 agent 列表等外围请求；如果 e2e 只 mock 了 feature 页自身 API，而漏掉 `/api/todolist/**`、`/api/agents*` 这类布局层接口，`authFetch` 遇到 401 会直接把页面打回 `/login`，看起来像 workspace 页没加载，实际是测试夹具不完整。
 - 当前环境里 Playwright 浏览器访问 `localhost:3000`/`127.0.0.1:3000` 对”已挂死的 next dev”不会快速报错，而是长时间卡在 `page.goto(..., waitUntil='domcontentloaded')`；遇到这类超时，先用 `curl` 和 `ss -ltnp` 判定 3000 端口是否真在响应，再决定是改代码还是重启 dev server。
+
+### 2026-03-27 npm install 跨平台补充
+
+成功经验：
+- 对根目录 `npm install` 这类生命周期脚本，最稳的跨平台修复是把 `postinstall` 从 `bash` 切到 `node` 脚本；安装逻辑仍可复用原有 `uv sync + 子目录 npm install` 流程，但不会再要求 Windows 预装 Git Bash / WSL。
+- 若仓库里已经存在 `scripts/postinstall.sh` 之类的 Unix 入口，保留它作为薄包装并统一委托给新的 Node 实现，可以避免后续维护两份安装逻辑。
+- 这类安装链路回归适合双层测试：Python 测试锁住 `package.json` 和壳包装入口，`node --test` 锁住 Windows shell 分支和任务列表，成本低且足够防止再次回到 `bash ./xxx.sh`。
+
+失败/风险经验：
+- 当前修复只解决”生命周期脚本依赖 bash”的兼容性，不代表 `uv`、Node 原生模块或其他三方依赖在 Windows 上已经全部无差异可用；后续若继续报平台问题，需要按具体子依赖逐个排查。
+
+### 2026-03-27 npm 脚本 Python 命令补充
+
+成功经验：
+- 面向 Windows 的 npm 脚本不要硬编码 `python3`；对本仓库这类 `uv run ...` 场景，直接统一成 `uv run python -m ...` 最稳，既兼容 Windows 的 `python.exe`，也能在当前 Unix 环境正常解析。
+- 若某个子目录本身不是 npm package，但用户会自然地在该目录执行 `npm install`，补一个极小的包装 `package.json + Node postinstall` 比要求用户记住”必须切到更深一层目录”更可靠。
+- 对脚本兼容性改动，除了静态断言 `package.json`，再跑一次真实 `npm run dev -- --help` 或真实 `npm install` 很有价值，能直接验证 shell 解析和命令分发没有写错。
+
+失败/风险经验：
+- 在嵌套目录跑真实 `npm install` 时，npm 版本可能顺手重写下游 `package-lock.json` 的元数据；如果这些改动与需求无关，提交前应恢复，避免把环境噪音混进功能修复。
+
+### 2026-03-27 dev 启动器进程树补充
+
+成功经验：
+- 像 `npm run dev -> uv run python -m sensenova_claw.app.main run` 这类总控启动器，不能只盯包装进程 pid；更稳的启动成功判定是”端口开始监听”，否则在 Windows 下很容易因为 `npm`/批处理包装层提前退出而误判失败。
+- 前端开发服务优先直接启动 `node node_modules/next/dist/bin/next dev -p <port>`，比从父进程里再套一层 `npm run dev` 更稳定，也更不容易出现包装进程退出后子服务残留的问题。
+- Windows 清理子进程树时，单纯 `proc.terminate()` 不够；要准备 `taskkill /PID <pid> /T /F` 兜底，真实 smoke test 里再检查 8000/3000 端口是否释放，才能确认没有孤儿进程。
+
+失败/风险经验：
+- `Ctrl+C` 下 `uv run ...` 的顶层退出码不一定等于子脚本的返回码；判断”是否正常收尾”时不能只看 shell 退出码，还要同时看端口释放和后台进程是否残留。
+
+### 2026-03-27 PPT ask_user 发送按钮卡死补充
+
+成功经验：
+- 工作台类页面若复用 `ChatPanel`，其输入禁用条件必须与 `/chat` 主页面保持一致；像 `interactionSubmitting`、`activeInteraction.kind === 'confirmation'` 这类交互态如果漏传，`ask_user`/审批类流程就会在工作台里表现出与主聊天页不同的 bug。
+- `ChatInput` 的本地 `isSubmitting` 不能盲目覆盖所有发送场景；当主输入框实际上是在提交 `ask_user` 回复时，应跳过普通消息的本地提交锁，否则很容易在回复后把发送按钮永久卡成 disabled。
+- 这类”看起来像按钮坏了”的问题，最有效的前端回归是直接断言 WebSocket 出站序列：先验证第一条是 `user_question_answered`，再验证收到 `user_question_answered_event` 后第二条恢复为 `user_input`。
+- 对”旧会话 ask_user 未完成，点击新建后首条消息被劫持”的问题，不能只看 UI 状态；要额外锁住”点击新建后已经发出 `create_session`，则后续输入不得再走 `user_question_answered`”这条协议级约束。
+
+失败/风险经验：
+- 现有 `ask-user.spec.ts` 中部分旧用例对文案和 WebSocket 初始化时机依赖较强，补跑相邻回归时可能先撞到与本次修复无关的 strict mode 选择器冲突或 `__mockWs` 未就绪问题；验证本次改动时应优先使用更聚焦的新场景。
+- Playwright 在聊天页里若直接用 `getByText('E2E Session')` 这类宽泛选择器，容易同时命中 agent 列表和 session 列表；会话点击应优先收窄到 `getByTestId('session-list')`。
+- `/sessions/[id]` 这类页面的 mock WebSocket 挂载时机不一定和 `/chat` 一样快；凡是用 `page.evaluate(() => __mockWs.emit(...))` 的 session 场景，最好先显式 `waitForMockWebSocketReady(page)`，否则会偶发 `Cannot read properties of undefined (reading 'emit')`。
+- 工作台首页 `/`、PPT `/ppt`、研究页等复用 `ChatPanel` 的页面，只要 `ChatPanel` 的禁用逻辑和 `ChatInput` 的 `ask_user` 提交语义正确，这类”回复 ask_user 后发送按钮卡死”的问题就会一起收敛；验证时可以用一个根工作台页和一个专用工作台页做抽样回归。
+- `/ppt` 这类带全局通知浮层的页面，Playwright 直接点击右上角按钮可能被 toast 遮挡误伤；如果要验证按钮处理链本身，优先给目标按钮加 `data-testid`，必要时直接触发 DOM `click()`，否则很容易把”按钮没被真正点到”误判成业务状态机 bug。
+
+### 2026-03-28 npm run dev 误判生产构建补充
+
+成功经验：
+- 根启动器判断 Next 前端是否可走 `next start` 时，不能只看 `web/.next` 目录是否存在；开发态缓存或半成品构建也会留下 `.next`，最稳的最小判定是检查 `web/.next/BUILD_ID` 是否存在且非空。
+- 这类启动问题最有效的复现方式就是直接跑真实 `npm run dev`，并同时观察前端日志；本次就是通过 Next 的明确报错 `Could not find a production build in the '.next' directory` 快速定位到了错误分支。
+- 对启动器修复，单测应直接锁住”有 `.next` 但无 `BUILD_ID` 时必须回退 `next dev`，有 `BUILD_ID` 时才允许 `next start`”这两个分支，能精确防止回归。
+
+失败/风险经验：
+- 用 `timeout npm run dev` 做 smoke test 可能留下 `next dev` 孤儿进程，因为外层超时信号不一定能完整传递到总控脚本管理的整个子进程树；验证启动器时，最好使用可交互会话并显式发送 `Ctrl+C` 收尾，再检查 3000/8000 端口是否释放。
+- 当前仓库默认 `uv run python -m pytest ...` 依赖先执行 `uv sync --extra dev`；如果环境里还没同步 `pytest`，测试失败会先表现为”环境缺依赖”而不是业务回归。
