@@ -10,6 +10,7 @@ import pytest
 
 import sensenova_claw.app.main as app_main
 from sensenova_claw.app.main import (
+    _check_port,
     _build_frontend_dev_cmd,
     _build_frontend_prod_cmd,
     _spawn_managed_process,
@@ -134,6 +135,41 @@ def test_wait_for_port_listen_fails_when_process_exits_early(monkeypatch: pytest
     proc = SimpleNamespace(poll=lambda: 1)
 
     assert _wait_for_port_listen(3000, timeout=0.01, proc=proc) is False
+
+
+def test_wait_for_port_listen_allows_long_startup_when_process_still_alive(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(app_main, "_check_port", lambda port: True)
+
+    proc = SimpleNamespace(poll=lambda: None)
+
+    assert _wait_for_port_listen(3000, timeout=0.01, proc=proc) is True
+
+
+def test_check_port_treats_system_listener_as_occupied(monkeypatch: pytest.MonkeyPatch):
+    class DummySocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def settimeout(self, timeout):
+            return None
+
+        def connect(self, address):
+            raise ConnectionRefusedError
+
+    monkeypatch.setattr(app_main.shutil, "which", lambda name: "/usr/bin/lsof" if name == "lsof" else None)
+    monkeypatch.setattr(app_main.socket, "socket", lambda *args, **kwargs: DummySocket())
+    monkeypatch.setattr(
+        app_main.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0),
+    )
+
+    assert _check_port(3000) is False
 
 
 def test_terminate_managed_process_uses_taskkill_on_windows(monkeypatch: pytest.MonkeyPatch):

@@ -1581,3 +1581,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 用 `timeout npm run dev` 做 smoke test 可能留下 `next dev` 孤儿进程，因为外层超时信号不一定能完整传递到总控脚本管理的整个子进程树；验证启动器时，最好使用可交互会话并显式发送 `Ctrl+C` 收尾，再检查 3000/8000 端口是否释放。
 - 当前仓库默认 `uv run python -m pytest ...` 依赖先执行 `uv sync --extra dev`；如果环境里还没同步 `pytest`，测试失败会先表现为”环境缺依赖”而不是业务回归。
+
+### 2026-03-30 npm run dev 端口探测误判补充
+
+成功经验：
+- `npm run dev` 走的是 `sensenova_claw.app.main` 的 Python 启动器，而 `scripts/dev.sh` 用的是 shell 级进程存活/端口检查；当两条链路的“启动成功判定”不一致时，就会出现“服务其实起来了，但 npm 仍判失败”的假象，排查时要先对照两边的判定逻辑。
+- 对这类本地启动误判，优先用 `lsof/ss/netstat` 读取系统监听状态，再退回 `127.0.0.1` 直连探测，比只靠 Python `socket.connect()` 更稳，尤其是在 WSL 或 `localhost` 访问受限环境下。
+- 回归测试最小切口可以直接锁 `_check_port()`：即使本地直连返回 `ConnectionRefusedError`，只要系统工具已经看到监听端口，就必须判定为“端口已占用”。
+- 当前网关在真实 `uvicorn --reload` 启动链路下，可能出现“子进程和 startup 日志都已起来，但 60 秒内仍未进入 LISTEN”的情况；这时总控启动器不应直接报错退出，而应提示“仍在初始化”并继续监控进程存活。
+
+失败/风险经验：
+- 当前环境下 `tests/unit/test_app_main.py` 里的 `test_terminate_managed_process_kills_child_process_tree` 仍会偶发失败，和本次端口探测修复无关；验证启动器改动时，应优先补并运行更聚焦的用例，避免被既有进程组问题干扰结论。
