@@ -177,6 +177,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
                 timestamp: Date.now() / 1000,
               });
               markCardPending(cardId, actionValue);
+              return true; // 需要等待服务端确认
             },
           });
           break;
@@ -315,6 +316,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
                 timestamp: Date.now() / 1000,
               });
               markCardPending(cardId, actionValue);
+              return true; // 需要等待服务端确认
             },
           });
           break;
@@ -359,6 +361,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
                 timestamp: Date.now() / 1000,
               });
               markCardPending(cardId, actionValue);
+              return true; // 需要等待服务端确认
             },
           });
           break;

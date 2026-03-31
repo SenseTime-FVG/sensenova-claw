@@ -76,7 +76,7 @@ export interface UnifiedToast {
   allowsInput?: boolean;
   inputPlaceholder?: string;
   questionData?: QuestionData;
-  onAction?: (actionValue: string, inputValue?: string) => void;
+  onAction?: (actionValue: string, inputValue?: string) => boolean | void;  // 返回 true 表示需要 pending（等待服务端确认）
   autoDismissMs: number;
   createdAtMs: number;
   pending: boolean;
@@ -99,7 +99,7 @@ export interface PushToastConfig {
   sessionId?: string;
   cardId?: string;
   eventKey?: string;
-  onAction?: (actionValue: string, inputValue?: string) => void;
+  onAction?: (actionValue: string, inputValue?: string) => boolean | void;  // 返回 true 表示需要 pending（等待服务端确认）
   browser?: boolean;
 }
 

@@ -85,6 +85,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     getCurrentSessionAgentId,
     refreshTaskGroups,
     bindSessionToCurrentSocket,
+    switchSession,
   } = useSession();
   const { subscribeCurrentSession, subscribeGlobal, subscribeFrontendCreate, markFrontendCreate } = useEventDispatcher();
   const { pushToast, pushCard } = useNotification();
@@ -401,8 +402,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             eventKey: `turn_completed_${(event as any).event_id || completedSessionId}`,
             onAction: (actionValue) => {
               if (actionValue === 'view_session' && completedSessionId) {
-                // TODO: 跳转到会话
+                switchSession(completedSessionId);
               }
+              // view_session 是纯前端操作，不需要 pending
             },
           });
           break;
@@ -437,7 +439,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
                 browser: metadata.show_browser === true,
                 onAction: (actionValue) => {
                   if (actionValue === 'view_session' && notifSessionId) {
-                    // TODO: 跳转到会话
+                    switchSession(notifSessionId);
                   }
                 },
               });
@@ -494,7 +496,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
               eventKey: `proactive_${jobId}_${resultSessionId}`,
               onAction: (actionValue) => {
                 if (actionValue === 'view_session' && resultSessionId) {
-                  // TODO: 跳转到会话
+                  switchSession(resultSessionId);
                 }
               },
             });
@@ -503,7 +505,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         }
       }
     });
-  }, [subscribeGlobal, pushCard, pushToast, refreshTaskGroups, sessionIdRef]);
+  }, [subscribeGlobal, pushCard, pushToast, refreshTaskGroups, sessionIdRef, switchSession]);
 
   // ── 前端创建 session 事件处理（pendingInput） ──
 

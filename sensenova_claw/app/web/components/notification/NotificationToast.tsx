@@ -333,10 +333,16 @@ export function ToastContainer({ toasts, onDismiss, onMarkPending }: ToastContai
     (toastId: string, actionValue: string, inputValue?: string) => {
       const toast = toasts.find((t) => t.id === toastId);
       if (!toast) return;
-      onMarkPending(toastId);
-      toast.onAction?.(actionValue, inputValue);
+      // onAction 返回 true 表示需要等待服务端确认（进入 pending 状态）
+      // 否则直接关闭 toast（如 view_session 等纯前端操作）
+      const needsPending = toast.onAction?.(actionValue, inputValue);
+      if (needsPending === true) {
+        onMarkPending(toastId);
+      } else {
+        onDismiss(toastId);
+      }
     },
-    [toasts, onMarkPending],
+    [toasts, onMarkPending, onDismiss],
   );
 
   if (toasts.length === 0) return null;
