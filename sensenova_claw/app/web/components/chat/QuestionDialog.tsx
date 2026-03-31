@@ -299,7 +299,7 @@ export function InteractionDialog({
               value={customInput}
               onChange={(e) => setCustomInput(e.target.value)}
               placeholder="输入你的补充说明..."
-              className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-card-foreground placeholder-muted-foreground focus:outline-none focus:border-primary resize-none"
+              className="w-full resize-none rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus:border-primary focus:outline-none disabled:text-neutral-500"
               rows={3}
               onKeyDown={handleCustomInputKeyDown}
               disabled={submitting || !wsConnected || remainingSeconds <= 0}

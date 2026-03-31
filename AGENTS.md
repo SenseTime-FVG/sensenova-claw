@@ -1689,3 +1689,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前 `tests/e2e/test_qq_channel_official_e2e.py` 仍有既有失败：用例断言回复里包含“当前没有可用的 LLM”，但当前 `mock` provider 已会返回正常自我介绍文本；这和本次 4009 重连修复无关，不能误判为回归。
+
+### 2026-03-31 ask_user 暗色输入框样式补充
+
+成功经验：
+- `ask_user` 的白底输入框在 dark 模式下如果继续复用 `text-foreground`，会跟随全局深色前景变成浅色文字；这类“白底局部控件”更稳的做法是直接给 textarea 指定固定深色文本类，如 `text-neutral-900`。
+- 在现有 `sensenova_claw/app/web/e2e/ask-user-action-toast.spec.ts` 上追加 dark 模式下的 `getComputedStyle(...).color` 断言，能低成本锁住主题回归，不需要引入截图比对。
+- Playwright 浏览器如果由 `npm run test:e2e` 通过 `PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers` 指定目录，首次安装浏览器时也必须带同一个环境变量；否则安装成功了，测试仍会报找不到 executable。
+
+失败/风险经验：
+- `sensenova_claw/app/web/e2e/ask-user.spec.ts` 中 `session 页面 ask_user 工具卡片内应显示内嵌回复框并可提交` 当前仍会失败，表现为 `inline-ask-user-q_session_inline_1` 未渲染；这更像既有测试夹具或页面状态问题，不能误归因到本次纯样式修改。
