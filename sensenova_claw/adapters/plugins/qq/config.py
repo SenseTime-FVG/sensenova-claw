@@ -19,9 +19,7 @@ class QQOfficialConfig:
 
     app_id: str = ""
     client_secret: str = ""
-    public_key: str = ""
     sandbox: bool = False
-    webhook_secret: str = ""
     intents: list[str] = field(default_factory=list)
 
 
@@ -66,9 +64,7 @@ class QQConfig:
             official=QQOfficialConfig(
                 app_id=api.get_config("official_app_id", ""),
                 client_secret=api.get_config("official_client_secret", ""),
-                public_key=api.get_config("official_public_key", ""),
                 sandbox=api.get_config("official_sandbox", False),
-                webhook_secret=api.get_config("official_webhook_secret", ""),
                 intents=api.get_config("official_intents", []),
             ),
             onebot=QQOneBotConfig(
@@ -78,4 +74,3 @@ class QQConfig:
                 self_id=api.get_config("onebot_self_id", ""),
             ),
         )
-

@@ -24,9 +24,7 @@ def _make_config() -> QQConfig:
         official=QQOfficialConfig(
             app_id="app-1",
             client_secret="secret-1",
-            public_key="pub-1",
             sandbox=False,
-            webhook_secret="hook-1",
             intents=["PUBLIC_GUILD_MESSAGES"],
         ),
         onebot=QQOneBotConfig(),
@@ -93,6 +91,35 @@ async def test_parse_group_message_event_detects_mention():
 
 
 @pytest.mark.asyncio
+async def test_parse_c2c_message_event():
+    dispatched = []
+    runtime = QQOfficialRuntime(config=_make_config())
+
+    async def collect(message):
+        dispatched.append(message)
+
+    runtime.set_message_handler(collect)
+    await runtime.handle_event(
+        {
+            "op": 0,
+            "t": "C2C_MESSAGE_CREATE",
+            "d": {
+                "id": "msg-3",
+                "content": "你好",
+                "author": {"id": "user-3", "username": "carl"},
+                "channel_id": "channel-3",
+                "guild_id": None,
+            },
+        }
+    )
+
+    assert dispatched
+    assert dispatched[0].chat_type == "p2p"
+    assert dispatched[0].chat_id == "channel-3"
+    assert dispatched[0].target == "direct:channel-3"
+
+
+@pytest.mark.asyncio
 async def test_send_text_posts_to_direct_message_api():
     runtime = QQOfficialRuntime(config=_make_config())
     runtime._access_token = "token-1"
@@ -111,3 +138,93 @@ async def test_send_text_posts_to_direct_message_api():
     assert result["message_id"] == "msg-100"
     client.post.assert_awaited_once()
     assert client.post.await_args.kwargs["headers"]["Authorization"] == "QQBot token-1"
+
+
+@pytest.mark.asyncio
+async def test_refresh_access_token_uses_bots_domain():
+    runtime = QQOfficialRuntime(config=_make_config())
+    response = Mock()
+    response.json.return_value = {"access_token": "token-2", "expires_in": 7200}
+    response.raise_for_status.return_value = None
+    client = AsyncMock()
+    client.post.return_value = response
+
+    with patch("sensenova_claw.adapters.plugins.qq.runtime_official.httpx.AsyncClient") as client_cls:
+        client_cls.return_value.__aenter__.return_value = client
+        await runtime._refresh_access_token()
+
+    assert runtime._access_token == "token-2"
+    client_cls.assert_called_once()
+    assert client_cls.call_args.kwargs["base_url"] == "https://bots.qq.com"
+    assert client.post.await_args.args[0] == "/app/getAppAccessToken"
+
+
+@pytest.mark.asyncio
+async def test_fetch_gateway_uses_gateway_bot_endpoint():
+    runtime = QQOfficialRuntime(config=_make_config())
+    runtime._access_token = "token-1"
+    runtime._token_expire_at = 9999999999
+    response = Mock()
+    response.json.return_value = {"url": "wss://example.qq/gateway"}
+    response.raise_for_status.return_value = None
+    client = AsyncMock()
+    client.get.return_value = response
+
+    with patch("sensenova_claw.adapters.plugins.qq.runtime_official.httpx.AsyncClient") as client_cls:
+        client_cls.return_value.__aenter__.return_value = client
+        gateway = await runtime._fetch_gateway()
+
+    assert gateway == "wss://example.qq/gateway"
+    assert client_cls.call_args.kwargs["base_url"] == "https://api.sgroup.qq.com"
+    assert client.get.await_args.args[0] == "/gateway/bot"
+
+
+@pytest.mark.asyncio
+async def test_hello_sends_identify_and_heartbeat():
+    runtime = QQOfficialRuntime(config=_make_config())
+    runtime._access_token = "token-1"
+    runtime._token_expire_at = 9999999999
+    sent_payloads = []
+
+    class _FakeWS:
+        async def send(self, payload: str) -> None:
+            sent_payloads.append(payload)
+
+    runtime._ws = _FakeWS()
+    heartbeat_task = None
+
+    async def fake_heartbeat(interval_ms: int) -> None:
+        assert interval_ms == 41000
+
+    with patch("asyncio.create_task") as create_task:
+        create_task.side_effect = lambda coro, name=None: coro
+        heartbeat_task = await runtime._handle_gateway_payload({"op": 10, "d": {"heartbeat_interval": 41000}})
+
+    assert heartbeat_task is True
+    assert sent_payloads
+    identify = __import__("json").loads(sent_payloads[0])
+    assert identify["op"] == 2
+    assert identify["d"]["token"] == "QQBot token-1"
+    assert identify["d"]["shard"] == [0, 1]
+    assert identify["d"]["intents"] > 0
+
+
+@pytest.mark.asyncio
+async def test_ready_event_updates_session_state():
+    runtime = QQOfficialRuntime(config=_make_config())
+    handled = await runtime._handle_gateway_payload(
+        {
+            "op": 0,
+            "s": 42,
+            "t": "READY",
+            "d": {
+                "session_id": "sess-1",
+                "shard": [0, 1],
+                "user": {"id": "bot-1", "username": "qqbot"},
+            },
+        }
+    )
+
+    assert handled is True
+    assert runtime._session_id == "sess-1"
+    assert runtime._last_seq == 42

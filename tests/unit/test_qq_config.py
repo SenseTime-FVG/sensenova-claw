@@ -25,9 +25,7 @@ def _make_plugin_api(config_overrides: dict | None = None) -> PluginApi:
         "reply_to_message": True,
         "official_app_id": "",
         "official_client_secret": "",
-        "official_public_key": "",
         "official_sandbox": False,
-        "official_webhook_secret": "",
         "official_intents": [],
         "onebot_ws_url": "ws://127.0.0.1:3001",
         "onebot_access_token": "",
@@ -75,9 +73,7 @@ def test_from_plugin_api_parses_official_mode() -> None:
             "mode": "official",
             "official_app_id": "app-1",
             "official_client_secret": "secret-1",
-            "official_public_key": "pub-1",
             "official_sandbox": True,
-            "official_webhook_secret": "hook-1",
             "official_intents": ["PUBLIC_GUILD_MESSAGES"],
         }
     )
@@ -87,7 +83,5 @@ def test_from_plugin_api_parses_official_mode() -> None:
     assert cfg.mode == "official"
     assert cfg.official.app_id == "app-1"
     assert cfg.official.client_secret == "secret-1"
-    assert cfg.official.public_key == "pub-1"
     assert cfg.official.sandbox is True
-    assert cfg.official.webhook_secret == "hook-1"
     assert cfg.official.intents == ["PUBLIC_GUILD_MESSAGES"]
