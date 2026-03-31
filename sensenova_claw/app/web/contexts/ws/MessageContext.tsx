@@ -71,9 +71,12 @@ export interface MessageContextValue {
   prefillInput: (value: string | PrefillInputPayload) => void;
   clearPendingPrefill: () => void;
 
-  sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string) => void;
+  sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string, recommendation?: RecommendationSendMeta | null) => void;
   cancelTurn: () => void;
   handleSkillInvoke: (skillName: string, args: string) => void;
+
+  /** 合并从 REST API 恢复的推荐数据（去重合并，不覆盖实时推送） */
+  mergeRestoredRecommendations: (items: ProactiveResultItem[]) => void;
 
   /** 供 InteractionContext 更新消息列表（如 ask_user 状态） */
   updateMessages: (updater: (prev: ChatMessage[]) => ChatMessage[]) => void;
@@ -142,7 +145,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
   const cancelledTurnIdsRef = useRef<Set<string>>(new Set());
   const lastStreamingTurnIdRef = useRef<string | null>(null);
-  const pendingInputRef = useRef<{ content: string; contextFiles?: string[] } | null>(null);
+  const pendingInputRef = useRef<{ content: string; contextFiles?: string[]; meta?: Record<string, string> } | null>(null);
 
   // ── helpers ──
 
@@ -533,11 +536,13 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         const newSid = event.session_id;
         if (!newSid) return;
         if (pendingInputRef.current) {
-          const { content, contextFiles } = pendingInputRef.current;
+          const { content, contextFiles, meta } = pendingInputRef.current;
+          const payload: Record<string, unknown> = { content, attachments: [], context_files: contextFiles || [] };
+          if (meta) payload.meta = meta;
           wsSend({
             type: 'user_input',
             session_id: newSid,
-            payload: { content, attachments: [], context_files: contextFiles || [] },
+            payload,
             timestamp: Date.now() / 1000,
           });
           pendingInputRef.current = null;
@@ -551,7 +556,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
   // ── 对外接口 ──
 
-  const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
+  const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string, recommendation?: RecommendationSendMeta | null) => {
     if (!content.trim()) return;
 
     // 防止在 session 创建中重复发送：如果已有 pending input 且正在等待 session_created，忽略
@@ -569,26 +574,46 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
     const filePaths = contextFiles?.map(f => f.path) || [];
 
+    // 构造 meta：当有 recommendation 信息时，附加 recommendation_id 供后端消费标记
+    const meta: Record<string, string> | undefined =
+      recommendation?.recommendationId
+        ? { recommendation_id: recommendation.recommendationId }
+        : undefined;
+
     if (!sessionIdRef.current) {
-      pendingInputRef.current = { content, contextFiles: filePaths };
+      pendingInputRef.current = { content, contextFiles: filePaths, meta };
       markFrontendCreate();
-      const meta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
+      const sessionMeta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
       const requestId = makeId();
       wsSend({
         type: 'create_session',
-        payload: { agent_id: targetAgentId, meta, request_id: requestId },
+        payload: { agent_id: targetAgentId, meta: sessionMeta, request_id: requestId },
         timestamp: Date.now() / 1000,
       });
     } else {
+      const payload: Record<string, unknown> = { content, attachments: [], context_files: filePaths };
+      if (meta) payload.meta = meta;
       wsSend({
         type: 'user_input',
         session_id: sessionIdRef.current,
-        payload: { content, attachments: [], context_files: filePaths },
+        payload,
         timestamp: Date.now() / 1000,
       });
     }
     setIsTyping(true);
   }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsSend, sessionIdRef, emptySessionIdRef, markFrontendCreate]);
+
+  // 合并从 REST API 恢复的推荐数据（去重合并，不覆盖实时推送）
+  const mergeRestoredRecommendations = useCallback((items: ProactiveResultItem[]) => {
+    if (!items.length) return;
+    setProactiveResults(prev => {
+      // 用 (jobId, sessionId) 组合键去重，已有的实时推送优先保留
+      const existingKeys = new Set(prev.map(r => `${r.jobId}__${r.sessionId}`));
+      const newItems = items.filter(r => !existingKeys.has(`${r.jobId}__${r.sessionId}`));
+      if (!newItems.length) return prev;
+      return [...prev, ...newItems].slice(0, 50);
+    });
+  }, []);
 
   const handleSkillInvoke = useCallback(async (skillName: string, args: string) => {
     if (!sessionIdRef.current) {
@@ -659,6 +684,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     sendMessage,
     cancelTurn,
     handleSkillInvoke,
+    mergeRestoredRecommendations,
     updateMessages,
   };
 
