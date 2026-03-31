@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -304,6 +305,145 @@ def _read_config_linux() -> list[Path]:
             logger.debug(f"Error reading Linux config {config_path}: {e}")
 
     return vaults
+
+
+def _ensure_knowledge_structure(vault_path: Path) -> dict:
+    """补全知识库必备结构
+
+    Returns:
+        {"created": bool, "error": str|None, "has_structure": bool}
+    """
+    try:
+        # 确保 .obsidian 目录存在
+        obsidian_dir = vault_path / ".obsidian"
+        if not obsidian_dir.exists():
+            obsidian_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created .obsidian directory in {vault_path}")
+
+        # 创建或验证 .obsidian/app.json
+        app_json_path = obsidian_dir / "app.json"
+        if not app_json_path.exists():
+            default_app_json = {
+                "basePath": None,
+                "baseUrl": "",
+                "cssTheme": "",
+                "enabledCssSnippets": [],
+                "foldIndent": False,
+                "promptDelete": True,
+                "showInlineTitle": False,
+                "showLineNumber": False,
+                "strictLineBreaks": False,
+                "tabSize": 4,
+                "useMarkdownLinks": False,
+                "vault": None,
+                "mobileSyncVersion": 9
+            }
+            with open(app_json_path, 'w', encoding='utf-8') as f:
+                json.dump(default_app_json, f, indent=2, ensure_ascii=False)
+            logger.info(f"Created .obsidian/app.json in {vault_path}")
+
+        # 创建 Knowledge 目录结构
+        knowledge_dir = vault_path / "Knowledge"
+        knowledge_dir.mkdir(parents=True, exist_ok=True)
+
+        # 创建 user-profile.md
+        user_profile = knowledge_dir / "user-profile.md"
+        if not user_profile.exists():
+            user_profile.write_text("---\nupdated: \ntags: [kb/profile]\n---\n\n", encoding='utf-8')
+            logger.info(f"Created Knowledge/user-profile.md in {vault_path}")
+
+        # 创建 qa-history 目录
+        qa_history_dir = knowledge_dir / "qa-history"
+        qa_history_dir.mkdir(parents=True, exist_ok=True)
+
+        # 创建 facts 目录
+        facts_dir = knowledge_dir / "facts"
+        facts_dir.mkdir(parents=True, exist_ok=True)
+
+        # 创建 README.md
+        readme_path = vault_path / "README.md"
+        if not readme_path.exists():
+            readme_content = """# Obsidian Vault
+
+这是一个 Obsidian vault，用于知识库管理。
+
+## 目录结构
+
+- **Knowledge/** - 知识库根目录
+  - **user-profile.md** - 用户档案（自动填充）
+  - **qa-history/** - 问答历史
+  - **facts/** - 知识点库
+
+## 使用方法
+
+1. 在 Obsidian 中打开此文件夹
+2. 将此 vault 路径配置到 Sensenova-Claw 的 config.yml 中
+3. 知识库系统将自动管理笔记
+
+---
+Created by Sensenova-Claw Obsidian Integration
+"""
+            readme_path.write_text(readme_content, encoding='utf-8')
+            logger.info(f"Created README.md in {vault_path}")
+
+        return {
+            "created": True,
+            "error": None,
+            "has_structure": True,
+        }
+
+    except Exception as e:
+        logger.exception(f"Error ensuring knowledge structure in {vault_path}: {e}")
+        return {
+            "created": False,
+            "error": str(e),
+            "has_structure": False,
+        }
+
+
+def _check_knowledge_structure(vault_path: Path) -> bool:
+    """检查 vault 是否有完整的知识库结构"""
+    required_items = [
+        vault_path / ".obsidian",
+        vault_path / ".obsidian" / "app.json",
+        vault_path / "Knowledge",
+        vault_path / "Knowledge" / "user-profile.md",
+        vault_path / "Knowledge" / "qa-history",
+        vault_path / "Knowledge" / "facts",
+    ]
+
+    for item in required_items:
+        if not item.exists():
+            return False
+
+    return True
+
+
+def _create_default_vault() -> Path | None:
+    """在标准位置创建默认 vault
+
+    Returns:
+        vault 路径或 None（如果创建失败）
+    """
+    home = Path.home()
+    vault_path = home / "Obsidian"
+
+    try:
+        vault_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created default vault at {vault_path}")
+
+        # 补全知识库结构
+        result = _ensure_knowledge_structure(vault_path)
+        if result["error"]:
+            logger.warning(f"Failed to create knowledge structure: {result['error']}")
+            return None
+
+        return vault_path
+
+    except Exception as e:
+        logger.exception(f"Failed to create default vault: {e}")
+        return None
+
 
 
 # ============================================================================
