@@ -260,7 +260,7 @@ def _first_available_llm_target(
         provider_name = str(entry.get("provider", "mock"))
         if provider_name == "mock" or not _provider_is_available(provider_name):
             continue
-        target = (provider_name, str(entry.get("model_id", model_key)))
+        target = (provider_name, str(entry.get("model_id", "")))
         if target not in excluded_targets:
             return target
     return None
@@ -952,7 +952,9 @@ class LLMSessionWorker(SessionWorker):
         # model/provider 可能由事件直接指定（已是 model_id），也可能需要从 model key 解析
         raw_model = event.payload.get("model")
         raw_provider = event.payload.get("provider")
-        if raw_provider and raw_model:
+        has_explicit_provider = "provider" in event.payload and raw_provider is not None
+        has_explicit_model = "model" in event.payload and raw_model is not None
+        if has_explicit_provider and has_explicit_model:
             # 事件已显式指定 provider 和 model_id，直接使用
             provider_name, model = raw_provider, raw_model
         else:

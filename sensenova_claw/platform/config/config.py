@@ -600,8 +600,7 @@ class Config:
     def resolve_model(self, model_key: str | None = None) -> tuple[str, str]:
         """解析模型 key 为 (provider_name, model_id)。
 
-        优先从 llm.models 注册表查找；如果 model_key 不在注册表中，
-        则视为直接的 model_id（向后兼容），从注册表中反查 provider。
+        仅接受 llm.models 注册表中的 key；不会在 model_key 与 model_id 之间互相兜底。
 
         Args:
             model_key: llm.models 中的 key（如 "claude-sonnet"），
@@ -624,24 +623,17 @@ class Config:
                 api_key = str(provider_cfg.get("api_key", ""))
                 if api_key and not api_key.startswith("${"):
                     logger.info("default_model 未设置，自动选用: %s (provider=%s)", key, provider_name)
-                    return provider_name, entry.get("model_id", key)
+                    return provider_name, str(entry.get("model_id", ""))
             logger.warning("没有找到任何已配置 api_key 的模型，使用 mock provider")
             return "mock", "mock"
 
         # 精确匹配 models 注册表
         if model_key in models:
             entry = models[model_key]
-            return entry.get("provider", "mock"), entry.get("model_id", model_key)
+            return entry.get("provider", "mock"), str(entry.get("model_id", ""))
 
-        # 向后兼容：model_key 可能是直接的 model_id（如 "gpt-4o-mini"）
-        # 从 models 注册表中反查
-        for _key, entry in models.items():
-            if isinstance(entry, dict) and entry.get("model_id") == model_key:
-                return entry.get("provider", "mock"), model_key
-
-        # 都找不到，返回 mock
         logger.warning("未知的模型 key: %s，使用 mock provider", model_key)
-        return "mock", model_key
+        return "mock", ""
 
     def resolve_embedding_model(self) -> tuple[str, str] | None:
         """解析 embedding 模型 key 为 (provider_name, model_id)。
@@ -658,7 +650,7 @@ class Config:
         models = self.get("llm.models", {})
         if model_key in models:
             entry = models[model_key]
-            return entry.get("provider", "mock"), entry.get("model_id", model_key)
+            return entry.get("provider", "mock"), str(entry.get("model_id", ""))
 
         logger.warning("未知的 embedding 模型 key: %s", model_key)
         return None
@@ -676,10 +668,6 @@ class Config:
         models = self.get("llm.models", {})
         if model_key in models:
             return int(models[model_key].get("max_output_tokens", 16384))
-        # 向后兼容：反查 model_id
-        for _key, entry in models.items():
-            if isinstance(entry, dict) and entry.get("model_id") == model_key:
-                return int(entry.get("max_output_tokens", 16384))
         return 16384
 
     def get_model_extra_body(self, model_key: str | None = None) -> dict:
@@ -695,10 +683,6 @@ class Config:
         models = self.get("llm.models", {})
         if model_key in models:
             return dict(models[model_key].get("extra_body", {}))
-        # 向后兼容：反查 model_id
-        for _key, entry in models.items():
-            if isinstance(entry, dict) and entry.get("model_id") == model_key:
-                return dict(entry.get("extra_body", {}))
         return {}
 
 

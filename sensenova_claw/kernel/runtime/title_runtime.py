@@ -134,8 +134,4 @@ class TitleRuntime:
                 model_key = agent_config.model
 
         provider_name, model_id = config.resolve_model(model_key)
-
-        # 兼容仍直接填写 model_id 的 agent 配置。
-        if provider_name == "mock" and model_key:
-            return "mock", model_key
         return provider_name, model_id

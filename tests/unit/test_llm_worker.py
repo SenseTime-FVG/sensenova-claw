@@ -393,6 +393,23 @@ class TestLLMWorkerHandle:
         assert provider.calls[0]["extra_body"] == {"top_p": 0.95, "top_k": 20}
         # 不抛异常即可
 
+    async def test_explicit_empty_model_does_not_fallback_to_default_model(self, private_bus, runtime):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "gpt-5.4"
+            provider = _SuccessProvider("ok")
+            runtime.factory.get_provider = lambda provider_name="mock": provider
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+            event = _make_llm_event("openai", "", [{"role": "user", "content": "hi"}])
+            event.payload["stream"] = False
+
+            await worker._handle_llm_requested(event)
+
+            assert provider.calls
+            assert provider.calls[0]["model"] == ""
+        finally:
+            config.data = original
+
     @pytest.mark.parametrize("provider_name", ["mock", "gemini"])
     async def test_routes_llm_requested(self, private_bus, public_bus, runtime, provider_name):
         skip_if_gemini_unavailable(provider_name)
