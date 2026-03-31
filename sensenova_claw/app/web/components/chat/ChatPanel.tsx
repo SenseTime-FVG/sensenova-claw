@@ -170,11 +170,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         </div>
       )}
 
-      <MessageArea 
-        messages={messages} 
-        isTyping={isTyping} 
-        currentSessionId={currentSessionId} 
-        emptyState={resolvedEmptyState}
+      <MessageArea
+        messages={messages}
+        isTyping={isTyping}
+        currentSessionId={currentSessionId}
+        emptyState={currentSessionId ? defaultEmptyState : resolvedEmptyState}
       />
 
       <InlinePreview
