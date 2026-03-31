@@ -41,6 +41,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     activeInteraction,
     interactionSubmitting,
     sendMessage,
+    sendQuestionAnswer,
     resetIfNeeded,
     startNewChat,
     handleSkillInvoke,
@@ -128,8 +129,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     contextFiles?: ContextFileRef[],
     recommendation?: RecommendationSendMeta | null,
   ) => {
+    if (activeInteraction?.kind === 'question' && activeInteraction.sourceSessionId === currentSessionId) {
+      sendQuestionAnswer(content, false);
+      return;
+    }
     sendMessage(content, contextFiles, selectedAgent, recommendation);
-  }, [sendMessage, selectedAgent]);
+  }, [activeInteraction, currentSessionId, sendMessage, sendQuestionAnswer, selectedAgent]);
 
   const fillInput = useCallback((text: string) => {
     chatInputRef.current?.setInput(text);

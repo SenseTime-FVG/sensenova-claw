@@ -1699,3 +1699,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - `sensenova_claw/app/web/e2e/ask-user.spec.ts` 中 `session 页面 ask_user 工具卡片内应显示内嵌回复框并可提交` 当前仍会失败，表现为 `inline-ask-user-q_session_inline_1` 未渲染；这更像既有测试夹具或页面状态问题，不能误归因到本次纯样式修改。
+
+### 2026-03-31 session 页 ask_user 主输入回归补充
+
+成功经验：
+- `/sessions/[id]` 复用 `ChatPanel` 时，`resetIfNeeded()` 必须对 React 开发态双调用幂等；先判断 `sessionIdRef.current` 是否已存在，可以避免第二次 effect 把刚绑定的会话清空。
+- ask_user 的“主输入优先回答问题”逻辑收敛到共享 `ChatPanel.handleSend()` 更稳，能让 `/chat`、`/ppt`、`/sessions` 统一走同一条发送分支。
+- 会话页 E2E 若要验证 ask_user，先等待 `current-session-id` 绑定到目标 session，再注入 mock `user_question_asked`，能把“页面绑定竞态”和“问答提交流程”分开定位。
+
+失败/风险经验：
+- 仅等待 mock WebSocket 就绪并不代表 `/sessions/[id]` 已完成 `switchSession`；如果过早注入 ask_user，表面上像“主输入不支持 ask_user”，实际是当前 session 仍为空。

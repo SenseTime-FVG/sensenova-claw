@@ -67,6 +67,7 @@ export interface MessageContextValue {
   sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string) => void;
   cancelTurn: () => void;
   handleSkillInvoke: (skillName: string, args: string) => void;
+  setTyping: (typing: boolean) => void;
 
   /** 供 InteractionContext 更新消息列表（如 ask_user 状态） */
   updateMessages: (updater: (prev: ChatMessage[]) => ChatMessage[]) => void;
@@ -592,6 +593,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     sendMessage,
     cancelTurn,
     handleSkillInvoke,
+    setTyping: setIsTyping,
     updateMessages,
   };
 

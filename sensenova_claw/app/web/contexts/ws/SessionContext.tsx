@@ -151,6 +151,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [startNewChat]);
 
   const resetIfNeeded = useCallback(() => {
+    if (sessionIdRef.current) {
+      return;
+    }
     if (switchedSessionRef.current) {
       switchedSessionRef.current = false;
       return;

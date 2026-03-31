@@ -1526,6 +1526,7 @@ test.describe('ask_user UI（mock websocket）', () => {
 
   test('session 页面可处理 ask_user', async ({ page }) => {
     await gotoSessionPage(page, 'sess_e2e');
+    await waitForMockWebSocketReady(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -1635,6 +1636,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   test('session 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input', async ({ page }) => {
     await gotoSessionPage(page, 'sess_e2e');
     await waitForMockWebSocketReady(page);
+    await expect(page.getByTestId('current-session-id')).toHaveText('sess_e2e');
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
