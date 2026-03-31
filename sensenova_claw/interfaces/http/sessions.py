@@ -80,6 +80,16 @@ async def list_sessions(request: Request, include_hidden: bool = Query(default=F
     return JSONResponse(content={"sessions": sessions})
 
 
+@router.get("/{session_id}")
+async def get_session_detail(session_id: str, request: Request):
+    """获取单个会话详情。"""
+    sessions = await _get_services(request).repo.list_sessions(limit=999999, include_hidden=True)
+    session = next((item for item in sessions if item["session_id"] == session_id), None)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    return JSONResponse(content={"session": session})
+
+
 @router.get("/{session_id}/turns")
 async def get_session_turns(session_id: str, request: Request):
     """获取会话的所有轮次。"""

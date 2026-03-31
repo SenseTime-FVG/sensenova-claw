@@ -1739,3 +1739,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `Config(project_root=...)` 会走目录向上发现配置的加载路径，并忽略 `config_path`；给配置解析补单测时如果混用两种构造方式，很容易把夹具写错，误把测试问题当成实现回归。
 - 当前前端 Playwright 在本机容易受到已有 `localhost:3000` 服务和现有 dev server 状态影响；出现长时间挂起时，需先区分 webServer/页面环境问题和业务断言失败。
+
+### 2026-03-31 sessions 详情页 404 补充
+
+成功经验：
+- `/sessions/[id]` 页面除了会话列表、消息和事件，还会单独请求 `GET /api/sessions/{id}`；排查“详情页固定显示 Session not found”时，先对照页面请求链和后端 router 是否真的有这个 endpoint，能最快定位根因。
+- 对这类“前端已有调用、后端缺接口”的问题，最小修复是在 `tests/unit/test_sessions_api.py` 先补 `GET /api/sessions/{id}` 的红灯，再在 `interfaces/http/sessions.py` 增加详情接口；这样比先改页面更稳。
+- 现有 `chat-ime-enter.spec.ts` 已覆盖 `/sessions/[id]` 打开路径，补齐 `**/api/sessions/sess_existing` 的 mock 后，就能把详情页加载链一并纳入前端回归。
+
+失败/风险经验：
+- 如果 Playwright 夹具只 mock `/api/sessions` 列表而没 mock `/api/sessions/{id}`，`/sessions/[id]` 用例会因为页面初始化失败而拿不到 `chat-input`，表面像输入框回归，实际是测试数据不完整。
