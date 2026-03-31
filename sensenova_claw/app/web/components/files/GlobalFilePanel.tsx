@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, type KeyboardEvent } from 'react';
 import {
   Folder, FolderOpen, File, ChevronRight, ChevronDown,
   Loader2, RefreshCw, CheckCircle2,
   Search, Presentation, Cog, Sparkles, Plus,
   Eye, FolderOpen as FolderOpenIcon,
+  CornerDownLeft, X,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useDrag } from 'react-dnd';
@@ -310,9 +311,13 @@ function bestMatchRoot(roots: FileItem[], target: string | null): string | null 
 }
 
 export function GlobalFilePanel() {
-  const { focusPath, focusGeneration } = useFilePanel();
+  const { focusPath, focusGeneration, openToPath } = useFilePanel();
   const localTreeKey = `${focusPath ?? 'manual'}-${focusGeneration}`;
   const [roots, setRoots] = useState<FileItem[]>([]);
+  const [pathInputVisible, setPathInputVisible] = useState(false);
+  const [pathInputValue, setPathInputValue] = useState('');
+  const [pathInputError, setPathInputError] = useState<string | null>(null);
+  const pathInputRef = useRef<HTMLInputElement>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -331,6 +336,62 @@ export function GlobalFilePanel() {
   useEffect(() => { loadRoots(); }, [loadRoots]);
 
   const bestRoot = bestMatchRoot(roots, focusPath);
+
+  /* ── 路径输入定位 ── */
+  const togglePathInput = useCallback(() => {
+    setPathInputVisible(v => {
+      if (!v) {
+        setPathInputValue(focusPath ?? '');
+        setPathInputError(null);
+        setTimeout(() => pathInputRef.current?.select(), 0);
+      }
+      return !v;
+    });
+  }, [focusPath]);
+
+  const handlePathSubmit = useCallback(async () => {
+    const raw = pathInputValue.trim();
+    if (!raw) return;
+    setPathInputError(null);
+    try {
+      // 验证路径是否存在
+      const res = await authFetch(`${API_BASE}/api/files?path=${encodeURIComponent(raw)}`);
+      if (res.ok) {
+        // 路径是文件夹，直接定位
+        openToPath(raw);
+        setPathInputVisible(false);
+        return;
+      }
+    } catch { /* ignore */ }
+    // 尝试把路径当文件处理（定位到其父目录并高亮该文件）
+    try {
+      const parent = raw.replace(/[\\/][^\\/]+$/, '');
+      if (parent && parent !== raw) {
+        const res = await authFetch(`${API_BASE}/api/files?path=${encodeURIComponent(parent)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const items: FileItem[] = data.items || [];
+          const normRaw = norm(raw);
+          const found = items.some(i => norm(i.path) === normRaw);
+          if (found) {
+            openToPath(raw);
+            setPathInputVisible(false);
+            return;
+          }
+        }
+      }
+    } catch { /* ignore */ }
+    setPathInputError('路径不存在');
+  }, [pathInputValue, openToPath]);
+
+  const handlePathKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handlePathSubmit();
+    } else if (e.key === 'Escape') {
+      setPathInputVisible(false);
+    }
+  }, [handlePathSubmit]);
 
   const handleFileClick = useCallback((item: FileItem) => {
     if (isPreviewable(item.name)) {
@@ -431,10 +492,50 @@ export function GlobalFilePanel() {
               <div className="w-1.5 h-1.5 rounded-full bg-teal-500/60" />
               <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-[0.15em]">文件区</span>
             </div>
-            <button onClick={loadRoots} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-all">
-              <RefreshCw className="w-3 h-3" />
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={togglePathInput}
+                title="输入路径定位"
+                className={cn(
+                  'p-1.5 rounded-lg hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-all',
+                  pathInputVisible && 'bg-muted text-foreground',
+                )}
+              >
+                <CornerDownLeft className="w-3 h-3" />
+              </button>
+              <button onClick={loadRoots} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-all">
+                <RefreshCw className="w-3 h-3" />
+              </button>
+            </div>
           </div>
+          {pathInputVisible && (
+            <div className="px-2 py-1.5 border-b border-border/40 bg-muted/30">
+              <div className="flex items-center gap-1">
+                <input
+                  ref={pathInputRef}
+                  type="text"
+                  value={pathInputValue}
+                  onChange={e => { setPathInputValue(e.target.value); setPathInputError(null); }}
+                  onKeyDown={handlePathKeyDown}
+                  placeholder="输入绝对路径，回车定位"
+                  className={cn(
+                    'flex-1 min-w-0 text-xs bg-background border rounded-md px-2 py-1 outline-none transition-colors',
+                    pathInputError ? 'border-destructive' : 'border-border focus:border-primary',
+                  )}
+                  autoFocus
+                />
+                <button
+                  onClick={() => setPathInputVisible(false)}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground shrink-0"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              {pathInputError && (
+                <p className="text-[10px] text-destructive mt-0.5 px-1">{pathInputError}</p>
+              )}
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto py-1">
             <div className="space-y-0.5 px-1" key={localTreeKey}>
               {roots.map(r => (

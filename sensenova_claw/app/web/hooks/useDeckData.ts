@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { jsonrepair } from 'jsonrepair';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import type { Storyboard } from '@/components/ppt/StoryboardPanel';
 import type { StyleSpec } from '@/components/ppt/StylePanel';
@@ -60,14 +61,27 @@ export interface DeckData {
   refresh: () => void;
 }
 
-/** 从 workdir 读取 JSON 文件 */
+/** 从 workdir 读取 JSON 文件，自动修复 LLM 常见的 JSON 语法错误 */
 async function fetchJsonFromWorkdir(deckDir: string, filename: string): Promise<unknown | null> {
   try {
     const path = `${deckDir}/${filename}`;
     const res = await authFetch(`${API_BASE}/api/files/workdir/${path}`);
     if (!res.ok) return null;
     const text = await res.text();
-    return JSON.parse(text);
+    try {
+      return JSON.parse(text);
+    } catch {
+      // JSON 解析失败，用 jsonrepair 修复（处理未转义引号、尾逗号等）
+      console.warn(`[useDeckData] ${filename} JSON 解析失败，尝试修复...`);
+      try {
+        const repaired = JSON.parse(jsonrepair(text));
+        console.info(`[useDeckData] ${filename} JSON 修复成功`);
+        return repaired;
+      } catch {
+        console.error(`[useDeckData] ${filename} JSON 修复失败`);
+        return null;
+      }
+    }
   } catch {
     return null;
   }
@@ -201,11 +215,23 @@ export function useDeckData(messages: ChatMessage[]): DeckData {
   const [loading, setLoading] = useState(false);
   const lastMsgCount = useRef(0);
 
-  // 从消息自动检测 deckDir
+  // 从消息自动检测 deckDir；会话切换（messages 清空再重建）时重置旧数据
   useEffect(() => {
     const detected = detectDeckDir(messages);
-    if (detected && detected !== deckDir) {
+    if (detected !== deckDir) {
       setDeckDir(detected);
+      if (!detected) {
+        // 新会话尚无产物，清空旧数据
+        setStoryboard(null);
+        setStyleSpec(null);
+        setReview(null);
+        setSpeakerNotes(null);
+        setSlideSet(null);
+        setHasTaskPack(false);
+        setHasResearch(false);
+        setAssetPlan(null);
+        lastMsgCount.current = 0;
+      }
     }
   }, [messages, deckDir]);
 
@@ -224,6 +250,12 @@ export function useDeckData(messages: ChatMessage[]): DeckData {
         fetchJsonFromWorkdir(deckDir, 'asset-plan.json'),
       ]);
 
+      // 兼容不同版本的字段名（如 deck_title → ppt_title）
+      if (sb && typeof sb === 'object') {
+        const raw = sb as Record<string, unknown>;
+        if (!raw.ppt_title && raw.deck_title) raw.ppt_title = raw.deck_title;
+        if (!raw.mode) raw.mode = 'fast';
+      }
       setStoryboard(sb as Storyboard | null);
       setStyleSpec(ss as StyleSpec | null);
       setReview(rv as ReviewReport | null);

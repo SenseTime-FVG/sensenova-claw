@@ -22,6 +22,28 @@ import {
   upsertAssistantTurnMessage,
 } from '@/lib/chatTypes';
 
+/** 检查事件列表中 turn 是否仍在进行中（有 user_input 但无对应的终结事件） */
+/** 检查事件列表中 turn 是否仍在进行中：
+ *  有 user_input 开启了 turn，但尚未收到终结事件。
+ *  兼容两种事件格式：
+ *  - WS 推送: type 字段，下划线命名 (user_input, turn_completed, ...)
+ *  - API 历史: event_type 字段，点分命名 (user.input, agent.step_completed, ...) */
+function isTurnStillActive(events: Record<string, unknown>[]): boolean {
+  let active = false;
+  for (const e of events) {
+    const type = (e.type || e.event_type || '') as string;
+    if (type === 'user_input' || type === 'user.input') {
+      active = true;
+    } else if (
+      type === 'turn_completed' || type === 'turn_cancelled' || type === 'error' ||
+      type === 'agent.step_completed'
+    ) {
+      active = false;
+    }
+  }
+  return active;
+}
+
 // ── proactive 推送 ──
 
 export interface ProactiveResultItem {
@@ -208,8 +230,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         setRightTaskProgress(taskProgress);
         toolStepMapRef.current = toolStepMap;
         if (!isPendingSessionBootstrap) {
-          setIsTyping(false);
-          setTurnActive(false);
+          const stillActive = isTurnStillActive(events);
+          setIsTyping(stillActive);
+          setTurnActive(stillActive);
         }
         pendingSessionBootstrapIdRef.current = null;
       } catch {
@@ -231,8 +254,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           const events = Array.isArray(event.payload.events) ? event.payload.events : [];
           resetTurnTracking();
           setMessages(rebuildMessagesFromEvents(events));
-          setIsTyping(false);
-          setTurnActive(false);
+          const stillActive = isTurnStillActive(events);
+          setIsTyping(stillActive);
+          setTurnActive(stillActive);
           pendingSessionBootstrapIdRef.current = null;
           break;
         }
