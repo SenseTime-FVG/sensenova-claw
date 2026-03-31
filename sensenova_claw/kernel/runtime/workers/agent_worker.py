@@ -320,14 +320,11 @@ class AgentSessionWorker(SessionWorker):
         await self.rt.repo.update_session_activity(self.session_id)
         await self.rt.repo.create_turn(turn_id=turn_id, session_id=self.session_id, user_input=content)
 
-        # v0.5: 首轮加载 per-agent workspace 文件
-        context_files = None
-        if self.rt.state_store.is_first_turn(self.session_id):
-            from sensenova_claw.platform.config.workspace import load_workspace_files, resolve_sensenova_claw_home
-            sensenova_claw_home = str(resolve_sensenova_claw_home(config))
-            agent_id = self.agent_config.id if self.agent_config else "default"
-            context_files = await load_workspace_files(sensenova_claw_home, agent_id=agent_id)
-            self.rt.state_store.mark_first_turn_done(self.session_id)
+        # 每轮加载 per-agent workspace 文件（AGENTS.md / USER.md），确保长对话不丢失指令
+        from sensenova_claw.platform.config.workspace import load_workspace_files, resolve_sensenova_claw_home
+        sensenova_claw_home = str(resolve_sensenova_claw_home(config))
+        agent_id = self.agent_config.id if self.agent_config else "default"
+        context_files = await load_workspace_files(sensenova_claw_home, agent_id=agent_id)
 
         # 读取前端拖入的用户文件
         user_file_paths = event.payload.get("context_files", [])
