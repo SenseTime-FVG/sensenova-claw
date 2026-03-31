@@ -23,12 +23,12 @@ test('MessageArea 应在空消息时稳定展示 empty state', () => {
   assert.ok(!source.includes('messages.length === 0 && !currentSessionId'));
 });
 
-test('ChatSessionContext 手动重连应强制重跑连接 effect', () => {
-  const source = readSource('contexts/ChatSessionContext.tsx');
+test('WebSocketContext 手动重连应强制重跑连接 effect', () => {
+  const source = readSource('contexts/ws/WebSocketContext.tsx');
 
   assert.match(source, /const \[connectionNonce, setConnectionNonce\] = useState\(0\);/);
   assert.match(source, /setConnectionNonce\(\(prev\) => prev \+ 1\);/);
-  assert.match(source, /\}, \[bindSessionToCurrentSocket, connectionNonce, loadSessionList, shouldActivate\]\);/);
+  assert.match(source, /\}, \[enabled, connectionNonce\]\);/);
 });
 
 test('前端 node 测试脚本应指向实际存在的测试文件集合', () => {
@@ -45,4 +45,13 @@ test('聊天泡泡旧的全局 bubble 样式不应再给整行容器叠加背景
   assert.match(source, /\.bubble\.assistant \{[\s\S]*background: transparent;[\s\S]*padding: 0;[\s\S]*border-radius: 0;/s);
   assert.match(source, /\.bubble\.tool \{[\s\S]*background: transparent;[\s\S]*padding: 0;[\s\S]*border-radius: 0;/s);
   assert.match(source, /\.bubble\.system \{[\s\S]*background: transparent;[\s\S]*padding: 0;[\s\S]*border-radius: 0;/s);
+});
+
+test('新建会话首条消息 bootstrap 期间不应被 session 历史加载提前清掉 isTyping', () => {
+  const source = readSource('contexts/ws/MessageContext.tsx');
+
+  assert.match(source, /const pendingSessionBootstrapIdRef = useRef<string \| null>\(null\);/);
+  assert.match(source, /const isPendingSessionBootstrap = pendingSessionBootstrapIdRef\.current === currentSessionId;/);
+  assert.match(source, /if \(!isPendingSessionBootstrap\) \{\s*setIsTyping\(false\);\s*\}/s);
+  assert.match(source, /pendingSessionBootstrapIdRef\.current = newSid;/);
 });

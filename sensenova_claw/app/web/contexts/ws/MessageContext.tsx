@@ -124,6 +124,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const cancelledTurnIdsRef = useRef<Set<string>>(new Set());
   const lastStreamingTurnIdRef = useRef<string | null>(null);
   const pendingInputRef = useRef<{ content: string; contextFiles?: string[] } | null>(null);
+  const pendingSessionBootstrapIdRef = useRef<string | null>(null);
 
   // ── helpers ──
 
@@ -180,9 +181,11 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       setRightTaskProgress([]);
       toolStepMapRef.current.clear();
       pendingInputRef.current = null;
+      pendingSessionBootstrapIdRef.current = null;
       return;
     }
     let cancelled = false;
+    const isPendingSessionBootstrap = pendingSessionBootstrapIdRef.current === currentSessionId;
     (async () => {
       try {
         const res = await authFetch(`${API_BASE}/api/sessions/${currentSessionId}/events`);
@@ -196,7 +199,10 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         setRightSteps(steps);
         setRightTaskProgress(taskProgress);
         toolStepMapRef.current = toolStepMap;
-        setIsTyping(false);
+        if (!isPendingSessionBootstrap) {
+          setIsTyping(false);
+        }
+        pendingSessionBootstrapIdRef.current = null;
       } catch {
         if (cancelled) return;
         setRightSteps([]);
@@ -217,6 +223,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           resetTurnTracking();
           setMessages(rebuildMessagesFromEvents(events));
           setIsTyping(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'agent_thinking':
@@ -342,6 +349,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             return prev;
           });
           setIsTyping(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'turn_cancelled': {
@@ -351,11 +359,13 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             if (lastStreamingTurnIdRef.current === cancelledTurnId) lastStreamingTurnIdRef.current = null;
           }
           setIsTyping(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'error':
           addMsg('system', event.payload.user_message || event.payload.message || event.payload.error_type || 'Unknown Error');
           setIsTyping(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         // 交互事件的 typing 状态（仅当前 session，重构前在单体 handler 中 isCurrentSession 守卫内处理）
         case 'tool_confirmation_requested':
@@ -479,6 +489,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         if (!newSid) return;
         if (pendingInputRef.current) {
           const { content, contextFiles } = pendingInputRef.current;
+          pendingSessionBootstrapIdRef.current = newSid;
           wsSend({
             type: 'user_input',
             session_id: newSid,
