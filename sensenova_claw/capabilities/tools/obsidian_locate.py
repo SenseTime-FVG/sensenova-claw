@@ -236,15 +236,74 @@ def _read_config_macos() -> list[Path]:
 
 
 def _detect_vaults_linux() -> list[Path]:
-    """Linux 平台 vault 检测"""
-    # 占位符，下个 task 实现
-    return []
+    """Linux 平台 vault 检测 - 检查标准位置"""
+    home = Path.home()
+
+    candidates = [
+        home / "Documents" / "Obsidian",
+        home / "Obsidian",
+        home / ".obsidian-vaults",
+        home / "文档" / "Obsidian",  # 中文环境
+    ]
+
+    vaults: list[Path] = []
+    for path in candidates:
+        try:
+            if path.exists() and path.is_dir():
+                if _validate_vault(path):
+                    vaults.append(path)
+                else:
+                    # 检查子目录
+                    try:
+                        for subdir in path.iterdir():
+                            if subdir.is_dir() and _validate_vault(subdir):
+                                vaults.append(subdir)
+                    except (PermissionError, OSError) as e:
+                        logger.debug(f"Cannot list directory {path}: {e}")
+        except Exception as e:
+            logger.debug(f"Error checking Linux path {path}: {e}")
+
+    return vaults
 
 
 def _read_config_linux() -> list[Path]:
-    """Linux 配置文件读取"""
-    # 占位符，下个 task 实现
-    return []
+    """Linux 配置文件读取 - 从 Obsidian 配置解析"""
+    home = Path.home()
+    vaults: list[Path] = []
+
+    config_paths = [
+        home / ".config" / "obsidian" / "obsidian.json",
+        home / ".local" / "share" / "obsidian" / "obsidian.json",
+    ]
+
+    for config_path in config_paths:
+        try:
+            if config_path.exists() and config_path.is_file():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                    # 解析 vaults 字段
+                    if "vaults" in data and isinstance(data["vaults"], dict):
+                        for vault_path_str in data["vaults"].values():
+                            if isinstance(vault_path_str, str):
+                                vault_path = Path(vault_path_str).expanduser()
+                                if _validate_vault(vault_path):
+                                    vaults.append(vault_path)
+
+                    # 解析 open 字段
+                    if "open" in data and isinstance(data["open"], str):
+                        vault_path = Path(data["open"]).expanduser()
+                        if _validate_vault(vault_path) and vault_path not in vaults:
+                            vaults.append(vault_path)
+
+                logger.debug(f"Found {len(vaults)} vault(s) in {config_path}")
+
+        except json.JSONDecodeError as e:
+            logger.debug(f"Failed to parse JSON config {config_path}: {e}")
+        except Exception as e:
+            logger.debug(f"Error reading Linux config {config_path}: {e}")
+
+    return vaults
 
 
 # ============================================================================
