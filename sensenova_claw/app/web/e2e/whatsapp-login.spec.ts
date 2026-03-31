@@ -219,6 +219,75 @@ test('whatsapp 未授权时 gateway 页面显示红灯和授权按钮', async ({
   await expect(page.getByRole('button', { name: '授权' })).toBeVisible();
 });
 
+test('gateway 页面 connecting 状态显示黄灯', async ({ page, context }) => {
+  await context.addCookies([
+    {
+      name: 'sensenova_claw_token',
+      value: 'test-token',
+      domain: 'localhost',
+      path: '/',
+      httpOnly: false,
+      secure: false,
+      sameSite: 'Lax',
+    },
+  ]);
+
+  await page.route('**/api/auth/status', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ authenticated: true }),
+    });
+  });
+
+  await page.route('**/api/gateway/stats', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        totalChannels: 1,
+        activeChannels: 0,
+        totalConnections: 0,
+        totalSessions: 0,
+      }),
+    });
+  });
+
+  await page.route('**/api/gateway/channels', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'qq',
+          name: 'QQ',
+          type: 'qq',
+          status: 'connecting',
+          config: {},
+        },
+      ]),
+    });
+  });
+
+  await page.route('**/api/gateway/whatsapp/status', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        enabled: false,
+        authorized: false,
+        state: 'stopped',
+      }),
+    });
+  });
+
+  await page.goto('/gateway');
+
+  const connectingBadge = page.getByText('connecting').first();
+  await expect(connectingBadge).toBeVisible();
+  await expect(connectingBadge).toHaveClass(/bg-amber-500/);
+});
+
 test('点击 gateway 中的 whatsapp 授权按钮后进入独立登录页', async ({ page, context }) => {
   await mockAuthenticatedWhatsAppBlocked(page, context);
 
