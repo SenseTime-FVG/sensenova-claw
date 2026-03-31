@@ -631,6 +631,108 @@ test('llms 页面单项编辑时测试按钮应读取草稿并位于编辑按钮
   expect(resultBox!.x).toBeGreaterThanOrEqual(saveBox!.x);
 });
 
+test('llms 页面测试连接在 model_id 为空时应直接发送空字符串', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          'gpt-4o-mini': { provider: 'openai', model_id: '', timeout: 60, max_tokens: 128000, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+      },
+    };
+
+    const testRequests: Array<Record<string, unknown>> = [];
+
+    Object.assign(window, {
+      __llmEmptyModelRequests: testRequests,
+    });
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/secret?path=llm.providers.openai.api_key') && method === 'GET') {
+        return new Response(JSON.stringify({ path: 'llm.providers.openai.api_key', value: 'sk-openai-real' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/api/config/test-llm') && method === 'POST') {
+        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
+        testRequests.push(body);
+        (window as typeof window & { __llmEmptyModelRequests: Array<Record<string, unknown>> }).__llmEmptyModelRequests = testRequests;
+        return new Response(JSON.stringify({ success: true, message: '连接成功' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.getByTestId('provider-toggle-openai').click();
+  await page.getByTestId('llm-test-gpt-4o-mini').click();
+
+  await expect.poll(async () => {
+    return page.evaluate(() => ((window as typeof window & {
+      __llmEmptyModelRequests?: Array<Record<string, unknown>>;
+    }).__llmEmptyModelRequests ?? []).length);
+  }).toBe(1);
+
+  await expect.poll(async () => {
+    return page.evaluate(() => ((window as typeof window & {
+      __llmEmptyModelRequests?: Array<Record<string, unknown>>;
+    }).__llmEmptyModelRequests ?? [])[0]);
+  }).toEqual({
+    provider: 'openai',
+    api_key: 'sk-openai-real',
+    base_url: 'https://api.openai.com/v1',
+    model_id: '',
+    max_tokens: 128000,
+    max_output_tokens: 8192,
+  });
+});
+
 test('llms 页面测试按钮悬停 3 秒后应显示 token 消耗提示', async ({ page }) => {
   const token = readCurrentToken();
   await page.context().addCookies([{

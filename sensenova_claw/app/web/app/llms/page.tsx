@@ -824,7 +824,7 @@ export default function LlmsPage() {
           provider: provider.source_type || 'openai',
           api_key: apiKey,
           base_url: provider.base_url || '',
-          model_id: model.model_id || modelName,
+          model_id: model.model_id ?? '',
           max_tokens: model.max_tokens || 128000,
           max_output_tokens: model.max_output_tokens || 16384,
         }),

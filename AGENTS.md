@@ -1719,3 +1719,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前 `tests/unit/test_config_api.py` 仍有与本次无关的既有失败：`test_create_single_model_when_missing` 断言未包含默认写入的 `type: chat`；跑整文件时要区分历史失败和本次修复结果。
+
+### 2026-03-31 model_key/model_id 兜底收口补充
+
+成功经验：
+- 如果需求要求 `model_key` 与 `model_id` 完全解耦，不能只改 `Config.resolve_model()`；还要同步检查 `get_model_max_output_tokens()`、`get_model_extra_body()`、`agent_worker`、`llm_worker` 和 `title_runtime`，否则仍会在参数继承或事件透传路径残留旧兜底。
+- `LLMSessionWorker` 判断“是否显式传入 model/provider”时不能用 truthy；空字符串也是有效显式值。改成“字段存在且不为 `None`”后，空 `model_id` 才能原样透传到 provider。
+- `/llms` 页这类配置测试回归，直接抓 `/api/config/test-llm` 请求体最有效，能精确锁住“`model_id=''` 也必须发送空字符串，而不是回退到模型名”。
+
+失败/风险经验：
+- `Config(project_root=...)` 会走目录向上发现配置的加载路径，并忽略 `config_path`；给配置解析补单测时如果混用两种构造方式，很容易把夹具写错，误把测试问题当成实现回归。
+- 当前前端 Playwright 在本机容易受到已有 `localhost:3000` 服务和现有 dev server 状态影响；出现长时间挂起时，需先区分 webServer/页面环境问题和业务断言失败。
