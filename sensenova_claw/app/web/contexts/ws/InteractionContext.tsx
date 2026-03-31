@@ -129,7 +129,6 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
           const { tool_call_id: toolCallId, tool_name: toolName } = event.payload;
           const sourceSessionId = event.session_id || '';
           if (!toolCallId || !sourceSessionId) break;
-          // 重构前行为：enqueueInteraction 仅当前 session，pushCard 始终执行
           const isThisSession = sourceSessionId === currentSessionIdRef.current;
           if (isThisSession) {
             enqueueInteraction({
@@ -143,7 +142,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
               arguments: (event.payload.arguments || {}) as Record<string, unknown>,
             });
           }
-          pushCard({
+          const cardId = pushCard({
             id: `confirm_${toolCallId}`,
             kind: 'tool_confirmation',
             title: '需要授权',
@@ -156,6 +155,29 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
               { label: '批准', value: 'approve' },
               { label: '拒绝', value: 'deny' },
             ],
+          });
+          // 当前 session 也需要 toast 弹窗（聊天区域没有内嵌的确认 UI）
+          pushToast({
+            kind: 'tool_confirmation',
+            title: '需要授权',
+            body: `工具 "${toolName}" 需要你的确认才能执行`,
+            level: 'warning',
+            actions: [
+              { label: '批准', value: 'approve' },
+              { label: '拒绝', value: 'deny' },
+            ],
+            cardId,
+            sessionId: sourceSessionId,
+            eventKey: `confirm_${toolCallId}`,
+            onAction: (actionValue) => {
+              wsSend({
+                type: 'tool_confirmation_response',
+                session_id: sourceSessionId,
+                payload: { tool_call_id: toolCallId, approved: actionValue === 'approve' },
+                timestamp: Date.now() / 1000,
+              });
+              markCardPending(cardId, actionValue);
+            },
           });
           break;
         }
