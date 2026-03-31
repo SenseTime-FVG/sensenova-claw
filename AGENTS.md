@@ -1634,3 +1634,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前仍有一个前端残余问题：`sensenova_claw/app/web/e2e/ask-user.spec.ts` 中“session 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input”持续失败，表现为答完问题后 `chat-input` 仍被禁用；说明 `/sessions/[id]` 页面在 `ask_user` 收口后仍有额外状态没释放，不能宣称该路径已完全回归。
+
+### 2026-03-30 QQ Channel 双协议移植补充
+
+成功经验：
+- 将 `qq` 设计成“单插件 + 单 `QQChannel` + 双 runtime (`official`/`onebot`)”最稳，能复用现有 `telegram/dingtalk/discord` 的会话桥接模式，同时把协议差异收敛在 runtime 层。
+- 先统一抽象 `QQInboundMessage(text/chat_type/chat_id/sender_id/target/mentioned_bot)` 再写 channel 逻辑最有效；这样官方 QQ 与 OneBot 都能直接复用同一套 `USER_INPUT / USER_QUESTION_ANSWERED / AGENT_STEP_COMPLETED` 事件链。
+- QQ 这类双协议接入，测试必须分三层：`config/plugin/channel` 单测、`runtime_official/runtime_onebot` 协议单测、进程内 e2e 各跑一条主链路；只测 channel 不测 runtime 很容易把协议字段差异漏掉。
+
+失败/风险经验：
+- `openclaw-cn/extensions/qqbot` 里的 QQ 插件只有元信息与 onboarding，没有可直接复用的 Python 收发 runtime；移植前必须先确认目标协议与当前仓库插件分层，不能误判为“直接复制就能跑”。
+- 用 `AsyncMock` 模拟 `httpx.Response` 时，`json()` 和 `raise_for_status()` 会变成 awaitable，容易把测试替身问题误判成 runtime bug；这类测试应优先使用同步 `Mock` 贴近 `httpx` 真实接口。
