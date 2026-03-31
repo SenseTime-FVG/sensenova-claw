@@ -205,6 +205,36 @@ async def test_tool_execute_with_exception(tool):
         assert result["vaults"] == []
 
 
+@pytest.mark.asyncio
+async def test_configured_vault_gets_knowledge_structure(tool):
+    """测试 - 配置的 vault 会自动补全知识库结构"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # 创建一个配置的 vault（只有 .obsidian，没有 Knowledge 结构）
+        vault_path = Path(tmpdir) / "configured-vault"
+        vault_path.mkdir()
+        (vault_path / ".obsidian").mkdir()
+
+        with patch("sensenova_claw.capabilities.tools.obsidian_locate.config") as mock_config:
+            mock_config.get.return_value = [str(vault_path)]
+
+            result = await tool.execute()
+
+            # 验证执行成功
+            assert result["success"] is True
+            assert len(result["vaults"]) == 1
+
+            # 验证知识库结构已创建
+            assert (vault_path / "Knowledge").exists()
+            assert (vault_path / "Knowledge" / "user-profile.md").exists()
+            assert (vault_path / "Knowledge" / "qa-history").exists()
+            assert (vault_path / "Knowledge" / "facts").exists()
+
+            # 验证 vault 信息正确
+            vault_info = result["vaults"][0]
+            assert vault_info["source"] == "configured"
+            assert vault_info["has_structure"] is True
+
+
 # ============================================================================
 # 测试 - 平台特定
 # ============================================================================

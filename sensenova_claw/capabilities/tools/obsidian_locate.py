@@ -518,7 +518,10 @@ def _get_all_vaults() -> tuple[list[VaultInfo], VaultInfo | None]:
             vaults_with_source.append((vault, "configured"))
 
     if vaults_with_source:
-        # 如果已配置，验证结构并返回
+        # 如果已配置，补全知识库结构后返回
+        for vault_path, _ in vaults_with_source:
+            _ensure_knowledge_structure(vault_path)
+
         vault_infos = _dedup_and_rank_vaults(vaults_with_source)
         primary = vault_infos[0] if vault_infos else None
         return vault_infos, primary
