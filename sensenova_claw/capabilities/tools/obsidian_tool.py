@@ -769,6 +769,10 @@ class ObsidianListVaultsTool(Tool):
     parameters = {
         "type": "object",
         "properties": {
+            "vault": {
+                "type": "string",
+                "description": "指定要列出的 vault 名称，不指定则列出所有 vault"
+            },
             "test_remote": {
                 "type": "boolean",
                 "description": "是否测试远程连接状态",
@@ -779,6 +783,7 @@ class ObsidianListVaultsTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
+        vault_filter = kwargs.get("vault", "")
         test_remote = kwargs.get("test_remote", False)
 
         configured_local = _get_configured_local_vaults()
@@ -787,8 +792,17 @@ class ObsidianListVaultsTool(Tool):
 
         vaults_info: list[dict[str, Any]] = []
 
-        # 本地 vaults
-        all_local = list(set(configured_local + detected_local))
+        # 本地 vaults：如果配置中指定了 vault，只使用配置的 vault
+        if configured_local:
+            all_local = configured_local
+        else:
+            all_local = detected_local
+
+        # 如果指定了 vault，只处理该 vault
+        if vault_filter:
+            all_local = [v for v in all_local if v.name == vault_filter]
+            remote_configs = [r for r in remote_configs if r.name == vault_filter]
+
         for vault in all_local:
             note_count = 0
             folders: set[str] = set()
@@ -831,6 +845,11 @@ class ObsidianListVaultsTool(Tool):
             vaults_info.append(info)
 
         if not vaults_info:
+            if vault_filter:
+                return {
+                    "success": False,
+                    "error": f"未找到指定的 vault: {vault_filter}",
+                }
             return {
                 "success": False,
                 "error": "未找到任何 Obsidian vault",
