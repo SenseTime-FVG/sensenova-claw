@@ -39,12 +39,12 @@ def _read_channel_runtime_state(channel: object) -> tuple[str, str]:
         if state in {"connecting", "refreshing_qr", "booting"}:
             return "connecting", ""
 
-    channel_status = getattr(channel, "_sensenova_claw_status", None)
     runtime_status = getattr(getattr(channel, "_runtime", None), "_sensenova_claw_status", None)
     client_status = getattr(getattr(channel, "_client", None), "_sensenova_claw_status", None)
+    channel_status = getattr(channel, "_sensenova_claw_status", None)
 
     normalized_sources: list[tuple[str, str]] = []
-    for source in (channel_status, runtime_status, client_status):
+    for source in (runtime_status, client_status, channel_status):
         if isinstance(source, dict):
             status = _normalize_channel_status(source.get("status", ""))
             if status:

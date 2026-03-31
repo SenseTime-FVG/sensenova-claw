@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Loader2, Globe, Settings } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Loader2, Globe, Settings, RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -37,21 +37,63 @@ export default function GatewayPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [whatsappStatus, setWhatsAppStatus] = useState<WhatsAppStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
+  const loadGatewayData = useCallback(async () => {
+    const [statsData, channelsData, whatsappStatusData] = await Promise.all([
       authFetch(`${API_BASE}/api/gateway/stats`).then(r => r.json()),
       authFetch(`${API_BASE}/api/gateway/channels`).then(r => r.json()),
       authFetch(`${API_BASE}/api/gateway/whatsapp/status`).then(r => r.json()).catch(() => null),
-    ])
-      .then(([statsData, channelsData, whatsappStatusData]) => {
-        setStats(statsData);
-        setChannels(channelsData);
-        setWhatsAppStatus(whatsappStatusData);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    ]);
+    setStats(statsData);
+    setChannels(channelsData);
+    setWhatsAppStatus(whatsappStatusData);
   }, []);
+
+  const refreshGatewayData = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadGatewayData();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadGatewayData]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        await loadGatewayData();
+      } catch {
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void load();
+
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        void loadGatewayData().catch(() => {});
+      }
+    };
+
+    const handleWindowFocus = () => {
+      void loadGatewayData().catch(() => {});
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [loadGatewayData]);
 
   function getChannelPresentation(channel: Channel) {
     if (channel.id === 'whatsapp' && whatsappStatus?.enabled && !whatsappStatus.authorized) {
@@ -95,6 +137,10 @@ export default function GatewayPage() {
       <div className="flex-1 space-y-8 p-10 lg:p-12">
         <div className="flex items-center justify-between space-y-2">
           <h2 className="text-4xl font-extrabold tracking-tight text-foreground/90">Gateway & Channels</h2>
+          <Button variant="outline" size="sm" onClick={refreshGatewayData} disabled={loading || refreshing} data-testid="gateway-refresh-button">
+            {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            <span className="ml-1">刷新</span>
+          </Button>
         </div>
 
         <div className="flex flex-col md:flex-row gap-8 mt-10">

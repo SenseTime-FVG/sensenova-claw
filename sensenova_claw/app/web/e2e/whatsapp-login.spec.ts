@@ -288,6 +288,80 @@ test('gateway 页面 connecting 状态显示黄灯', async ({ page, context }) =
   await expect(connectingBadge).toHaveClass(/bg-amber-500/);
 });
 
+test('gateway 页面点击刷新后会从 connecting 刷新到 connected', async ({ page, context }) => {
+  await context.addCookies([
+    {
+      name: 'sensenova_claw_token',
+      value: 'test-token',
+      domain: 'localhost',
+      path: '/',
+      httpOnly: false,
+      secure: false,
+      sameSite: 'Lax',
+    },
+  ]);
+
+  let channelsCallCount = 0;
+  let statsCallCount = 0;
+
+  await page.route('**/api/auth/status', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ authenticated: true }),
+    });
+  });
+
+  await page.route('**/api/gateway/stats', async (route: Route) => {
+    statsCallCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        totalChannels: 1,
+        activeChannels: statsCallCount >= 2 ? 1 : 0,
+        totalConnections: 0,
+        totalSessions: 0,
+      }),
+    });
+  });
+
+  await page.route('**/api/gateway/channels', async (route: Route) => {
+    channelsCallCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 'qq',
+          name: 'QQ',
+          type: 'qq',
+          status: channelsCallCount >= 2 ? 'connected' : 'connecting',
+          config: {},
+        },
+      ]),
+    });
+  });
+
+  await page.route('**/api/gateway/whatsapp/status', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        enabled: false,
+        authorized: false,
+        state: 'stopped',
+      }),
+    });
+  });
+
+  await page.goto('/gateway');
+
+  await expect(page.getByText('connecting').first()).toBeVisible();
+  await page.getByTestId('gateway-refresh-button').click();
+  await expect(page.getByText('connected').first()).toBeVisible();
+});
+
 test('点击 gateway 中的 whatsapp 授权按钮后进入独立登录页', async ({ page, context }) => {
   await mockAuthenticatedWhatsAppBlocked(page, context);
 
