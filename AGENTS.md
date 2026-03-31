@@ -356,6 +356,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境下 Playwright 即使能拉起 `next dev` 和 headless Chromium，也可能长时间卡住不返回最终结果；浏览器级回归要和进程内/单元测试分层看，不能把这类环境挂起误判成业务失败。
 
+### 2026-03-31 LLM 连接测试错误提示补充
+
+成功经验：
+- 对 `/api/config/test-llm` 这类轻量接口，先在接口层统一产出 `error_hint`，前端单项测试和批量测试结果展示都能复用同一字段，不需要分别写 provider 特判。
+- `max_tokens` / `max_output_tokens` 超限提示的高价值回归，不是测真实 provider，而是直接锁住“原始 error 保留 + 归一化 error_hint 命中”这两个输出字段。
+
+失败/风险经验：
+- 这类前端交互回归虽然已补 Playwright 用例，但当前环境下浏览器级执行仍可能卡住不返回结果；交付时要明确区分“代码与单测已验证”与“浏览器级 e2e 未在本机跑通”。
+
 ### 2026-03-27 安装脚本 app 分支变量补充
 
 成功经验：

@@ -56,6 +56,7 @@ interface ModelTestResult {
   success: boolean;
   message: string;
   detail?: string;
+  errorHint?: string;
 }
 
 interface BulkModelTestState extends ModelTestResult {
@@ -835,7 +836,8 @@ export default function LlmsPage() {
       }
 
       const detail = typeof data.error === 'string' && data.error.trim() ? data.error : '测试失败';
-      return { success: false, message: '连接失败', detail };
+      const errorHint = typeof data.error_hint === 'string' && data.error_hint.trim() ? data.error_hint : undefined;
+      return { success: false, message: '连接失败', detail, errorHint };
     } catch (error) {
       return {
         success: false,
@@ -1774,10 +1776,20 @@ export default function LlmsPage() {
                                       type="button"
                                       data-testid={`llm-test-result-${modelName}`}
                                       onClick={() => setOpenTestErrorModel((prev) => (prev === modelName ? null : modelName))}
-                                      className="inline-flex max-w-[220px] items-center justify-end gap-1.5 rounded-lg bg-destructive/10 px-3 py-1.5 text-right text-xs font-semibold text-destructive"
+                                      className="inline-flex max-w-[220px] flex-col items-end gap-1 rounded-lg bg-destructive/10 px-3 py-1.5 text-right text-xs font-semibold text-destructive"
                                     >
-                                      <XCircle size={14} />
-                                      {testResults[modelName].message}
+                                      <span className="inline-flex items-center gap-1.5">
+                                        <XCircle size={14} />
+                                        {testResults[modelName].message}
+                                      </span>
+                                      {testResults[modelName].errorHint ? (
+                                        <span
+                                          data-testid={`llm-test-error-hint-${modelName}`}
+                                          className="text-[11px] font-semibold text-amber-700 dark:text-amber-300"
+                                        >
+                                          {testResults[modelName].errorHint}
+                                        </span>
+                                      ) : null}
                                     </button>
                                   )}
                                 </div>
@@ -1873,15 +1885,25 @@ export default function LlmsPage() {
                               >
                                 <span className="pt-0.5 text-muted-foreground">-</span>
                                 <span className="min-w-0 flex-1 break-all text-foreground">{modelName}</span>
-                                <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                  isPending
-                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                                    : result?.success
-                                      ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                                      : 'bg-destructive/10 text-destructive'
-                                }`}>
-                                  {isPending ? <Loader2 size={14} className="animate-spin" /> : result?.success ? <CheckCircle size={14} /> : <XCircle size={14} />}
-                                  {isPending ? '连接中' : result?.message || '未开始'}
+                                <span className="flex flex-col items-end gap-1 text-right">
+                                  <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                                    isPending
+                                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                      : result?.success
+                                        ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                                        : 'bg-destructive/10 text-destructive'
+                                  }`}>
+                                    {isPending ? <Loader2 size={14} className="animate-spin" /> : result?.success ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                    {isPending ? '连接中' : result?.message || '未开始'}
+                                  </span>
+                                  {isFailed && result?.errorHint ? (
+                                    <span
+                                      data-testid={`test-all-llms-hint-${modelName}`}
+                                      className="text-[11px] font-semibold text-amber-700 dark:text-amber-300"
+                                    >
+                                      {result.errorHint}
+                                    </span>
+                                  ) : null}
                                 </span>
                               </button>
                               {isFailed && openBulkTestErrorModel === modelName && result?.detail ? (

@@ -965,6 +965,93 @@ test('llms 页面测试失败时应先显示连接失败状态框，点击后再
   await expect(failedPopover).toHaveCount(0);
 });
 
+test('llms 页面单项测试遇到 max token 超限时应显示专门提示和原始错误', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••1234', source: 'config' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_tokens: 128000, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/secret?path=llm.providers.openai.api_key') && method === 'GET') {
+        return new Response(JSON.stringify({ path: 'llm.providers.openai.api_key', value: 'sk-openai-real' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/api/config/test-llm') && method === 'POST') {
+        return new Response(JSON.stringify({
+          success: false,
+          error_hint: 'max tokens 超限',
+          error: 'Range of max_tokens should be [1, 65536]',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.getByTestId('provider-toggle-openai').click();
+  await page.getByTestId('llm-test-gpt-4o-mini').click();
+
+  const failedBadge = page.getByTestId('llm-test-result-gpt-4o-mini');
+  const failedPopover = page.getByTestId('llm-test-error-popover-gpt-4o-mini');
+  await expect(failedBadge).toContainText('连接失败');
+  await expect(page.getByTestId('llm-test-error-hint-gpt-4o-mini')).toHaveText('max tokens 超限');
+  await failedBadge.click();
+  await expect(failedPopover).toBeVisible();
+  await expect(failedPopover).not.toContainText('max tokens 超限');
+  await expect(failedPopover).toContainText('Range of max_tokens should be [1, 65536]');
+});
+
 test('llms 页面应支持测试全部，并以最大并发 10 在浮层中展示进度和失败详情', async ({ page }) => {
   const token = readCurrentToken();
   await page.context().addCookies([{
@@ -1166,6 +1253,92 @@ test('llms 页面应支持测试全部，并以最大并发 10 在浮层中展�
   await page.getByTestId('show-all-llms-test-results').click();
   await expect(bulkDialog).toBeVisible();
   await expect(page.getByTestId('test-all-llms-item-claude-3-5-haiku')).toContainText('连接失败');
+});
+
+test('llms 页面测试全部遇到 max output tokens 超限时应在失败详情展示专门提示', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const state = {
+      llm: {
+        providers: {
+          openai: {
+            source_type: 'openai',
+            api_key: { configured: true, masked_value: 'sk-••••openai', source: 'config' },
+            base_url: 'https://api.openai.com/v1',
+            timeout: 60,
+            max_retries: 3,
+          },
+        },
+        models: {
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_tokens: 128000, max_output_tokens: 999999 },
+        },
+        default_model: 'gpt-4o-mini',
+      },
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        return new Response(JSON.stringify(state), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/secret?path=llm.providers.openai.api_key') && method === 'GET') {
+        return new Response(JSON.stringify({ path: 'llm.providers.openai.api_key', value: 'sk-openai-real' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/api/config/test-llm') && method === 'POST') {
+        return new Response(JSON.stringify({
+          success: false,
+          error_hint: 'max output tokens 超限',
+          error: 'max_output_tokens is too large: 999999. This model supports at most 8192 output tokens.',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto('/llms');
+  await page.getByTestId('test-all-llms').click();
+  const bulkDialog = page.getByTestId('test-all-llms-dialog');
+  await expect(bulkDialog).toBeVisible();
+  await expect(page.getByTestId('test-all-llms-item-gpt-4o-mini')).toContainText('连接失败');
+  await expect(page.getByTestId('test-all-llms-hint-gpt-4o-mini')).toHaveText('max output tokens 超限');
+
+  await page.getByTestId('test-all-llms-item-gpt-4o-mini').click();
+  const errorDetail = page.getByTestId('test-all-llms-error-gpt-4o-mini');
+  await expect(errorDetail).not.toContainText('max output tokens 超限');
+  await expect(errorDetail).toContainText('max_output_tokens is too large');
 });
 
 test('llms 页面批量测试浮窗层级应高于顶部导航栏', async ({ page }) => {
