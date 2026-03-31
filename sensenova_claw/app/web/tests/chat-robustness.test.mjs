@@ -55,3 +55,9 @@ test('新建会话首条消息 bootstrap 期间不应被 session 历史加载提
   assert.match(source, /if \(!isPendingSessionBootstrap\) \{\s*setIsTyping\(false\);\s*\}/s);
   assert.match(source, /pendingSessionBootstrapIdRef\.current = newSid;/);
 });
+
+test('手动停止当前轮次时应追加 用户中止 系统消息', () => {
+  const source = readSource('contexts/ws/MessageContext.tsx');
+
+  assert.match(source, /addMsg\('system', '用户中止'\);/);
+});

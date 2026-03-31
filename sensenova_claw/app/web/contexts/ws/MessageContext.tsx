@@ -557,7 +557,14 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   }, [sessionIdRef]);
 
   const cancelTurn = useCallback(() => {
-    if (!sessionIdRef.current) return;
+    if (!sessionIdRef.current && !pendingInputRef.current) return;
+    addMsg('system', '用户中止');
+    if (!sessionIdRef.current) {
+      pendingInputRef.current = null;
+      pendingSessionBootstrapIdRef.current = null;
+      setIsTyping(false);
+      return;
+    }
     if (lastStreamingTurnIdRef.current) {
       cancelledTurnIdsRef.current.add(lastStreamingTurnIdRef.current);
     }
