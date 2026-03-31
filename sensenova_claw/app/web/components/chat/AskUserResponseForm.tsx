@@ -123,7 +123,7 @@ export function AskUserResponseForm({
           placeholder="输入你的回复..."
           rows={2}
           disabled={disabled}
-          className="w-full resize-none rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs text-foreground placeholder-muted-foreground/50 focus:border-sky-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-neutral-100"
+          className="w-full resize-none rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-900 placeholder:text-neutral-500 focus:border-sky-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500"
         />
       </div>
 

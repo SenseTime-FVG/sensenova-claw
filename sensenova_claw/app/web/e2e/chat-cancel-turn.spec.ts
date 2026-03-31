@@ -127,3 +127,44 @@ test('cancelled turn ignores late llm deltas and unlocks input', async ({ page }
   await expect(page.getByTestId('stop-button')).toBeHidden();
   await expect(input).toBeEnabled();
 });
+
+test('首条消息创建会话时在首个 token 前也应显示停止按钮', async ({ page }) => {
+  await page.route('**/api/sessions', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ sessions: [] }),
+    });
+  });
+
+  await page.route('**/api/cron/runs?limit=50', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ runs: [] }),
+    });
+  });
+
+  await page.goto('/automation');
+
+  const input = page.getByTestId('chat-input');
+  await expect(input).toBeVisible({ timeout: 10000 });
+  await expect(input).toBeEnabled();
+
+  await input.fill('第一条消息');
+  await page.getByTestId('send-button').click();
+
+  await expect(page.locator('.bubble.user').last()).toHaveText('第一条消息');
+  await expect(page.getByTestId('stop-button')).toBeVisible();
+
+  await page.evaluate(() => {
+    (window as any).__mockWs.emit({
+      type: 'session_created',
+      session_id: 'sess_first_turn',
+      payload: {},
+      timestamp: Date.now() / 1000,
+    });
+  });
+
+  await expect(page.getByTestId('stop-button')).toBeVisible();
+});

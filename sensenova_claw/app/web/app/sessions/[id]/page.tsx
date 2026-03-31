@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
@@ -42,17 +42,27 @@ export default function SessionDetailPage() {
   const sessionId = params.id as string;
   const { t } = useI18n();
 
-  const { switchSession, sessions } = useSession();
+  const { switchSession, sessions, currentSessionId } = useSession();
   const { wsConnected } = useWebSocket();
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [bindingSession, setBindingSession] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // URL param 驱动 session 切换
-  useEffect(() => {
+  useLayoutEffect(() => {
+    let cancelled = false;
     if (sessionId) {
-      switchSession(sessionId);
+      setBindingSession(true);
+      Promise.resolve(switchSession(sessionId)).finally(() => {
+        if (!cancelled) {
+          setBindingSession(false);
+        }
+      });
     }
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId, switchSession]);
 
   // 加载 session 元数据
@@ -76,7 +86,7 @@ export default function SessionDetailPage() {
   const activeSession = sessions.find(s => s.session_id === sessionId);
   const agentId = activeSession ? (getAgentId(activeSession.meta) || 'default') : 'default';
 
-  if (loading) {
+  if (loading || bindingSession) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-full">
@@ -102,6 +112,7 @@ export default function SessionDetailPage() {
   return (
     <DashboardLayout>
       <div className="flex flex-col h-full">
+        <span data-testid="current-session-id" className="sr-only">{currentSessionId || ''}</span>
         {/* ── Header ── */}
         <div className="sticky top-0 z-10 bg-background border-b px-4 py-3 flex items-center gap-3">
           <Link href="/sessions" className="text-muted-foreground hover:text-foreground">

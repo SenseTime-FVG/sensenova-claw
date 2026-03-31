@@ -41,7 +41,10 @@ def test_load_parent_project_and_legacy_config(isolated_tmp: Path) -> None:
         encoding="utf-8",
     )
 
-    cfg = Config(project_root=backend_dir, user_config_dir=isolated_tmp / "no_user_config")
+    cfg = Config(
+        project_root=backend_dir,
+        user_config_dir=isolated_tmp / "no_user_config",
+    )
 
     assert cfg.get("agent.model") == "gpt-5.4"
     assert cfg.get("llm.providers.openai.base_url") == "https://api.example.com/v1"
@@ -66,7 +69,10 @@ def test_nearer_project_config_overrides_parent(isolated_tmp: Path) -> None:
         encoding="utf-8",
     )
 
-    cfg = Config(project_root=backend_dir, user_config_dir=isolated_tmp / "no_user_config")
+    cfg = Config(
+        project_root=backend_dir,
+        user_config_dir=isolated_tmp / "no_user_config",
+    )
     assert cfg.get("agent.model") == "mock"
 
 
@@ -125,3 +131,36 @@ def test_config_uses_env_home_for_default_config_path(isolated_tmp: Path) -> Non
             os.environ["SENSENOVA_CLAW_HOME"] = previous_home
 
     assert cfg.get("server.port") == 9001
+
+
+def test_resolve_model_only_accepts_model_key_without_model_id_fallback(isolated_tmp: Path) -> None:
+    root = isolated_tmp / "repo"
+    backend_dir = root / "backend"
+    backend_dir.mkdir(parents=True)
+
+    config_path = root / "config.yml"
+    config_path.write_text(
+        "llm:\n"
+        "  providers:\n"
+        "    openai:\n"
+        "      source_type: openai\n"
+        "      api_key: sk-test\n"
+        "  models:\n"
+        "    alias-model:\n"
+        "      provider: openai\n"
+        "      model_id: actual-model-id\n"
+        "    empty-model-id:\n"
+        "      provider: openai\n"
+        "      model_id: ''\n"
+        "  default_model: alias-model\n",
+        encoding="utf-8",
+    )
+
+    cfg = Config(config_path=config_path)
+
+    assert cfg.resolve_model("alias-model") == ("openai", "actual-model-id")
+    assert cfg.resolve_model("actual-model-id") == ("mock", "")
+    assert cfg.resolve_model("missing-model") == ("mock", "")
+    assert cfg.resolve_model("empty-model-id") == ("openai", "")
+    assert cfg.get_model_max_output_tokens("actual-model-id") == 16384
+    assert cfg.get_model_extra_body("actual-model-id") == {}

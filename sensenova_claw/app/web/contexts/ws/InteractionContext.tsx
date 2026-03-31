@@ -37,7 +37,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
   const { subscribeCurrentSession } = useEventDispatcher();
   const { pushCard, resolveCard, markCardPending } = useNotification();
   const { currentSessionId } = useSession();
-  const { updateMessages } = useMessages();
+  const { updateMessages, setTyping } = useMessages();
   const currentSessionIdRef = useRef<string | null>(null);
   currentSessionIdRef.current = currentSessionId;
 
@@ -172,9 +172,8 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
           const sourceAgentId = (source_agent_id || 'default').trim() || 'default';
           const sourceAgentName = (source_agent_name || sourceAgentId).trim() || sourceAgentId;
           const rawOptions = Array.isArray(options) ? options : null;
-          // 重构前行为：enqueueInteraction 仅当前 session，pushCard 始终执行
-          const isThisSession2 = sourceSessionId === currentSessionIdRef.current;
-          if (isThisSession2) {
+          // ask_user 需要全局可见；主输入是否可直接回答由 ChatInput 再按当前 session 精确判定
+          if (sourceSessionId === currentSessionIdRef.current) {
             updateMessages((prev) => attachAskUserToLatestToolMessage(prev, {
               questionId,
               sourceSessionId,
@@ -186,19 +185,19 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
               pending: false,
               resolved: false,
             }));
-            enqueueInteraction({
-              kind: 'question',
-              interactionId: questionId,
-              sourceSessionId,
-              timeout: timeout || 300,
-              createdAt: Date.now(),
-              sourceAgentId,
-              sourceAgentName,
-              question: question || '',
-              options: rawOptions,
-              multiSelect: Boolean(multiSelect),
-            });
           }
+          enqueueInteraction({
+            kind: 'question',
+            interactionId: questionId,
+            sourceSessionId,
+            timeout: timeout || 300,
+            createdAt: Date.now(),
+            sourceAgentId,
+            sourceAgentName,
+            question: question || '',
+            options: rawOptions,
+            multiSelect: Boolean(multiSelect),
+          });
           const questionCardActions = rawOptions
             ? rawOptions.map((o) => ({ label: o, value: o }))
             : undefined;
@@ -231,6 +230,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
               pending: false,
               resolved: true,
             }));
+            setTyping(false);
             setInteractionSubmitting(false);
             resolveInteraction('question', questionId);
             resolveCard(`question_${questionId}`, 'answered');
@@ -259,6 +259,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
     pushCard,
     resolveCard,
     updateMessages,
+    setTyping,
   ]);
 
   // ── 对外接口 ──

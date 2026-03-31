@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 telegram_mod = pytest.importorskip("telegram", reason="python-telegram-bot not installed")
 from telegram import Update
+from telegram.error import Conflict
 from unittest.mock import AsyncMock, patch
 
 from sensenova_claw.adapters.plugins.telegram.config import TelegramConfig
@@ -39,7 +42,7 @@ class TestPolling:
                         "first_name": "Alice",
                     },
                     "entities": [
-                        {"type": "mention", "offset": 0, "length": 12}
+                        {"type": "mention", "offset": 0, "length": 19}
                     ],
                     "message_thread_id": 777,
                     "date": 1710000000,
@@ -55,6 +58,31 @@ class TestPolling:
         assert dispatched[0].chat_id == "-100123"
         assert dispatched[0].message_thread_id == 777
         assert dispatched[0].mentioned_bot is True
+
+    @pytest.mark.asyncio
+    async def test_poll_loop_stops_on_conflict(self):
+        runtime = TelegramRuntime(
+            config=TelegramConfig(enabled=True, bot_token="123:abc", polling_timeout_seconds=1),
+        )
+
+        with (
+            patch.object(
+                type(runtime._bot),
+                "get_updates",
+                AsyncMock(
+                    side_effect=[
+                        Conflict("terminated by other getUpdates request"),
+                        asyncio.CancelledError(),
+                    ]
+                ),
+            ),
+            patch("sensenova_claw.adapters.plugins.telegram.runtime.asyncio.sleep", AsyncMock()) as sleep_mock,
+        ):
+            await runtime._poll_loop()
+
+        assert runtime._sensenova_claw_status["status"] == "failed"
+        assert "other getUpdates request" in runtime._sensenova_claw_status["error"]
+        sleep_mock.assert_not_awaited()
 
 
 class TestSendText:

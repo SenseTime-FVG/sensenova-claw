@@ -2,42 +2,27 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { authFetch, API_BASE } from '@/lib/authFetch';
-
-interface SkillItem {
-  name: string;
-  description: string;
-}
+import {
+  filterSlashCommandSkills,
+  getSlashCommandQuery,
+  resolveSlashCommandSubmission,
+  type SlashCommandSkillItem,
+} from './slashCommand';
 
 interface SlashCommandMenuProps {
   inputValue: string;
+  skills: SlashCommandSkillItem[];
   onSelect: (skillName: string) => void;
   visible: boolean;
 }
 
-export function SlashCommandMenu({ inputValue, onSelect, visible }: SlashCommandMenuProps) {
-  const [skills, setSkills] = useState<SkillItem[]>([]);
+export function SlashCommandMenu({ inputValue, skills, onSelect, visible }: SlashCommandMenuProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // 加载已启用的 skills
-  useEffect(() => {
-    authFetch(`${API_BASE}/api/skills`)
-      .then(r => r.json())
-      .then((data: any[]) => {
-        setSkills(
-          data
-            .filter(s => s.enabled)
-            .map(s => ({ name: s.name, description: s.description }))
-        );
-      })
-      .catch(() => setSkills([]));
-  }, []);
-
   // 过滤
-  const query = inputValue.startsWith('/') ? inputValue.slice(1).toLowerCase() : '';
-  const filtered = skills.filter(s =>
-    s.name.toLowerCase().includes(query) || s.description.toLowerCase().includes(query)
-  );
+  const query = getSlashCommandQuery(inputValue);
+  const filtered = filterSlashCommandSkills(inputValue, skills);
 
   // 重置选中
   useEffect(() => { setSelectedIndex(0); }, [query]);
@@ -75,6 +60,25 @@ export function useSlashCommand(
   setInputValue: (v: string) => void,
   onInvoke: (skillName: string, args: string) => void,
 ) {
+  const [skills, setSkills] = useState<SlashCommandSkillItem[]>([]);
+
+  useEffect(() => {
+    authFetch(`${API_BASE}/api/skills`)
+      .then(r => r.json())
+      .then((data: Array<{ name?: string; description?: string; enabled?: boolean }>) => {
+        setSkills(
+          data
+            .filter((skill) => skill.enabled)
+            .map((skill) => ({
+              name: String(skill.name || ''),
+              description: String(skill.description || ''),
+            }))
+            .filter((skill) => skill.name),
+        );
+      })
+      .catch(() => setSkills([]));
+  }, []);
+
   const showMenu = inputValue.startsWith('/') && !inputValue.includes(' ');
 
   const handleSelect = (skillName: string) => {
@@ -82,18 +86,16 @@ export function useSlashCommand(
   };
 
   const handleSubmit = (text: string): boolean => {
-    // 检查是否是斜杠命令
-    if (text.startsWith('/')) {
-      const parts = text.slice(1).split(/\s+/, 2);
-      const skillName = parts[0];
-      const args = text.slice(1 + skillName.length).trim();
-      if (skillName) {
-        onInvoke(skillName, args);
-        return true; // 已处理
-      }
+    const submission = resolveSlashCommandSubmission(
+      text,
+      skills.map((skill) => skill.name),
+    );
+    if (submission.handled && submission.skillName) {
+      onInvoke(submission.skillName, submission.args);
+      return true;
     }
-    return false; // 非斜杠命令，走正常消息发送
+    return false;
   };
 
-  return { showMenu, handleSelect, handleSubmit };
+  return { showMenu, skills, handleSelect, handleSubmit };
 }

@@ -67,6 +67,7 @@ export interface MessageContextValue {
   sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string) => void;
   cancelTurn: () => void;
   handleSkillInvoke: (skillName: string, args: string) => void;
+  setTyping: (typing: boolean) => void;
 
   /** 供 InteractionContext 更新消息列表（如 ask_user 状态） */
   updateMessages: (updater: (prev: ChatMessage[]) => ChatMessage[]) => void;
@@ -124,6 +125,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const cancelledTurnIdsRef = useRef<Set<string>>(new Set());
   const lastStreamingTurnIdRef = useRef<string | null>(null);
   const pendingInputRef = useRef<{ content: string; contextFiles?: string[] } | null>(null);
+  const pendingSessionBootstrapIdRef = useRef<string | null>(null);
 
   // ── helpers ──
 
@@ -180,9 +182,11 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       setRightTaskProgress([]);
       toolStepMapRef.current.clear();
       pendingInputRef.current = null;
+      pendingSessionBootstrapIdRef.current = null;
       return;
     }
     let cancelled = false;
+    const isPendingSessionBootstrap = pendingSessionBootstrapIdRef.current === currentSessionId;
     (async () => {
       try {
         const res = await authFetch(`${API_BASE}/api/sessions/${currentSessionId}/events`);
@@ -196,7 +200,10 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         setRightSteps(steps);
         setRightTaskProgress(taskProgress);
         toolStepMapRef.current = toolStepMap;
-        setIsTyping(false);
+        if (!isPendingSessionBootstrap) {
+          setIsTyping(false);
+        }
+        pendingSessionBootstrapIdRef.current = null;
       } catch {
         if (cancelled) return;
         setRightSteps([]);
@@ -217,6 +224,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           resetTurnTracking();
           setMessages(rebuildMessagesFromEvents(events));
           setIsTyping(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'agent_thinking':
@@ -342,6 +350,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             return prev;
           });
           setIsTyping(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'turn_cancelled': {
@@ -351,11 +360,13 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             if (lastStreamingTurnIdRef.current === cancelledTurnId) lastStreamingTurnIdRef.current = null;
           }
           setIsTyping(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'error':
           addMsg('system', event.payload.user_message || event.payload.message || event.payload.error_type || 'Unknown Error');
           setIsTyping(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         // 交互事件的 typing 状态（仅当前 session，重构前在单体 handler 中 isCurrentSession 守卫内处理）
         case 'tool_confirmation_requested':
@@ -479,6 +490,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         if (!newSid) return;
         if (pendingInputRef.current) {
           const { content, contextFiles } = pendingInputRef.current;
+          pendingSessionBootstrapIdRef.current = newSid;
           wsSend({
             type: 'user_input',
             session_id: newSid,
@@ -536,17 +548,51 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsSend, sessionIdRef, emptySessionIdRef, markFrontendCreate]);
 
   const handleSkillInvoke = useCallback(async (skillName: string, args: string) => {
-    if (!sessionIdRef.current) return;
-    await authFetch(`${API_BASE}/api/sessions/${sessionIdRef.current}/skill-invoke`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skill_name: skillName, arguments: args }),
-    });
-    setIsTyping(true);
-  }, [sessionIdRef]);
+    if (!sessionIdRef.current) {
+      pushNotification({
+        title: '命令执行失败',
+        body: '请先发送一条普通消息创建会话，再执行 / 命令',
+        level: 'error',
+        source: 'skill',
+      });
+      return;
+    }
+    try {
+      const resp = await authFetch(`${API_BASE}/api/sessions/${sessionIdRef.current}/skill-invoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skill_name: skillName, arguments: args }),
+      });
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
+        pushNotification({
+          title: '命令执行失败',
+          body: errData.detail || `未知错误 (${resp.status})`,
+          level: 'error',
+          source: 'skill',
+        });
+        return;
+      }
+      setIsTyping(true);
+    } catch (err) {
+      pushNotification({
+        title: '命令执行失败',
+        body: '网络错误，请稍后重试',
+        level: 'error',
+        source: 'skill',
+      });
+    }
+  }, [sessionIdRef, pushNotification]);
 
   const cancelTurn = useCallback(() => {
-    if (!sessionIdRef.current) return;
+    if (!sessionIdRef.current && !pendingInputRef.current) return;
+    addMsg('system', '用户中止');
+    if (!sessionIdRef.current) {
+      pendingInputRef.current = null;
+      pendingSessionBootstrapIdRef.current = null;
+      setIsTyping(false);
+      return;
+    }
     if (lastStreamingTurnIdRef.current) {
       cancelledTurnIdsRef.current.add(lastStreamingTurnIdRef.current);
     }
@@ -574,6 +620,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     sendMessage,
     cancelTurn,
     handleSkillInvoke,
+    setTyping: setIsTyping,
     updateMessages,
   };
 

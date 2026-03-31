@@ -170,6 +170,30 @@ def test_update_sections_multiple(client, app):
     assert sections["miniapps"]["acp"]["command"] == "codex"
 
 
+def test_update_sections_preserves_env_ref_for_sensitive_value(client, app):
+    """批量保存 section 时，环境变量引用应保持原样。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["providers"]["openai"]["api_key"] = "${OPENAI_API_KEY}"
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.put("/api/config/sections", json={
+        "llm": {
+            "providers": {
+                "openai": {
+                    "api_key": "${OPENAI_API_KEY}",
+                    "base_url": "https://api.openai.com/v1",
+                }
+            }
+        }
+    })
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["providers"]["openai"]["api_key"] == "${OPENAI_API_KEY}"
+    assert app.state.secret_store.get("sensenova_claw/llm.providers.openai.api_key") is None
+
+
 def test_update_sections_empty_body(client):
     """未提供任何更新内容时返回 400"""
     resp = client.put("/api/config/sections", json={})
@@ -296,6 +320,32 @@ def test_update_single_provider_does_not_persist_secret_ref_placeholder_as_api_k
     written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
     assert written["llm"]["providers"]["openai"]["api_key"] == "${secret:sensenova_claw/llm.providers.openai.api_key}"
     assert app.state.secret_store.get("sensenova_claw/llm.providers.openai.api_key") == "sk-real"
+
+
+def test_update_single_provider_preserves_env_ref_api_key(client, app):
+    """单项保存 provider 时，环境变量引用应保持原样，不改写为 secret 引用。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["providers"]["openai"]["api_key"] = "${OPENAI_API_KEY}"
+    raw["llm"]["providers"]["openai"]["base_url"] = "https://api.openai.com/v1"
+    raw["llm"]["providers"]["openai"]["timeout"] = 60
+    raw["llm"]["providers"]["openai"]["max_retries"] = 3
+    raw["llm"]["providers"]["openai"]["source_type"] = "openai"
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.put("/api/config/llm/providers/openai", json={
+        "name": "openai",
+        "source_type": "openai",
+        "api_key": "${OPENAI_API_KEY}",
+        "base_url": "https://api.openai.com/v1",
+        "timeout": 60,
+        "max_retries": 3,
+    })
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["providers"]["openai"]["api_key"] == "${OPENAI_API_KEY}"
+    assert app.state.secret_store.get("sensenova_claw/llm.providers.openai.api_key") is None
 
 
 def test_create_single_provider_when_missing(client, app):

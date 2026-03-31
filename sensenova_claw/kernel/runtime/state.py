@@ -57,6 +57,25 @@ class SessionStateStore:
             self._session_history[session_id] = []
         self._session_history[session_id].extend(messages)
 
+    def append_turn_messages_to_history(self, session_id: str, state: TurnState) -> list[dict[str, Any]]:
+        """将当前轮次的新消息追加到历史，并自动跳过与现有尾部重叠的部分。"""
+        new_messages = state.messages[state.history_offset:]
+        if not new_messages:
+            return []
+
+        history = self._session_history.setdefault(session_id, [])
+        max_overlap = min(len(history), len(new_messages))
+        overlap = 0
+        for size in range(max_overlap, 0, -1):
+            if history[-size:] == new_messages[:size]:
+                overlap = size
+                break
+
+        appended = new_messages[overlap:]
+        if appended:
+            history.extend(appended)
+        return appended
+
     def replace_history(self, session_id: str, history: list[dict[str, Any]]) -> None:
         """替换会话历史（用于上下文压缩后更新）"""
         self._session_history[session_id] = history

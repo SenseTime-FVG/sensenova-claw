@@ -142,7 +142,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     },
   }), [resizeTextarea]);
 
-  const { showMenu, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmitHook } = useSlashCommand(
+  const { showMenu, skills, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmitHook } = useSlashCommand(
     inputValue, setInputValue, handleSkillInvoke,
   );
 
@@ -291,7 +291,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
           <div className="flex-1">
             <UploadProgress items={uploadItems} />
-            <SlashCommandMenu inputValue={inputValue} onSelect={handleSlashSelect} visible={showMenu} />
+            <SlashCommandMenu inputValue={inputValue} skills={skills} onSelect={handleSlashSelect} visible={showMenu} />
             <textarea
               data-testid="chat-input"
               ref={textareaRef}
