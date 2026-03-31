@@ -1,0 +1,143 @@
+"""Obsidian Vault 定位与初始化工具
+
+支持在 Windows/macOS/Linux 上定位现有 vault，创建默认 vault，
+以及补全知识库必备结构。
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import sys
+from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Any
+
+from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
+from sensenova_claw.platform.config.config import config
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# 数据结构
+# ============================================================================
+
+@dataclass
+class VaultInfo:
+    """Vault 信息"""
+    name: str                  # vault 名称
+    path: str                  # 绝对路径
+    source: str                # "configured" | "standard" | "created"
+    has_structure: bool        # 知识库结构是否完整
+    created_now: bool          # 本次调用是否新创建
+    accessible: bool           # 是否可读写
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+# ============================================================================
+# 配置检查
+# ============================================================================
+
+def _get_configured_vaults() -> list[Path]:
+    """从 config.yml 获取已配置的 vault 路径"""
+    vault_paths = config.get("tools.obsidian.vaults", [])
+    if isinstance(vault_paths, str):
+        vault_paths = [vault_paths]
+
+    vaults: list[Path] = []
+    for p in vault_paths:
+        try:
+            path = Path(p).expanduser().resolve()
+            if path.exists() and path.is_dir():
+                vaults.append(path)
+            else:
+                logger.warning(f"配置的 vault 路径不存在: {p}")
+        except Exception as e:
+            logger.warning(f"处理配置 vault 路径失败 {p}: {e}")
+
+    return vaults
+
+
+def _validate_vault(vault_path: Path) -> bool:
+    """验证是有效的 Obsidian vault（存在 .obsidian 目录）"""
+    try:
+        obsidian_dir = vault_path / ".obsidian"
+        return obsidian_dir.exists() and obsidian_dir.is_dir()
+    except Exception:
+        return False
+
+
+def _parse_vault_name(vault_path: Path) -> str:
+    """从路径推断 vault 名称"""
+    return vault_path.name
+
+
+# ============================================================================
+# 平台检测辅助函数骨架
+# ============================================================================
+
+def _detect_vaults_windows() -> list[Path]:
+    """Windows 平台 vault 检测"""
+    # 占位符，下个 task 实现
+    return []
+
+
+def _query_registry_windows() -> str | None:
+    """Windows 注册表查询 Obsidian 应用位置"""
+    # 占位符，下个 task 实现
+    return None
+
+
+def _detect_vaults_macos() -> list[Path]:
+    """macOS 平台 vault 检测"""
+    # 占位符，下个 task 实现
+    return []
+
+
+def _read_config_macos() -> list[Path]:
+    """macOS 配置文件读取"""
+    # 占位符，下个 task 实现
+    return []
+
+
+def _detect_vaults_linux() -> list[Path]:
+    """Linux 平台 vault 检测"""
+    # 占位符，下个 task 实现
+    return []
+
+
+def _read_config_linux() -> list[Path]:
+    """Linux 配置文件读取"""
+    # 占位符，下个 task 实现
+    return []
+
+
+# ============================================================================
+# 工具主类
+# ============================================================================
+
+class ObsidianLocateTool(Tool):
+    """Obsidian Vault 定位与初始化工具"""
+
+    name = "obsidian_locate_and_setup"
+    description = "定位和初始化 Obsidian vault，支持 Windows/macOS/Linux"
+    risk_level = ToolRiskLevel.MEDIUM
+
+    parameters = {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    }
+
+    async def execute(self, **kwargs: Any) -> dict:
+        """执行工具"""
+        # 占位符，下个 task 实现
+        return {
+            "success": False,
+            "error": "Not implemented",
+            "vaults": [],
+            "primary_vault": None,
+        }
