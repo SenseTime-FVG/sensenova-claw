@@ -445,6 +445,114 @@ def _create_default_vault() -> Path | None:
         return None
 
 
+def _dedup_and_rank_vaults(vaults_with_source: list[tuple[Path, str]]) -> list[VaultInfo]:
+    """对 vault 进行去重和排序
+
+    Args:
+        vaults_with_source: [(Path, source_string), ...]
+        source_string: "configured" | "standard" | "created"
+
+    Returns:
+        排序后的 VaultInfo 列表
+    """
+    # 去重：使用绝对路径作为 key
+    vault_dict: dict[str, tuple[Path, str]] = {}
+    for vault_path, source in vaults_with_source:
+        abs_path = vault_path.resolve()
+        # configured > standard > created，保留优先级最高的
+        if str(abs_path) not in vault_dict:
+            vault_dict[str(abs_path)] = (abs_path, source)
+        else:
+            existing_source = vault_dict[str(abs_path)][1]
+            source_rank = {"configured": 0, "standard": 1, "created": 2}
+            if source_rank.get(source, 99) < source_rank.get(existing_source, 99):
+                vault_dict[str(abs_path)] = (abs_path, source)
+
+    # 创建 VaultInfo 对象
+    vault_infos: list[VaultInfo] = []
+    for abs_path_str, (vault_path, source) in vault_dict.items():
+        vault_path = Path(abs_path_str)
+        has_structure = _check_knowledge_structure(vault_path)
+
+        vault_info = VaultInfo(
+            name=_parse_vault_name(vault_path),
+            path=str(vault_path),
+            source=source,
+            has_structure=has_structure,
+            created_now=(source == "created"),
+            accessible=vault_path.exists() and os.access(vault_path, os.R_OK | os.W_OK)
+        )
+        vault_infos.append(vault_info)
+
+    # 排序优先级：
+    # 1. source == "configured" (已配置)
+    # 2. created_now == True (新创建)
+    # 3. has_structure == True (结构完整)
+    # 4. source == "standard" (标准位置)
+
+    def sort_key(v: VaultInfo) -> tuple:
+        source_rank = {"configured": 0, "standard": 1, "created": 2}
+        return (
+            source_rank.get(v.source, 99),
+            not v.created_now,  # True 在前
+            not v.has_structure,  # True 在前
+            v.name,  # 字母排序
+        )
+
+    vault_infos.sort(key=sort_key)
+    return vault_infos
+
+
+def _get_all_vaults() -> tuple[list[VaultInfo], VaultInfo | None]:
+    """获取所有 vault 并排序，返回列表和主要 vault
+
+    Returns:
+        (sorted_vaults, primary_vault)
+    """
+    vaults_with_source: list[tuple[Path, str]] = []
+
+    # 1. 检查配置的 vault
+    configured = _get_configured_vaults()
+    for vault in configured:
+        if _validate_vault(vault):
+            vaults_with_source.append((vault, "configured"))
+
+    if vaults_with_source:
+        # 如果已配置，验证结构并返回
+        vault_infos = _dedup_and_rank_vaults(vaults_with_source)
+        primary = vault_infos[0] if vault_infos else None
+        return vault_infos, primary
+
+    # 2. 根据平台检测
+    if sys.platform == "win32":
+        vaults_with_source.extend([(v, "standard") for v in _detect_vaults_windows()])
+        vaults_with_source.extend([(v, "standard") for v in _read_config_macos()])
+    elif sys.platform == "darwin":
+        vaults_with_source.extend([(v, "standard") for v in _detect_vaults_macos()])
+        vaults_with_source.extend([(v, "standard") for v in _read_config_macos()])
+    else:  # Linux
+        vaults_with_source.extend([(v, "standard") for v in _detect_vaults_linux()])
+        vaults_with_source.extend([(v, "standard") for v in _read_config_linux()])
+
+    # 3. 如果仍未找到，创建默认 vault
+    if not vaults_with_source:
+        default_vault = _create_default_vault()
+        if default_vault:
+            vaults_with_source.append((default_vault, "created"))
+        else:
+            # 创建失败，返回空结果
+            return [], None
+
+    # 4. 补全所有 vault 的知识库结构
+    for vault_path, _ in vaults_with_source:
+        _ensure_knowledge_structure(vault_path)
+
+    # 5. 排序并返回
+    vault_infos = _dedup_and_rank_vaults(vaults_with_source)
+    primary = vault_infos[0] if vault_infos else None
+
+    return vault_infos, primary
+
 
 # ============================================================================
 # 工具主类
