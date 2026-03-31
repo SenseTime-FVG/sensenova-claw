@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -191,18 +192,21 @@ async def test_hello_sends_identify_and_heartbeat():
             sent_payloads.append(payload)
 
     runtime._ws = _FakeWS()
-    heartbeat_task = None
-
-    async def fake_heartbeat(interval_ms: int) -> None:
-        assert interval_ms == 41000
+    class _FakeTask:
+        def cancel(self) -> None:
+            return None
 
     with patch("asyncio.create_task") as create_task:
-        create_task.side_effect = lambda coro, name=None: coro
+        def _fake_create_task(coro, name=None):
+            coro.close()
+            return _FakeTask()
+
+        create_task.side_effect = _fake_create_task
         heartbeat_task = await runtime._handle_gateway_payload({"op": 10, "d": {"heartbeat_interval": 41000}})
 
     assert heartbeat_task is True
     assert sent_payloads
-    identify = __import__("json").loads(sent_payloads[0])
+    identify = json.loads(sent_payloads[0])
     assert identify["op"] == 2
     assert identify["d"]["token"] == "QQBot token-1"
     assert identify["d"]["shard"] == [0, 1]
