@@ -398,7 +398,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             source: 'agent',
             cardId,
             actions: taskActions,
-            eventKey: `turn_completed_${event.event_id || completedSessionId}`,
+            eventKey: `turn_completed_${(event as any).event_id || completedSessionId}`,
             onAction: (actionValue) => {
               if (actionValue === 'view_session' && completedSessionId) {
                 // TODO: 跳转到会话
@@ -433,7 +433,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
                 source: event.payload.source || 'system',
                 cardId,
                 actions: notifActions,
-                eventKey: `notification_${event.event_id}`,
+                eventKey: `notification_${(event as any).event_id || Date.now()}`,
                 browser: metadata.show_browser === true,
                 onAction: (actionValue) => {
                   if (actionValue === 'view_session' && notifSessionId) {
