@@ -36,6 +36,26 @@ async def test_list_vaults():
     return result
 
 
+async def test_list_specific_vault(vault_name: str):
+    """测试列出指定 vault"""
+    print(f"\n=== 测试 1.5: 列出指定 Vault (vault='{vault_name}') ===")
+    tool = ObsidianListVaultsTool()
+    result = await tool.execute(vault=vault_name)
+
+    print(f"成功: {result.get('success')}")
+    if result.get('success'):
+        print(f"找到 {result.get('count')} 个 vault:")
+        for vault in result.get('vaults', []):
+            print(f"  - {vault.get('name')} ({vault.get('type')})")
+            if vault.get('type') == 'local':
+                print(f"    路径: {vault.get('path')}")
+                print(f"    笔记数: {vault.get('note_count')}")
+    else:
+        print(f"错误: {result.get('error')}")
+
+    return result
+
+
 async def test_search(query="test"):
     """测试搜索笔记"""
     print(f"\n=== 测试 2: 搜索笔记 (query='{query}') ===")
@@ -115,6 +135,15 @@ async def main():
             print("\n⚠️  未找到 Obsidian vault，跳过搜索和读写测试")
             print("请配置 vault 或确保 Obsidian 安装在常见位置")
             return
+
+        # 测试 1.5: 列出指定 vault（如果有多个 vault）
+        vaults = vaults_result.get('vaults', [])
+        if len(vaults) > 0:
+            first_vault_name = vaults[0].get('name')
+            await test_list_specific_vault(first_vault_name)
+
+            # 测试不存在的 vault
+            await test_list_specific_vault("nonexistent_vault_xyz")
 
         # 测试 2: 搜索
         await test_search()
