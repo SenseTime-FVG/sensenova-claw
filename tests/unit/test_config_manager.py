@@ -84,6 +84,16 @@ async def test_update_handles_secrets(setup):
 
 
 @pytest.mark.asyncio
+async def test_update_preserves_env_ref_for_sensitive_value(setup):
+    """敏感字段若使用环境变量引用，保存时应保持原样，不迁移到 secret store。"""
+    manager, cfg, bus, config_path, secret_store = setup
+    await manager.update("llm", {"providers": {"openai": {"api_key": "${OPENAI_API_KEY}"}}})
+    written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["providers"]["openai"]["api_key"] == "${OPENAI_API_KEY}"
+    assert secret_store.get("sensenova_claw/llm.providers.openai.api_key") is None
+
+
+@pytest.mark.asyncio
 async def test_update_event_masks_secrets(setup):
     manager, cfg, bus, config_path, _ = setup
     events = []

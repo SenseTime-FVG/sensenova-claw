@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import re
+
 SECRET_REF_PREFIX = "${secret:"
 SECRET_REF_SUFFIX = "}"
+ENV_REF_PATTERN = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")
 
 
 def is_secret_ref(value: str) -> bool:
     """判断字符串是否为合法的 secret 引用。"""
     return value.startswith(SECRET_REF_PREFIX) and value.endswith(SECRET_REF_SUFFIX)
+
+
+def is_env_ref(value: str) -> bool:
+    """判断字符串是否为 `${ENV_VAR}` 形式的环境变量引用。"""
+    return bool(ENV_REF_PATTERN.fullmatch(value))
 
 
 def parse_secret_ref(value: str) -> str:

@@ -1709,3 +1709,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅等待 mock WebSocket 就绪并不代表 `/sessions/[id]` 已完成 `switchSession`；如果过早注入 ask_user，表面上像“主输入不支持 ask_user”，实际是当前 session 仍为空。
+
+### 2026-03-31 /llms 环境变量引用保存补充
+
+成功经验：
+- `ConfigManager.update/replace()` 是 `/llms` 批量保存与单项保存共享的最终写回入口；凡是“敏感字段保存行为”问题，优先在这里统一修，比只改前端或单个 API 更稳。
+- 对敏感字段不能只区分“普通字符串”和 `${secret:...}`；`${OPENAI_API_KEY}` 这类环境变量引用也必须保留原样，否则保存时会被误迁移成 `${secret:...}` 且 secret store 内没有对应值。
+- 这类回归至少要双测：一个测底层 `ConfigManager`，一个测 `/api/config/sections` 或 `/api/config/llm/providers/*` 实际入口，避免只修到底层却漏了页面使用路径。
+
+失败/风险经验：
+- 当前 `tests/unit/test_config_api.py` 仍有与本次无关的既有失败：`test_create_single_model_when_missing` 断言未包含默认写入的 `type: chat`；跑整文件时要区分历史失败和本次修复结果。
