@@ -240,3 +240,32 @@ test('ask_user 无选项时应在通知提示框显示输入框并提交回答',
     )
   ).toBeTruthy();
 });
+
+test('ask_user 在 dark 模式下的通知输入框应保持深色文字', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('theme', 'dark');
+    document.documentElement.classList.add('dark');
+  });
+
+  await page.goto('/chat?token=e2e-sensenova-claw-token');
+  await waitForMockWebSocketReady(page);
+
+  await page.evaluate(() => {
+    (window as any).__mockWs.emit({
+      type: 'user_question_asked',
+      session_id: 'sess_dark_input',
+      payload: {
+        question_id: 'q_dark_input_1',
+        question: '请填写用于继续执行的说明：',
+        timeout: 300,
+      },
+      timestamp: Date.now() / 1000,
+    });
+  });
+
+  const input = page.getByTestId('action-toast-input');
+  await expect(input).toBeVisible({ timeout: 10000 });
+
+  const color = await input.evaluate((node) => window.getComputedStyle(node).color);
+  expect(color).toBe('rgb(23, 23, 23)');
+});

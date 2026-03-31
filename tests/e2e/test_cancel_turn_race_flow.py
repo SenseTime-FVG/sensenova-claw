@@ -204,3 +204,70 @@ async def test_cancel_turn_stops_inflight_streaming_output(tmp_path: Path):
 
     error_event = next(event for event in events if event.type == ERROR_RAISED)
     assert error_event.payload["error_type"] == "TurnCancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_user_message_is_included_in_next_turn_context(tmp_path: Path):
+    original_config = copy.deepcopy(config.data)
+    svc = await setup_services(tmp_path, provider="mock", model=None)
+
+    provider = _RaceProvider()
+    tool = _BlockingTool()
+    session_id = f"sess_{uuid.uuid4().hex[:12]}"
+    events: list[EventEnvelope] = []
+    tool_started = asyncio.Event()
+    cancel_finished = asyncio.Event()
+
+    async def collector():
+        async for event in svc["bus"].subscribe():
+            if event.session_id != session_id:
+                continue
+            events.append(event)
+            if event.type == TOOL_CALL_STARTED:
+                tool_started.set()
+            if (
+                event.type == ERROR_RAISED
+                and event.payload.get("error_type") == "TurnCancelled"
+                and event.turn_id
+            ):
+                cancel_finished.set()
+
+    collect_task = asyncio.create_task(collector())
+    await asyncio.sleep(0.05)
+
+    try:
+        svc["llm_runtime"].factory._providers["race"] = provider
+        svc["tool_runtime"].registry.register(tool)
+        config.data["llm"]["models"]["race-model"] = {
+            "provider": "race",
+            "model_id": "race-v1",
+        }
+        config.data["llm"]["default_model"] = "race-model"
+        config.data["agent"]["stream"] = False
+
+        await svc["gateway"].send_user_input(session_id, "解释 DSA")
+        await asyncio.wait_for(tool_started.wait(), timeout=5)
+
+        await svc["gateway"].cancel_turn(session_id, reason="user_cancel")
+        tool.release.set()
+        await asyncio.wait_for(cancel_finished.wait(), timeout=5)
+
+        await svc["gateway"].send_user_input(session_id, "我刚才问了什么")
+        for _ in range(50):
+            if len(provider.calls) >= 2:
+                break
+            await asyncio.sleep(0.1)
+    finally:
+        collect_task.cancel()
+        await teardown_services(svc)
+        config.data = original_config
+
+    assert len(provider.calls) >= 2
+    second_messages = provider.calls[1]["messages"]
+    user_contents = [
+        msg.get("content", "")
+        for msg in second_messages
+        if msg.get("role") == "user"
+    ]
+    assert any("解释 DSA" in content for content in user_contents)
+    assert any("我刚才问了什么" in content for content in user_contents)

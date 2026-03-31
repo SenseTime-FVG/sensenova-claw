@@ -410,6 +410,28 @@ plugins:
     require_mention: true
     show_tool_progress: false
     reply_to_sender: false
+  qq:
+    enabled: false
+    mode: "onebot"  # official | onebot
+    dm_policy: "open"  # open | allowlist | disabled
+    group_policy: "open"  # open | allowlist | disabled
+    allowlist: []
+    group_allowlist: []
+    require_mention: true
+    show_tool_progress: false
+    reply_to_message: true
+
+    # QQ 官方开放平台配置
+    official_app_id: "${QQ_OFFICIAL_APP_ID}"
+    official_client_secret: "${QQ_OFFICIAL_CLIENT_SECRET}"
+    official_sandbox: false
+    official_intents: []
+
+    # OneBot / NapCat / Lagrange 配置
+    onebot_ws_url: "ws://127.0.0.1:3001"
+    onebot_access_token: "${QQ_ONEBOT_ACCESS_TOKEN}"
+    onebot_api_base_url: "http://127.0.0.1:3000"
+    onebot_self_id: "${QQ_ONEBOT_SELF_ID}"
   whatsapp:
     enabled: false
     auth_dir: "~/.sensenova-claw/data/plugins/whatsapp/auth"

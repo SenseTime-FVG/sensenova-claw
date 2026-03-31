@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle, ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, Save, Server, Trash2, X, XCircle, Zap } from 'lucide-react';
+import { CheckCircle, ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, RefreshCw, Save, Server, Trash2, X, XCircle, Zap } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -88,8 +88,10 @@ function isSecretRefLike(value: string | null | undefined): boolean {
 
 export default function LlmsPage() {
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
+  const [lastLoadedSnapshot, setLastLoadedSnapshot] = useState('');
 
   const [providers, setProviders] = useState<Record<string, ProviderConfig>>({});
   const [models, setModels] = useState<Record<string, ModelConfig>>({});
@@ -126,10 +128,15 @@ export default function LlmsPage() {
   const [hoveringBulkTestButton, setHoveringBulkTestButton] = useState(false);
   const [showBulkTestTooltip, setShowBulkTestTooltip] = useState(false);
 
-  const loadConfig = () => {
-    authFetch(`${API_BASE}/api/config/sections`)
-      .then((res) => res.json())
-      .then((data) => {
+  const loadConfig = async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setRefreshing(true);
+    }
+
+    try {
+      const res = await authFetch(`${API_BASE}/api/config/sections`);
+      const data = await res.json();
         const llm = data?.llm || {};
         const normalizedProviders = normalizeProviders(llm.providers || {});
         const explicitProviderNames = normalizeExplicitProviderNames(llm._meta);
@@ -144,10 +151,18 @@ export default function LlmsPage() {
         const visibleModels = Object.fromEntries(
           Object.entries(realModels).filter(([, model]) => model.provider in visibleProviders),
         );
+        const nextDefaultModel = llm.default_model && llm.default_model in visibleModels ? llm.default_model : '';
+        const nextDefaultEmbeddingModel = llm.default_embedding_model && llm.default_embedding_model in visibleModels ? llm.default_embedding_model : '';
         setProviders(visibleProviders);
         setModels(visibleModels);
-        setDefaultModel(llm.default_model && llm.default_model in visibleModels ? llm.default_model : '');
-        setDefaultEmbeddingModel(llm.default_embedding_model && llm.default_embedding_model in visibleModels ? llm.default_embedding_model : '');
+        setDefaultModel(nextDefaultModel);
+        setDefaultEmbeddingModel(nextDefaultEmbeddingModel);
+        setLastLoadedSnapshot(createConfigSnapshot({
+          providers: cloneProvidersToDrafts(visibleProviders),
+          models: cloneModelsToDrafts(visibleModels),
+          defaultModel: nextDefaultModel,
+          defaultEmbeddingModel: nextDefaultEmbeddingModel,
+        }));
         setExpandedProviders(
           Object.fromEntries(Object.keys(visibleProviders).map((name) => [name, false])),
         );
@@ -167,13 +182,16 @@ export default function LlmsPage() {
         setBulkTestResults({});
         setOpenBulkTestErrorModel(null);
         setHasBulkTestResults(false);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    } catch {
+      setSaveMsg('读取配置失败');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
-    loadConfig();
+    void loadConfig({ silent: true });
   }, []);
 
   useEffect(() => {
@@ -297,6 +315,55 @@ export default function LlmsPage() {
     if (editingAll && globalDraft) return globalDraft.models[name];
     return modelDrafts[name] || { ...models[name], name };
   };
+
+  const currentSnapshot = useMemo(() => {
+    if (editingAll && globalDraft) {
+      return createConfigSnapshot({
+        providers: globalDraft.providers,
+        models: globalDraft.models,
+        defaultModel: globalDraft.defaultModel,
+        defaultEmbeddingModel: globalDraft.defaultEmbeddingModel,
+      });
+    }
+
+    const currentProviderState = cloneProvidersToDrafts(providers);
+    if (editingProvider && providerDrafts[editingProvider]) {
+      const draft = providerDrafts[editingProvider];
+      delete currentProviderState[editingProvider];
+      currentProviderState[draft.name] = draft;
+    }
+
+    const currentModelState = cloneModelsToDrafts(models);
+    if (editingModel && modelDrafts[editingModel]) {
+      const draft = modelDrafts[editingModel];
+      delete currentModelState[editingModel];
+      currentModelState[draft.name] = draft;
+    }
+
+    return createConfigSnapshot({
+      providers: currentProviderState,
+      models: currentModelState,
+      defaultModel: editingDefaultModel ? defaultModelDraft : defaultModel,
+      defaultEmbeddingModel: editingDefaultEmbeddingModel ? defaultEmbeddingModelDraft : defaultEmbeddingModel,
+    });
+  }, [
+    defaultEmbeddingModel,
+    defaultEmbeddingModelDraft,
+    defaultModel,
+    defaultModelDraft,
+    editingAll,
+    editingDefaultEmbeddingModel,
+    editingDefaultModel,
+    editingModel,
+    editingProvider,
+    globalDraft,
+    modelDrafts,
+    models,
+    providerDrafts,
+    providers,
+  ]);
+
+  const hasUnsavedChanges = Boolean(lastLoadedSnapshot) && currentSnapshot !== lastLoadedSnapshot;
 
   const updateProviderField = (name: string, field: keyof ProviderConfig, value: string | number) => {
     if (editingAll && globalDraft) {
@@ -760,7 +827,7 @@ export default function LlmsPage() {
           provider: provider.source_type || 'openai',
           api_key: apiKey,
           base_url: provider.base_url || '',
-          model_id: model.model_id || modelName,
+          model_id: model.model_id ?? '',
           max_tokens: model.max_tokens || 128000,
           max_output_tokens: model.max_output_tokens || 16384,
         }),
@@ -1029,6 +1096,17 @@ export default function LlmsPage() {
     setDefaultEmbeddingModelDraft('');
   };
 
+  const refreshConfig = async () => {
+    if (hasUnsavedChanges) {
+      const confirmed = window.confirm('当前有未保存修改，刷新将丢弃这些更改。是否继续刷新？');
+      if (!confirmed) {
+        return;
+      }
+    }
+    setSaveMsg('');
+    await loadConfig();
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -1058,6 +1136,16 @@ export default function LlmsPage() {
                 {saveMsg}
               </span>
             )}
+            <button
+              type="button"
+              data-testid="refresh-llm-config"
+              onClick={() => void refreshConfig()}
+              disabled={loading || refreshing || saving}
+              className="flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
+            >
+              {refreshing ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+              刷新
+            </button>
             {editingAll ? (
               <>
                 <button
@@ -2028,4 +2116,30 @@ function buildModelPayloadsFromDrafts(models: Record<string, ModelDraft>): Recor
       },
     ]),
   );
+}
+
+function createConfigSnapshot({
+  providers,
+  models,
+  defaultModel,
+  defaultEmbeddingModel,
+}: {
+  providers: Record<string, ProviderDraft>;
+  models: Record<string, ModelDraft>;
+  defaultModel: string;
+  defaultEmbeddingModel: string;
+}) {
+  const providerPayloads = buildProviderPayloadsFromDrafts(providers);
+  const modelPayloads = buildModelPayloadsFromDrafts(models);
+
+  return JSON.stringify({
+    providers: Object.fromEntries(
+      Object.entries(providerPayloads).sort(([left], [right]) => left.localeCompare(right)),
+    ),
+    models: Object.fromEntries(
+      Object.entries(modelPayloads).sort(([left], [right]) => left.localeCompare(right)),
+    ),
+    defaultModel,
+    defaultEmbeddingModel,
+  });
 }
