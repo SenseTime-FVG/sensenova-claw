@@ -359,6 +359,9 @@ class AgentMessageCoordinator:
         )
 
     async def _handle_child_failed(self, event: EventEnvelope) -> None:
+        # 工具级错误不终止子 agent 会话，AgentWorker 会将错误交给 LLM 决策
+        if event.source == "tool":
+            return
         record = await self.get_record_by_session(event.session_id)
         if not record or record.status in self.FINAL_STATUSES:
             return

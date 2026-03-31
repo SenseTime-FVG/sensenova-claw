@@ -248,7 +248,7 @@ function SessionListGroup({
 function ChatContent() {
   const { locale, t } = useI18n();
   const {
-    wsConnected, currentSessionId, sessions, messages, isTyping, activeInteraction, interactionSubmitting,
+    wsConnected, currentSessionId, sessions, messages, isTyping, turnActive, activeInteraction, interactionSubmitting,
     sendMessage, sendQuestionAnswer, switchSession, createSession, deleteSession, startNewChat,
     refreshTaskGroups, loadingSessions, handleSkillInvoke, cancelTurn, cleanupEmptySession,
   } = useChatSession();
@@ -497,7 +497,7 @@ function ChatContent() {
               onSend={handleSend}
               onSlashSubmit={() => false}
               onStop={cancelTurn}
-              disabled={activeInteraction?.kind === 'confirmation' || (isTyping && !isCurrentSessionQuestionInteraction)}
+              disabled={activeInteraction?.kind === 'confirmation' || (turnActive && !isCurrentSessionQuestionInteraction)}
               wsConnected={wsConnected}
               handleSkillInvoke={handleSkillInvoke}
               hideAgentSelector

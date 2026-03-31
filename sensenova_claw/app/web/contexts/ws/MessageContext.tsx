@@ -55,6 +55,10 @@ export interface PrefillInputPayload {
 export interface MessageContextValue {
   messages: ChatMessage[];
   isTyping: boolean;
+  /** 当前 turn 是否在进行中（从发送消息到 turn_completed/cancelled/error）。
+   *  与 isTyping 的区别：isTyping 在 user_question_asked 时会变 false（允许显示输入 UI），
+   *  但 turnActive 始终为 true 直到 turn 真正结束。用于控制输入框的 disabled 状态。 */
+  turnActive: boolean;
   steps: StepItem[];
   taskProgress: TaskProgressItem[];
   proactiveResults: ProactiveResultItem[];
@@ -93,6 +97,8 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   // 消息状态
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  // turnActive: 从发送消息起为 true，仅在 turn_completed/turn_cancelled/error 时才变 false
+  const [turnActive, setTurnActive] = useState(false);
 
   // 步骤/进度
   const [rightSteps, setRightSteps] = useState<StepItem[]>([]);
@@ -176,6 +182,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     if (!currentSessionId) {
       setMessages([]);
       setIsTyping(false);
+      setTurnActive(false);
       resetTurnTracking();
       toolCallMapRef.current.clear();
       setRightSteps([]);
@@ -202,6 +209,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         toolStepMapRef.current = toolStepMap;
         if (!isPendingSessionBootstrap) {
           setIsTyping(false);
+          setTurnActive(false);
         }
         pendingSessionBootstrapIdRef.current = null;
       } catch {
@@ -224,6 +232,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           resetTurnTracking();
           setMessages(rebuildMessagesFromEvents(events));
           setIsTyping(false);
+          setTurnActive(false);
           pendingSessionBootstrapIdRef.current = null;
           break;
         }
@@ -350,6 +359,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             return prev;
           });
           setIsTyping(false);
+          setTurnActive(false);
           pendingSessionBootstrapIdRef.current = null;
           break;
         }
@@ -360,12 +370,14 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             if (lastStreamingTurnIdRef.current === cancelledTurnId) lastStreamingTurnIdRef.current = null;
           }
           setIsTyping(false);
+          setTurnActive(false);
           pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'error':
           addMsg('system', event.payload.user_message || event.payload.message || event.payload.error_type || 'Unknown Error');
           setIsTyping(false);
+          setTurnActive(false);
           pendingSessionBootstrapIdRef.current = null;
           break;
         // 交互事件的 typing 状态（仅当前 session，重构前在单体 handler 中 isCurrentSession 守卫内处理）
@@ -545,6 +557,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       });
     }
     setIsTyping(true);
+    setTurnActive(true);
   }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsSend, sessionIdRef, emptySessionIdRef, markFrontendCreate]);
 
   const handleSkillInvoke = useCallback(async (skillName: string, args: string) => {
@@ -574,6 +587,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setIsTyping(true);
+      setTurnActive(true);
     } catch (err) {
       pushNotification({
         title: '命令执行失败',
@@ -611,6 +625,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const value: MessageContextValue = {
     messages,
     isTyping,
+    turnActive,
     steps: rightSteps,
     taskProgress: rightTaskProgress,
     proactiveResults,
