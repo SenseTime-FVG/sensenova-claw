@@ -31,6 +31,7 @@ interface ModelConfig {
   timeout: number;
   max_tokens: number;
   max_output_tokens: number;
+  dimensions?: number;  // embedding 模型向量维度
 }
 
 interface ProviderDraft extends ProviderConfig {
@@ -253,6 +254,7 @@ export default function LlmsPage() {
         timeout: draft.timeout,
         max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
+        dimensions: draft.dimensions,
       },
     ]));
   }, [editingAll, globalDraft, models]);
@@ -508,6 +510,7 @@ export default function LlmsPage() {
         timeout: 60,
         max_tokens: 128000,
         max_output_tokens: 16384,
+        dimensions: undefined,
         name: nextName,
       };
     if (editingAll && globalDraft) {
@@ -859,6 +862,7 @@ export default function LlmsPage() {
         timeout: draft.timeout,
         max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
+        ...(draft.dimensions ? { dimensions: draft.dimensions } : {}),
       }),
     });
     if (!res.ok) {
@@ -1572,6 +1576,17 @@ export default function LlmsPage() {
                                   />
                                 </>
                               )}
+                              {getModelDraft(modelName).type === 'embedding' && (
+                                <FieldInput
+                                  label="向量维度"
+                                  type="number"
+                                  value={String(getModelDraft(modelName).dimensions || '')}
+                                  placeholder="如: 1536"
+                                  dataTestId={`llm-dimensions-input-${modelName}`}
+                                  disabled={!isModelEditable(modelName)}
+                                  onChange={(value) => updateModelField(modelName, 'dimensions', value ? parseInt(value, 10) : 0)}
+                                />
+                              )}
                             </div>
                             <div className="flex min-w-0 flex-col items-end gap-2">
                               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1953,6 +1968,7 @@ function normalizeModels(input: Record<string, unknown>): Record<string, ModelCo
           timeout: Number(model.timeout || 60),
           max_tokens: Number(model.max_tokens || 128000),
           max_output_tokens: Number(model.max_output_tokens || 16384),
+          ...(model.dimensions ? { dimensions: Number(model.dimensions) } : {}),
         },
       ];
     }),
@@ -2008,6 +2024,7 @@ function buildModelPayloadsFromDrafts(models: Record<string, ModelDraft>): Recor
         timeout: draft.timeout,
         max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
+        ...(draft.dimensions ? { dimensions: draft.dimensions } : {}),
       },
     ]),
   );

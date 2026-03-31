@@ -55,6 +55,7 @@ class ModelUpdateBody(BaseModel):
     timeout: int = 60
     max_tokens: int = 128000
     max_output_tokens: int = 16384
+    dimensions: int | None = None  # embedding 模型向量维度
 
 
 class DefaultModelUpdateBody(BaseModel):
@@ -227,7 +228,7 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
         raise HTTPException(400, f"Model 已存在: {next_name}")
 
     models.pop(model_name, None)
-    models[next_name] = {
+    model_data = {
         "provider": body.provider,
         "model_id": body.model_id,
         "type": body.model_type,
@@ -235,6 +236,9 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
         "max_tokens": body.max_tokens,
         "max_output_tokens": body.max_output_tokens,
     }
+    if body.dimensions:
+        model_data["dimensions"] = body.dimensions
+    models[next_name] = model_data
     llm_section["models"] = models
     if model_exists and llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
