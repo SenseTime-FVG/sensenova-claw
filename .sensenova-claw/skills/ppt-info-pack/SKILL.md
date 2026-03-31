@@ -9,7 +9,7 @@ description: 当需要把用户输入、上传材料和 research 结果汇总为
 
 ## 目标
 
-1. 读取 `task-pack.json`、可选 `source-map.json`、可选 `research-pack.json` / `research-pack.md`。
+1. 读取 `task-pack.json`、可选 `source-map.json`、可选 `research-pack.json`。
 2. 产出 `${deck_dir}/info-pack.json`，作为分页前的唯一信息来源。
 3. 把用户输入、上传材料、research-pack 中可用的信息整理成带稳定 ID 的 `InfoAtom`。
 4. 为后续 `ppt-storyboard` 提供统一、轻量、可追溯的内容池，避免在 `ppt-page-html` 阶段现场补编可见信息。
@@ -26,7 +26,7 @@ description: 当需要把用户输入、上传材料和 research 结果汇总为
 - 用户输入：原始 query、补充要求、明确给出的标题 / 文案 / 数值 / 章节。
 - `source-map.json`（可选）：来源分类结果。
 - 上传材料（可选）：文档、网页、截图、已有 deck 等。
-- `research-pack.json` / `research-pack.md`（按需）：结构化研究结果。
+- `research-pack.json`（按需）：结构化研究结果。
 
 消费前必须确认以上工件真实存在且可读。如果 `task-pack.json` 缺失、路径不一致或 research 本应存在却未产出，先返回缺失依赖，不要猜测。
 
