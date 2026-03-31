@@ -89,14 +89,20 @@ class QQOfficialRuntime:
             raise RuntimeError(f"Invalid QQ official target: {target}")
 
         target_type, target_id = target.split(":", 1)
+        payload: dict[str, Any] = {"content": text}
         if target_type == "direct":
             path = f"/dms/{target_id}/messages"
+        elif target_type == "c2c":
+            path = f"/v2/users/{target_id}/messages"
+            payload["msg_type"] = 0
+            payload["msg_seq"] = 1
         elif target_type == "channel":
             path = f"/channels/{target_id}/messages"
-        else:
+        elif target_type == "group":
             path = f"/v2/groups/{target_id}/messages"
-
-        payload: dict[str, Any] = {"content": text}
+            payload["msg_type"] = 0
+        else:
+            raise RuntimeError(f"Unsupported QQ official target type: {target_type}")
         if reply_to_message_id:
             payload["msg_id"] = reply_to_message_id
 
@@ -184,10 +190,21 @@ class QQOfficialRuntime:
             return None
 
         author = data.get("author") or {}
-        if event_type in {"DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE"}:
+        sender_id = (
+            str(author.get("id", "")).strip()
+            or str(author.get("user_openid", "")).strip()
+            or str(author.get("member_openid", "")).strip()
+        )
+        sender_name = str(author.get("username", "")).strip() or str(author.get("nickname", "")).strip()
+
+        if event_type == "DIRECT_MESSAGE_CREATE":
             chat_type = "p2p"
-            chat_id = str(data.get("channel_id", "")).strip()
+            chat_id = str(data.get("guild_id", "")).strip() or str(data.get("channel_id", "")).strip()
             target = f"direct:{chat_id}"
+        elif event_type == "C2C_MESSAGE_CREATE":
+            chat_type = "p2p"
+            chat_id = str(author.get("user_openid", "")).strip() or sender_id
+            target = f"c2c:{chat_id}"
         elif event_type == "GROUP_AT_MESSAGE_CREATE":
             chat_type = "group"
             chat_id = str(data.get("group_openid", "") or data.get("group_id", "")).strip()
@@ -201,8 +218,8 @@ class QQOfficialRuntime:
             text=content,
             chat_type=chat_type,
             chat_id=chat_id,
-            sender_id=str(author.get("id", "")).strip(),
-            sender_name=str(author.get("username", "")).strip(),
+            sender_id=sender_id,
+            sender_name=sender_name,
             message_id=str(data.get("id", "")).strip(),
             target=target,
             mentioned_bot=self._contains_bot_mention(content),

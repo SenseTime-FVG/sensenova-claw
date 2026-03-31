@@ -50,15 +50,15 @@ async def test_parse_direct_message_event():
                 "content": "你好",
                 "author": {"id": "user-1", "username": "alice"},
                 "channel_id": "channel-1",
-                "guild_id": None,
+                "guild_id": "dm-guild-1",
             },
         }
     )
 
     assert dispatched
     assert dispatched[0].chat_type == "p2p"
-    assert dispatched[0].chat_id == "channel-1"
-    assert dispatched[0].target == "direct:channel-1"
+    assert dispatched[0].chat_id == "dm-guild-1"
+    assert dispatched[0].target == "direct:dm-guild-1"
 
 
 @pytest.mark.asyncio
@@ -107,7 +107,7 @@ async def test_parse_c2c_message_event():
             "d": {
                 "id": "msg-3",
                 "content": "你好",
-                "author": {"id": "user-3", "username": "carl"},
+                "author": {"user_openid": "openid-3", "username": "carl"},
                 "channel_id": "channel-3",
                 "guild_id": None,
             },
@@ -116,8 +116,9 @@ async def test_parse_c2c_message_event():
 
     assert dispatched
     assert dispatched[0].chat_type == "p2p"
-    assert dispatched[0].chat_id == "channel-3"
-    assert dispatched[0].target == "direct:channel-3"
+    assert dispatched[0].sender_id == "openid-3"
+    assert dispatched[0].chat_id == "openid-3"
+    assert dispatched[0].target == "c2c:openid-3"
 
 
 @pytest.mark.asyncio
@@ -133,12 +134,39 @@ async def test_send_text_posts_to_direct_message_api():
 
     with patch("sensenova_claw.adapters.plugins.qq.runtime_official.httpx.AsyncClient") as client_cls:
         client_cls.return_value.__aenter__.return_value = client
-        result = await runtime.send_text("direct:channel-1", "你好")
+        result = await runtime.send_text("direct:dm-guild-1", "你好")
 
     assert result["success"] is True
     assert result["message_id"] == "msg-100"
     client.post.assert_awaited_once()
+    assert client.post.await_args.args[0] == "/dms/dm-guild-1/messages"
     assert client.post.await_args.kwargs["headers"]["Authorization"] == "QQBot token-1"
+
+
+@pytest.mark.asyncio
+async def test_send_text_posts_to_c2c_message_api():
+    runtime = QQOfficialRuntime(config=_make_config())
+    runtime._access_token = "token-1"
+    runtime._token_expire_at = 9999999999
+    response = Mock()
+    response.json.return_value = {"id": "msg-101"}
+    response.raise_for_status.return_value = None
+    client = AsyncMock()
+    client.post.return_value = response
+
+    with patch("sensenova_claw.adapters.plugins.qq.runtime_official.httpx.AsyncClient") as client_cls:
+        client_cls.return_value.__aenter__.return_value = client
+        result = await runtime.send_text("c2c:openid-3", "你好", reply_to_message_id="msg-3")
+
+    assert result["success"] is True
+    assert result["message_id"] == "msg-101"
+    assert client.post.await_args.args[0] == "/v2/users/openid-3/messages"
+    assert client.post.await_args.kwargs["json"] == {
+        "content": "你好",
+        "msg_type": 0,
+        "msg_seq": 1,
+        "msg_id": "msg-3",
+    }
 
 
 @pytest.mark.asyncio

@@ -1656,3 +1656,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 即使代码已修复，只要外部还有其他 Telegram polling 实例占用同一个 bot token，服务仍会进入 `failed`；这种问题必须通过保证单实例或切换 webhook 解决，不能靠重试。
 - Telegram mention 相关测试夹具里的 `entities[*].length` 必须与 `@bot_username` 文本精确一致，否则 `mentioned_bot` 会误报失败，干扰真正的 runtime 回归判断。
+
+### 2026-03-31 QQ official 出站目标修复补充
+
+成功经验：
+- QQ official 的“已入站但不回复”要先看完整事件链日志；如果 `agent.step_completed` 已经产生，问题通常不在 LLM/Agent，而在 channel 出站目标映射。
+- 对照 botpy 源码确认协议细节最有效：`DIRECT_MESSAGE_CREATE.reply()` 走 `/dms/{guild_id}/messages`，`C2C_MESSAGE_CREATE.reply()` 走 `/v2/users/{author.user_openid}/messages`，这比猜字段名稳得多。
+- 这类协议修复应同时补两类单测：一类锁定入站事件规范化后的 `target`，一类锁定 `send_text()` 最终命中的 HTTP path 和 payload；否则很容易只修半边。
+
+失败/风险经验：
+- 官方 QQ 的 `DIRECT_MESSAGE_CREATE` 和 `C2C_MESSAGE_CREATE` 都属于私聊，但回复目标并不共用 `channel_id`；把两者统一映射成 `direct:{channel_id}` 会导致 `/dms//messages` 或错误路径。
+- `author.id` 不是所有 QQ official 事件都稳定存在；`C2C_MESSAGE_CREATE` 需要优先读取 `author.user_openid`，`GROUP_AT_MESSAGE_CREATE` 也可能依赖 `member_openid`，否则会话键和 allowlist 判断都会埋雷。
