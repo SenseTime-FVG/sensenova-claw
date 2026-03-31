@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 import websockets
+from websockets.exceptions import ConnectionClosed
 
 from .config import QQConfig
 from .models import QQInboundMessage
@@ -45,6 +46,7 @@ class QQOfficialRuntime:
         self._session_id: str = ""
         self._shard: list[int] = [0, 1]
         self._bot_user: dict[str, Any] = {}
+        self._resume_requested = False
         self._sensenova_claw_status = {"status": "initialized", "error": None}
 
     def set_message_handler(self, handler: QQMessageHandler) -> None:
@@ -53,8 +55,7 @@ class QQOfficialRuntime:
     async def start(self) -> None:
         self._sensenova_claw_status = {"status": "connecting", "error": None}
         await self._refresh_access_token()
-        gateway = await self._fetch_gateway()
-        self._ws = await websockets.connect(gateway)
+        await self._open_gateway_connection()
         self._gateway_task = asyncio.create_task(self._recv_loop(), name="qq-official-recv")
 
     async def stop(self) -> None:
@@ -121,10 +122,21 @@ class QQOfficialRuntime:
                 await self._handle_gateway_payload(payload)
             except asyncio.CancelledError:
                 raise
+            except ConnectionClosed as exc:
+                logger.warning(
+                    "QQ official gateway closed: code=%s reason=%s",
+                    getattr(exc.rcvd, "code", None) or getattr(exc.sent, "code", None),
+                    getattr(exc.rcvd, "reason", None) or getattr(exc.sent, "reason", ""),
+                )
+                await self._reconnect_gateway(prefer_resume=True)
             except Exception:
                 logger.exception("QQ official recv loop failed")
-                self._sensenova_claw_status = {"status": "failed", "error": "recv loop failed"}
-                await asyncio.sleep(1)
+                try:
+                    await self._reconnect_gateway(prefer_resume=True)
+                except Exception:
+                    logger.exception("QQ official reconnect after recv failure failed")
+                    self._sensenova_claw_status = {"status": "failed", "error": "recv loop failed"}
+                    await asyncio.sleep(1)
 
     async def _handle_gateway_payload(self, payload: dict[str, Any]) -> bool:
         opcode = int(payload.get("op", -1))
@@ -134,7 +146,11 @@ class QQOfficialRuntime:
 
         if opcode == self.WS_HELLO:
             heartbeat_interval = int((payload.get("d") or {}).get("heartbeat_interval", 0) or 0)
-            await self._send_identify()
+            if self._resume_requested and self._can_resume():
+                await self._send_resume()
+            else:
+                self._resume_requested = False
+                await self._send_identify()
             if heartbeat_interval > 0:
                 if self._heartbeat_task is not None:
                     self._heartbeat_task.cancel()
@@ -150,10 +166,15 @@ class QQOfficialRuntime:
 
         if opcode == self.WS_RECONNECT:
             logger.warning("QQ official gateway requested reconnect")
+            await self._reconnect_gateway(prefer_resume=True)
             return True
 
         if opcode == self.WS_INVALID_SESSION:
-            logger.error("QQ official invalid session")
+            can_resume = bool(payload.get("d"))
+            logger.error("QQ official invalid session: resumable=%s", can_resume)
+            if not can_resume:
+                self._session_id = ""
+            await self._reconnect_gateway(prefer_resume=can_resume)
             return True
 
         event_type = str(payload.get("t", "")).strip()
@@ -276,16 +297,54 @@ class QQOfficialRuntime:
         }
         await self._send_ws_json(payload)
 
+    async def _send_resume(self) -> None:
+        payload = {
+            "op": self.WS_RESUME,
+            "d": {
+                "token": f"QQBot {self._access_token}",
+                "session_id": self._session_id,
+                "seq": self._last_seq,
+            },
+        }
+        await self._send_ws_json(payload)
+        self._resume_requested = False
+
     async def _heartbeat_loop(self, interval_ms: int) -> None:
         interval = max(interval_ms, 1000) / 1000
         while True:
             await asyncio.sleep(interval)
             await self._send_ws_json({"op": self.WS_HEARTBEAT, "d": self._last_seq})
 
+    async def _open_gateway_connection(self) -> None:
+        gateway = await self._fetch_gateway()
+        self._ws = await websockets.connect(gateway)
+
+    async def _reconnect_gateway(self, *, prefer_resume: bool) -> None:
+        self._sensenova_claw_status = {"status": "reconnecting", "error": None}
+        if self._heartbeat_task is not None:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            self._heartbeat_task = None
+        if self._ws is not None:
+            try:
+                await self._ws.close()
+            except Exception:
+                logger.debug("QQ official websocket close failed during reconnect", exc_info=True)
+            finally:
+                self._ws = None
+        self._resume_requested = prefer_resume and self._can_resume()
+        await self._open_gateway_connection()
+
     async def _send_ws_json(self, payload: dict[str, Any]) -> None:
         if self._ws is None:
             raise RuntimeError("QQ official websocket is not connected")
         await self._ws.send(json.dumps(payload))
+
+    def _can_resume(self) -> bool:
+        return bool(self._session_id and self._last_seq is not None)
 
     def _resolve_intents(self) -> int:
         intent_map = {

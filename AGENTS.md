@@ -1679,3 +1679,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 官方 QQ 的 `DIRECT_MESSAGE_CREATE` 和 `C2C_MESSAGE_CREATE` 都属于私聊，但回复目标并不共用 `channel_id`；把两者统一映射成 `direct:{channel_id}` 会导致 `/dms//messages` 或错误路径。
 - `author.id` 不是所有 QQ official 事件都稳定存在；`C2C_MESSAGE_CREATE` 需要优先读取 `author.user_openid`，`GROUP_AT_MESSAGE_CREATE` 也可能依赖 `member_openid`，否则会话键和 allowlist 判断都会埋雷。
+
+### 2026-03-31 QQ official 4009 超时重连补充
+
+成功经验：
+- QQ official gateway 出现 `4009 Session timed out` 时，优先修 runtime 的连接生命周期而不是外围 channel；根因通常是旧 websocket 已关闭，但 `_recv_loop` 仍在失效连接上反复 `recv()`，同时没有重新建连。
+- 这类网关协议必须把“重连后等 `HELLO` 再发 `RESUME/IDENTIFY`”做成显式状态位（如 `_resume_requested`）；如果建连后立刻发送恢复包，测试看似合理，实际上不符合握手顺序。
+- 对协议级 bug，最有效的回归测试是直接构造真实风格的 `ConnectionClosedError(Close(4009, ...))`，再让新连接返回一帧 `HELLO`，断言最终发出的就是 `WS_RESUME`。
+
+失败/风险经验：
+- 当前 `tests/e2e/test_qq_channel_official_e2e.py` 仍有既有失败：用例断言回复里包含“当前没有可用的 LLM”，但当前 `mock` provider 已会返回正常自我介绍文本；这和本次 4009 重连修复无关，不能误判为回归。

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from websockets.exceptions import ConnectionClosedError
+from websockets.frames import Close
 
 from sensenova_claw.adapters.plugins.qq.config import QQConfig, QQOfficialConfig, QQOneBotConfig
 from sensenova_claw.adapters.plugins.qq.runtime_official import QQOfficialRuntime
@@ -260,3 +263,65 @@ async def test_ready_event_updates_session_state():
     assert handled is True
     assert runtime._session_id == "sess-1"
     assert runtime._last_seq == 42
+
+
+@pytest.mark.asyncio
+async def test_recv_loop_reconnects_and_resumes_after_session_timeout():
+    runtime = QQOfficialRuntime(config=_make_config())
+    runtime._access_token = "token-1"
+    runtime._token_expire_at = 9999999999
+    runtime._session_id = "sess-1"
+    runtime._last_seq = 42
+
+    sent_payloads = []
+
+    class _ClosedWS:
+        def __init__(self) -> None:
+            self.recv_calls = 0
+            self.closed = False
+
+        async def recv(self) -> str:
+            self.recv_calls += 1
+            raise ConnectionClosedError(
+                Close(4009, "Session timed out"),
+                Close(4009, "Session timed out"),
+                True,
+            )
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class _ReplacementWS:
+        def __init__(self) -> None:
+            self._hello_sent = False
+
+        async def recv(self) -> str:
+            if not self._hello_sent:
+                self._hello_sent = True
+                return json.dumps({"op": 10, "d": {"heartbeat_interval": 41000}})
+            raise asyncio.CancelledError
+
+        async def send(self, payload: str) -> None:
+            sent_payloads.append(json.loads(payload))
+
+        async def close(self) -> None:
+            return None
+
+    runtime._ws = _ClosedWS()
+
+    with patch.object(runtime, "_fetch_gateway", AsyncMock(return_value="wss://example.qq/gateway")), patch(
+        "sensenova_claw.adapters.plugins.qq.runtime_official.websockets.connect",
+        AsyncMock(return_value=_ReplacementWS()),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await runtime._recv_loop()
+
+    assert sent_payloads
+    assert sent_payloads[0] == {
+        "op": runtime.WS_RESUME,
+        "d": {
+            "token": "QQBot token-1",
+            "session_id": "sess-1",
+            "seq": 42,
+        },
+    }
