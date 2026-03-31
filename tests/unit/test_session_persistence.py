@@ -188,3 +188,68 @@ async def test_load_session_history_from_state_store(repo):
     # 第二次加载：从内存缓存
     history2 = await store.load_session_history(session_id, repo)
     assert history2 is history  # 同一个对象引用
+
+
+@pytest.mark.asyncio
+async def test_log_event_not_blocking_event_loop(repo):
+    """验证 log_event 在线程池中执行，不阻塞 event loop"""
+    import threading
+    from sensenova_claw.kernel.events.envelope import EventEnvelope
+
+    session_id = "sess_thread_test"
+    turn_id = "turn_thread_test"
+    await repo.create_session(session_id)
+    await repo.create_turn(turn_id, session_id, "test")
+
+    # 记录 _sync_log_event 实际执行时所在的线程
+    execution_threads: list[int] = []
+    original_sync = repo._sync_log_event
+
+    def patched_sync(event):
+        execution_threads.append(threading.get_ident())
+        return original_sync(event)
+
+    repo._sync_log_event = patched_sync
+
+    event = EventEnvelope(
+        type="test.event",
+        session_id=session_id,
+        turn_id=turn_id,
+        payload={"msg": "hello"},
+        source="test",
+    )
+    await repo.log_event(event)
+
+    # 验证 _sync_log_event 在非主线程中执行
+    assert len(execution_threads) == 1
+    assert execution_threads[0] != threading.main_thread().ident, \
+        "log_event 的同步实现应在线程池中执行，而非 event loop 主线程"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_log_events_complete_correctly(repo):
+    """验证并发 log_event 不丢失数据"""
+    import asyncio
+    from sensenova_claw.kernel.events.envelope import EventEnvelope
+
+    session_id = "sess_concurrent"
+    turn_id = "turn_concurrent"
+    await repo.create_session(session_id)
+    await repo.create_turn(turn_id, session_id, "test")
+
+    # 并发写入 10 个事件
+    events = [
+        EventEnvelope(
+            type=f"test.event.{i}",
+            session_id=session_id,
+            turn_id=turn_id,
+            payload={"index": i},
+            source="test",
+        )
+        for i in range(10)
+    ]
+    await asyncio.gather(*[repo.log_event(e) for e in events])
+
+    # 验证全部写入
+    stored = await repo.get_session_events(session_id)
+    assert len(stored) == 10
