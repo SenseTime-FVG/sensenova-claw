@@ -78,7 +78,7 @@ class SendMessageTool(Tool):
         bus: PublicEventBus,
         repo: Repository,
         coordinator: AgentMessageCoordinator,
-        timeout: float = 300,
+        timeout: float = 600,
         default_max_retries: int = 0,
         max_tool_calls: int = 30,
         max_llm_calls: int = 15,
