@@ -10,12 +10,23 @@ function readCurrentToken(): string {
 
 test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) => {
   const token = readCurrentToken();
-  await page.context().addCookies([{
-    name: 'sensenova_claw_token',
-    value: token,
-    domain: 'localhost',
-    path: '/',
-  }]);
+  await page.context().addCookies([
+    {
+      name: 'sensenova_claw_token',
+      value: token,
+      domain: 'localhost',
+      path: '/',
+    },
+    {
+      name: 'sensenova_claw_token',
+      value: token,
+      domain: '127.0.0.1',
+      path: '/',
+    },
+  ]);
+  await page.addInitScript((tokenValue: string) => {
+    document.cookie = `sensenova_claw_token=${encodeURIComponent(tokenValue)}; path=/`;
+  }, token);
 
   await page.addInitScript(() => {
     const nativeFetch = window.fetch.bind(window);
@@ -31,6 +42,9 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
           'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_tokens: 128000, max_output_tokens: 8192 },
         },
         default_model: 'gpt-4o-mini',
+        _meta: {
+          explicit_provider_names: ['openai'],
+        },
       },
     };
 
@@ -51,6 +65,9 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
       const method = init?.method?.toUpperCase() ?? 'GET';
 
       if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/auth/verify-token') && method === 'POST') {
         return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       if (url.includes('/api/config/llm-status')) {
@@ -110,7 +127,7 @@ test('llms 页面应支持单项编辑与编辑所有配置', async ({ page }) =
     };
   });
 
-  await page.goto('/llms');
+  await page.goto(`/llms?token=${encodeURIComponent(token)}`);
 
   await expect(page.getByTestId('default-model-select')).toBeDisabled();
   await page.getByTestId('default-model-edit').click();
@@ -228,7 +245,7 @@ test('llms 页面只显示用户显式配置过的 provider', async ({ page }) =
     };
   });
 
-  await page.goto('/llms');
+  await page.goto(`/llms?token=${encodeURIComponent(token)}`);
 
   await expect(page.getByTestId('provider-card-deepseek')).toBeVisible();
   await expect(page.getByTestId('provider-card-openai')).toHaveCount(0);
@@ -278,6 +295,9 @@ test('llms 页面新增 provider 后应支持单项编辑并保存', async ({ pa
       if (url.includes('/api/auth/status')) {
         return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
+      if (url.includes('/api/auth/verify-token') && method === 'POST') {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
       if (url.includes('/api/config/llm-status')) {
         return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
@@ -304,7 +324,7 @@ test('llms 页面新增 provider 后应支持单项编辑并保存', async ({ pa
     };
   });
 
-  await page.goto('/llms');
+  await page.goto(`/llms?token=${encodeURIComponent(token)}`);
 
   await page.getByTestId('add-provider-button').click();
   await page.getByTestId('new-provider-name-input').fill('deepseek');
@@ -340,6 +360,149 @@ test('llms 页面新增 provider 后应支持单项编辑并保存', async ({ pa
       api_key: '',
     },
   });
+});
+
+test('llms 页面右上角刷新按钮应重新读取最新配置，并在存在未保存修改时先确认', async ({ page }) => {
+  const token = readCurrentToken();
+  await page.context().addCookies([{
+    name: 'sensenova_claw_token',
+    value: token,
+    domain: 'localhost',
+    path: '/',
+  }]);
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+
+    const firstState = {
+      llm: {
+        providers: {
+          mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: { source_type: 'openai', api_key: '', base_url: 'https://api.openai.com/v1', timeout: 60, max_retries: 3 },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          'gpt-4o-mini': { provider: 'openai', model_id: 'gpt-4o-mini', timeout: 60, max_tokens: 128000, max_output_tokens: 8192 },
+        },
+        default_model: 'gpt-4o-mini',
+        _meta: {
+          explicit_provider_names: ['openai'],
+        },
+      },
+    };
+
+    const secondState = {
+      llm: {
+        providers: {
+          mock: { api_key: '', base_url: '', timeout: 60, max_retries: 1 },
+          openai: { source_type: 'openai-compatible', api_key: '', base_url: 'https://proxy.example.com/v1', timeout: 90, max_retries: 5 },
+        },
+        models: {
+          mock: { provider: 'mock', model_id: 'mock-agent-v1' },
+          'gpt-4.1-mini': { provider: 'openai', model_id: 'gpt-4.1-mini', timeout: 60, max_tokens: 128000, max_output_tokens: 16384 },
+        },
+        default_model: 'gpt-4.1-mini',
+        _meta: {
+          explicit_provider_names: ['openai'],
+        },
+      },
+    };
+
+    let sectionGetCount = 0;
+    let serveLatestConfig = false;
+    let allowConfirm = false;
+    let confirmCalls = 0;
+
+    Object.assign(window, {
+      __sectionGetCount: sectionGetCount,
+      __confirmCalls: confirmCalls,
+      __useLatestRefreshConfig: () => {
+        serveLatestConfig = true;
+      },
+      __setRefreshConfirmResult: (next: boolean) => {
+        allowConfirm = next;
+      },
+    });
+
+    window.confirm = () => {
+      confirmCalls += 1;
+      (window as typeof window & { __confirmCalls: number }).__confirmCalls = confirmCalls;
+      return allowConfirm;
+    };
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method?.toUpperCase() ?? 'GET';
+
+      if (url.includes('/api/auth/status')) {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/auth/verify-token') && method === 'POST') {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/config/llm-status')) {
+        return new Response(JSON.stringify({ configured: true, providers: ['openai'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/custom-pages')) {
+        return new Response(JSON.stringify({ pages: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/api/cron/runs')) {
+        return new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/api/config/sections') && method === 'GET') {
+        sectionGetCount += 1;
+        (window as typeof window & { __sectionGetCount: number }).__sectionGetCount = sectionGetCount;
+        const body = serveLatestConfig ? secondState : firstState;
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      return nativeFetch(input, init);
+    };
+  });
+
+  await page.goto(`/llms?token=${encodeURIComponent(token)}`);
+
+  await expect(page.getByTestId('refresh-llm-config')).toBeVisible();
+  await page.getByTestId('provider-toggle-openai').click();
+  await expect(page.getByTestId('provider-base-url-input-openai')).toHaveValue('https://api.openai.com/v1');
+
+  await page.evaluate(() => {
+    (window as typeof window & { __useLatestRefreshConfig?: () => void }).__useLatestRefreshConfig?.();
+  });
+  await page.getByTestId('refresh-llm-config').click();
+  await page.getByTestId('provider-toggle-openai').click();
+  await expect(page.getByTestId('provider-base-url-input-openai')).toHaveValue('https://proxy.example.com/v1');
+  await expect(page.getByTestId('provider-source-type-select-openai')).toHaveValue('openai-compatible');
+  await expect(page.getByTestId('default-model-select')).toHaveValue('gpt-4.1-mini');
+  const sectionGetCountAfterRefresh = await page.evaluate(() => {
+    return (window as typeof window & { __sectionGetCount?: number }).__sectionGetCount ?? 0;
+  });
+
+  await page.getByTestId('provider-edit-openai').click();
+  await page.getByTestId('provider-base-url-input-openai').fill('https://dirty.example.com/v1');
+
+  await page.getByTestId('refresh-llm-config').click();
+  await expect.poll(async () => {
+    return page.evaluate(() => (window as typeof window & { __confirmCalls?: number }).__confirmCalls ?? 0);
+  }).toBe(1);
+  await expect(page.getByTestId('provider-base-url-input-openai')).toHaveValue('https://dirty.example.com/v1');
+  await expect.poll(async () => {
+    return page.evaluate(() => (window as typeof window & { __sectionGetCount?: number }).__sectionGetCount ?? 0);
+  }).toBe(sectionGetCountAfterRefresh);
+
+  await page.evaluate(() => {
+    (window as typeof window & { __setRefreshConfirmResult?: (next: boolean) => void }).__setRefreshConfirmResult?.(true);
+  });
+
+  await page.getByTestId('refresh-llm-config').click();
+  await page.getByTestId('provider-toggle-openai').click();
+  await expect.poll(async () => {
+    return page.evaluate(() => (window as typeof window & { __sectionGetCount?: number }).__sectionGetCount ?? 0);
+  }).toBe(sectionGetCountAfterRefresh + 1);
+  await expect(page.getByTestId('provider-base-url-input-openai')).toHaveValue('https://proxy.example.com/v1');
 });
 
 test('llms 页面单项编辑时测试按钮应读取草稿并位于编辑按钮下方，结果区域不侵入编辑按钮左侧', async ({ page }) => {
