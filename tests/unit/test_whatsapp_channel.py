@@ -219,7 +219,7 @@ class TestInbound:
 
         assert len(gateway._session_bindings) == 1
         session_id = next(iter(gateway._session_bindings))
-        assert gateway._session_bindings[session_id] == "whatsapp"
+        assert gateway._session_bindings[session_id] == {"whatsapp"}
         assert collected[0].payload["content"] == "你好"
         assert collected[0].session_id == session_id
 

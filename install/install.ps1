@@ -1,4 +1,4 @@
-# Sensenova-Claw 一键安装脚本（Windows PowerShell）
+﻿# Sensenova-Claw 一键安装脚本（Windows PowerShell）
 #
 # 用法:
 #   irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
@@ -282,7 +282,7 @@ function Setup-HomeDir {
 # ── 步骤 6: 初始化配置文件 ──
 
 function Setup-Config {
-    $configFile = "$APP_DIR\config.yml"
+    $configFile = "$SENSENOVA_CLAW_HOME\config.yml"
     $exampleFile = "$APP_DIR\config_example.yml"
 
     if (Test-Path $configFile) {
@@ -306,16 +306,20 @@ function Register-Command {
     Info "注册 sensenova-claw 命令..."
     Push-Location $APP_DIR
 
-    try {
-        uv tool install --editable --from . --force sensenova-claw 2>$null
-    } catch {
-        Warn "uv tool install 失败，尝试 pip install..."
-        try {
-            uv pip install -e . 2>$null
-        } catch {
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+
+    uv tool install --editable --from . --force sensenova-claw 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Warn "uv tool install 失败，尝试 uv pip install..."
+        uv pip install -e . 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Warn "uv pip install 失败，尝试 pip install..."
             pip install -e . 2>$null
         }
     }
+
+    $ErrorActionPreference = $prevEAP
 
     Pop-Location
 

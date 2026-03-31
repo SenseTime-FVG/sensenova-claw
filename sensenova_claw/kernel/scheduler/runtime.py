@@ -202,9 +202,10 @@ class CronRuntime:
         """根据调用方 session_id 解析投递配置，持久化到 CronJob.delivery"""
         if not self._gateway or not session_id:
             return None
-        channel_id = self._gateway._session_bindings.get(session_id)
-        if not channel_id:
+        channel_ids = self._gateway._session_bindings.get(session_id)
+        if not channel_ids:
             return None
+        channel_id = next(iter(channel_ids))
 
         delivery = CronDelivery(mode="announce", channel_id=channel_id, session_id=session_id)
 

@@ -197,7 +197,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         wsConnected={wsConnected}
         handleSkillInvoke={handleSkillInvoke}
         hideAgentSelector={hideAgentSelector}
-        lockAgent={lockAgent}
+        lockAgent={lockAgent || Boolean(currentSessionId)}
         onReconnect={reconnect}
       />
     </div>
