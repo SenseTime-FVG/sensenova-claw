@@ -536,14 +536,41 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsSend, sessionIdRef, emptySessionIdRef, markFrontendCreate]);
 
   const handleSkillInvoke = useCallback(async (skillName: string, args: string) => {
-    if (!sessionIdRef.current) return;
-    await authFetch(`${API_BASE}/api/sessions/${sessionIdRef.current}/skill-invoke`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skill_name: skillName, arguments: args }),
-    });
-    setIsTyping(true);
-  }, [sessionIdRef]);
+    if (!sessionIdRef.current) {
+      pushNotification({
+        title: '命令执行失败',
+        body: '请先发送一条普通消息创建会话，再执行 / 命令',
+        level: 'error',
+        source: 'skill',
+      });
+      return;
+    }
+    try {
+      const resp = await authFetch(`${API_BASE}/api/sessions/${sessionIdRef.current}/skill-invoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skill_name: skillName, arguments: args }),
+      });
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
+        pushNotification({
+          title: '命令执行失败',
+          body: errData.detail || `未知错误 (${resp.status})`,
+          level: 'error',
+          source: 'skill',
+        });
+        return;
+      }
+      setIsTyping(true);
+    } catch (err) {
+      pushNotification({
+        title: '命令执行失败',
+        body: '网络错误，请稍后重试',
+        level: 'error',
+        source: 'skill',
+      });
+    }
+  }, [sessionIdRef, pushNotification]);
 
   const cancelTurn = useCallback(() => {
     if (!sessionIdRef.current) return;

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -174,22 +176,41 @@ class Repository:
             db_path = str(resolve_sensenova_claw_home(config) / "data" / "sensenova-claw.db")
         self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._local = threading.local()  # 线程本地连接存储
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
+        """返回当前线程的 SQLite 连接（线程本地复用，首次创建时启用 WAL 模式）
+
+        注意：threading.local 已保证每个线程独占一个连接，连接永远不会跨线程共享，
+        因此不需要也不应该设置 check_same_thread=False（保持默认 True 以保留安全检查）。
+
+        TODO: Task 2-6 完成后，所有 async 方法将迁移至 asyncio.to_thread + _sync_* 模式，
+        届时业务方法中的 conn.close() + self._local.conn = None 均可删除（连接将持久复用）。
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.db_path)  # 默认 check_same_thread=True，保留驱动安全检查
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")   # 读写并发，减少锁竞争
+            conn.execute("PRAGMA synchronous=NORMAL")  # 降低 fsync 频率，性能与安全的平衡
+            self._local.conn = conn
         return conn
 
     async def init(self) -> None:
+        await asyncio.to_thread(self._sync_init)
+
+    def _sync_init(self) -> None:
         conn = self._conn()
         conn.executescript(SCHEMA_SQL)
         conn.commit()
         self._migrate_sessions_table(conn)
         self._migrate_agent_messages_table(conn)
         self._migrate_cron_runs_table(conn)
-        conn.close()
 
     async def create_session(self, session_id: str, meta: dict[str, Any] | None = None) -> None:
+        await asyncio.to_thread(self._sync_create_session, session_id, meta)
+
+    def _sync_create_session(self, session_id: str, meta: dict[str, Any] | None) -> None:
         now = time.time()
         meta = meta or {}
         agent_id = meta.get("agent_id", "default")
@@ -199,24 +220,26 @@ class Repository:
             (session_id, now, now, json.dumps(meta, ensure_ascii=False), agent_id),
         )
         conn.commit()
-        conn.close()
 
     async def update_session_activity(self, session_id: str) -> None:
+        await asyncio.to_thread(self._sync_update_session_activity, session_id)
+
+    def _sync_update_session_activity(self, session_id: str) -> None:
         conn = self._conn()
         conn.execute("UPDATE sessions SET last_active = ? WHERE session_id = ?", (time.time(), session_id))
         conn.commit()
-        conn.close()
 
     async def update_session_title(self, session_id: str, title: str) -> None:
+        await asyncio.to_thread(self._sync_update_session_title, session_id, title)
+
+    def _sync_update_session_title(self, session_id: str, title: str) -> None:
         conn = self._conn()
-        # 获取当前 meta
         row = conn.execute("SELECT meta FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
         if row:
             meta = json.loads(row[0]) if row[0] else {}
             meta["title"] = title
             conn.execute("UPDATE sessions SET meta = ? WHERE session_id = ?", (json.dumps(meta, ensure_ascii=False), session_id))
             conn.commit()
-        conn.close()
 
     async def list_sessions(
         self,
@@ -224,6 +247,9 @@ class Repository:
         *,
         include_hidden: bool = False,
     ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._sync_list_sessions, limit, include_hidden)
+
+    def _sync_list_sessions(self, limit: int, include_hidden: bool) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             """
@@ -243,29 +269,32 @@ class Repository:
             ORDER BY s.last_active DESC
             """,
         ).fetchall()
-        conn.close()
         sessions = [dict(row) for row in rows]
         if not include_hidden:
             sessions = [row for row in sessions if not self._is_hidden_session(row.get("meta"))]
         return sessions[:limit]
 
     async def create_turn(self, turn_id: str, session_id: str, user_input: str) -> None:
+        await asyncio.to_thread(self._sync_create_turn, turn_id, session_id, user_input)
+
+    def _sync_create_turn(self, turn_id: str, session_id: str, user_input: str) -> None:
         conn = self._conn()
         conn.execute(
             "INSERT INTO turns (turn_id, session_id, status, started_at, user_input) VALUES (?, ?, ?, ?, ?)",
             (turn_id, session_id, "started", time.time(), user_input),
         )
         conn.commit()
-        conn.close()
 
     async def complete_turn(self, turn_id: str, agent_response: str) -> None:
+        await asyncio.to_thread(self._sync_complete_turn, turn_id, agent_response)
+
+    def _sync_complete_turn(self, turn_id: str, agent_response: str) -> None:
         conn = self._conn()
         conn.execute(
             "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
             ("completed", time.time(), agent_response, turn_id),
         )
         conn.commit()
-        conn.close()
 
     async def update_turn_status(
         self,
@@ -274,15 +303,20 @@ class Repository:
         agent_response: str | None = None,
     ) -> None:
         """更新 turn 状态，必要时补充结束时间与最终输出。"""
+        await asyncio.to_thread(self._sync_update_turn_status, turn_id, status, agent_response)
+
+    def _sync_update_turn_status(self, turn_id: str, status: str, agent_response: str | None) -> None:
         conn = self._conn()
         conn.execute(
             "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
             (status, time.time(), agent_response, turn_id),
         )
         conn.commit()
-        conn.close()
 
     async def log_event(self, event: EventEnvelope) -> None:
+        await asyncio.to_thread(self._sync_log_event, event)
+
+    def _sync_log_event(self, event: EventEnvelope) -> None:
         conn = self._conn()
         conn.execute(
             """INSERT INTO events (event_id, session_id, turn_id, event_type, timestamp, source, trace_id, payload_json)
@@ -299,12 +333,13 @@ class Repository:
             ),
         )
         conn.commit()
-        conn.close()
 
     async def get_session_events(self, session_id: str) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._sync_get_session_events, session_id)
+
+    def _sync_get_session_events(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp", (session_id,)).fetchall()
-        conn.close()
         return [dict(row) for row in rows]
 
     def _parse_payload_json(self, raw: str | bytes | None) -> dict[str, Any]:
@@ -350,7 +385,9 @@ class Repository:
         """聚合最近未消费的 turn_end 下一问推荐。"""
         if limit <= 0:
             return []
+        return await asyncio.to_thread(self._sync_list_pending_recommendations, limit)
 
+    def _sync_list_pending_recommendations(self, limit: int) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             """
@@ -422,16 +459,17 @@ class Repository:
             if len(pending) >= limit:
                 break
 
-        conn.close()
         return pending
 
     async def get_session_turns(self, session_id: str) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._sync_get_session_turns, session_id)
+
+    def _sync_get_session_turns(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             "SELECT * FROM turns WHERE session_id = ? ORDER BY started_at",
             (session_id,),
         ).fetchall()
-        conn.close()
         return [dict(row) for row in rows]
 
     # ---------- Sessions 表迁移 ----------
@@ -461,25 +499,6 @@ class Repository:
         except (json.JSONDecodeError, TypeError, ValueError):
             return False
         return str(meta.get("visibility", "")).strip().lower() == "hidden"
-        # 回填：从 meta JSON 中提取 agent_id 写入 agent_id 列（修复历史数据）
-        rows = conn.execute(
-            "SELECT session_id, meta FROM sessions WHERE agent_id IS NULL OR agent_id = 'default'"
-        ).fetchall()
-        for row in rows:
-            meta_str = row[1]
-            if not meta_str:
-                continue
-            try:
-                meta = json.loads(meta_str)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            aid = meta.get("agent_id")
-            if aid and aid != "default":
-                conn.execute(
-                    "UPDATE sessions SET agent_id = ? WHERE session_id = ?",
-                    (aid, row[0]),
-                )
-        conn.commit()
 
     def _migrate_agent_messages_table(self, conn: sqlite3.Connection) -> None:
         """为 agent_messages 表补充新增列（兼容旧库）。"""
@@ -516,9 +535,11 @@ class Repository:
 
     async def get_session_meta(self, session_id: str) -> dict[str, Any] | None:
         """获取会话的 meta 信息（含 agent_id 等）"""
+        return await asyncio.to_thread(self._sync_get_session_meta, session_id)
+
+    def _sync_get_session_meta(self, session_id: str) -> dict[str, Any] | None:
         conn = self._conn()
         row = conn.execute("SELECT meta FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
-        conn.close()
         if not row or not row[0]:
             return None
         return json.loads(row[0])
@@ -536,6 +557,21 @@ class Repository:
         tool_name: str | None = None,
     ) -> None:
         """保存单条消息到 messages 表"""
+        await asyncio.to_thread(
+            self._sync_save_message,
+            session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name,
+        )
+
+    def _sync_save_message(
+        self,
+        session_id: str,
+        turn_id: str,
+        role: str,
+        content: str | None,
+        tool_calls: str | None,
+        tool_call_id: str | None,
+        tool_name: str | None,
+    ) -> None:
         conn = self._conn()
         conn.execute(
             """INSERT INTO messages (session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name, created_at)
@@ -543,16 +579,17 @@ class Repository:
             (session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name, time.time()),
         )
         conn.commit()
-        conn.close()
 
     async def get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
         """获取会话的所有消息（按时间排序），返回 LLM 消息格式"""
+        return await asyncio.to_thread(self._sync_get_session_messages, session_id)
+
+    def _sync_get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             "SELECT role, content, tool_calls, tool_call_id, tool_name FROM messages WHERE session_id = ? ORDER BY created_at",
             (session_id,),
         ).fetchall()
-        conn.close()
         messages: list[dict[str, Any]] = []
         for row in rows:
             msg: dict[str, Any] = {"role": row[0]}
@@ -574,26 +611,33 @@ class Repository:
         model: str | None = None,
     ) -> None:
         """更新会话的 channel 和 model 信息"""
+        await asyncio.to_thread(self._sync_update_session_info, session_id, channel, model)
+
+    def _sync_update_session_info(self, session_id: str, channel: str | None, model: str | None) -> None:
         conn = self._conn()
         if channel is not None:
             conn.execute("UPDATE sessions SET channel = ? WHERE session_id = ?", (channel, session_id))
         if model is not None:
             conn.execute("UPDATE sessions SET model = ? WHERE session_id = ?", (model, session_id))
         conn.commit()
-        conn.close()
 
     async def increment_message_count(self, session_id: str) -> None:
         """递增会话消息计数"""
+        await asyncio.to_thread(self._sync_increment_message_count, session_id)
+
+    def _sync_increment_message_count(self, session_id: str) -> None:
         conn = self._conn()
         conn.execute(
             "UPDATE sessions SET message_count = COALESCE(message_count, 0) + 1 WHERE session_id = ?",
             (session_id,),
         )
         conn.commit()
-        conn.close()
 
     async def delete_session_cascade(self, session_id: str) -> None:
         """级联删除会话及关联的 turns, messages, events"""
+        await asyncio.to_thread(self._sync_delete_session_cascade, session_id)
+
+    def _sync_delete_session_cascade(self, session_id: str) -> None:
         conn = self._conn()
         conn.execute(
             "DELETE FROM agent_messages WHERE parent_session_id = ? OR child_session_id = ?",
@@ -604,12 +648,14 @@ class Repository:
         conn.execute("DELETE FROM turns WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
         conn.commit()
-        conn.close()
 
     # ---------- Agent Messages 表操作 ----------
 
     async def save_message_record(self, record: MessageRecord) -> None:
         """保存 Agent-to-Agent 消息记录。"""
+        await asyncio.to_thread(self._sync_save_message_record, record)
+
+    def _sync_save_message_record(self, record: MessageRecord) -> None:
         conn = self._conn()
         conn.execute(
             """
@@ -643,7 +689,6 @@ class Repository:
             ),
         )
         conn.commit()
-        conn.close()
 
     async def update_message_record(self, record: MessageRecord) -> None:
         """更新 Agent-to-Agent 消息记录。"""
@@ -651,12 +696,14 @@ class Repository:
 
     async def get_message_record(self, record_id: str) -> MessageRecord | None:
         """按记录 ID 查询 Agent-to-Agent 消息记录。"""
+        return await asyncio.to_thread(self._sync_get_message_record, record_id)
+
+    def _sync_get_message_record(self, record_id: str) -> MessageRecord | None:
         conn = self._conn()
         row = conn.execute(
             "SELECT * FROM agent_messages WHERE id = ?",
             (record_id,),
         ).fetchone()
-        conn.close()
         if not row:
             return None
         return MessageRecord.from_mapping(dict(row))
@@ -666,6 +713,9 @@ class Repository:
         child_session_id: str,
     ) -> MessageRecord | None:
         """按子会话 ID 查询最新一条 Agent-to-Agent 消息记录。"""
+        return await asyncio.to_thread(self._sync_get_message_record_by_child_session, child_session_id)
+
+    def _sync_get_message_record_by_child_session(self, child_session_id: str) -> MessageRecord | None:
         conn = self._conn()
         row = conn.execute(
             """
@@ -676,7 +726,6 @@ class Repository:
             """,
             (child_session_id,),
         ).fetchone()
-        conn.close()
         if not row:
             return None
         return MessageRecord.from_mapping(dict(row))
@@ -686,6 +735,9 @@ class Repository:
         parent_session_id: str,
     ) -> list[MessageRecord]:
         """查询父会话下仍在运行中的 Agent-to-Agent 消息记录。"""
+        return await asyncio.to_thread(self._sync_list_active_message_records, parent_session_id)
+
+    def _sync_list_active_message_records(self, parent_session_id: str) -> list[MessageRecord]:
         conn = self._conn()
         rows = conn.execute(
             """
@@ -696,38 +748,45 @@ class Repository:
             """,
             (parent_session_id,),
         ).fetchall()
-        conn.close()
         return [MessageRecord.from_mapping(dict(row)) for row in rows]
 
     async def prune_sessions(self, max_age_days: int = 30) -> int:
         """删除超期未活跃的会话及关联数据，返回删除数量"""
+        return await asyncio.to_thread(self._sync_prune_sessions, max_age_days)
+
+    def _sync_prune_sessions(self, max_age_days: int) -> int:
         cutoff = time.time() - max_age_days * 86400
         conn = self._conn()
+        # 注意：必须先 fetchall() 拿到全部结果，再进入循环执行 DELETE。
+        # 如果使用游标懒迭代，后续的 DELETE + commit 会使游标失效。
         rows = conn.execute(
             "SELECT session_id FROM sessions WHERE last_active < ?", (cutoff,)
         ).fetchall()
-        conn.close()
         count = 0
         for row in rows:
-            await self.delete_session_cascade(row[0])
+            # _sync_delete_session_cascade 与本方法在同一线程执行（threading.local 保证），
+            # 复用同一个 conn 对象，串行调用安全。
+            self._sync_delete_session_cascade(row[0])
             count += 1
         return count
 
     async def cap_sessions(self, max_count: int = 500) -> int:
         """限制会话总数，淘汰最旧的，返回删除数量"""
+        return await asyncio.to_thread(self._sync_cap_sessions, max_count)
+
+    def _sync_cap_sessions(self, max_count: int) -> int:
         conn = self._conn()
         total = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
         if total <= max_count:
-            conn.close()
             return 0
         overflow = total - max_count
+        # 同 _sync_prune_sessions：先 fetchall() 后再循环 DELETE
         rows = conn.execute(
             "SELECT session_id FROM sessions ORDER BY last_active ASC LIMIT ?", (overflow,)
         ).fetchall()
-        conn.close()
         count = 0
         for row in rows:
-            await self.delete_session_cascade(row[0])
+            self._sync_delete_session_cascade(row[0])
             count += 1
         return count
 
@@ -735,6 +794,9 @@ class Repository:
 
     async def create_cron_job(self, job_data: dict[str, Any]) -> None:
         """插入一条 cron_jobs 记录"""
+        await asyncio.to_thread(self._sync_create_cron_job, job_data)
+
+    def _sync_create_cron_job(self, job_data: dict[str, Any]) -> None:
         conn = self._conn()
         conn.execute(
             """INSERT INTO cron_jobs (id, name, description, schedule_json, session_target,
@@ -755,53 +817,62 @@ class Repository:
             ),
         )
         conn.commit()
-        conn.close()
 
     async def get_cron_job(self, job_id: str) -> dict[str, Any] | None:
         """按 ID 查询单条 cron job"""
+        return await asyncio.to_thread(self._sync_get_cron_job, job_id)
+
+    def _sync_get_cron_job(self, job_id: str) -> dict[str, Any] | None:
         conn = self._conn()
         row = conn.execute("SELECT * FROM cron_jobs WHERE id = ?", (job_id,)).fetchone()
-        conn.close()
         return dict(row) if row else None
 
     async def list_cron_jobs(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         """返回所有 cron jobs"""
+        return await asyncio.to_thread(self._sync_list_cron_jobs, enabled_only)
+
+    def _sync_list_cron_jobs(self, enabled_only: bool) -> list[dict[str, Any]]:
         conn = self._conn()
         if enabled_only:
             rows = conn.execute("SELECT * FROM cron_jobs WHERE enabled = 1 ORDER BY created_at_ms").fetchall()
         else:
             rows = conn.execute("SELECT * FROM cron_jobs ORDER BY created_at_ms").fetchall()
-        conn.close()
         return [dict(row) for row in rows]
 
     async def update_cron_job(self, job_id: str, updates: dict[str, Any]) -> None:
         """更新 cron job 的指定字段"""
         if not updates:
             return
+        await asyncio.to_thread(self._sync_update_cron_job, job_id, updates)
+
+    def _sync_update_cron_job(self, job_id: str, updates: dict[str, Any]) -> None:
         set_parts = [f"{k} = ?" for k in updates]
         values = list(updates.values()) + [job_id]
         conn = self._conn()
         conn.execute(f"UPDATE cron_jobs SET {', '.join(set_parts)} WHERE id = ?", values)
         conn.commit()
-        conn.close()
 
     async def delete_cron_job(self, job_id: str, *, keep_runs: bool = False) -> None:
         """删除 cron job。keep_runs=True 时保留 runs 历史（用于自动删除场景）。"""
+        await asyncio.to_thread(self._sync_delete_cron_job, job_id, keep_runs)
+
+    def _sync_delete_cron_job(self, job_id: str, keep_runs: bool) -> None:
         conn = self._conn()
         if not keep_runs:
             conn.execute("DELETE FROM cron_runs WHERE job_id = ?", (job_id,))
         conn.execute("DELETE FROM cron_jobs WHERE id = ?", (job_id,))
         conn.commit()
-        conn.close()
 
     async def get_runnable_cron_jobs(self, now_ms: int) -> list[dict[str, Any]]:
         """返回到期且未在执行中的 enabled jobs"""
+        return await asyncio.to_thread(self._sync_get_runnable_cron_jobs, now_ms)
+
+    def _sync_get_runnable_cron_jobs(self, now_ms: int) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             "SELECT * FROM cron_jobs WHERE enabled = 1 AND running_at_ms IS NULL AND next_run_at_ms <= ?",
             (now_ms,),
         ).fetchall()
-        conn.close()
         return [dict(row) for row in rows]
 
     async def update_cron_job_state(self, job_id: str, state_updates: dict[str, Any]) -> None:
@@ -810,15 +881,20 @@ class Repository:
 
     async def clear_stale_cron_running(self) -> None:
         """启动时清除所有 running_at_ms 残留（上次异常退出）"""
+        await asyncio.to_thread(self._sync_clear_stale_cron_running)
+
+    def _sync_clear_stale_cron_running(self) -> None:
         conn = self._conn()
         conn.execute("UPDATE cron_jobs SET running_at_ms = NULL WHERE running_at_ms IS NOT NULL")
         conn.commit()
-        conn.close()
 
     # ---------- Cron Runs 表操作 ----------
 
     async def insert_cron_run(self, run_data: dict[str, Any]) -> int:
         """插入一条 cron_runs 记录，返回自增 ID"""
+        return await asyncio.to_thread(self._sync_insert_cron_run, run_data)
+
+    def _sync_insert_cron_run(self, run_data: dict[str, Any]) -> int:
         conn = self._conn()
         cursor = conn.execute(
             """INSERT INTO cron_runs (job_id, started_at_ms, ended_at_ms, status, error,
@@ -835,32 +911,38 @@ class Repository:
         )
         run_id = cursor.lastrowid
         conn.commit()
-        conn.close()
         return run_id
 
     async def update_cron_run(self, run_id: int, updates: dict[str, Any]) -> None:
         """更新 cron_runs 记录"""
         if not updates:
             return
+        await asyncio.to_thread(self._sync_update_cron_run, run_id, updates)
+
+    def _sync_update_cron_run(self, run_id: int, updates: dict[str, Any]) -> None:
         set_parts = [f"{k} = ?" for k in updates]
         values = list(updates.values()) + [run_id]
         conn = self._conn()
         conn.execute(f"UPDATE cron_runs SET {', '.join(set_parts)} WHERE id = ?", values)
         conn.commit()
-        conn.close()
 
     async def list_cron_runs(self, job_id: str, limit: int = 50) -> list[dict[str, Any]]:
         """按 started_at_ms 倒序列出 job 运行历史。"""
+        return await asyncio.to_thread(self._sync_list_cron_runs, job_id, limit)
+
+    def _sync_list_cron_runs(self, job_id: str, limit: int) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             "SELECT * FROM cron_runs WHERE job_id = ? ORDER BY started_at_ms DESC LIMIT ?",
             (job_id, limit),
         ).fetchall()
-        conn.close()
         return [dict(row) for row in rows]
 
     async def list_all_cron_runs(self, limit: int = 50, status: str | None = None) -> list[dict[str, Any]]:
         """跨所有 job 列出 cron_runs，并 JOIN cron_jobs 获取 job 名称和 payload。"""
+        return await asyncio.to_thread(self._sync_list_all_cron_runs, limit, status)
+
+    def _sync_list_all_cron_runs(self, limit: int, status: str | None) -> list[dict[str, Any]]:
         conn = self._conn()
         sql = """
             SELECT r.*, j.name AS joined_job_name, j.payload_json
@@ -874,13 +956,15 @@ class Repository:
         sql += " ORDER BY r.started_at_ms DESC LIMIT ?"
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
-        conn.close()
         return [dict(row) for row in rows]
 
     # ---------- Proactive Jobs 表操作 ----------
 
     async def create_proactive_job(self, row: dict[str, Any]) -> None:
         """插入一条 proactive_jobs 记录"""
+        await asyncio.to_thread(self._sync_create_proactive_job, row)
+
+    def _sync_create_proactive_job(self, row: dict[str, Any]) -> None:
         now_ms = int(time.time() * 1000)
         conn = self._conn()
         conn.execute(
@@ -897,17 +981,21 @@ class Repository:
             ),
         )
         conn.commit()
-        conn.close()
 
     async def get_proactive_job(self, job_id: str) -> dict[str, Any] | None:
         """按 ID 查询单条 proactive job"""
+        return await asyncio.to_thread(self._sync_get_proactive_job, job_id)
+
+    def _sync_get_proactive_job(self, job_id: str) -> dict[str, Any] | None:
         conn = self._conn()
         row = conn.execute("SELECT * FROM proactive_jobs WHERE id = ?", (job_id,)).fetchone()
-        conn.close()
         return dict(row) if row else None
 
     async def list_proactive_jobs(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         """返回所有 proactive jobs"""
+        return await asyncio.to_thread(self._sync_list_proactive_jobs, enabled_only)
+
+    def _sync_list_proactive_jobs(self, enabled_only: bool) -> list[dict[str, Any]]:
         conn = self._conn()
         if enabled_only:
             rows = conn.execute(
@@ -915,32 +1003,38 @@ class Repository:
             ).fetchall()
         else:
             rows = conn.execute("SELECT * FROM proactive_jobs ORDER BY created_at_ms").fetchall()
-        conn.close()
         return [dict(row) for row in rows]
 
     async def update_proactive_job(self, job_id: str, updates: dict[str, Any]) -> None:
         """更新 proactive job 的指定字段"""
         if not updates:
             return
+        await asyncio.to_thread(self._sync_update_proactive_job, job_id, updates)
+
+    def _sync_update_proactive_job(self, job_id: str, updates: dict[str, Any]) -> None:
         set_parts = [f"{k} = ?" for k in updates]
         values = list(updates.values()) + [job_id]
         conn = self._conn()
         conn.execute(f"UPDATE proactive_jobs SET {', '.join(set_parts)} WHERE id = ?", values)
         conn.commit()
-        conn.close()
 
     async def delete_proactive_job(self, job_id: str) -> None:
         """删除 proactive job 及其 runs"""
+        await asyncio.to_thread(self._sync_delete_proactive_job, job_id)
+
+    def _sync_delete_proactive_job(self, job_id: str) -> None:
         conn = self._conn()
         conn.execute("DELETE FROM proactive_runs WHERE job_id = ?", (job_id,))
         conn.execute("DELETE FROM proactive_jobs WHERE id = ?", (job_id,))
         conn.commit()
-        conn.close()
 
     # ---------- Proactive Runs 表操作 ----------
 
     async def create_proactive_run(self, row: dict[str, Any]) -> None:
         """插入一条 proactive_runs 记录"""
+        await asyncio.to_thread(self._sync_create_proactive_run, row)
+
+    def _sync_create_proactive_run(self, row: dict[str, Any]) -> None:
         conn = self._conn()
         conn.execute(
             """INSERT INTO proactive_runs (id, job_id, session_id, status, triggered_by,
@@ -954,32 +1048,37 @@ class Repository:
             ),
         )
         conn.commit()
-        conn.close()
 
     async def update_proactive_run(self, run_id: str, updates: dict[str, Any]) -> None:
         """更新 proactive_runs 记录"""
         if not updates:
             return
+        await asyncio.to_thread(self._sync_update_proactive_run, run_id, updates)
+
+    def _sync_update_proactive_run(self, run_id: str, updates: dict[str, Any]) -> None:
         set_parts = [f"{k} = ?" for k in updates]
         values = list(updates.values()) + [run_id]
         conn = self._conn()
         conn.execute(f"UPDATE proactive_runs SET {', '.join(set_parts)} WHERE id = ?", values)
         conn.commit()
-        conn.close()
 
     async def list_proactive_runs(self, job_id: str, limit: int = 50) -> list[dict[str, Any]]:
         """按 started_at_ms 倒序列出 job 运行历史"""
+        return await asyncio.to_thread(self._sync_list_proactive_runs, job_id, limit)
+
+    def _sync_list_proactive_runs(self, job_id: str, limit: int) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             "SELECT * FROM proactive_runs WHERE job_id = ? ORDER BY started_at_ms DESC LIMIT ?",
             (job_id, limit),
         ).fetchall()
-        conn.close()
         return [dict(row) for row in rows]
 
     async def get_proactive_run(self, run_id: str) -> dict[str, Any] | None:
         """按 ID 查询单条 proactive run"""
+        return await asyncio.to_thread(self._sync_get_proactive_run, run_id)
+
+    def _sync_get_proactive_run(self, run_id: str) -> dict[str, Any] | None:
         conn = self._conn()
         row = conn.execute("SELECT * FROM proactive_runs WHERE id = ?", (run_id,)).fetchone()
-        conn.close()
         return dict(row) if row else None
