@@ -572,11 +572,53 @@ class ObsidianLocateTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> dict:
-        """执行工具"""
-        # 占位符，下个 task 实现
-        return {
-            "success": False,
-            "error": "Not implemented",
-            "vaults": [],
-            "primary_vault": None,
-        }
+        """执行工具 - 定位和初始化 Obsidian vault"""
+        try:
+            # 获取所有 vault 并排序
+            vault_infos, primary_vault = _get_all_vaults()
+
+            if not vault_infos:
+                return {
+                    "success": False,
+                    "error": "无法创建或定位 Obsidian vault",
+                    "vaults": [],
+                    "primary_vault": None,
+                    "note": "请检查文件系统权限并重试",
+                }
+
+            # 准备返回数据
+            vaults_data = [v.to_dict() for v in vault_infos]
+            primary_vault_data = primary_vault.to_dict() if primary_vault else None
+
+            # 生成说明文本
+            note_parts = []
+            if any(v["created_now"] for v in vaults_data):
+                note_parts.append("已在 ~/Obsidian 创建新的默认 vault")
+
+            if any(not v["has_structure"] for v in vaults_data):
+                note_parts.append("已为部分 vault 补全知识库结构")
+
+            if len(vault_infos) > 1:
+                note_parts.append(f"检测到 {len(vault_infos)} 个 vault，首选推荐使用第一个")
+            else:
+                note_parts.append("已检测到 1 个 vault")
+
+            note = "；".join(note_parts)
+
+            return {
+                "success": True,
+                "vaults": vaults_data,
+                "primary_vault": primary_vault_data,
+                "note": note,
+                "error": None,
+            }
+
+        except Exception as e:
+            logger.exception(f"ObsidianLocateTool execute failed: {e}")
+            return {
+                "success": False,
+                "error": f"工具执行失败: {str(e)}",
+                "vaults": [],
+                "primary_vault": None,
+                "note": None,
+            }
