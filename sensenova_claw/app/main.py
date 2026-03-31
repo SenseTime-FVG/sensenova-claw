@@ -149,18 +149,77 @@ def _terminate_managed_process(proc: subprocess.Popen, timeout: float = 5) -> No
 # ── sensenova_claw run ──────────────────────────────────────
 
 def _check_port(port: int) -> bool:
-    """检查端口是否可用（尝试连接，连上说明被占用）"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(0.5)
-        try:
-            s.connect(("127.0.0.1", port))
-            return False  # 连上了，说明已被占用
-        except (ConnectionRefusedError, OSError):
-            return True  # 连不上，说明空闲
+    """检查端口是否可用。返回 True 表示端口空闲，False 表示已有监听。"""
+    has_listener = _port_has_listener(port)
+    if has_listener is not None:
+        return not has_listener
+    return True
+
+
+def _port_has_listener(port: int) -> bool | None:
+    """探测端口是否已有监听；无法判断时返回 None。"""
+    # 在 WSL/受限环境里，直连 localhost 可能失真；优先使用系统工具读取监听状态。
+    if os.name == "nt":
+        netstat = shutil.which("netstat")
+        if netstat:
+            try:
+                result = subprocess.run(
+                    [netstat, "-ano"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    check=False,
+                )
+            except OSError:
+                result = None
+            if result is not None:
+                needle = f":{port}"
+                return any(needle in line and "LISTENING" in line.upper() for line in result.stdout.splitlines())
+    else:
+        lsof = shutil.which("lsof")
+        if lsof:
+            try:
+                result = subprocess.run(
+                    [lsof, f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            except OSError:
+                result = None
+            if result is not None:
+                return result.returncode == 0
+
+        ss = shutil.which("ss")
+        if ss:
+            try:
+                result = subprocess.run(
+                    [ss, "-ltn"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    check=False,
+                )
+            except OSError:
+                result = None
+            if result is not None:
+                needle = f":{port}"
+                return any(needle in line for line in result.stdout.splitlines())
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            try:
+                s.connect(("127.0.0.1", port))
+                return True
+            except (ConnectionRefusedError, OSError):
+                return False
+    except OSError:
+        return None
 
 
 def _wait_for_port_listen(port: int, *, timeout: float, proc: subprocess.Popen | None = None) -> bool:
-    """等待端口开始监听；若进程提前退出则立即失败。"""
+    """等待端口开始监听；若进程长期初始化但仍存活，则交由上层继续观察。"""
     deadline = time.time() + timeout
     while time.time() < deadline:
         if not _check_port(port):
@@ -168,7 +227,7 @@ def _wait_for_port_listen(port: int, *, timeout: float, proc: subprocess.Popen |
         if proc is not None and proc.poll() is not None:
             return False
         time.sleep(0.2)
-    return False
+    return proc is not None and proc.poll() is None
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -235,10 +294,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     procs.append(backend_proc)
 
     # 等待后端启动，避免仅依赖包装进程 pid
-    if not _wait_for_port_listen(backend_port, timeout=15, proc=backend_proc):
+    if not _wait_for_port_listen(backend_port, timeout=60, proc=backend_proc):
         print("错误: 后端启动失败", file=sys.stderr)
         cleanup()
         return 1
+    if _check_port(backend_port):
+        print("警告: 后端进程已启动，但端口尚未就绪，初始化可能仍在继续。")
 
     # 启动前端：检测到 .next/ 目录（已 build）自动用 next start，否则回退 next dev
     frontend_proc = None
@@ -264,10 +325,12 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
             procs.append(frontend_proc)
 
-            if not _wait_for_port_listen(frontend_port, timeout=20, proc=frontend_proc):
+            if not _wait_for_port_listen(frontend_port, timeout=60, proc=frontend_proc):
                 print("错误: 前端启动失败", file=sys.stderr)
                 cleanup()
                 return 1
+            if _check_port(frontend_port):
+                print("警告: 前端进程已启动，但端口尚未就绪，初始化可能仍在继续。")
 
     # 检测 LLM 配置状态
     try:

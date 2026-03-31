@@ -19,11 +19,10 @@ from pydantic import BaseModel
 from sensenova_claw.capabilities.agents.config import AgentConfig
 from sensenova_claw.capabilities.agents.preferences import (
     load_preferences,
-    resolve_tool_enabled_from_prefs,
-    save_agent_tool_preferences,
     save_preferences,
 )
 from sensenova_claw.capabilities.agents.registry import SYSTEM_PROMPT_FILENAME
+from sensenova_claw.capabilities.tools.registry import _is_tool_config_enabled
 from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
 logger = logging.getLogger(__name__)
@@ -121,7 +120,7 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
         # 如果 Agent 配置了 tools 列表，过滤展示
         if agent_cfg.tools and name not in agent_cfg.tools:
             continue
-        enabled = resolve_tool_enabled_from_prefs(prefs, agent_cfg.id, name, default=True)
+        enabled = _is_tool_config_enabled(name)
         tools_detail.append({
             "name": name,
             "description": tool.description or "",
@@ -384,19 +383,21 @@ async def delete_agent(agent_id: str, request: Request):
 
 @router.put("/{agent_id}/preferences")
 async def update_agent_preferences(agent_id: str, body: AgentPreferences, request: Request):
-    """批量更新 agent 的 tools/skills 启用偏好"""
+    """批量更新 agent 的 tools/skills 启用偏好
+
+    注意：tools 开关已迁移到 config.yml，此端点仅保留对 skills 偏好的写入。
+    tools 字段如果传入将被忽略（应通过 PUT /api/tools/{name}/enabled 或 Agent 配置管理）。
+    """
     registry = _get_agent_registry(request)
     if not registry.get(agent_id):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     home = _sensenova_claw_home_path(request)
-    prefs = load_preferences(home)
 
-    if body.tools is not None:
-        prefs = save_agent_tool_preferences(home, agent_id, body.tools)
     if body.skills is not None:
+        prefs = load_preferences(home)
         prefs["skills"] = {**prefs.get("skills", {}), **body.skills}
         save_preferences(home, prefs)
 
-    logger.info("Agent preferences updated: tools=%s, skills=%s", body.tools, body.skills)
+    logger.info("Agent preferences updated: skills=%s (tools ignored, use config.yml)", body.skills)
     return {"status": "saved"}

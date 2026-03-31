@@ -997,3 +997,81 @@ class TestToolTurnCancellation:
 
         assert tool.executed is False
         assert published == []
+
+
+# ---------- config.yml 工具 enabled 开关 ----------
+
+
+class TestConfigToolEnabled:
+    """验证工具启用状态来自 config.yml 而非 preferences"""
+
+    async def test_config_disabled_tool_rejected_at_execution(self, tmp_path):
+        """config disabled 的工具执行时返回错误"""
+        worker, cfg = _make_worker(session_id="test_disabled", tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": False,
+            "tools.tracking_tool.enabled": False,
+        })
+        tool = _TrackingTool()
+        worker.rt.registry.register(tool)
+
+        event = EventEnvelope(
+            type=TOOL_CALL_REQUESTED,
+            session_id="test_disabled",
+            turn_id="turn_1",
+            source="agent",
+            payload={
+                "tool_call_id": "tc_disabled",
+                "tool_name": "tracking_tool",
+                "arguments": {},
+            },
+        )
+
+        published: list[EventEnvelope] = []
+        original_publish = worker.bus.publish
+
+        async def capture_publish(evt: EventEnvelope):
+            published.append(evt)
+            await original_publish(evt)
+
+        worker.bus.publish = capture_publish
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        import sensenova_claw.capabilities.tools.registry as tr
+        original_tw_config = tw.config
+        original_tr_config = tr.config
+        try:
+            tw.config = cfg
+            tr.config = cfg
+            await worker._handle_tool_requested(event)
+        finally:
+            tw.config = original_tw_config
+            tr.config = original_tr_config
+
+        # 工具不应被执行
+        assert tool.executed is False
+        # 应有 TOOL_CALL_RESULT 事件且 success=False
+        result_events = [e for e in published if e.type == TOOL_CALL_RESULT]
+        assert len(result_events) == 1
+        assert result_events[0].payload["success"] is False
+        assert "禁用" in result_events[0].payload["result"]
+
+    def test_tool_enabled_reads_config_not_preferences(self, tmp_path):
+        """验证 _is_tool_enabled_for_agent 不再依赖 preferences"""
+        worker, cfg = _make_worker(session_id="test_config", tmp_path=tmp_path, config_overrides={
+            "tools.permission.enabled": False,
+        })
+
+        import sensenova_claw.capabilities.tools.registry as tr
+        original_config = tr.config
+        try:
+            tr.config = cfg
+            # 默认启用（config 中没有显式 enabled 字段）
+            assert worker._is_tool_enabled_for_agent("default", "bash_command") is True
+            # 设置为 False
+            cfg.set("tools.bash_command.enabled", False)
+            assert worker._is_tool_enabled_for_agent("default", "bash_command") is False
+            # 设置回 True
+            cfg.set("tools.bash_command.enabled", True)
+            assert worker._is_tool_enabled_for_agent("default", "bash_command") is True
+        finally:
+            tr.config = original_config

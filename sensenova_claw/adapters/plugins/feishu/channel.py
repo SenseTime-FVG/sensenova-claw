@@ -88,6 +88,18 @@ class FeishuChannel(Channel):
             types.add(TOOL_CALL_STARTED)
         return types
 
+    def on_session_expired(self, session_id: str) -> None:
+        """BusRouter GC 清理 session 后，移除内部映射，下次消息自动新建。"""
+        with self._lock:
+            self._session_meta.pop(session_id, None)
+            self._pending_questions.pop(session_id, None)
+            keys_to_remove = [
+                key for key, sid in self._chat_sessions.items() if sid == session_id
+            ]
+            for key in keys_to_remove:
+                del self._chat_sessions[key]
+        logger.debug("FeishuChannel cleaned up expired session %s", session_id)
+
     async def start(self) -> None:
         self._loop = asyncio.get_event_loop()
         self._sensenova_claw_status = {"status": "connecting", "error": None}
@@ -236,6 +248,13 @@ class FeishuChannel(Channel):
         self, text: str, chat_id: str, chat_type: str, message_id: str, sender_id: str
     ) -> None:
         """asyncio 线程：session 管理 → bind → 发布事件"""
+
+        # /new 命令：强制新建会话
+        if text.strip().lower() == "/new":
+            self._reset_session(chat_type, chat_id, sender_id)
+            await self._send_to_chat(chat_id, "✅ 已开启新对话")
+            return
+
         session_key = (
             f"dm:{sender_id}" if chat_type == "p2p" else f"group:{chat_id}"
         )
@@ -285,6 +304,25 @@ class FeishuChannel(Channel):
                 },
             )
         )
+
+    def _reset_session(self, chat_type: str, chat_id: str, sender_id: str) -> None:
+        """清除指定聊天的 session 映射，下次消息自动新建"""
+        session_key = (
+            f"dm:{sender_id}" if chat_type == "p2p" else f"group:{chat_id}"
+        )
+        with self._lock:
+            self._chat_sessions.pop(session_key, None)
+
+    async def _send_to_chat(self, chat_id: str, text: str) -> None:
+        """直接向 chat_id 发送一条消息（用于命令回复等不走 session 的场景）"""
+        if not self._client:
+            return
+        content, msg_type = self._build_content(text)
+        request = self._build_message_request(chat_id, "chat_id", content, msg_type)
+        try:
+            await asyncio.to_thread(self._client.im.v1.message.create, request)
+        except Exception:
+            logger.exception("Failed to send Feishu command reply")
 
     def _extract_text(
         self, msg_type: str, content_str: str, chat_type: str, msg

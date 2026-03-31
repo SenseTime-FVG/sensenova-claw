@@ -6,14 +6,13 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
-from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+from sensenova_claw.capabilities.tools.registry import _is_tool_config_enabled
 from sensenova_claw.platform.secrets.refs import is_secret_ref
 
 logger = logging.getLogger(__name__)
@@ -70,24 +69,6 @@ TOOL_API_KEY_SPECS: dict[str, dict[str, Any]] = {
         "example_format": "tvly-...",
     },
 }
-
-
-def _prefs_path(request: Request) -> Path:
-    home = Path(getattr(request.app.state, "sensenova_claw_home", "") or default_sensenova_claw_home())
-    return home / ".agent_preferences.json"
-
-
-def _load_prefs(request: Request) -> dict:
-    p = _prefs_path(request)
-    if p.exists():
-        return json.loads(p.read_text(encoding="utf-8"))
-    return {}
-
-
-def _save_prefs(request: Request, prefs: dict) -> None:
-    p = _prefs_path(request)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(prefs, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _mask_secret(secret: str | None) -> str | None:
@@ -213,12 +194,10 @@ async def list_tools(request: Request):
     """获取所有已注册的工具。"""
     tool_registry = request.app.state.tool_registry
     cfg = request.app.state.config
-    prefs = _load_prefs(request)
-    tool_prefs = prefs.get("tools", {})
 
     tools = []
     for name, tool in tool_registry._tools.items():
-        enabled = tool_prefs.get(name, True)
+        enabled = _is_tool_config_enabled(name)
         api_key_spec = TOOL_API_KEY_SPECS.get(name)
         tools.append({
             "id": f"tool-{name}",
@@ -237,17 +216,19 @@ async def list_tools(request: Request):
 
 @router.put("/{tool_name}/enabled")
 async def toggle_tool(tool_name: str, body: EnablePayload, request: Request):
-    """启用/禁用工具。"""
+    """启用/禁用工具（通过 ConfigManager 写入 config.yml）。"""
     tool_registry = request.app.state.tool_registry
     tool = tool_registry.get(tool_name)
     if not tool:
         raise HTTPException(404, f"Tool 不存在: {tool_name}")
 
-    prefs = _load_prefs(request)
-    if "tools" not in prefs:
-        prefs["tools"] = {}
-    prefs["tools"][tool_name] = body.enabled
-    _save_prefs(request, prefs)
+    config_manager = request.app.state.config_manager
+    # file_operations 分组：read_file/write_file/edit/apply_patch 共享一个开关
+    FILE_OPS_TOOLS = {"read_file", "write_file", "edit", "apply_patch"}
+    if tool_name in FILE_OPS_TOOLS:
+        await config_manager.update("tools", {"file_operations": {"enabled": body.enabled}})
+    else:
+        await config_manager.update("tools", {tool_name: {"enabled": body.enabled}})
 
     logger.info("Tool %s %s", tool_name, "enabled" if body.enabled else "disabled")
     return {"name": tool_name, "enabled": body.enabled}
