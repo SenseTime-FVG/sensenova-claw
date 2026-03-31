@@ -3,10 +3,7 @@
 import { createContext, useCallback, useEffect, useRef, useState } from 'react';
 
 import {
-  NotificationToast,
-  ActionToastPanel,
-  type ToastNotification,
-  type ActionToast,
+  ToastContainer,
   type QuestionData,
 } from '@/components/notification/NotificationToast';
 
@@ -53,31 +50,81 @@ export interface NotificationCard {
   resolvedAction?: string;
 }
 
-// 需要弹窗提醒的卡片类型
-const ACTIONABLE_KINDS: NotificationCardKind[] = ['tool_confirmation', 'user_question', 'task_completed', 'general'];
+// ── 统一 Toast 类型 ──
 
-interface NotificationContextValue {
-  notifications: ToastNotification[];
-  permission: NotificationPermission | 'unsupported';
-  pushNotification: (
-    notification: NotificationInput,
-    options?: { browser?: boolean; toast?: boolean },
-  ) => void;
-  dismissNotification: (id: string) => void;
-  requestBrowserPermission: () => Promise<NotificationPermission | 'unsupported'>;
-  // 通知卡片
+export type ToastKind =
+  | 'info'
+  | 'tool_confirmation'
+  | 'user_question'
+  | 'task_completed'
+  | 'proactive'
+  | 'general';
+
+export interface ToastAction {
+  label: string;
+  value: string;
+}
+
+export interface UnifiedToast {
+  id: string;
+  kind: ToastKind;
+  title: string;
+  body: string;
+  level: 'info' | 'warning' | 'error' | 'success';
+  source: string;
+  actions?: ToastAction[];
+  allowsInput?: boolean;
+  inputPlaceholder?: string;
+  questionData?: QuestionData;
+  onAction?: (actionValue: string, inputValue?: string) => void;
+  autoDismissMs: number;
+  createdAtMs: number;
+  pending: boolean;
+  cardId?: string;
+  sessionId?: string;
+  eventKey?: string;
+}
+
+export interface PushToastConfig {
+  kind?: ToastKind;
+  title: string;
+  body: string;
+  level?: 'info' | 'warning' | 'error' | 'success';
+  source?: string;
+  actions?: ToastAction[];
+  allowsInput?: boolean;
+  inputPlaceholder?: string;
+  questionData?: QuestionData;
+  autoDismissMs?: number;
+  sessionId?: string;
+  cardId?: string;
+  eventKey?: string;
+  onAction?: (actionValue: string, inputValue?: string) => void;
+  browser?: boolean;
+}
+
+export interface NotificationContextValue {
+  // Toast 队列（统一弹窗）
+  toasts: UnifiedToast[];
+  pushToast: (config: PushToastConfig) => string;
+  dismissToast: (id: string) => void;
+  resolveToast: (id: string, action?: string) => void;
+  markToastPending: (id: string) => void;
+
+  // Card（通知中心，保持原有签名但 pushCard 改为返回 string）
   cards: NotificationCard[];
-  unreadCount: number;
-  pushCard: (card: Omit<NotificationCard, 'id' | 'createdAtMs' | 'read'> & { id?: string; createdAtMs?: number }) => void;
+  pushCard: (card: Omit<NotificationCard, 'id' | 'createdAtMs' | 'read'> & { id?: string; createdAtMs?: number }) => string;
   markCardRead: (id: string) => void;
   markAllRead: () => void;
   markCardPending: (id: string, action?: string) => void;
   resolveCard: (id: string, action?: string) => void;
   dismissCard: (id: string) => void;
   clearAllCards: () => void;
-  // 操作弹窗回调（由 NotificationDropdown 注册）
-  onActionToastAction: ((cardId: string, actionValue: string, inputValue?: string) => void) | null;
-  setOnActionToastAction: (fn: ((cardId: string, actionValue: string, inputValue?: string) => void) | null) => void;
+  unreadCount: number;
+
+  // 浏览器通知权限（不变）
+  permission: NotificationPermission | 'unsupported';
+  requestBrowserPermission: () => Promise<NotificationPermission | 'unsupported'>;
 }
 
 export const NotificationContext = createContext<NotificationContextValue | null>(null);
@@ -87,33 +134,34 @@ function makeNotificationId() {
 }
 
 const MAX_CARDS = 50;
-const ACTION_TOAST_AUTO_DISMISS_MS = 60_000;
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
-  const [notifications, setNotifications] = useState<ToastNotification[]>([]);
+  const [toasts, setToasts] = useState<UnifiedToast[]>([]);
   const [cards, setCards] = useState<NotificationCard[]>([]);
-  const [actionToasts, setActionToasts] = useState<ActionToast[]>([]);
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
-  // 操作回调：由 NotificationDropdown 注册，处理 WebSocket 响应
-  const [onActionToastAction, setOnActionToastActionRaw] = useState<((cardId: string, actionValue: string, inputValue?: string) => void) | null>(null);
-  const actionToastTimeoutsRef = useRef<Map<string, number>>(new Map());
 
-  const setOnActionToastAction = useCallback((fn: ((cardId: string, actionValue: string, inputValue?: string) => void) | null) => {
-    setOnActionToastActionRaw(() => fn);
+  // Toast 定时器管理
+  const toastTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const clearToastTimer = useCallback((toastId: string) => {
+    const timer = toastTimersRef.current.get(toastId);
+    if (timer) {
+      clearTimeout(timer);
+      toastTimersRef.current.delete(toastId);
+    }
   }, []);
 
-  const clearActionToastTimer = useCallback((toastId: string) => {
-    const timerId = actionToastTimeoutsRef.current.get(toastId);
-    if (timerId === undefined) return;
-    window.clearTimeout(timerId);
-    actionToastTimeoutsRef.current.delete(toastId);
+  const clearAllToastTimers = useCallback(() => {
+    toastTimersRef.current.forEach((timer) => clearTimeout(timer));
+    toastTimersRef.current.clear();
   }, []);
 
-  const removeActionToast = useCallback((toastId: string) => {
-    clearActionToastTimer(toastId);
-    setActionToasts(prev => prev.filter(t => t.id !== toastId));
-  }, [clearActionToastTimer]);
+  // 组件卸载时清理所有定时器
+  useEffect(() => {
+    return () => clearAllToastTimers();
+  }, [clearAllToastTimers]);
 
+  // 初始化浏览器通知权限
   useEffect(() => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
       setPermission('unsupported');
@@ -121,47 +169,6 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     }
     setPermission(window.Notification.permission);
   }, []);
-
-  useEffect(() => {
-    const visibleToastIds = new Set(actionToasts.map(toast => toast.id));
-    for (const toastId of actionToastTimeoutsRef.current.keys()) {
-      const toast = actionToasts.find(item => item.id === toastId);
-      if (!toast || toast.pending) {
-        clearActionToastTimer(toastId);
-      }
-    }
-
-    actionToasts.forEach((toast) => {
-      if (toast.pending || actionToastTimeoutsRef.current.has(toast.id)) {
-        return;
-      }
-      const remainingMs = Math.max(0, toast.createdAtMs + ACTION_TOAST_AUTO_DISMISS_MS - Date.now());
-      const timerId = window.setTimeout(() => {
-        actionToastTimeoutsRef.current.delete(toast.id);
-        setActionToasts(prev => prev.filter(t => t.id !== toast.id));
-      }, remainingMs);
-      actionToastTimeoutsRef.current.set(toast.id, timerId);
-    });
-
-    for (const toastId of actionToastTimeoutsRef.current.keys()) {
-      if (!visibleToastIds.has(toastId)) {
-        clearActionToastTimer(toastId);
-      }
-    }
-  }, [actionToasts, clearActionToastTimer]);
-
-  useEffect(() => {
-    return () => {
-      for (const timerId of actionToastTimeoutsRef.current.values()) {
-        window.clearTimeout(timerId);
-      }
-      actionToastTimeoutsRef.current.clear();
-    };
-  }, []);
-
-  const dismissNotification = (id: string) => {
-    setNotifications((prev) => prev.filter((item) => item.id !== id));
-  };
 
   const requestBrowserPermission = async (): Promise<NotificationPermission | 'unsupported'> => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -173,96 +180,135 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     return result;
   };
 
-  const pushNotification = (
-    notification: NotificationInput,
-    options?: { browser?: boolean; toast?: boolean },
-  ) => {
-    const nextNotification: ToastNotification = {
-      id: notification.id || makeNotificationId(),
-      title: notification.title,
-      body: notification.body,
-      level: notification.level || 'info',
-      source: notification.source || 'system',
-      createdAtMs: notification.createdAtMs || Date.now(),
-    };
-    const shouldShowToast = options?.toast !== false;
-    const shouldShowBrowser = options?.browser === true;
+  // ── 统一 Toast 管理 ──
 
-    if (shouldShowToast) {
-      setNotifications((prev) => [nextNotification, ...prev].slice(0, 5));
+  const pushToast = useCallback((config: PushToastConfig): string => {
+    const id = makeNotificationId();
+    const hasInteraction = (config.actions && config.actions.length > 0) || config.allowsInput;
+    const autoDismissMs = config.autoDismissMs ?? (hasInteraction ? 60_000 : 5_000);
+
+    const toast: UnifiedToast = {
+      id,
+      kind: config.kind ?? 'info',
+      title: config.title,
+      body: config.body,
+      level: config.level ?? 'info',
+      source: config.source ?? 'system',
+      actions: config.actions,
+      allowsInput: config.allowsInput,
+      inputPlaceholder: config.inputPlaceholder,
+      questionData: config.questionData,
+      onAction: config.onAction,
+      autoDismissMs,
+      createdAtMs: Date.now(),
+      pending: false,
+      cardId: config.cardId,
+      sessionId: config.sessionId,
+      eventKey: config.eventKey,
+    };
+
+    setToasts((prev) => {
+      if (config.eventKey) {
+        const existing = prev.find((t) => t.eventKey === config.eventKey);
+        // 已有相同 eventKey 且处于 pending 状态时跳过
+        if (existing?.pending) return prev;
+        const filtered = prev.filter((t) => t.eventKey !== config.eventKey);
+        if (existing) clearToastTimer(existing.id);
+        return [toast, ...filtered].slice(0, 20);
+      }
+      return [toast, ...prev].slice(0, 20);
+    });
+
+    // 设置自动消失定时器
+    if (autoDismissMs > 0) {
+      const timer = setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+        toastTimersRef.current.delete(id);
+      }, autoDismissMs);
+      toastTimersRef.current.set(id, timer);
     }
 
+    // 浏览器原生通知
     if (
-      shouldShowBrowser &&
+      config.browser &&
       permission === 'granted' &&
       typeof window !== 'undefined' &&
       'Notification' in window
     ) {
-      new window.Notification(nextNotification.title, {
-        body: nextNotification.body,
-      });
+      new window.Notification(config.title, { body: config.body });
     }
 
-    if (shouldShowToast) {
-      window.setTimeout(() => {
-        dismissNotification(nextNotification.id);
-      }, 5000);
-    }
-  };
+    return id;
+  }, [clearToastTimer, permission]);
+
+  const dismissToast = useCallback((id: string) => {
+    clearToastTimer(id);
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, [clearToastTimer]);
+
+  const resolveToast = useCallback((id: string, action?: string) => {
+    clearToastTimer(id);
+    setToasts((prev) => {
+      const toast = prev.find((t) => t.id === id);
+      if (toast?.cardId) {
+        // 注意：resolveCard 在下方定义，通过 setCards 联动，避免循环依赖
+        setCards((prevCards) =>
+          prevCards.map((c) =>
+            c.id === toast.cardId
+              ? { ...c, resolved: true, resolvedAction: action }
+              : c
+          )
+        );
+      }
+      return prev.filter((t) => t.id !== id);
+    });
+  }, [clearToastTimer]);
+
+  const markToastPending = useCallback((id: string) => {
+    clearToastTimer(id);
+    setToasts((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, pending: true } : t))
+    );
+  }, [clearToastTimer]);
 
   // ── 通知卡片管理 ──
 
-  const pushCard = useCallback((input: Omit<NotificationCard, 'id' | 'createdAtMs' | 'read'> & { id?: string; createdAtMs?: number }) => {
+  const resolveCard = useCallback((id: string, action?: string) => {
+    setCards((prev) =>
+      prev.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              pending: false,
+              resolved: true,
+              resolvedAction: action || c.pendingAction,
+              read: true,
+            }
+          : c
+      )
+    );
+    // 联动移除关联的 toast
+    setToasts((prev) => {
+      const toast = prev.find((t) => t.cardId === id);
+      if (toast) clearToastTimer(toast.id);
+      return prev.filter((t) => t.cardId !== id);
+    });
+  }, [clearToastTimer]);
+
+  const pushCard = useCallback((cardInput: Omit<NotificationCard, 'id' | 'createdAtMs' | 'read'> & { id?: string; createdAtMs?: number }): string => {
     const card: NotificationCard = {
-      ...input,
-      id: input.id || makeNotificationId(),
-      createdAtMs: input.createdAtMs || Date.now(),
+      ...cardInput,
+      id: cardInput.id || makeNotificationId(),
+      createdAtMs: cardInput.createdAtMs || Date.now(),
       read: false,
     };
-    setCards(prev => {
-      if (prev.some(c => c.id === card.id)) return prev;
+
+    setCards((prev) => {
+      if (prev.some((c) => c.id === card.id)) return prev;
       return [card, ...prev].slice(0, MAX_CARDS);
     });
 
-    // 如果是需要用户操作的类型，同时弹出操作弹窗
-    if (ACTIONABLE_KINDS.includes(card.kind) && ((card.actions && card.actions.length > 0) || card.allowsInput)) {
-      const toast: ActionToast = {
-        id: `toast_${card.id}`,
-        title: card.title,
-        body: card.body,
-        level: card.level,
-        source: card.kind,
-        createdAtMs: card.createdAtMs,
-        actions: card.actions,
-        allowsInput: card.allowsInput,
-        inputPlaceholder: card.inputPlaceholder,
-        cardId: card.id,
-        questionData: card.questionData,
-      };
-      setActionToasts(prev => {
-        if (prev.some(t => t.cardId === card.id)) return prev;
-        return [toast, ...prev];
-      });
-    }
-
-    // 对于 user_question 类型，即使没有 actions 也弹出富交互弹窗
-    if (card.kind === 'user_question' && card.questionData && (!card.actions || card.actions.length === 0)) {
-      const toast: ActionToast = {
-        id: `toast_${card.id}`,
-        title: card.title,
-        body: card.body,
-        level: card.level,
-        source: card.kind,
-        createdAtMs: card.createdAtMs,
-        actions: [],
-        cardId: card.id,
-        questionData: card.questionData,
-      };
-      setActionToasts(prev => {
-        if (prev.some(t => t.cardId === card.id)) return prev;
-        return [toast, ...prev];
-      });
-    }
+    return card.id;
   }, []);
 
   const markCardRead = useCallback((id: string) => {
@@ -274,102 +320,61 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, []);
 
   const markCardPending = useCallback((id: string, action?: string) => {
-    setCards(prev => prev.map(c =>
-      c.id === id && !c.resolved
-        ? { ...c, pending: true, pendingAction: action, read: true }
-        : c
-    ));
-    setActionToasts(prev => prev.map(t =>
-      t.cardId === id
-        ? { ...t, pending: true, pendingAction: action }
-        : t
-    ));
-  }, []);
-
-  const resolveCard = useCallback((id: string, action?: string) => {
-    setCards(prev => prev.map(c =>
-      c.id === id
-        ? {
-            ...c,
-            pending: false,
-            resolved: true,
-            resolvedAction: action || c.pendingAction,
-            read: true,
-          }
-        : c
-    ));
-    // 同时移除对应的操作弹窗
-    setActionToasts(prev => {
-      const matchedToasts = prev.filter(t => t.cardId === id);
-      matchedToasts.forEach((toast) => clearActionToastTimer(toast.id));
-      return prev.filter(t => t.cardId !== id);
+    setCards((prev) =>
+      prev.map((c) =>
+        c.id === id ? { ...c, pending: true, read: true, resolvedAction: action } : c
+      )
+    );
+    setToasts((prev) => {
+      const toast = prev.find((t) => t.cardId === id);
+      if (toast) {
+        clearToastTimer(toast.id);
+        return prev.map((t) =>
+          t.cardId === id ? { ...t, pending: true } : t
+        );
+      }
+      return prev;
     });
-  }, [clearActionToastTimer]);
+  }, [clearToastTimer]);
 
   const dismissCard = useCallback((id: string) => {
-    setCards(prev => prev.filter(c => c.id !== id));
-    setActionToasts(prev => {
-      const matchedToasts = prev.filter(t => t.cardId === id);
-      matchedToasts.forEach((toast) => clearActionToastTimer(toast.id));
-      return prev.filter(t => t.cardId !== id);
-    });
-  }, [clearActionToastTimer]);
+    setCards((prev) => prev.filter((c) => c.id !== id));
+  }, []);
 
   const clearAllCards = useCallback(() => {
     setCards([]);
-    setActionToasts([]);
-  }, []);
-
-  // 操作弹窗：用户点击按钮
-  const handleActionToastAction = useCallback((toastId: string, cardId: string, actionValue: string, inputValue?: string) => {
-    clearActionToastTimer(toastId);
-    setActionToasts(prev => prev.map(t =>
-      t.id === toastId
-        ? { ...t, pending: true, pendingAction: actionValue }
-        : t
-    ));
-    // 触发回调（发送 WebSocket 响应）
-    onActionToastAction?.(cardId, actionValue, inputValue);
-    if (!onActionToastAction) {
-      markCardPending(cardId, actionValue);
-    }
-  }, [clearActionToastTimer, markCardPending, onActionToastAction]);
-
-  // 操作弹窗：用户关闭（不操作）
-  const handleActionToastDismiss = useCallback((toastId: string) => {
-    removeActionToast(toastId);
-  }, [removeActionToast]);
+    setToasts((prev) => {
+      const removed = prev.filter((t) => t.cardId);
+      removed.forEach((t) => clearToastTimer(t.id));
+      return prev.filter((t) => !t.cardId);
+    });
+  }, [clearToastTimer]);
 
   const unreadCount = cards.filter(c => !c.read && !c.resolved).length;
 
+  const value: NotificationContextValue = {
+    toasts,
+    pushToast,
+    dismissToast,
+    resolveToast,
+    markToastPending,
+    cards,
+    pushCard,
+    markCardRead,
+    markAllRead,
+    markCardPending,
+    resolveCard,
+    dismissCard,
+    clearAllCards,
+    unreadCount,
+    permission,
+    requestBrowserPermission,
+  };
+
   return (
-    <NotificationContext.Provider
-      value={{
-        notifications,
-        permission,
-        pushNotification,
-        dismissNotification,
-        requestBrowserPermission,
-        cards,
-        unreadCount,
-        pushCard,
-        markCardRead,
-        markAllRead,
-        markCardPending,
-        resolveCard,
-        dismissCard,
-        clearAllCards,
-        onActionToastAction,
-        setOnActionToastAction,
-      }}
-    >
+    <NotificationContext.Provider value={value}>
       {children}
-      <NotificationToast notifications={notifications} dismissNotification={dismissNotification} />
-      <ActionToastPanel
-        toasts={actionToasts}
-        onAction={handleActionToastAction}
-        onDismiss={handleActionToastDismiss}
-      />
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} onMarkPending={markToastPending} />
     </NotificationContext.Provider>
   );
 }
