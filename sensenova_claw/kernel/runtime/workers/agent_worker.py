@@ -291,6 +291,8 @@ class AgentSessionWorker(SessionWorker):
 
         reason = str(event.payload.get("reason", "user_cancel"))
         self.rt.state_store.mark_turn_cancelled(self.session_id, turn_id)
+        if latest_turn and latest_turn.turn_id == turn_id:
+            self.rt.state_store.append_turn_messages_to_history(self.session_id, latest_turn)
         await self.rt.repo.update_turn_status(turn_id, status="cancelled", agent_response=reason)
         await self.bus.publish(
             EventEnvelope(
@@ -551,8 +553,7 @@ class AgentSessionWorker(SessionWorker):
         await self.rt.repo.complete_turn(event.turn_id, agent_response=content)
 
         # 追加本轮新消息到内存历史（供后续 turn 上下文使用）
-        new_messages = state.messages[state.history_offset:]
-        self.rt.state_store.append_to_history(event.session_id, new_messages)
+        self.rt.state_store.append_turn_messages_to_history(event.session_id, state)
 
         # 注意：消息已在 _handle_user_input / _handle_llm_result / _handle_tool_result
         # 中增量持久化到 SQLite，此处无需再批量保存

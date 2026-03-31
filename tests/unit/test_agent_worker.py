@@ -783,3 +783,63 @@ class TestIncrementalPersistence:
         # 验证消息没有被重复保存（仍然只有 2 条）
         messages = await repo.get_session_messages("s1")
         assert len(messages) == 2
+
+    async def test_cancelled_turn_keeps_user_message_in_runtime_history(
+        self,
+        private_bus,
+        public_bus,
+        runtime,
+        state_store,
+        repo,
+    ):
+        """取消当前轮次后，已进入上下文的用户消息仍应保留到后续轮次历史。"""
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+
+        await repo.create_session("s1")
+        await repo.create_turn(turn_id="t1", session_id="s1", user_input="解释 DSA")
+        await repo.save_message("s1", "t1", "user", "解释 DSA")
+
+        cancelled_state = TurnState(
+            turn_id="t1",
+            user_input="解释 DSA",
+            messages=[
+                {"role": "system", "content": "系统提示"},
+                {"role": "user", "content": "解释 DSA"},
+            ],
+        )
+        cancelled_state.history_offset = 1
+        state_store.set_turn("s1", cancelled_state)
+
+        cancel_event = EventEnvelope(
+            type=USER_TURN_CANCEL_REQUESTED,
+            session_id="s1",
+            turn_id="t1",
+            payload={"reason": "user_stop"},
+        )
+        await worker._handle(cancel_event)
+
+        history = state_store.get_session_history("s1")
+        assert history == [{"role": "user", "content": "解释 DSA"}]
+
+        collected, done, task = await _collect_from_bus(public_bus, target_type=LLM_CALL_REQUESTED)
+        try:
+            next_event = EventEnvelope(
+                type=USER_INPUT,
+                session_id="s1",
+                turn_id="t2",
+                payload={"content": "我刚才问了什么"},
+            )
+            await worker._handle(next_event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+        finally:
+            task.cancel()
+
+        request_event = next(evt for evt in collected if evt.type == LLM_CALL_REQUESTED)
+        request_messages = request_event.payload["messages"]
+        user_contents = [
+            msg.get("content", "")
+            for msg in request_messages
+            if msg.get("role") == "user"
+        ]
+        assert "解释 DSA" in user_contents
+        assert any("我刚才问了什么" in content for content in user_contents)
