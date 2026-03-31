@@ -1,19 +1,11 @@
 'use client';
 
-import { useState, type KeyboardEvent } from 'react';
-import { Bell, CircleAlert, CircleCheck, Info, X, ShieldAlert, HelpCircle, Send } from 'lucide-react';
+import { useCallback, useState, type KeyboardEvent } from 'react';
+import { Bell, CircleAlert, CircleCheck, Info, X, ShieldAlert, HelpCircle, Send, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-
-export interface ToastNotification {
-  id: string;
-  title: string;
-  body: string;
-  level: 'info' | 'warning' | 'error' | 'success';
-  source: string;
-  createdAtMs: number;
-}
+import { type UnifiedToast } from './NotificationProvider';
 
 // ── ask_user 问题数据 ──
 
@@ -25,25 +17,7 @@ export interface QuestionData {
   sessionId: string;
 }
 
-// ── 带操作按钮的弹窗 ──
-
-export interface ActionToast {
-  id: string;
-  title: string;
-  body: string;
-  level: 'info' | 'warning' | 'error' | 'success';
-  source: string;
-  createdAtMs: number;
-  actions?: { label: string; value: string }[];
-  allowsInput?: boolean;
-  inputPlaceholder?: string;
-  // 关联的通知卡片 ID
-  cardId: string;
-  pending?: boolean;
-  pendingAction?: string;
-  // ask_user 富交互数据
-  questionData?: QuestionData;
-}
+// ── 等级图标映射 ──
 
 const levelIcon = {
   info: Info,
@@ -52,85 +26,21 @@ const levelIcon = {
   success: CircleCheck,
 } as const;
 
-const levelStyles = {
-  info: 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300',
-  warning: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
-  error: 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300',
-  success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-} as const;
+// ── 动作类型图标映射 ──
 
 const actionKindIcon: Record<string, typeof Bell> = {
   tool_confirmation: ShieldAlert,
   user_question: HelpCircle,
 };
 
-// ── 普通 Toast（自动消失） ──
-
-export function NotificationToast({
-  notifications,
-  dismissNotification,
-}: {
-  notifications: ToastNotification[];
-  dismissNotification: (id: string) => void;
-}) {
-  if (notifications.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="pointer-events-none fixed right-4 top-20 z-[250] flex w-[min(28rem,calc(100vw-2rem))] flex-col gap-3">
-      {notifications.map((notification) => {
-        const Icon = levelIcon[notification.level] ?? Bell;
-        return (
-          <div
-            key={notification.id}
-            className={cn(
-              'pointer-events-auto rounded-2xl border shadow-2xl backdrop-blur-sm',
-              'bg-background/95',
-              levelStyles[notification.level],
-            )}
-          >
-            <div className="flex items-start gap-3 p-4">
-              <div className="mt-0.5 rounded-full bg-background/80 p-2 text-current">
-                <Icon size={16} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold text-foreground">{notification.title}</p>
-                    <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                      {notification.source}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="h-7 w-7 shrink-0 rounded-full"
-                    onClick={() => dismissNotification(notification.id)}
-                  >
-                    <X size={14} />
-                  </Button>
-                </div>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
-                  {notification.body}
-                </p>
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ── ask_user 富交互弹窗（内嵌选项 + 自定义输入） ──
 
 function QuestionToastBody({
   toast,
-  onAction,
+  onSubmit,
 }: {
-  toast: ActionToast;
-  onAction: (toastId: string, cardId: string, actionValue: string) => void;
+  toast: UnifiedToast;
+  onSubmit: (actionValue: string, inputValue?: string) => void;
 }) {
   const qd = toast.questionData!;
   const [customInput, setCustomInput] = useState('');
@@ -157,11 +67,11 @@ function QuestionToastBody({
 
   const submit = () => {
     const answer = getAnswer();
-    if (answer) onAction(toast.id, toast.cardId, answer);
+    if (answer) onSubmit(answer);
   };
 
   const cancel = () => {
-    onAction(toast.id, toast.cardId, '__cancelled__');
+    onSubmit('__cancelled__');
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -258,17 +168,15 @@ function QuestionToastBody({
   );
 }
 
-// ── 操作弹窗（不自动消失，需要用户操作） ──
+// ── 单个统一 Toast 卡片 ──
 
-function ActionToastItem({
-  toast,
-  onAction,
-  onDismiss,
-}: {
-  toast: ActionToast;
-  onAction: (toastId: string, cardId: string, actionValue: string, inputValue?: string) => void;
-  onDismiss: (toastId: string) => void;
-}) {
+interface ToastItemProps {
+  toast: UnifiedToast;
+  onDismiss: (id: string) => void;
+  onAction: (toastId: string, actionValue: string, inputValue?: string) => void;
+}
+
+export function ToastItem({ toast, onDismiss, onAction }: ToastItemProps) {
   const Icon = actionKindIcon[toast.source] || levelIcon[toast.level] || Bell;
   const [inputValue, setInputValue] = useState('');
   const trimmedInput = inputValue.trim();
@@ -276,7 +184,7 @@ function ActionToastItem({
 
   const submitInput = () => {
     if (!trimmedInput || isPending) return;
-    onAction(toast.id, toast.cardId, trimmedInput, trimmedInput);
+    onAction(toast.id, trimmedInput, trimmedInput);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -285,9 +193,16 @@ function ActionToastItem({
     submitInput();
   };
 
+  // 处理 QuestionToastBody 的提交回调
+  const handleQuestionSubmit = useCallback(
+    (actionValue: string, inputVal?: string) => {
+      onAction(toast.id, actionValue, inputVal);
+    },
+    [toast.id, onAction],
+  );
+
   return (
     <div
-      key={toast.id}
       data-testid="action-toast"
       className={cn(
         'pointer-events-auto rounded-2xl border-2 shadow-[0_20px_60px_rgba(15,23,42,0.2)] backdrop-blur-xl animate-in slide-in-from-top-4 fade-in duration-300',
@@ -300,6 +215,7 @@ function ActionToastItem({
       )}
     >
       <div className="flex items-start gap-3 p-4">
+        {/* 左侧图标 */}
         <div className={cn(
           'mt-0.5 rounded-xl p-2.5',
           toast.level === 'warning'
@@ -310,7 +226,10 @@ function ActionToastItem({
         )}>
           <Icon size={18} />
         </div>
+
+        {/* 内容区域 */}
         <div className="min-w-0 flex-1">
+          {/* 标题 + 关闭按钮 */}
           <div className="flex items-start justify-between gap-2">
             <p className="text-sm font-bold text-foreground">{toast.title}</p>
             <Button
@@ -322,68 +241,78 @@ function ActionToastItem({
               <X size={12} />
             </Button>
           </div>
+
+          {/* 富交互：ask_user 问答 */}
           {toast.source === 'user_question' && toast.questionData ? (
-            <QuestionToastBody toast={toast} onAction={onAction} />
+            <QuestionToastBody toast={toast} onSubmit={handleQuestionSubmit} />
           ) : (
-          <>
-          <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/70 line-clamp-2">
-            {toast.body}
-          </p>
-          {isPending && (
-            <div className="mt-3 rounded-lg border border-amber-300/60 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-              已提交，等待服务端确认最终结果。
-            </div>
-          )}
-          {toast.allowsInput && !isPending && (
-            <div className="mt-3 space-y-2">
-              <textarea
-                data-testid="action-toast-input"
-                value={inputValue}
-                onChange={(event) => setInputValue(event.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={toast.inputPlaceholder || '请输入回复'}
-                className="min-h-[88px] w-full resize-none rounded-lg border border-neutral-200 dark:border-neutral-700 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-sky-400 dark:focus:border-sky-500"
-                rows={3}
-              />
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] text-muted-foreground">Enter 提交，Shift+Enter 换行</span>
-                <button
-                  data-testid="action-toast-submit"
-                  type="button"
-                  onClick={submitInput}
-                  disabled={!trimmedInput}
-                  className="rounded-lg border border-sky-300 bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  确认
-                </button>
-              </div>
-            </div>
-          )}
-          {toast.actions && toast.actions.length > 0 && !isPending && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {toast.actions.map((action) => (
-                <button
-                  key={action.value}
-                  data-testid="action-toast-button"
-                  type="button"
-                  onClick={() => onAction(toast.id, toast.cardId, action.value)}
-                  className={cn(
-                    'max-w-full rounded-lg border px-4 py-1.5 text-left text-xs font-semibold leading-relaxed whitespace-normal break-all transition-all hover:scale-[1.02] active:scale-[0.98]',
-                    action.value === 'approve' || action.value === 'accept'
-                      ? 'border-emerald-300 bg-emerald-500 text-white shadow-sm shadow-emerald-200 dark:shadow-emerald-900 hover:bg-emerald-600'
-                      : action.value === 'deny' || action.value === 'reject'
-                        ? 'border-rose-200 dark:border-rose-800 bg-background text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950'
-                        : action.value === 'view_session'
-                          ? 'border-violet-300 bg-violet-500 text-white shadow-sm shadow-violet-200 dark:shadow-violet-900 hover:bg-violet-600'
-                          : 'border-neutral-200 dark:border-neutral-700 bg-background text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800',
-                  )}
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          )}
-          </>
+            <>
+              {/* 消息正文 */}
+              <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/70 line-clamp-2">
+                {toast.body}
+              </p>
+
+              {/* pending 状态提示 */}
+              {isPending && (
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-300/60 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                  <Loader2 size={12} className="animate-spin shrink-0" />
+                  已提交，等待服务端确认…
+                </div>
+              )}
+
+              {/* 自定义输入框（allowsInput 且非 pending） */}
+              {toast.allowsInput && !isPending && (
+                <div className="mt-3 space-y-2">
+                  <textarea
+                    data-testid="action-toast-input"
+                    value={inputValue}
+                    onChange={(event) => setInputValue(event.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={toast.inputPlaceholder || '请输入回复'}
+                    className="min-h-[88px] w-full resize-none rounded-lg border border-neutral-200 dark:border-neutral-700 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-sky-400 dark:focus:border-sky-500"
+                    rows={3}
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-muted-foreground">Enter 提交，Shift+Enter 换行</span>
+                    <button
+                      data-testid="action-toast-submit"
+                      type="button"
+                      onClick={submitInput}
+                      disabled={!trimmedInput}
+                      className="rounded-lg border border-sky-300 bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      确认
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 操作按钮组（非 pending） */}
+              {toast.actions && toast.actions.length > 0 && !isPending && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {toast.actions.map((action) => (
+                    <button
+                      key={action.value}
+                      data-testid="action-toast-button"
+                      type="button"
+                      onClick={() => onAction(toast.id, action.value)}
+                      className={cn(
+                        'max-w-full rounded-lg border px-4 py-1.5 text-left text-xs font-semibold leading-relaxed whitespace-normal break-all transition-all hover:scale-[1.02] active:scale-[0.98]',
+                        action.value === 'approve' || action.value === 'accept'
+                          ? 'border-emerald-300 bg-emerald-500 text-white shadow-sm shadow-emerald-200 dark:shadow-emerald-900 hover:bg-emerald-600'
+                          : action.value === 'deny' || action.value === 'reject'
+                            ? 'border-rose-200 dark:border-rose-800 bg-background text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950'
+                            : action.value === 'view_session'
+                              ? 'border-violet-300 bg-violet-500 text-white shadow-sm shadow-violet-200 dark:shadow-violet-900 hover:bg-violet-600'
+                              : 'border-neutral-200 dark:border-neutral-700 bg-background text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800',
+                      )}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -391,28 +320,38 @@ function ActionToastItem({
   );
 }
 
-export function ActionToastPanel({
-  toasts,
-  onAction,
-  onDismiss,
-}: {
-  toasts: ActionToast[];
-  onAction: (toastId: string, cardId: string, actionValue: string, inputValue?: string) => void;
-  onDismiss: (toastId: string) => void;
-}) {
+// ── 统一 Toast 容器 ──
+
+interface ToastContainerProps {
+  toasts: UnifiedToast[];
+  onDismiss: (id: string) => void;
+  onMarkPending: (id: string) => void;
+}
+
+export function ToastContainer({ toasts, onDismiss, onMarkPending }: ToastContainerProps) {
+  const handleAction = useCallback(
+    (toastId: string, actionValue: string, inputValue?: string) => {
+      const toast = toasts.find((t) => t.id === toastId);
+      if (!toast) return;
+      onMarkPending(toastId);
+      toast.onAction?.(actionValue, inputValue);
+    },
+    [toasts, onMarkPending],
+  );
+
   if (toasts.length === 0) return null;
 
-  // 只显示前 5 个，剩余的在处理后自动补位
-  const visibleToasts = toasts.slice(0, 5);
-
   return (
-    <div className="pointer-events-none fixed right-4 top-16 z-[300] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3">
-      {visibleToasts.map((toast) => (
-        <ActionToastItem
+    <div
+      className="fixed right-4 top-16 z-[300] flex flex-col gap-3 pointer-events-auto"
+      style={{ width: 'min(28rem, calc(100vw - 2rem))' }}
+    >
+      {toasts.slice(0, 5).map((toast) => (
+        <ToastItem
           key={toast.id}
           toast={toast}
-          onAction={onAction}
           onDismiss={onDismiss}
+          onAction={handleAction}
         />
       ))}
     </div>
