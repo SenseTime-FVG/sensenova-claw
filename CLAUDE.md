@@ -213,6 +213,47 @@ skills:
 
 远程设置: 安装 [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) 插件并配置 API key
 
+#### 使用 obsidian_locate_and_setup 工具自动配置
+
+如果未在 `config.yml` 中配置 Obsidian vault，可以使用 `obsidian_locate_and_setup` 工具自动定位或创建：
+
+**system-admin 中的使用**：
+
+```bash
+# system-admin 会自动调用此工具并提示用户选择 vault
+obsidian_locate_and_setup
+```
+
+**手动调用**（如果需要）：
+
+```python
+from sensenova_claw.capabilities.tools.obsidian_locate import ObsidianLocateTool
+
+tool = ObsidianLocateTool()
+result = await tool.execute()
+# 返回格式：{
+#   "success": bool,
+#   "vaults": [{"name", "path", "source", "has_structure", "created_now", "accessible"}, ...],
+#   "primary_vault": {...},
+#   "note": "说明信息",
+#   "error": null or "错误信息"
+# }
+```
+
+**工具行为**：
+
+1. 优先检查 `tools.obsidian.vaults` 配置
+2. 若未配置，根据平台（Windows/macOS/Linux）自动检测标准位置
+3. 若系统中无 vault，在 `~/Obsidian` 创建默认 vault
+4. 为所有 vault 补全知识库必备结构（Knowledge/ 等）
+5. 返回排序后的 vault 列表，首选项为推荐使用的 vault
+
+**跨平台支持**：
+
+- **Windows**: 检查 OneDrive、Dropbox、Google Drive、本地 Documents 等位置，支持注册表查询
+- **macOS**: 检查 OneDrive、Documents、iCloud 位置，读取应用配置
+- **Linux**: 检查 Documents、主目录、.obsidian-vaults、中文 Documents
+
 ### Skills 系统
 
 Skills 是声明式任务编排机制（`sensenova_claw/capabilities/skills/`），24 个内置 skills 包括：
