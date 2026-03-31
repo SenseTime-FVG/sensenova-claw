@@ -72,12 +72,12 @@ class QQChannel(Channel):
             self._sensenova_claw_status = {"status": "failed", "error": str(exc).strip() or type(exc).__name__}
             logger.exception("QQChannel start failed")
             raise
-        self._sensenova_claw_status = {"status": "connected", "error": ""}
+        self._sync_channel_status_from_runtime()
         logger.info("QQChannel started in mode=%s", self._config.mode)
 
     async def stop(self) -> None:
         await self._runtime.stop()
-        self._sensenova_claw_status = {"status": "stopped", "error": ""}
+        self._sync_channel_status_from_runtime(default_status="stopped")
         logger.info("QQChannel stopped")
 
     async def handle_incoming_message(self, message: QQInboundMessage) -> None:
@@ -211,3 +211,11 @@ class QQChannel(Channel):
             return QQOfficialRuntime(config)
         return QQOneBotRuntime(config)
 
+    def _sync_channel_status_from_runtime(self, *, default_status: str | None = None) -> None:
+        runtime_status = getattr(self._runtime, "_sensenova_claw_status", None)
+        if isinstance(runtime_status, dict):
+            status = str(runtime_status.get("status", "")).strip() or (default_status or "initialized")
+            error = runtime_status.get("error")
+            self._sensenova_claw_status = {"status": status, "error": str(error).strip() if error else ""}
+            return
+        self._sensenova_claw_status = {"status": default_status or "initialized", "error": ""}

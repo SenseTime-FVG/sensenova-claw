@@ -38,6 +38,7 @@ class _FakeQQRuntime:
         self.stopped = False
         self.handler = None
         self.sent_messages: list[dict] = []
+        self._sensenova_claw_status = {"status": "connected", "error": None}
 
     def set_message_handler(self, handler) -> None:
         self.handler = handler
@@ -112,6 +113,15 @@ class TestLifecycle:
         assert runtime.started is True
         assert runtime.stopped is True
         assert runtime.handler is not None
+
+    @pytest.mark.asyncio
+    async def test_start_syncs_channel_status_from_runtime(self):
+        channel, _, _, runtime = _make_channel(mode="official")
+        runtime._sensenova_claw_status = {"status": "connecting", "error": None}
+
+        await channel.start()
+
+        assert channel._sensenova_claw_status == {"status": "connecting", "error": ""}
 
     @pytest.mark.asyncio
     async def test_start_failure_marks_channel_failed(self):
