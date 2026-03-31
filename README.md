@@ -269,7 +269,7 @@ plugins:
     onebot_self_id: "123456789"
 ```
 
-[QQ Channel 配置说明](docs/channel/qq.md)
+[怎么创建QQ bot](docs/channel/qq.md)
 
 使用说明：
 
