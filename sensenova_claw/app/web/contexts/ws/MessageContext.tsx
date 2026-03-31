@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useNotification } from '@/hooks/useNotification';
 import { useWebSocket } from './WebSocketContext';
@@ -20,7 +21,13 @@ import {
   rebuildStepsFromEvents,
   findLatestAssistantTurnMessage,
   upsertAssistantTurnMessage,
+  getAgentId,
 } from '@/lib/chatTypes';
+
+// view_session 跳转时的 Agent → 页面路由映射
+const AGENT_PAGE_MAP: Record<string, string> = {
+  'ppt-agent': '/ppt',
+};
 
 // ── proactive 推送 ──
 
@@ -77,6 +84,7 @@ const MessageCtx = createContext<MessageContextValue | null>(null);
 // ── Provider ──
 
 export function MessageProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const { wsSend } = useWebSocket();
   const {
     sessionIdRef,
@@ -86,9 +94,19 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     refreshTaskGroups,
     bindSessionToCurrentSocket,
     switchSession,
+    sessions,
   } = useSession();
   const { subscribeCurrentSession, subscribeGlobal, subscribeFrontendCreate, markFrontendCreate } = useEventDispatcher();
   const { pushToast, pushCard } = useNotification();
+
+  // 导航到指定会话（switchSession + 页面路由跳转）
+  const navigateToSession = useCallback(async (sessionId: string) => {
+    await switchSession(sessionId);
+    const session = sessions.find((s: { session_id: string }) => s.session_id === sessionId);
+    const agentId = session ? getAgentId(session.meta) : 'default';
+    const targetPage = AGENT_PAGE_MAP[agentId] ?? '/';
+    router.push(targetPage);
+  }, [switchSession, sessions, router]);
 
   // 消息状态
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -402,7 +420,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             eventKey: `turn_completed_${(event as any).event_id || completedSessionId}`,
             onAction: (actionValue) => {
               if (actionValue === 'view_session' && completedSessionId) {
-                switchSession(completedSessionId);
+                navigateToSession(completedSessionId);
               }
               // view_session 是纯前端操作，不需要 pending
             },
@@ -439,7 +457,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
                 browser: metadata.show_browser === true,
                 onAction: (actionValue) => {
                   if (actionValue === 'view_session' && notifSessionId) {
-                    switchSession(notifSessionId);
+                    navigateToSession(notifSessionId);
                   }
                 },
               });
@@ -496,7 +514,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
               eventKey: `proactive_${jobId}_${resultSessionId}`,
               onAction: (actionValue) => {
                 if (actionValue === 'view_session' && resultSessionId) {
-                  switchSession(resultSessionId);
+                  navigateToSession(resultSessionId);
                 }
               },
             });
@@ -505,7 +523,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         }
       }
     });
-  }, [subscribeGlobal, pushCard, pushToast, refreshTaskGroups, sessionIdRef, switchSession]);
+  }, [subscribeGlobal, pushCard, pushToast, refreshTaskGroups, sessionIdRef, navigateToSession]);
 
   // ── 前端创建 session 事件处理（pendingInput） ──
 

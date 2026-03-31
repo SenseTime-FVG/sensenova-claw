@@ -339,7 +339,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   const dismissCard = useCallback((id: string) => {
     setCards((prev) => prev.filter((c) => c.id !== id));
-  }, []);
+    // 联动移除关联的 toast
+    setToasts((prev) => {
+      const toast = prev.find((t) => t.cardId === id);
+      if (toast) clearToastTimer(toast.id);
+      return prev.filter((t) => t.cardId !== id);
+    });
+  }, [clearToastTimer]);
 
   const clearAllCards = useCallback(() => {
     setCards([]);
