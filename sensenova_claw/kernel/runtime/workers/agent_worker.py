@@ -259,6 +259,8 @@ class AgentSessionWorker(SessionWorker):
                 await self._handle_llm_result(event)
             elif event.type == LLM_CALL_COMPLETED:
                 await self._handle_llm_completed(event)
+            elif event.type == ERROR_RAISED:
+                await self._handle_error_raised(event)
             elif event.type == TOOL_CALL_RESULT:
                 await self._handle_tool_result(event)
             self._consecutive_errors = 0
@@ -309,6 +311,17 @@ class AgentSessionWorker(SessionWorker):
             )
         )
         logger.info("已取消 turn session=%s turn=%s reason=%s", self.session_id, turn_id, reason)
+
+    async def _handle_error_raised(self, event: EventEnvelope) -> None:
+        """错误收尾时补齐当前轮次历史，避免后续上下文丢失最后一轮消息。"""
+        if not event.turn_id:
+            return
+        if self.rt.state_store.is_turn_cancelled(event.session_id, event.turn_id):
+            return
+        state = self.rt.state_store.get_turn(event.session_id, event.turn_id)
+        if not state:
+            return
+        self.rt.state_store.append_turn_messages_to_history(event.session_id, state)
 
     async def _handle_user_input(self, event: EventEnvelope) -> None:
         content = str(event.payload.get("content", ""))
