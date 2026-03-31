@@ -80,14 +80,86 @@ def _parse_vault_name(vault_path: Path) -> str:
 # ============================================================================
 
 def _detect_vaults_windows() -> list[Path]:
-    """Windows 平台 vault 检测"""
-    # 占位符，下个 task 实现
-    return []
+    """Windows 平台 vault 检测 - 检查标准位置"""
+    home = Path.home()
+
+    candidates = [
+        home / "OneDrive" / "Documents" / "Obsidian",  # OneDrive Documents
+        home / "OneDrive" / "Obsidian",                # OneDrive 直接
+        home / "Documents" / "Obsidian",               # 本地 Documents
+        home / "Obsidian",                             # 主目录下
+        home / "Dropbox" / "Obsidian",                 # Dropbox
+        home / "Google Drive" / "Obsidian",            # Google Drive
+        home / "AppData" / "Local" / "Obsidian" / "data",  # 应用本身
+    ]
+
+    vaults: list[Path] = []
+    for path in candidates:
+        try:
+            if path.exists() and path.is_dir():
+                if _validate_vault(path):
+                    vaults.append(path)
+                else:
+                    # 检查是否是容器目录（包含多个 vault）
+                    try:
+                        for subdir in path.iterdir():
+                            if subdir.is_dir() and _validate_vault(subdir):
+                                vaults.append(subdir)
+                    except (PermissionError, OSError) as e:
+                        logger.debug(f"Cannot list directory {path}: {e}")
+        except Exception as e:
+            logger.debug(f"Error checking Windows path {path}: {e}")
+
+    return vaults
 
 
 def _query_registry_windows() -> str | None:
     """Windows 注册表查询 Obsidian 应用位置"""
-    # 占位符，下个 task 实现
+    if sys.platform != "win32":
+        return None
+
+    try:
+        import winreg
+
+        try:
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+            )
+        except FileNotFoundError:
+            logger.debug("Registry path not found")
+            return None
+
+        try:
+            i = 0
+            while True:
+                subkey_name = winreg.EnumKey(key, i)
+                try:
+                    subkey = winreg.OpenKey(key, subkey_name)
+                    try:
+                        display_name, _ = winreg.QueryValueEx(subkey, "DisplayName")
+                        if "obsidian" in display_name.lower():
+                            try:
+                                install_location, _ = winreg.QueryValueEx(subkey, "InstallLocation")
+                                logger.info(f"Found Obsidian in registry: {install_location}")
+                                return install_location
+                            except FileNotFoundError:
+                                pass
+                    finally:
+                        winreg.CloseKey(subkey)
+                except (FileNotFoundError, OSError):
+                    pass
+                i += 1
+        except WindowsError:
+            pass
+        finally:
+            winreg.CloseKey(key)
+
+    except ImportError:
+        logger.debug("winreg module not available (not on Windows)")
+    except Exception as e:
+        logger.debug(f"Registry query failed: {e}")
+
     return None
 
 
