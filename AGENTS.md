@@ -1645,3 +1645,14 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `openclaw-cn/extensions/qqbot` 里的 QQ 插件只有元信息与 onboarding，没有可直接复用的 Python 收发 runtime；移植前必须先确认目标协议与当前仓库插件分层，不能误判为“直接复制就能跑”。
 - 用 `AsyncMock` 模拟 `httpx.Response` 时，`json()` 和 `raise_for_status()` 会变成 awaitable，容易把测试替身问题误判成 runtime bug；这类测试应优先使用同步 `Mock` 贴近 `httpx` 真实接口。
+
+### 2026-03-31 Telegram polling conflict 补充
+
+成功经验：
+- Telegram Bot API 返回 `409 Conflict: terminated by other getUpdates request` 时，应视为终止性占用错误，而不是普通瞬时异常；runtime 直接标记 `failed` 并退出 polling loop，状态和日志都更清晰。
+- 给 `tests/unit/test_telegram_runtime.py` 增加 `Conflict` 单测时，除了断言 `_sensenova_claw_status`，还要断言 `asyncio.sleep` 未被调用，才能真正防止“悄悄继续重试”回归。
+- 这类 runtime 修复后，再补跑 `tests/e2e/test_telegram_channel_e2e.py` 很有必要，能确认 channel -> gateway -> agent 的进程内主链路未受影响。
+
+失败/风险经验：
+- 即使代码已修复，只要外部还有其他 Telegram polling 实例占用同一个 bot token，服务仍会进入 `failed`；这种问题必须通过保证单实例或切换 webhook 解决，不能靠重试。
+- Telegram mention 相关测试夹具里的 `entities[*].length` 必须与 `@bot_username` 文本精确一致，否则 `mentioned_bot` 会误报失败，干扰真正的 runtime 回归判断。
