@@ -58,6 +58,7 @@ export interface ChatSessionContextValue {
   // 消息
   messages: ChatMessage[];
   isTyping: boolean;
+  turnActive: boolean;
   sendMessage: (
     content: string,
     contextFiles?: ContextFileRef[],
@@ -169,6 +170,7 @@ export function useChatSession(): ChatSessionContextValue {
     // 消息
     messages: msg.messages,
     isTyping: msg.isTyping,
+    turnActive: msg.turnActive,
     sendMessage: msg.sendMessage,
     steps: msg.steps,
     taskProgress: msg.taskProgress,

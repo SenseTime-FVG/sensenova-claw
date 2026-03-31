@@ -167,6 +167,7 @@ llm:
       provider: qwen-embedding
       model_id: text-embedding-v4
       type: embedding
+      dimensions: 1024
       timeout: 180
 
   default_model: null
@@ -445,6 +446,13 @@ plugins:
       entry: "sensenova_claw/adapters/plugins/whatsapp/bridge/src/index.mjs"
       startup_timeout_seconds: 30
       send_timeout_seconds: 15
+
+delegation:
+  enabled: true
+  max_llm_calls: 300
+  max_tool_calls: 300
+  max_retries: 3
+  default_timeout: 600
 
 memory:
   enabled: true
