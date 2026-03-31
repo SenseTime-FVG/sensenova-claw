@@ -87,7 +87,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     bindSessionToCurrentSocket,
   } = useSession();
   const { subscribeCurrentSession, subscribeGlobal, subscribeFrontendCreate, markFrontendCreate } = useEventDispatcher();
-  const { pushNotification, pushCard } = useNotification();
+  const { pushToast, pushCard } = useNotification();
 
   // 消息状态
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -377,17 +377,33 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     return subscribeGlobal((event: WsInboundEvent) => {
       switch (event.type) {
         case 'turn_completed': {
-          // 跨会话 turn_completed → 推送通知卡片
+          // 跨会话 turn_completed → 推送通知卡片 + toast
           const completedSessionId = event.session_id || '';
           const final = event.payload.final_response || '';
-          pushCard({
+          const taskActions = [{ label: '查看会话 →', value: 'view_session' }];
+          const cardId = pushCard({
             kind: 'task_completed',
             title: '任务完成',
             body: final ? (final.length > 100 ? final.slice(0, 100) + '...' : final) : '一个任务已完成',
             level: 'success',
             source: 'agent',
             sessionId: completedSessionId,
-            actions: [{ label: '查看会话 →', value: 'view_session' }],
+            actions: taskActions,
+          });
+          pushToast({
+            kind: 'task_completed',
+            title: '任务完成',
+            body: final ? (final.length > 100 ? final.slice(0, 100) + '...' : final) : '一个任务已完成',
+            level: 'success',
+            source: 'agent',
+            cardId,
+            actions: taskActions,
+            eventKey: `turn_completed_${event.event_id || completedSessionId}`,
+            onAction: (actionValue) => {
+              if (actionValue === 'view_session' && completedSessionId) {
+                // TODO: 跳转到会话
+              }
+            },
           });
           break;
         }
@@ -396,26 +412,36 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           const body = event.payload.body || event.payload.text || '';
           const metadata = event.payload.metadata || {};
           if (body) {
-            pushNotification({
-              title,
-              body,
-              level: (event.payload.level || 'info') as 'info' | 'warning' | 'error' | 'success',
-              source: event.payload.source || 'system',
-              createdAtMs: event.payload.created_at_ms || Date.now(),
-            }, {
-              toast: metadata.show_toast !== false,
-              browser: metadata.show_browser === true,
-            });
             const notifSessionId = event.session_id;
-            pushCard({
+            const notifActions = notifSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined;
+            const cardId = pushCard({
               kind: 'general',
               title,
               body,
               level: (event.payload.level || 'info') as 'info' | 'warning' | 'error' | 'success',
               source: event.payload.source || 'system',
               sessionId: notifSessionId,
-              actions: notifSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined,
+              actions: notifActions,
             });
+            // 仅当 show_toast 不为 false 时显示 toast
+            if (metadata.show_toast !== false) {
+              pushToast({
+                kind: 'general',
+                title,
+                body,
+                level: (event.payload.level || 'info') as 'info' | 'warning' | 'error' | 'success',
+                source: event.payload.source || 'system',
+                cardId,
+                actions: notifActions,
+                eventKey: `notification_${event.event_id}`,
+                browser: metadata.show_browser === true,
+                onAction: (actionValue) => {
+                  if (actionValue === 'view_session' && notifSessionId) {
+                    // TODO: 跳转到会话
+                  }
+                },
+              });
+            }
           }
           if (body && Boolean(metadata.append_to_chat)) {
             const targetSessionId = event.session_id || null;
@@ -447,28 +473,37 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
               return [newItem, ...deduped].slice(0, 50);
             });
             refreshTaskGroups();
-            pushNotification({
-              title: `[主动推送] ${jobName || 'Proactive Agent'}`,
-              body: resultText.slice(0, 200),
-              level: 'info',
-              source: 'proactive',
-              createdAtMs: Date.now(),
-            }, { toast: true, browser: false });
-            pushCard({
+            const proactiveActions = resultSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined;
+            const cardId = pushCard({
               kind: 'general',
               title: `主动推送 — ${jobName || 'Proactive Agent'}`,
               body: resultText.slice(0, 300),
               level: 'info',
               source: 'proactive',
               sessionId: resultSessionId || undefined,
-              actions: resultSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined,
+              actions: proactiveActions,
+            });
+            pushToast({
+              kind: 'proactive',
+              title: `[主动推送] ${jobName || 'Proactive Agent'}`,
+              body: resultText.slice(0, 200),
+              level: 'info',
+              source: 'proactive',
+              cardId,
+              actions: proactiveActions,
+              eventKey: `proactive_${jobId}_${resultSessionId}`,
+              onAction: (actionValue) => {
+                if (actionValue === 'view_session' && resultSessionId) {
+                  // TODO: 跳转到会话
+                }
+              },
             });
           }
           break;
         }
       }
     });
-  }, [subscribeGlobal, pushCard, pushNotification, refreshTaskGroups, sessionIdRef]);
+  }, [subscribeGlobal, pushCard, pushToast, refreshTaskGroups, sessionIdRef]);
 
   // ── 前端创建 session 事件处理（pendingInput） ──
 
@@ -537,7 +572,8 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
   const handleSkillInvoke = useCallback(async (skillName: string, args: string) => {
     if (!sessionIdRef.current) {
-      pushNotification({
+      pushToast({
+        kind: 'info',
         title: '命令执行失败',
         body: '请先发送一条普通消息创建会话，再执行 / 命令',
         level: 'error',
@@ -553,7 +589,8 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       });
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
-        pushNotification({
+        pushToast({
+          kind: 'info',
           title: '命令执行失败',
           body: errData.detail || `未知错误 (${resp.status})`,
           level: 'error',
@@ -563,14 +600,15 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       }
       setIsTyping(true);
     } catch (err) {
-      pushNotification({
+      pushToast({
+        kind: 'info',
         title: '命令执行失败',
         body: '网络错误，请稍后重试',
         level: 'error',
         source: 'skill',
       });
     }
-  }, [sessionIdRef, pushNotification]);
+  }, [sessionIdRef, pushToast]);
 
   const cancelTurn = useCallback(() => {
     if (!sessionIdRef.current) return;
