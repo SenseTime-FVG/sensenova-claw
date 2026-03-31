@@ -369,7 +369,7 @@ export function SlideViewer({ slideSet, onClose }: { slideSet: SlideSet; onClose
               transformOrigin: 'top left',
             }}
             title={`Slide ${current + 1}`}
-            sandbox="allow-same-origin"
+            sandbox="allow-same-origin allow-scripts"
           />
         </div>
       </div>
