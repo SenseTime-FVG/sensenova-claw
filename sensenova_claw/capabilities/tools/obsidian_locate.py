@@ -164,15 +164,75 @@ def _query_registry_windows() -> str | None:
 
 
 def _detect_vaults_macos() -> list[Path]:
-    """macOS 平台 vault 检测"""
-    # 占位符，下个 task 实现
-    return []
+    """macOS 平台 vault 检测 - 检查标准位置"""
+    home = Path.home()
+
+    candidates = [
+        home / "OneDrive" / "Documents" / "Obsidian",
+        home / "Documents" / "Obsidian",
+        home / "Obsidian",
+        home / "Library" / "Mobile Documents" / "iCloud~md~obsidian" / "Documents",
+    ]
+
+    vaults: list[Path] = []
+    for path in candidates:
+        try:
+            if path.exists() and path.is_dir():
+                if _validate_vault(path):
+                    vaults.append(path)
+                else:
+                    # 检查子目录
+                    try:
+                        for subdir in path.iterdir():
+                            if subdir.is_dir() and _validate_vault(subdir):
+                                vaults.append(subdir)
+                    except (PermissionError, OSError) as e:
+                        logger.debug(f"Cannot list directory {path}: {e}")
+        except Exception as e:
+            logger.debug(f"Error checking macOS path {path}: {e}")
+
+    return vaults
 
 
 def _read_config_macos() -> list[Path]:
-    """macOS 配置文件读取"""
-    # 占位符，下个 task 实现
-    return []
+    """macOS 配置文件读取 - 从 Obsidian 应用配置解析"""
+    home = Path.home()
+    vaults: list[Path] = []
+
+    # 尝试两个可能的配置位置
+    config_paths = [
+        home / "Library" / "Application Support" / "obsidian" / "obsidian.json",
+        home / "Library" / "Preferences" / "com.obsidianmd.obsidian.plist",
+    ]
+
+    for config_path in config_paths:
+        try:
+            if config_path.exists() and config_path.is_file():
+                if config_path.suffix == ".json":
+                    with open(config_path, 'r') as f:
+                        data = json.load(f)
+                        # Obsidian JSON 配置中通常有 "vaults" 或 "open" 字段
+                        if "vaults" in data and isinstance(data["vaults"], dict):
+                            for vault_path_str in data["vaults"].values():
+                                if isinstance(vault_path_str, str):
+                                    vault_path = Path(vault_path_str).expanduser()
+                                    if _validate_vault(vault_path):
+                                        vaults.append(vault_path)
+
+                        # 也检查 "open" 字段（最近打开的 vault）
+                        if "open" in data and isinstance(data["open"], str):
+                            vault_path = Path(data["open"]).expanduser()
+                            if _validate_vault(vault_path) and vault_path not in vaults:
+                                vaults.append(vault_path)
+
+                logger.debug(f"Found {len(vaults)} vault(s) in {config_path}")
+
+        except json.JSONDecodeError as e:
+            logger.debug(f"Failed to parse JSON config {config_path}: {e}")
+        except Exception as e:
+            logger.debug(f"Error reading macOS config {config_path}: {e}")
+
+    return vaults
 
 
 def _detect_vaults_linux() -> list[Path]:
