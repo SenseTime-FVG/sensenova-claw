@@ -351,74 +351,78 @@ function PPTWorkspace() {
 
         <ResizableHandle invisible />
 
-        {/* 右栏：会话列表 + 对话面板 */}
+        {/* 右栏：会话列表 + 对话面板（上下可拖拽调整） */}
         <ResizablePanel id="ppt-chat" defaultSize="32%" minSize="20%" maxSize="45%" className="overflow-hidden border-l border-border/40">
-          <div className="flex flex-col h-full">
-            {/* 紧凑会话列表头 */}
-            <div className="shrink-0 border-b border-border/40">
-              <div className="flex items-center justify-between px-3 py-1.5">
-                <div className="flex items-center gap-1.5">
-                  <MessageSquare className="w-3 h-3 text-muted-foreground/50" />
-                  <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">
-                    PPT 对话
-                  </span>
-                  {pptSessions.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground/40">{pptSessions.length}</span>
-                  )}
+          <ResizablePanelGroup orientation="vertical" className="h-full">
+            {/* 上部：会话列表（可上下拖拽边框调整高度） */}
+            <ResizablePanel id="ppt-sessions" defaultSize="20%" minSize="8%" maxSize="50%" className="overflow-hidden">
+              <div className="flex flex-col h-full">
+                <div className="flex items-center justify-between px-3 py-1.5 shrink-0">
+                  <div className="flex items-center gap-1.5">
+                    <MessageSquare className="w-3 h-3 text-muted-foreground/50" />
+                    <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">
+                      PPT 对话
+                    </span>
+                    {pptSessions.length > 0 && (
+                      <span className="text-[10px] text-muted-foreground/40">{pptSessions.length}</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { startNewChat(); createSession('ppt-agent'); }}
+                    data-testid="ppt-new-chat-button"
+                    className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium text-primary hover:bg-primary/10 transition-colors"
+                  >
+                    <Plus className="w-3 h-3" />
+                    新建
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => { startNewChat(); createSession('ppt-agent'); }}
-                  data-testid="ppt-new-chat-button"
-                  className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium text-primary hover:bg-primary/10 transition-colors"
-                >
-                  <Plus className="w-3 h-3" />
-                  新建
-                </button>
-              </div>
-              {/* 会话列表（可滚动，最多显示几条） */}
-              {pptSessions.length > 0 && (
-                <div className="max-h-[120px] overflow-y-auto px-1.5 pb-1.5 space-y-0.5 scrollbar-thin">
-                  {pptSessions.map(session => {
-                    const isActive = currentSessionId === session.session_id;
-                    const title = getTitle(session.meta);
-                    return (
-                      <button
-                        key={session.session_id}
-                        type="button"
-                        onClick={() => switchSession(session.session_id)}
-                        className={cn(
-                          'w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-all text-[11px] group',
-                          isActive
-                            ? 'bg-primary/10 text-foreground'
-                            : 'text-muted-foreground/70 hover:bg-muted/40 hover:text-foreground',
-                        )}
-                      >
-                        <MessageSquare className={cn('w-3 h-3 shrink-0', isActive ? 'text-primary' : 'text-muted-foreground/40')} />
-                        <span className="flex-1 truncate font-medium">{title}</span>
-                        <span className="text-[9px] text-muted-foreground/40 shrink-0">{timeLabel(session.last_active)}</span>
+                {pptSessions.length > 0 && (
+                  <div className="flex-1 overflow-y-auto px-1.5 pb-1.5 space-y-0.5 scrollbar-thin">
+                    {pptSessions.map(session => {
+                      const isActive = currentSessionId === session.session_id;
+                      const title = getTitle(session.meta);
+                      return (
                         <button
+                          key={session.session_id}
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); deleteSession(session.session_id); }}
-                          className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all"
+                          onClick={() => switchSession(session.session_id)}
+                          className={cn(
+                            'w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-all text-[11px] group',
+                            isActive
+                              ? 'bg-primary/10 text-foreground'
+                              : 'text-muted-foreground/70 hover:bg-muted/40 hover:text-foreground',
+                          )}
                         >
-                          <Trash2 className="w-2.5 h-2.5" />
+                          <MessageSquare className={cn('w-3 h-3 shrink-0', isActive ? 'text-primary' : 'text-muted-foreground/40')} />
+                          <span className="flex-1 truncate font-medium">{title}</span>
+                          <span className="text-[9px] text-muted-foreground/40 shrink-0">{timeLabel(session.last_active)}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); deleteSession(session.session_id); }}
+                            className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all"
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                          </button>
                         </button>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            {/* 对话面板 */}
-            <div className="flex-1 overflow-hidden">
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </ResizablePanel>
+
+            <ResizableHandle orientation="vertical" />
+
+            {/* 下部：对话面板 */}
+            <ResizablePanel id="ppt-chat-panel" defaultSize="80%" minSize="40%" className="overflow-hidden">
               <ChatPanel
                 ref={chatPanelRef}
                 defaultAgentId="ppt-agent"
                 lockAgent
               />
-            </div>
-          </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </ResizablePanel>
       </ResizablePanelGroup>
 

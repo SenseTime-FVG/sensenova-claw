@@ -48,13 +48,11 @@ function collectMotifMarkers(html) {
 }
 
 function ensureReviewArtifact(deckDir) {
-  const reviewMd = resolve(deckDir, 'review.md');
   const reviewJson = resolve(deckDir, 'review.json');
-  const hasReviewMd = existsSync(reviewMd);
   const hasReviewJson = existsSync(reviewJson);
 
-  if (!hasReviewMd && !hasReviewJson) {
-    throw new Error('缺少 review 工件：必须先生成 review.md 或 review.json，才能继续导出');
+  if (!hasReviewJson) {
+    throw new Error('缺少 review 工件：必须先生成 review.json，才能继续导出');
   }
 
   let isBlocked = false;
@@ -71,16 +69,6 @@ function ensureReviewArtifact(deckDir) {
       .join(' ')
       .toLowerCase();
     if (/(block|blocked|fail|failed|reject|rejected|needs-fix|needs_fix)/.test(markers)) {
-      isBlocked = true;
-    }
-  }
-
-  if (hasReviewMd && !isBlocked) {
-    const reviewText = readFileSync(reviewMd, 'utf-8');
-    if (
-      /status:\s*(block|blocked|fail|failed|reject|rejected)/i.test(reviewText) ||
-      /阻塞|不可交付|不能直接交付/.test(reviewText)
-    ) {
       isBlocked = true;
     }
   }

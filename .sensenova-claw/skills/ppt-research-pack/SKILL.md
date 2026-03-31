@@ -10,7 +10,7 @@ description: 当 `ppt-task-pack` 判定存在内容缺口、`task-pack.json.rese
 ## 目标
 
 - 必须先读取 `task-pack.json`，按其中 `research_required` 字段决定是否执行研究。
-- 产出 `research-pack.md` 或 `research-pack.json`，作为 `ppt-info-pack` 的内容依据。
+- 产出 `research-pack.json`，作为 `ppt-info-pack` 的内容依据。
 - research 不是摘要——它是带有稳定 ID 的结构化"可上页内容池"，先供 `ppt-info-pack` 汇总，再供 `ppt-storyboard` 的 `source_claim_ids` / `source_evidence_ids` 回指。
 
 ## 触发条件
@@ -30,7 +30,7 @@ description: 当 `ppt-task-pack` 判定存在内容缺口、`task-pack.json.rese
 
 ## 输出
 
-- 输出路径：`${deck_dir}/research-pack.json` 或 `${deck_dir}/research-pack.md`。
+- 输出路径：`${deck_dir}/research-pack.json`。
 - 不要手写、缩写、翻译或重拼 `deck_dir`。
 
 研究结果至少应包含：
