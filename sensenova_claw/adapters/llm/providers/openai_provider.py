@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
@@ -11,6 +12,8 @@ from sensenova_claw.adapters.llm.base import (
     LLMProvider,
     merge_sampling_extra_body,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIProvider(LLMProvider):
@@ -202,7 +205,105 @@ class OpenAIProvider(LLMProvider):
                 normalized.append(self._normalize_tool_message(message))
                 continue
             normalized.append(dict(message))
-        return normalized
+        return self._align_tool_call_responses(normalized)
+
+    def _align_tool_call_responses(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """确保每个 assistant tool_calls 之后都有完整的 tool 响应。
+
+        部分 OpenAI 兼容网关会严格校验：
+        - assistant 含 tool_calls 后，后续必须紧跟对应的 tool 消息
+        - 不允许出现没有前置 tool_calls 的孤儿 tool 消息
+        因此这里在请求前统一补齐/清理历史，避免旧会话残留导致 400。
+        """
+        aligned: list[dict[str, Any]] = []
+        index = 0
+
+        while index < len(messages):
+            message = messages[index]
+            tool_calls = message.get("tool_calls") if message.get("role") == "assistant" else None
+
+            if not tool_calls:
+                if self._is_orphan_tool_message(message, aligned):
+                    logger.warning(
+                        "OpenAI align: 跳过孤儿 tool 消息 tool_call_id=%s",
+                        message.get("tool_call_id"),
+                    )
+                    index += 1
+                    continue
+                aligned.append(message)
+                index += 1
+                continue
+
+            expected_ids = [
+                str(tc.get("id") or tc.get("function", {}).get("name", "") or "")
+                for tc in tool_calls
+            ]
+            aligned.append(message)
+            index += 1
+
+            tool_messages: list[dict[str, Any]] = []
+            while index < len(messages) and messages[index].get("role") == "tool":
+                tool_messages.append(messages[index])
+                index += 1
+
+            if len(tool_messages) == len(expected_ids) and all(
+                tool_msg.get("tool_call_id") in expected_ids for tool_msg in tool_messages
+            ):
+                aligned.extend(tool_messages)
+                continue
+
+            logger.warning(
+                "OpenAI align: tool_calls=%d vs tool_responses=%d, 修补对齐",
+                len(expected_ids),
+                len(tool_messages),
+            )
+            tool_by_id = {
+                str(tool_msg.get("tool_call_id") or ""): tool_msg
+                for tool_msg in tool_messages
+                if str(tool_msg.get("tool_call_id") or "")
+            }
+
+            for tool_call in tool_calls:
+                tool_call_id = str(
+                    tool_call.get("id") or tool_call.get("function", {}).get("name", "") or ""
+                )
+                if tool_call_id in tool_by_id:
+                    aligned.append(tool_by_id[tool_call_id])
+                    continue
+
+                tool_name = (
+                    tool_call.get("name")
+                    or tool_call.get("function", {}).get("name")
+                    or "unknown"
+                )
+                logger.warning("OpenAI align: 补齐缺失的 tool 响应 tool_call_id=%s", tool_call_id)
+                aligned.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "content": "[tool response unavailable]",
+                })
+
+        return aligned
+
+    def _is_orphan_tool_message(
+        self,
+        message: dict[str, Any],
+        aligned: list[dict[str, Any]],
+    ) -> bool:
+        if message.get("role") != "tool":
+            return False
+        if not aligned:
+            return True
+        if aligned[-1].get("role") == "assistant" and aligned[-1].get("tool_calls"):
+            return False
+
+        for previous in reversed(aligned):
+            if previous.get("role") == "assistant" and previous.get("tool_calls"):
+                return False
+            if previous.get("role") in ("user", "system"):
+                break
+        return True
 
     def _normalize_assistant_message(
         self, message: dict[str, Any], has_thinking: bool = False,

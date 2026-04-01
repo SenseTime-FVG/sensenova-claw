@@ -1759,3 +1759,21 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 如果 Playwright 夹具只 mock `/api/sessions` 列表而没 mock `/api/sessions/{id}`，`/sessions/[id]` 用例会因为页面初始化失败而拿不到 `chat-input`，表面像输入框回归，实际是测试数据不完整。
+
+### 2026-04-01 OpenAI 兼容 tool_calls 历史补齐补充
+
+成功经验：
+- `GeminiProvider` 已有“assistant tool_calls 与 tool 响应数量对齐”的现成模式；遇到 minimax、cloudsway 这类 OpenAI 兼容网关同类 400 时，优先对照 provider 侧消息清洗，而不是先改 worker 重试层。
+- 对这类兼容性 bug，最小高价值单测就是直接断言 `OpenAIProvider._normalize_messages()` 的输出：一条覆盖“缺失 tool 响应时补占位”，一条覆盖“孤儿 tool 消息丢弃”，能精确锁住请求体合法性。
+
+失败/风险经验：
+- 扩大到不相干测试集时，容易撞上仓库既有失败并干扰判断；本次 `tests/unit/test_gemini_provider_thought_signature.py` 当前就存在失败，验证 OpenAI 兼容修复时应优先跑聚焦的 provider 单测，不要把无关红灯误判成回归。
+
+### 2026-04-01 Anthropic tool_result 历史对齐补充
+
+成功经验：
+- `AnthropicProvider._normalize_messages()` 一旦同时承担“格式转换 + 合法性对齐”，旧单测就不该再用它验证“孤立 tool 消息如何转换”；这类断言应下沉到 `_normalize_tool_message()`，否则会和新加入的孤儿清理逻辑冲突。
+- 对 Anthropic 协议，最小有效修复是和 OpenAIProvider 保持同级策略：`assistant(tool_use)` 后缺失 `tool_result` 就补占位，孤儿 `tool_result` 直接丢弃，这样能在请求发出前保证消息序列合法。
+
+失败/风险经验：
+- `tests/unit/test_anthropic_provider.py` 之前把纯逻辑测试绑定到真实 API provider fixture，缺少 API key 时新增单测会被整体 skip；以后给这类文件补本地逻辑测试时，应优先拆出不依赖真实配置的 `local_provider` fixture。
