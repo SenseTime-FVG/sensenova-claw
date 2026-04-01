@@ -7,15 +7,17 @@ import { useEventDispatcher } from './EventDispatcherContext';
 import { useSession } from './SessionContext';
 import { useMessages } from './MessageContext';
 import { attachAskUserToLatestToolMessage, updateAskUserToolState } from '@/lib/chatTypes';
-import type { PendingInteraction } from '@/components/chat/QuestionDialog';
+import type { PendingInteraction, PendingQuestionInteraction } from '@/components/chat/QuestionDialog';
 import type { WsInboundEvent } from '@/lib/wsEvents';
 
 // ── Context 类型 ──
 
 export interface InteractionContextValue {
   activeInteraction: PendingInteraction | null;
+  currentSessionQuestionInteraction: PendingQuestionInteraction | null;
   interactionSubmitting: boolean;
   sendQuestionAnswer: (answer: string | string[] | null, cancelled: boolean) => void;
+  sendCurrentSessionQuestionAnswer: (answer: string | string[] | null, cancelled: boolean) => void;
   submitQuestionResponse: (params: {
     questionId: string;
     sourceSessionId: string;
@@ -42,6 +44,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
   currentSessionIdRef.current = currentSessionId;
 
   const [activeInteraction, setActiveInteraction] = useState<PendingInteraction | null>(null);
+  const [currentSessionQuestionInteraction, setCurrentSessionQuestionInteraction] = useState<PendingQuestionInteraction | null>(null);
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
 
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
@@ -51,6 +54,25 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
 
   const interactionKey = (interaction: PendingInteraction) =>
     `${interaction.kind}:${interaction.interactionId}`;
+
+  const findCurrentSessionQuestionInteraction = useCallback((): PendingQuestionInteraction | null => {
+    const currentSessionId = currentSessionIdRef.current;
+    if (!currentSessionId) return null;
+
+    const active = activeInteractionRef.current;
+    if (active?.kind === 'question' && active.sourceSessionId === currentSessionId) {
+      return active;
+    }
+
+    return interactionQueueRef.current.find(
+      (item): item is PendingQuestionInteraction =>
+        item.kind === 'question' && item.sourceSessionId === currentSessionId
+    ) || null;
+  }, []);
+
+  const syncCurrentSessionQuestionInteraction = useCallback(() => {
+    setCurrentSessionQuestionInteraction(findCurrentSessionQuestionInteraction());
+  }, [findCurrentSessionQuestionInteraction]);
 
   const enqueueInteraction = useCallback((interaction: PendingInteraction) => {
     const active = activeInteractionRef.current;
@@ -62,10 +84,12 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
     if (!active) {
       activeInteractionRef.current = interaction;
       setActiveInteraction(interaction);
+      syncCurrentSessionQuestionInteraction();
       return;
     }
     interactionQueueRef.current = [...queue, interaction];
-  }, []);
+    syncCurrentSessionQuestionInteraction();
+  }, [syncCurrentSessionQuestionInteraction]);
 
   const resolveInteraction = useCallback((kind: PendingInteraction['kind'], interactionId: string) => {
     const active = activeInteractionRef.current;
@@ -81,18 +105,21 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
         setActiveInteraction(null);
       }
       setInteractionSubmitting(false);
+      syncCurrentSessionQuestionInteraction();
       return;
     }
     const filtered = queue.filter((item) => !(item.kind === kind && item.interactionId === interactionId));
     if (filtered.length !== queue.length) {
       interactionQueueRef.current = filtered;
+      syncCurrentSessionQuestionInteraction();
     }
-  }, []);
+  }, [syncCurrentSessionQuestionInteraction]);
 
   const clearInteractions = useCallback(() => {
     interactionQueueRef.current = [];
     activeInteractionRef.current = null;
     setActiveInteraction(null);
+    setCurrentSessionQuestionInteraction(null);
     setInteractionSubmitting(false);
   }, []);
 
@@ -111,14 +138,20 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
       }
       activeInteractionRef.current = next;
       setActiveInteraction(next);
+      syncCurrentSessionQuestionInteraction();
       setInteractionSubmitting(false);
       return;
     }
 
     if (filteredQueue.length !== queue.length) {
       interactionQueueRef.current = filteredQueue;
+      syncCurrentSessionQuestionInteraction();
     }
-  }, []);
+  }, [syncCurrentSessionQuestionInteraction]);
+
+  useEffect(() => {
+    syncCurrentSessionQuestionInteraction();
+  }, [currentSessionId, syncCurrentSessionQuestionInteraction]);
 
   // ── 监听当前 session 事件 ──
 
@@ -298,6 +331,17 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
     });
   }, [submitQuestionResponse]);
 
+  const sendCurrentSessionQuestionAnswer = useCallback((answer: string | string[] | null, cancelled: boolean) => {
+    const interaction = findCurrentSessionQuestionInteraction();
+    if (!interaction) return;
+    submitQuestionResponse({
+      questionId: interaction.interactionId,
+      sourceSessionId: interaction.sourceSessionId,
+      answer,
+      cancelled,
+    });
+  }, [findCurrentSessionQuestionInteraction, submitQuestionResponse]);
+
   const sendConfirmationResponse = useCallback((approved: boolean) => {
     const interaction = activeInteractionRef.current;
     if (!interaction || interaction.kind !== 'confirmation') return;
@@ -320,8 +364,10 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
 
   const value: InteractionContextValue = {
     activeInteraction,
+    currentSessionQuestionInteraction,
     interactionSubmitting,
     sendQuestionAnswer,
+    sendCurrentSessionQuestionAnswer,
     submitQuestionResponse,
     sendConfirmationResponse,
     handleInteractionTimeout,

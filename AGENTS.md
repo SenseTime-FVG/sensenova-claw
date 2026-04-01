@@ -1719,6 +1719,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅等待 mock WebSocket 就绪并不代表 `/sessions/[id]` 已完成 `switchSession`；如果过早注入 ask_user，表面上像“主输入不支持 ask_user”，实际是当前 session 仍为空。
 
+### 2026-04-01 ask_user 跨会话停止按钮补充
+
+成功经验：
+- `activeInteraction` 是全局 FIFO，只能代表“当前最上层待处理交互”，不能直接拿它判断“当前会话输入框是否该显示发送按钮”；跨会话 ask_user 并发时，必须额外计算 `currentSessionQuestionInteraction`。
+- 为 `InteractionContext` 增加“当前会话待回答问题”视图后，`ChatInput`、`ChatPanel`、`/chat` 页面都能统一使用它决定 `showStopButton` 和提交目标，避免一个地方修好、另一个入口仍走旧判断。
+- 这类回归最有效的 E2E 是同时构造两个会话：会话1先收到 ask_user，占住全局 active；会话2再通过 `/events` 标成 turn 进行中并收到 ask_user，断言当前会话应继续显示发送按钮且提交到会话2。
+
+失败/风险经验：
+- 若只模拟第二个会话的 `user_question_asked` 而不让它处于 `turnActive`，就复现不出“停止按钮误显示”的真实问题，测试会漏掉 UI 判断里的关键前提。
+
 ### 2026-03-31 /llms 环境变量引用保存补充
 
 成功经验：

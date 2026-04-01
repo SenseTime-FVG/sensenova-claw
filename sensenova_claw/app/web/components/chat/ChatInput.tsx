@@ -58,8 +58,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     currentSessionId,
     pendingPrefill,
     clearPendingPrefill,
-    activeInteraction,
-    sendQuestionAnswer,
+    currentSessionQuestionInteraction,
+    sendCurrentSessionQuestionAnswer,
   } = useChatSession();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isComposingRef = useRef(false);
@@ -180,10 +180,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       return;
     }
 
-    const isQuestionReply = activeInteraction?.kind === 'question'
-      && activeInteraction.sourceSessionId === currentSessionId;
+    const isQuestionReply = Boolean(currentSessionQuestionInteraction);
     if (isQuestionReply) {
-      sendQuestionAnswer(content, false);
+      sendCurrentSessionQuestionAnswer(content, false);
       setDraftRecommendation(null);
       setInputValue('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -209,9 +208,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     onSend,
     parseAtRefs,
     draftRecommendation,
-    activeInteraction,
-    currentSessionId,
-    sendQuestionAnswer,
+    currentSessionQuestionInteraction,
+    sendCurrentSessionQuestionAnswer,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
