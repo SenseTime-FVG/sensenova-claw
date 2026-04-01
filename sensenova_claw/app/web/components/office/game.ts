@@ -38,7 +38,7 @@ export class OfficeScene extends Phaser.Scene {
     // 背景
     this.load.image('office_bg', `${base}/office_bg_small.webp`);
     // 主角
-    this.load.spritesheet('star_idle', `${base}/icon.png`, { frameWidth: 128, frameHeight: 128 });
+    this.load.spritesheet('star_idle', `${base}/star-idle-sheep-grid.png`, { frameWidth: 128, frameHeight: 128 });
     this.load.spritesheet('star_working', `${base}/icon.png`, { frameWidth: 128, frameHeight: 128 });
     // 家具
     this.load.image('sofa_idle', `${base}/sofa-idle-v3.png`);
@@ -50,7 +50,7 @@ export class OfficeScene extends Phaser.Scene {
     this.load.spritesheet('serverroom', `${base}/serverroom-spritesheet.webp`, { frameWidth: 180, frameHeight: 251 });
     this.load.spritesheet('error_bug', `${base}/error-bug-spritesheet-grid.webp`, { frameWidth: 180, frameHeight: 180 });
     this.load.spritesheet('cats', `${base}/cats-spritesheet.webp`, { frameWidth: 160, frameHeight: 160 });
-    this.load.spritesheet('sync_anim', `${base}/icon.png`, { frameWidth: 128, frameHeight: 128 });
+    this.load.spritesheet('sync_anim', `${base}/star-idle-sheep-grid.png`, { frameWidth: 128, frameHeight: 128 });
     this.load.spritesheet('flowers', `${base}/flowers-bloom-v2.webp`, { frameWidth: 65, frameHeight: 65 });
   }
 
@@ -66,8 +66,9 @@ export class OfficeScene extends Phaser.Scene {
     // 主角动画定义（多 agent 复用）
     this.anims.create({
       key: 'star_idle',
-      frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 0 }),
-      frameRate: 1, repeat: -1,
+      // 4 帧轻呼吸 + 眨眼，保持待机状态有生命感但不抢戏
+      frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 3 }),
+      frameRate: 2.2, repeat: -1,
     });
     this.anims.create({
       key: 'star_working',
@@ -129,13 +130,15 @@ export class OfficeScene extends Phaser.Scene {
 
     // 同步动画
     this.anims.create({
-      key: 'sync_anim',
-      frames: this.anims.generateFrameNumbers('sync_anim', { start: 1, end: 48 }),
-      frameRate: 12, repeat: -1,
+      key: 'sync_sheep_idle',
+      // 右下角展示羊始终保持轻微动态，避免停在静态首帧
+      frames: this.anims.generateFrameNumbers('sync_anim', { start: 0, end: 3 }),
+      frameRate: 2.2, repeat: -1,
     });
     const sa = LAYOUT.furniture.syncAnim;
     this.syncAnimSprite = this.add.sprite(sa.x, sa.y, 'sync_anim', 0)
       .setOrigin(sa.origin.x, sa.origin.y).setDepth(sa.depth);
+    this.syncAnimSprite.play('sync_sheep_idle');
 
     // 小猫（可点击切换）
     const ct = LAYOUT.furniture.cat;
@@ -190,12 +193,9 @@ export class OfficeScene extends Phaser.Scene {
       this.errorBug.setVisible(false);
     }
 
-    // 同步动画
-    if (this.currentState === 'syncing') {
-      if (!this.syncAnimSprite.anims.isPlaying) this.syncAnimSprite.play('sync_anim');
-    } else {
-      if (this.syncAnimSprite.anims.isPlaying) this.syncAnimSprite.anims.stop();
-      this.syncAnimSprite.setFrame(0);
+    // 右下角羊保持待机动画，避免在 idle 下退回静态首帧
+    if (!this.syncAnimSprite.anims.isPlaying) {
+      this.syncAnimSprite.play('sync_sheep_idle');
     }
 
     // 气泡
