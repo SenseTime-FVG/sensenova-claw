@@ -105,6 +105,9 @@ async def lifespan(app: FastAPI):
 
     repo = Repository(db_path=db_path)
     await repo.init()
+    cancelled_stale_turns = await repo.cancel_stale_started_turns()
+    if cancelled_stale_turns:
+        logger.warning("Recovered %s stale started turns after restart", cancelled_stale_turns)
 
     # 会话维护：清理过期会话
     maintenance = SessionMaintenance(repo=repo)

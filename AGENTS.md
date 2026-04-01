@@ -1777,3 +1777,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - `tests/unit/test_anthropic_provider.py` 之前把纯逻辑测试绑定到真实 API provider fixture，缺少 API key 时新增单测会被整体 skip；以后给这类文件补本地逻辑测试时，应优先拆出不依赖真实配置的 `local_provider` fixture。
+
+### 2026-04-01 重启后 stale turn 恢复补充
+
+成功经验：
+- 对“重启后仍显示停止按钮/工具执行中”这类问题，优先检查后端是否在启动时清理数据库里遗留的 `started` turn；只修前端展示会留下状态源不一致。
+- 前端历史恢复要双重收口：`isTurnStillActive(events)` 需要把 `error.raised` 视为终结事件，`rebuildMessagesFromEvents()` 还要把残留的 `running` 工具消息收敛为失败态，否则会出现“停止按钮没了，但工具还在执行中”的半残 UI。
+- 这类回归最稳的测试组合是：后端仓储单测断言“stale turn -> cancelled + error.raised”，前端再补 mock websocket 的 Playwright 历史恢复用例，直接验证浏览器里不再出现停止按钮。
+
+失败/风险经验：
+- 仅依赖历史里的 `user.input` 判断 turn 是否活跃，会把“进程重启前的遗留轮次”误判为仍在运行；以后凡是涉及重启恢复，都必须设计显式终结事件或启动清理逻辑。

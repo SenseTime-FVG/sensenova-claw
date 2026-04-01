@@ -11,7 +11,7 @@ from typing import Any
 from sensenova_claw.kernel.runtime.message_record import MessageRecord
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.envelope import EventEnvelope
-from sensenova_claw.kernel.events.types import PROACTIVE_RESULT, USER_INPUT
+from sensenova_claw.kernel.events.types import ERROR_RAISED, PROACTIVE_RESULT, USER_INPUT
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -312,6 +312,70 @@ class Repository:
             (status, time.time(), agent_response, turn_id),
         )
         conn.commit()
+
+    async def cancel_stale_started_turns(
+        self,
+        reason: str = "服务已重启，上一轮未完成任务已自动终止。",
+    ) -> int:
+        """将重启前遗留的 started turn 收敛为 cancelled，并补终结事件。"""
+        return await asyncio.to_thread(self._sync_cancel_stale_started_turns, reason)
+
+    def _sync_cancel_stale_started_turns(self, reason: str) -> int:
+        conn = self._conn()
+        stale_turns = conn.execute(
+            """
+            SELECT turn_id, session_id
+            FROM turns
+            WHERE status = 'started' AND ended_at IS NULL
+            ORDER BY started_at ASC
+            """,
+        ).fetchall()
+        if not stale_turns:
+            return 0
+
+        now = time.time()
+        for row in stale_turns:
+            turn_id = row["turn_id"]
+            session_id = row["session_id"]
+            conn.execute(
+                "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
+                ("cancelled", now, reason, turn_id),
+            )
+            conn.execute(
+                """INSERT INTO events (event_id, session_id, turn_id, event_type, timestamp, source, trace_id, payload_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    EventEnvelope(
+                        type=ERROR_RAISED,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        source="system",
+                        payload={
+                            "error_type": "TurnCancelled",
+                            "error_message": reason,
+                            "user_message": reason,
+                            "context": {"cancelled": True, "reason": "restart_cleanup"},
+                        },
+                    ).event_id,
+                    session_id,
+                    turn_id,
+                    ERROR_RAISED,
+                    now,
+                    "system",
+                    None,
+                    json.dumps(
+                        {
+                            "error_type": "TurnCancelled",
+                            "error_message": reason,
+                            "user_message": reason,
+                            "context": {"cancelled": True, "reason": "restart_cleanup"},
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+        conn.commit()
+        return len(stale_turns)
 
     async def log_event(self, event: EventEnvelope) -> None:
         await asyncio.to_thread(self._sync_log_event, event)

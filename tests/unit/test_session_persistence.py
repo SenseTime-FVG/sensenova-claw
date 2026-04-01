@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import time
+import json
 
 import pytest
 import pytest_asyncio
 
 from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.kernel.events.types import ERROR_RAISED
 
 
 @pytest_asyncio.fixture
@@ -253,3 +255,31 @@ async def test_concurrent_log_events_complete_correctly(repo):
     # 验证全部写入
     stored = await repo.get_session_events(session_id)
     assert len(stored) == 10
+
+
+@pytest.mark.asyncio
+async def test_cancel_stale_started_turns_marks_turn_cancelled_and_logs_terminal_event(repo):
+    """启动后清理遗留 started turn 时，应补齐 cancelled 状态和终结事件。"""
+    session_id = "sess_stale_turn"
+    turn_id = "turn_stale_turn"
+    await repo.create_session(session_id)
+    await repo.create_turn(turn_id, session_id, "上次未完成的问题")
+
+    cleaned = await repo.cancel_stale_started_turns(
+        reason="服务已重启，上一轮未完成任务已自动终止。",
+    )
+
+    assert cleaned == 1
+
+    turns = await repo.get_session_turns(session_id)
+    assert turns[0]["status"] == "cancelled"
+    assert turns[0]["ended_at"] is not None
+    assert turns[0]["agent_response"] == "服务已重启，上一轮未完成任务已自动终止。"
+
+    events = await repo.get_session_events(session_id)
+    assert len(events) == 1
+    assert events[0]["event_type"] == ERROR_RAISED
+    assert events[0]["turn_id"] == turn_id
+    payload = json.loads(events[0]["payload_json"])
+    assert payload["error_type"] == "TurnCancelled"
+    assert payload["context"]["cancelled"] is True
