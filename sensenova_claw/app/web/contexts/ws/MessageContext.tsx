@@ -79,7 +79,7 @@ export interface MessageContextValue {
   isTyping: boolean;
   /** 当前 turn 是否在进行中（从发送消息到 turn_completed/cancelled/error）。
    *  与 isTyping 的区别：isTyping 在 user_question_asked 时会变 false（允许显示输入 UI），
-   *  但 turnActive 始终为 true 直到 turn 真正结束。用于控制输入框的 disabled 状态。 */
+   *  但 turnActive 始终为 true 直到 turn 真正结束。用于控制停止按钮与重复提交。 */
   turnActive: boolean;
   steps: StepItem[];
   taskProgress: TaskProgressItem[];
@@ -629,6 +629,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       pendingInputRef.current = null;
       pendingSessionBootstrapIdRef.current = null;
       setIsTyping(false);
+      setTurnActive(false);
       return;
     }
     if (lastStreamingTurnIdRef.current) {

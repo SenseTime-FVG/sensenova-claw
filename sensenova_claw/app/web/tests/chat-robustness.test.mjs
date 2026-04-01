@@ -52,7 +52,7 @@ test('新建会话首条消息 bootstrap 期间不应被 session 历史加载提
 
   assert.match(source, /const pendingSessionBootstrapIdRef = useRef<string \| null>\(null\);/);
   assert.match(source, /const isPendingSessionBootstrap = pendingSessionBootstrapIdRef\.current === currentSessionId;/);
-  assert.match(source, /if \(!isPendingSessionBootstrap\) \{\s*setIsTyping\(false\);\s*\}/s);
+  assert.match(source, /if \(!isPendingSessionBootstrap\) \{\s*const stillActive = isTurnStillActive\(events\);\s*setIsTyping\(stillActive\);\s*setTurnActive\(stillActive\);\s*\}/s);
   assert.match(source, /pendingSessionBootstrapIdRef\.current = newSid;/);
 });
 
@@ -60,4 +60,30 @@ test('手动停止当前轮次时应追加 用户中止 系统消息', () => {
   const source = readSource('contexts/ws/MessageContext.tsx');
 
   assert.match(source, /addMsg\('system', '用户中止'\);/);
+});
+
+test('首条消息尚未创建会话时点击停止应同步清掉 turnActive', () => {
+  const source = readSource('contexts/ws/MessageContext.tsx');
+
+  assert.match(
+    source,
+    /if \(!sessionIdRef\.current\) \{\s*pendingInputRef\.current = null;\s*pendingSessionBootstrapIdRef\.current = null;\s*setIsTyping\(false\);\s*setTurnActive\(false\);\s*return;\s*\}/s,
+  );
+});
+
+test('等待模型响应期间应继续显示停止按钮但允许编辑输入框', () => {
+  const chatInputSource = readSource('components/chat/ChatInput.tsx');
+  const chatPanelSource = readSource('components/chat/ChatPanel.tsx');
+  const chatPageSource = readSource('app/chat/page.tsx');
+
+  assert.match(chatInputSource, /showStopButton\?: boolean;/);
+  assert.match(chatInputSource, /if \(!content \|\| !wsConnected \|\| disabled \|\| isSubmitting \|\| showStopButton\) return;/);
+  assert.match(chatInputSource, /disabled=\{!wsConnected \|\| disabled\}/);
+  assert.match(chatInputSource, /\{showStopButton && onStop \? \(/);
+
+  assert.match(chatPanelSource, /disabled=\{activeInteraction\?\.kind === 'confirmation'\}/);
+  assert.match(chatPanelSource, /showStopButton=\{turnActive && !isCurrentSessionQuestionInteraction\}/);
+
+  assert.match(chatPageSource, /disabled=\{activeInteraction\?\.kind === 'confirmation'\}/);
+  assert.match(chatPageSource, /showStopButton=\{turnActive && !isCurrentSessionQuestionInteraction\}/);
 });

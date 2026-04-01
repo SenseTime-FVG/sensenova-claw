@@ -1719,6 +1719,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅等待 mock WebSocket 就绪并不代表 `/sessions/[id]` 已完成 `switchSession`；如果过早注入 ask_user，表面上像“主输入不支持 ask_user”，实际是当前 session 仍为空。
 
+### 2026-04-01 ask_user 跨会话停止按钮补充
+
+成功经验：
+- `activeInteraction` 是全局 FIFO，只能代表“当前最上层待处理交互”，不能直接拿它判断“当前会话输入框是否该显示发送按钮”；跨会话 ask_user 并发时，必须额外计算 `currentSessionQuestionInteraction`。
+- 为 `InteractionContext` 增加“当前会话待回答问题”视图后，`ChatInput`、`ChatPanel`、`/chat` 页面都能统一使用它决定 `showStopButton` 和提交目标，避免一个地方修好、另一个入口仍走旧判断。
+- 这类回归最有效的 E2E 是同时构造两个会话：会话1先收到 ask_user，占住全局 active；会话2再通过 `/events` 标成 turn 进行中并收到 ask_user，断言当前会话应继续显示发送按钮且提交到会话2。
+
+失败/风险经验：
+- 若只模拟第二个会话的 `user_question_asked` 而不让它处于 `turnActive`，就复现不出“停止按钮误显示”的真实问题，测试会漏掉 UI 判断里的关键前提。
+
 ### 2026-03-31 /llms 环境变量引用保存补充
 
 成功经验：
@@ -1749,3 +1759,21 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 如果 Playwright 夹具只 mock `/api/sessions` 列表而没 mock `/api/sessions/{id}`，`/sessions/[id]` 用例会因为页面初始化失败而拿不到 `chat-input`，表面像输入框回归，实际是测试数据不完整。
+
+### 2026-04-01 OpenAI 兼容 tool_calls 历史补齐补充
+
+成功经验：
+- `GeminiProvider` 已有“assistant tool_calls 与 tool 响应数量对齐”的现成模式；遇到 minimax、cloudsway 这类 OpenAI 兼容网关同类 400 时，优先对照 provider 侧消息清洗，而不是先改 worker 重试层。
+- 对这类兼容性 bug，最小高价值单测就是直接断言 `OpenAIProvider._normalize_messages()` 的输出：一条覆盖“缺失 tool 响应时补占位”，一条覆盖“孤儿 tool 消息丢弃”，能精确锁住请求体合法性。
+
+失败/风险经验：
+- 扩大到不相干测试集时，容易撞上仓库既有失败并干扰判断；本次 `tests/unit/test_gemini_provider_thought_signature.py` 当前就存在失败，验证 OpenAI 兼容修复时应优先跑聚焦的 provider 单测，不要把无关红灯误判成回归。
+
+### 2026-04-01 Anthropic tool_result 历史对齐补充
+
+成功经验：
+- `AnthropicProvider._normalize_messages()` 一旦同时承担“格式转换 + 合法性对齐”，旧单测就不该再用它验证“孤立 tool 消息如何转换”；这类断言应下沉到 `_normalize_tool_message()`，否则会和新加入的孤儿清理逻辑冲突。
+- 对 Anthropic 协议，最小有效修复是和 OpenAIProvider 保持同级策略：`assistant(tool_use)` 后缺失 `tool_result` 就补占位，孤儿 `tool_result` 直接丢弃，这样能在请求发出前保证消息序列合法。
+
+失败/风险经验：
+- `tests/unit/test_anthropic_provider.py` 之前把纯逻辑测试绑定到真实 API provider fixture，缺少 API key 时新增单测会被整体 skip；以后给这类文件补本地逻辑测试时，应优先拆出不依赖真实配置的 `local_provider` fixture。

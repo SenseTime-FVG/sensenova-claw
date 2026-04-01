@@ -16,6 +16,20 @@ from sensenova_claw.platform.config.config import Config
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.fixture
+def local_provider() -> Any:
+    """纯逻辑测试使用本地 AnthropicProvider，不依赖真实 API key。"""
+    import sensenova_claw.adapters.llm.providers.anthropic_provider as mod
+
+    original_config = mod.config
+    mod.config = Config()
+    try:
+        from sensenova_claw.adapters.llm.providers.anthropic_provider import AnthropicProvider
+        yield AnthropicProvider()
+    finally:
+        mod.config = original_config
+
+
 async def _safe_call(provider, **kwargs) -> dict[str, Any]:
     """调用 provider.call，如果 API 不可达则 skip 测试"""
     try:
@@ -80,24 +94,24 @@ class TestAnthropicProviderInheritance:
 # ---------------------------------------------------------------------------
 
 class TestNormalizeMessages:
-    def test_user_message_passthrough(self, provider) -> None:
+    def test_user_message_passthrough(self, local_provider) -> None:
         """user 消息应原样传递"""
-        result = provider._normalize_messages([
+        result = local_provider._normalize_messages([
             {"role": "user", "content": "hello"},
         ])
         assert result == [{"role": "user", "content": "hello"}]
 
-    def test_assistant_with_text_only(self, provider) -> None:
+    def test_assistant_with_text_only(self, local_provider) -> None:
         """仅文本的 assistant 消息应转换为 content 列表"""
-        result = provider._normalize_messages([
+        result = local_provider._normalize_messages([
             {"role": "assistant", "content": "回复"},
         ])
         assert result[0]["role"] == "assistant"
         assert result[0]["content"] == [{"type": "text", "text": "回复"}]
 
-    def test_assistant_with_tool_calls(self, provider) -> None:
+    def test_assistant_with_tool_calls(self, local_provider) -> None:
         """带 tool_calls 的 assistant 消息应转换为 tool_use 格式"""
-        result = provider._normalize_messages([
+        result = local_provider._normalize_messages([
             {
                 "role": "assistant",
                 "content": "搜索中",
@@ -115,39 +129,82 @@ class TestNormalizeMessages:
         assert content[1]["name"] == "search"
         assert content[1]["input"] == {"q": "test"}
 
-    def test_assistant_empty_content_no_tool_calls(self, provider) -> None:
+    def test_assistant_empty_content_no_tool_calls(self, local_provider) -> None:
         """assistant 消息 content 为空且无 tool_calls 时 content 列表为空"""
-        result = provider._normalize_messages([
+        result = local_provider._normalize_messages([
             {"role": "assistant", "content": ""},
         ])
         assert result[0]["content"] == []
 
-    def test_tool_message_to_user_tool_result(self, provider) -> None:
-        """tool 消息应转为 user 角色 + tool_result 格式"""
-        result = provider._normalize_messages([
+    def test_tool_message_to_user_tool_result(self, local_provider) -> None:
+        """tool 消息格式转换应产出 user + tool_result。"""
+        result = local_provider._normalize_tool_message({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": '{"result": "ok"}',
+        })
+
+        assert result["role"] == "user"
+        assert result["content"][0]["type"] == "tool_result"
+        assert result["content"][0]["tool_use_id"] == "call_1"
+        assert result["content"][0]["content"] == '{"result": "ok"}'
+
+    def test_tool_message_fallback_to_name(self, local_provider) -> None:
+        """tool 消息无 tool_call_id 时应回退到 name 字段。"""
+        result = local_provider._normalize_tool_message({
+            "role": "tool",
+            "name": "my_tool",
+            "content": "result",
+        })
+
+        assert result["content"][0]["tool_use_id"] == "my_tool"
+
+    def test_fills_missing_tool_result_placeholder(self, local_provider) -> None:
+        """assistant.tool_calls 缺少结果时，应补一条占位 tool_result。"""
+        result = local_provider._normalize_messages([
+            {"role": "user", "content": "帮我继续"},
             {
-                "role": "tool",
-                "tool_call_id": "call_1",
-                "content": '{"result": "ok"}',
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_missing", "name": "search", "arguments": {"q": "test"}},
+                ],
             },
+            {"role": "user", "content": "工具没返回，你继续"},
         ])
 
-        assert result[0]["role"] == "user"
-        assert result[0]["content"][0]["type"] == "tool_result"
-        assert result[0]["content"][0]["tool_use_id"] == "call_1"
-        assert result[0]["content"][0]["content"] == '{"result": "ok"}'
+        assert result[1]["role"] == "assistant"
+        assert result[2] == {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "call_missing",
+                    "content": "[tool response unavailable]",
+                }
+            ],
+        }
+        assert result[3] == {"role": "user", "content": "工具没返回，你继续"}
 
-    def test_tool_message_fallback_to_name(self, provider) -> None:
-        """tool 消息无 tool_call_id 时应回退到 name 字段"""
-        result = provider._normalize_messages([
+    def test_drops_orphan_tool_result_message(self, local_provider) -> None:
+        """没有前置 assistant.tool_calls 的 tool 消息应被丢弃。"""
+        result = local_provider._normalize_messages([
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "普通回复"},
             {
                 "role": "tool",
-                "name": "my_tool",
-                "content": "result",
+                "tool_call_id": "orphan_call",
+                "name": "search",
+                "content": '{"items": []}',
             },
+            {"role": "user", "content": "q2"},
         ])
 
-        assert result[0]["content"][0]["tool_use_id"] == "my_tool"
+        assert result == [
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": [{"type": "text", "text": "普通回复"}]},
+            {"role": "user", "content": "q2"},
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -155,28 +212,28 @@ class TestNormalizeMessages:
 # ---------------------------------------------------------------------------
 
 class TestConvertTool:
-    def test_convert_tool_format(self, provider) -> None:
+    def test_convert_tool_format(self, local_provider) -> None:
         """工具格式转换：parameters -> input_schema"""
         tool = {
             "name": "test_tool",
             "description": "test description",
             "parameters": {"type": "object", "properties": {}},
         }
-        converted = provider._convert_tool(tool)
+        converted = local_provider._convert_tool(tool)
         assert converted["name"] == "test_tool"
         assert converted["description"] == "test description"
         assert converted["input_schema"] == {"type": "object", "properties": {}}
 
-    def test_convert_tool_missing_description(self, provider) -> None:
+    def test_convert_tool_missing_description(self, local_provider) -> None:
         """缺少 description 时应默认为空字符串"""
         tool = {"name": "t", "parameters": {}}
-        converted = provider._convert_tool(tool)
+        converted = local_provider._convert_tool(tool)
         assert converted["description"] == ""
 
-    def test_convert_tool_missing_parameters(self, provider) -> None:
+    def test_convert_tool_missing_parameters(self, local_provider) -> None:
         """缺少 parameters 时应默认为空 dict"""
         tool = {"name": "t", "description": "d"}
-        converted = provider._convert_tool(tool)
+        converted = local_provider._convert_tool(tool)
         assert converted["input_schema"] == {}
 
 
