@@ -42,7 +42,7 @@ test('office 右下角小羊应播放待机动画', async ({ page }) => {
   });
 
   expect(state.texture).toBeTruthy();
-  expect(state.frameCount).toBeGreaterThan(1);
+  expect(state.frameCount).toBeGreaterThanOrEqual(8);
   expect(state.isPlaying).toBe(true);
   expect(state.currentAnim).toBe('sync_sheep_idle');
 });

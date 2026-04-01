@@ -66,9 +66,9 @@ export class OfficeScene extends Phaser.Scene {
     // 主角动画定义（多 agent 复用）
     this.anims.create({
       key: 'star_idle',
-      // 4 帧轻呼吸 + 眨眼，保持待机状态有生命感但不抢戏
-      frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 3 }),
-      frameRate: 2.2, repeat: -1,
+      // 8 帧更明显的呼吸、摆动和眨眼，让待机状态更有生命感
+      frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 7 }),
+      frameRate: 4, repeat: -1,
     });
     this.anims.create({
       key: 'star_working',
@@ -131,9 +131,9 @@ export class OfficeScene extends Phaser.Scene {
     // 同步动画
     this.anims.create({
       key: 'sync_sheep_idle',
-      // 右下角展示羊始终保持轻微动态，避免停在静态首帧
-      frames: this.anims.generateFrameNumbers('sync_anim', { start: 0, end: 3 }),
-      frameRate: 2.2, repeat: -1,
+      // 右下角展示羊使用同一套 8 帧待机动画
+      frames: this.anims.generateFrameNumbers('sync_anim', { start: 0, end: 7 }),
+      frameRate: 4, repeat: -1,
     });
     const sa = LAYOUT.furniture.syncAnim;
     this.syncAnimSprite = this.add.sprite(sa.x, sa.y, 'sync_anim', 0)
