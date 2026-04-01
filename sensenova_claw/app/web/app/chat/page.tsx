@@ -497,7 +497,8 @@ function ChatContent() {
               onSend={handleSend}
               onSlashSubmit={() => false}
               onStop={cancelTurn}
-              disabled={activeInteraction?.kind === 'confirmation' || (turnActive && !isCurrentSessionQuestionInteraction)}
+              disabled={activeInteraction?.kind === 'confirmation'}
+              showStopButton={turnActive && !isCurrentSessionQuestionInteraction}
               wsConnected={wsConnected}
               handleSkillInvoke={handleSkillInvoke}
               hideAgentSelector

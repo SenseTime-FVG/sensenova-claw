@@ -23,6 +23,7 @@ interface ChatInputProps {
   onSlashSubmit: (content: string) => boolean;
   onStop?: () => void;
   disabled: boolean;
+  showStopButton?: boolean;
   wsConnected: boolean;
   handleSkillInvoke: (skillName: string, args: string) => void;
   hideAgentSelector?: boolean;
@@ -42,6 +43,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onSlashSubmit,
   onStop,
   disabled,
+  showStopButton,
   wsConnected,
   handleSkillInvoke,
   hideAgentSelector,
@@ -66,10 +68,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
 
-  // 当外部 disabled 改变（通常是 isTyping 结束）时，重置本地提交状态
+  // 当前轮次结束或 stop 按钮隐藏后，允许再次发送
   useEffect(() => {
-    if (!disabled) setIsSubmitting(false);
-  }, [disabled]);
+    if (!showStopButton) setIsSubmitting(false);
+  }, [showStopButton]);
 
   useEffect(() => {
     if (!showUploadMenu) return;
@@ -162,7 +164,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const handleSend = useCallback(() => {
     const content = inputValue.trim();
-    if (!content || !wsConnected || disabled || isSubmitting) return;
+    if (!content || !wsConnected || disabled || isSubmitting || showStopButton) return;
 
     if (handleSlashSubmitHook(content)) {
       setDraftRecommendation(null);
@@ -201,6 +203,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     wsConnected,
     disabled,
     isSubmitting,
+    showStopButton,
     handleSlashSubmitHook,
     onSlashSubmit,
     onSend,
@@ -311,7 +314,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               style={{ minHeight: '40px', maxHeight: '240px' }}
             />
           </div>
-          {disabled && onStop ? (
+          {showStopButton && onStop ? (
             <button
               data-testid="stop-button"
               onClick={onStop}
