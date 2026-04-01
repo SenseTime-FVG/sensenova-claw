@@ -27,6 +27,12 @@
   - [LLM 适配器](adapters/llm.md)
   - [Gateway 与 Channel](adapters/gateway-channel.md)
   - [存储层](adapters/storage.md)
+  - [QQ Channel](channel/qq.md)
+  - [Telegram Channel](channel/telegram.md)
+  - [Discord Channel](channel/discord.md)
+  - [DingTalk Channel](channel/dingtalk.md)
+  - [飞书 Channel](channel/feishu.md)
+  - [企微 Channel](channel/wecom.md)
 
 - **平台服务**
   - [安全策略 PathPolicy](platform/security.md)

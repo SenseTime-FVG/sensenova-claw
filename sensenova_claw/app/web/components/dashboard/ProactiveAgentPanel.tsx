@@ -173,7 +173,7 @@ export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRec
               className="h-7 px-2 text-xs"
             >
               <Sparkles className="h-3.5 w-3.5 mr-1" />
-              兴趣推送
+              现在给我推送
             </Button>
           }
         />

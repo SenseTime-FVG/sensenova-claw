@@ -6,6 +6,8 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from sensenova_claw.interfaces.http import config_api
 
@@ -116,3 +118,78 @@ async def test_test_gemini_passes_prompt_and_token_limits(monkeypatch: pytest.Mo
         "max_tokens": 8192,
         "extra_body": {"max_output_tokens": 1536},
     }]
+
+
+def test_normalize_llm_test_error_extracts_max_tokens_hint() -> None:
+    normalized = config_api._normalize_llm_test_error(
+        "Error code: 400 - InternalError.Algo.InvalidParameter: Range of max_tokens should be [1, 65536]"
+    )
+
+    assert normalized["error_hint"] == "max tokens 超限"
+
+
+def test_normalize_llm_test_error_extracts_max_output_tokens_hint() -> None:
+    normalized = config_api._normalize_llm_test_error(
+        "Error code: 400 - max_output_tokens is too large: 200000. This model supports at most 8192 output tokens."
+    )
+
+    assert normalized["error_hint"] == "max output tokens 超限"
+
+
+def test_normalize_llm_test_error_extracts_model_limit_max_tokens_hint() -> None:
+    normalized = config_api._normalize_llm_test_error(
+        'Error code: 400 - {"error": {"code": "400", "message": "{\\"message\\":\\"The maximum tokens you requested exceeds the model limit of 128000\\"}"}}'
+    )
+
+    assert normalized["error_hint"] == "max tokens 超限"
+
+
+def test_normalize_llm_test_error_extracts_context_length_exceeded_max_tokens_hint() -> None:
+    normalized = config_api._normalize_llm_test_error(
+        """Error code: 400 - {'error': {'message': "This model's maximum context length is 262144 tokens. However, you requested 12800020 tokens (20 in the messages, 12800000 in the completion). Please reduce the length of the messages or completion.", 'type': 'context_length_exceeded'}}"""
+    )
+
+    assert normalized["error_hint"] == "max tokens 超限"
+
+
+def test_normalize_llm_test_error_extracts_invalid_max_tokens_range_hint() -> None:
+    normalized = config_api._normalize_llm_test_error(
+        "Error code: 400 - {'error': {'message': 'Invalid max_tokens value, the valid range of max_tokens is [1, 8192]', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}"
+    )
+
+    assert normalized["error_hint"] == "max tokens 超限"
+
+
+def test_normalize_llm_test_error_extracts_gemini_max_output_tokens_range_hint() -> None:
+    normalized = config_api._normalize_llm_test_error(
+        'Error code: 400 - {\'error\': {\'code\': \'400\', \'message\': \'{ "error": { "code": 400, "message": "Unable to submit request because it has a maxOutputTokens value of 6553600 but the supported range is from 1 (inclusive) to 65537 (exclusive). Update the value and try again.", "status": "INVALID_ARGUMENT" }\\n}\'}}'
+    )
+
+    assert normalized["error_hint"] == "max tokens 超限"
+
+
+def test_test_llm_connection_returns_error_hint_for_max_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_test_openai_compatible(**kwargs):
+        raise RuntimeError("Range of max_tokens should be [1, 65536]")
+
+    monkeypatch.setattr(config_api, "_test_openai_compatible", fake_test_openai_compatible)
+
+    app = FastAPI()
+    app.include_router(config_api.router)
+    client = TestClient(app)
+
+    response = client.post("/api/config/test-llm", json={
+        "provider": "openai",
+        "api_key": "sk-test",
+        "base_url": "https://example.com/v1",
+        "model_id": "gpt-4.1-mini",
+        "max_tokens": 999999,
+        "max_output_tokens": 1024,
+    })
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": False,
+        "error": "Range of max_tokens should be [1, 65536]",
+        "error_hint": "max tokens 超限",
+    }

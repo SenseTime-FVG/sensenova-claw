@@ -38,9 +38,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     sessions,
     messages,
     isTyping,
+    turnActive,
     activeInteraction,
+    currentSessionQuestionInteraction,
     interactionSubmitting,
     sendMessage,
+    sendQuestionAnswer,
+    sendCurrentSessionQuestionAnswer,
     resetIfNeeded,
     startNewChat,
     handleSkillInvoke,
@@ -128,8 +132,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     contextFiles?: ContextFileRef[],
     recommendation?: RecommendationSendMeta | null,
   ) => {
+    if (currentSessionQuestionInteraction) {
+      sendCurrentSessionQuestionAnswer(content, false);
+      return;
+    }
     sendMessage(content, contextFiles, selectedAgent, recommendation);
-  }, [sendMessage, selectedAgent]);
+  }, [currentSessionQuestionInteraction, sendCurrentSessionQuestionAnswer, sendMessage, selectedAgent]);
 
   const fillInput = useCallback((text: string) => {
     chatInputRef.current?.setInput(text);
@@ -151,8 +159,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
 
   const showReturnToMain =
     Boolean(returnToMainLabel) && (Boolean(currentSessionId) || messages.length > 0);
-  const isCurrentSessionQuestionInteraction =
-    activeInteraction?.kind === 'question' && activeInteraction.sourceSessionId === currentSessionId;
+  const isCurrentSessionQuestionInteraction = Boolean(currentSessionQuestionInteraction);
 
   return (
     <div className="flex flex-col h-full min-w-0">
@@ -169,11 +176,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         </div>
       )}
 
-      <MessageArea 
-        messages={messages} 
-        isTyping={isTyping} 
-        currentSessionId={currentSessionId} 
-        emptyState={resolvedEmptyState}
+      <MessageArea
+        messages={messages}
+        isTyping={isTyping}
+        currentSessionId={currentSessionId}
+        emptyState={currentSessionId ? defaultEmptyState : resolvedEmptyState}
       />
 
       <InlinePreview
@@ -193,11 +200,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         onSend={handleSend}
         onSlashSubmit={() => false}
         onStop={cancelTurn}
-        disabled={activeInteraction?.kind === 'confirmation' || (isTyping && !isCurrentSessionQuestionInteraction)}
+        disabled={activeInteraction?.kind === 'confirmation'}
+        showStopButton={turnActive && !isCurrentSessionQuestionInteraction}
         wsConnected={wsConnected}
         handleSkillInvoke={handleSkillInvoke}
         hideAgentSelector={hideAgentSelector}
-        lockAgent={lockAgent}
+        lockAgent={lockAgent || Boolean(currentSessionId)}
         onReconnect={reconnect}
       />
     </div>

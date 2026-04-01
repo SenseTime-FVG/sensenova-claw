@@ -29,6 +29,27 @@ const AGENT_PAGE_MAP: Record<string, string> = {
   'ppt-agent': '/ppt',
 };
 
+/** 检查事件列表中 turn 是否仍在进行中：
+ *  有 user_input 开启了 turn，但尚未收到终结事件。
+ *  兼容两种事件格式：
+ *  - WS 推送: type 字段，下划线命名 (user_input, turn_completed, ...)
+ *  - API 历史: event_type 字段，点分命名 (user.input, agent.step_completed, ...) */
+function isTurnStillActive(events: Record<string, unknown>[]): boolean {
+  let active = false;
+  for (const e of events) {
+    const type = (e.type || e.event_type || '') as string;
+    if (type === 'user_input' || type === 'user.input') {
+      active = true;
+    } else if (
+      type === 'turn_completed' || type === 'turn_cancelled' || type === 'error' ||
+      type === 'agent.step_completed'
+    ) {
+      active = false;
+    }
+  }
+  return active;
+}
+
 // ── proactive 推送 ──
 
 export interface ProactiveResultItem {
@@ -62,6 +83,10 @@ export interface PrefillInputPayload {
 export interface MessageContextValue {
   messages: ChatMessage[];
   isTyping: boolean;
+  /** 当前 turn 是否在进行中（从发送消息到 turn_completed/cancelled/error）。
+   *  与 isTyping 的区别：isTyping 在 user_question_asked 时会变 false（允许显示输入 UI），
+   *  但 turnActive 始终为 true 直到 turn 真正结束。用于控制停止按钮与重复提交。 */
+  turnActive: boolean;
   steps: StepItem[];
   taskProgress: TaskProgressItem[];
   proactiveResults: ProactiveResultItem[];
@@ -74,6 +99,7 @@ export interface MessageContextValue {
   sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string, recommendation?: RecommendationSendMeta | null) => void;
   cancelTurn: () => void;
   handleSkillInvoke: (skillName: string, args: string) => void;
+  setTyping: (typing: boolean) => void;
 
   /** 合并从 REST API 恢复的推荐数据（去重合并，不覆盖实时推送） */
   mergeRestoredRecommendations: (items: ProactiveResultItem[]) => void;
@@ -114,6 +140,8 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   // 消息状态
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  // turnActive: 从发送消息起为 true，仅在 turn_completed/turn_cancelled/error 时才变 false
+  const [turnActive, setTurnActive] = useState(false);
 
   // 步骤/进度
   const [rightSteps, setRightSteps] = useState<StepItem[]>([]);
@@ -146,6 +174,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const cancelledTurnIdsRef = useRef<Set<string>>(new Set());
   const lastStreamingTurnIdRef = useRef<string | null>(null);
   const pendingInputRef = useRef<{ content: string; contextFiles?: string[]; meta?: Record<string, string> } | null>(null);
+  const pendingSessionBootstrapIdRef = useRef<string | null>(null);
 
   // ── helpers ──
 
@@ -196,15 +225,18 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     if (!currentSessionId) {
       setMessages([]);
       setIsTyping(false);
+      setTurnActive(false);
       resetTurnTracking();
       toolCallMapRef.current.clear();
       setRightSteps([]);
       setRightTaskProgress([]);
       toolStepMapRef.current.clear();
       pendingInputRef.current = null;
+      pendingSessionBootstrapIdRef.current = null;
       return;
     }
     let cancelled = false;
+    const isPendingSessionBootstrap = pendingSessionBootstrapIdRef.current === currentSessionId;
     (async () => {
       try {
         const res = await authFetch(`${API_BASE}/api/sessions/${currentSessionId}/events`);
@@ -218,7 +250,12 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         setRightSteps(steps);
         setRightTaskProgress(taskProgress);
         toolStepMapRef.current = toolStepMap;
-        setIsTyping(false);
+        if (!isPendingSessionBootstrap) {
+          const stillActive = isTurnStillActive(events);
+          setIsTyping(stillActive);
+          setTurnActive(stillActive);
+        }
+        pendingSessionBootstrapIdRef.current = null;
       } catch {
         if (cancelled) return;
         setRightSteps([]);
@@ -238,7 +275,10 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           const events = Array.isArray(event.payload.events) ? event.payload.events : [];
           resetTurnTracking();
           setMessages(rebuildMessagesFromEvents(events));
-          setIsTyping(false);
+          const stillActive = isTurnStillActive(events);
+          setIsTyping(stillActive);
+          setTurnActive(stillActive);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'agent_thinking':
@@ -364,6 +404,8 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             return prev;
           });
           setIsTyping(false);
+          setTurnActive(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'turn_cancelled': {
@@ -373,11 +415,15 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             if (lastStreamingTurnIdRef.current === cancelledTurnId) lastStreamingTurnIdRef.current = null;
           }
           setIsTyping(false);
+          setTurnActive(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'error':
           addMsg('system', event.payload.user_message || event.payload.message || event.payload.error_type || 'Unknown Error');
           setIsTyping(false);
+          setTurnActive(false);
+          pendingSessionBootstrapIdRef.current = null;
           break;
         // 交互事件的 typing 状态（仅当前 session，重构前在单体 handler 中 isCurrentSession 守卫内处理）
         case 'tool_confirmation_requested':
@@ -537,6 +583,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         if (!newSid) return;
         if (pendingInputRef.current) {
           const { content, contextFiles, meta } = pendingInputRef.current;
+          pendingSessionBootstrapIdRef.current = newSid;
           const payload: Record<string, unknown> = { content, attachments: [], context_files: contextFiles || [] };
           if (meta) payload.meta = meta;
           wsSend({
@@ -601,6 +648,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       });
     }
     setIsTyping(true);
+    setTurnActive(true);
   }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsSend, sessionIdRef, emptySessionIdRef, markFrontendCreate]);
 
   // 合并从 REST API 恢复的推荐数据（去重合并，不覆盖实时推送）
@@ -644,6 +692,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setIsTyping(true);
+      setTurnActive(true);
     } catch (err) {
       pushToast({
         kind: 'info',
@@ -656,7 +705,15 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   }, [sessionIdRef, pushToast]);
 
   const cancelTurn = useCallback(() => {
-    if (!sessionIdRef.current) return;
+    if (!sessionIdRef.current && !pendingInputRef.current) return;
+    addMsg('system', '用户中止');
+    if (!sessionIdRef.current) {
+      pendingInputRef.current = null;
+      pendingSessionBootstrapIdRef.current = null;
+      setIsTyping(false);
+      setTurnActive(false);
+      return;
+    }
     if (lastStreamingTurnIdRef.current) {
       cancelledTurnIdsRef.current.add(lastStreamingTurnIdRef.current);
     }
@@ -675,6 +732,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const value: MessageContextValue = {
     messages,
     isTyping,
+    turnActive,
     steps: rightSteps,
     taskProgress: rightTaskProgress,
     proactiveResults,
@@ -685,6 +743,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     cancelTurn,
     handleSkillInvoke,
     mergeRestoredRecommendations,
+    setTyping: setIsTyping,
     updateMessages,
   };
 

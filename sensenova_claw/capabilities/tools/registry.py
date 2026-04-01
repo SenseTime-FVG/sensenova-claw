@@ -24,6 +24,7 @@ from sensenova_claw.capabilities.tools.email import (
     SearchEmailsTool,
     SendEmailTool,
 )
+from sensenova_claw.capabilities.tools.obsidian_locate import ObsidianLocateTool
 from sensenova_claw.capabilities.tools.obsidian_tool import (
     ObsidianIndexTool,
     ObsidianListVaultsTool,
@@ -81,13 +82,19 @@ class ToolRegistry:
             EditTool(),
             CreateAgentTool(),
             AskUserTool(),
-            ObsidianSearchTool(),
-            ObsidianReadTool(),
-            ObsidianWriteTool(),
-            ObsidianListVaultsTool(),
-            ObsidianIndexTool(),
         ]:
             self.register(tool)
+        # Obsidian 工具：仅在 tools.obsidian.enabled=true 时注册
+        if config.get("tools.obsidian.enabled", False):
+            for tool in [
+                ObsidianSearchTool(),
+                ObsidianReadTool(),
+                ObsidianWriteTool(),
+                ObsidianListVaultsTool(),
+                ObsidianIndexTool(),
+                ObsidianLocateTool(),
+            ]:
+                self.register(tool)
         if config.get("tools.email.enabled", False):
             for tool in [
                 SendEmailTool(),

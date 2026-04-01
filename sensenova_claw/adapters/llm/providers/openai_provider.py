@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
@@ -11,6 +12,8 @@ from sensenova_claw.adapters.llm.base import (
     LLMProvider,
     merge_sampling_extra_body,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIProvider(LLMProvider):
@@ -179,23 +182,152 @@ class OpenAIProvider(LLMProvider):
             "tool_calls": assembled_tool_calls,
         }
 
+    # 默认启用 thinking 的 source_type（这些模型的 API 要求 assistant tool_call 消息携带 reasoning_content）
+    _THINKING_SOURCE_TYPES = {"kimi"}
+
     def _normalize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # 检测对话中是否启用了 thinking：
+        # 1. source_type 为已知 thinking 模型
+        # 2. 或对话历史中任意 assistant 消息含 reasoning_content/reasoning_details
+        has_thinking = self.source_type in self._THINKING_SOURCE_TYPES or any(
+            msg.get("role") == "assistant"
+            and (msg.get("reasoning_content") or msg.get("reasoning_details"))
+            for msg in messages
+        )
+
         normalized: list[dict[str, Any]] = []
         for message in messages:
             role = message.get("role")
             if role == "assistant" and isinstance(message.get("tool_calls"), list):
-                normalized.append(self._normalize_assistant_message(message))
+                normalized.append(self._normalize_assistant_message(message, has_thinking))
                 continue
             if role == "tool":
                 normalized.append(self._normalize_tool_message(message))
                 continue
             normalized.append(dict(message))
-        return normalized
+        return self._align_tool_call_responses(normalized)
 
-    def _normalize_assistant_message(self, message: dict[str, Any]) -> dict[str, Any]:
+    def _align_tool_call_responses(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """确保每个 assistant tool_calls 之后都有完整的 tool 响应。
+
+        部分 OpenAI 兼容网关会严格校验：
+        - assistant 含 tool_calls 后，后续必须紧跟对应的 tool 消息
+        - 不允许出现没有前置 tool_calls 的孤儿 tool 消息
+        因此这里在请求前统一补齐/清理历史，避免旧会话残留导致 400。
+        """
+        aligned: list[dict[str, Any]] = []
+        index = 0
+
+        while index < len(messages):
+            message = messages[index]
+            tool_calls = message.get("tool_calls") if message.get("role") == "assistant" else None
+
+            if not tool_calls:
+                if self._is_orphan_tool_message(message, aligned):
+                    logger.warning(
+                        "OpenAI align: 跳过孤儿 tool 消息 tool_call_id=%s",
+                        message.get("tool_call_id"),
+                    )
+                    index += 1
+                    continue
+                aligned.append(message)
+                index += 1
+                continue
+
+            expected_ids = [
+                str(tc.get("id") or tc.get("function", {}).get("name", "") or "")
+                for tc in tool_calls
+            ]
+            aligned.append(message)
+            index += 1
+
+            tool_messages: list[dict[str, Any]] = []
+            while index < len(messages) and messages[index].get("role") == "tool":
+                tool_messages.append(messages[index])
+                index += 1
+
+            if len(tool_messages) == len(expected_ids) and all(
+                tool_msg.get("tool_call_id") in expected_ids for tool_msg in tool_messages
+            ):
+                aligned.extend(tool_messages)
+                continue
+
+            logger.warning(
+                "OpenAI align: tool_calls=%d vs tool_responses=%d, 修补对齐",
+                len(expected_ids),
+                len(tool_messages),
+            )
+            tool_by_id = {
+                str(tool_msg.get("tool_call_id") or ""): tool_msg
+                for tool_msg in tool_messages
+                if str(tool_msg.get("tool_call_id") or "")
+            }
+
+            for tool_call in tool_calls:
+                tool_call_id = str(
+                    tool_call.get("id") or tool_call.get("function", {}).get("name", "") or ""
+                )
+                if tool_call_id in tool_by_id:
+                    aligned.append(tool_by_id[tool_call_id])
+                    continue
+
+                tool_name = (
+                    tool_call.get("name")
+                    or tool_call.get("function", {}).get("name")
+                    or "unknown"
+                )
+                logger.warning("OpenAI align: 补齐缺失的 tool 响应 tool_call_id=%s", tool_call_id)
+                aligned.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "content": "[tool response unavailable]",
+                })
+
+        return aligned
+
+    def _is_orphan_tool_message(
+        self,
+        message: dict[str, Any],
+        aligned: list[dict[str, Any]],
+    ) -> bool:
+        if message.get("role") != "tool":
+            return False
+        if not aligned:
+            return True
+        if aligned[-1].get("role") == "assistant" and aligned[-1].get("tool_calls"):
+            return False
+
+        for previous in reversed(aligned):
+            if previous.get("role") == "assistant" and previous.get("tool_calls"):
+                return False
+            if previous.get("role") in ("user", "system"):
+                break
+        return True
+
+    def _normalize_assistant_message(
+        self, message: dict[str, Any], has_thinking: bool = False,
+    ) -> dict[str, Any]:
         next_message = dict(message)
         tool_calls = next_message.get("tool_calls") or []
         next_message["tool_calls"] = [self._normalize_tool_call(tc) for tc in tool_calls]
+
+        # 从 reasoning_details 还原 reasoning_content（Kimi/DeepSeek 等需要）
+        reasoning_details = next_message.pop("reasoning_details", None)
+        if reasoning_details and "reasoning_content" not in next_message:
+            for detail in reasoning_details:
+                if isinstance(detail, dict) and detail.get("type") == "thinking":
+                    next_message["reasoning_content"] = detail.get("thinking", "")
+                    break
+
+        # 当对话启用了 thinking 时，确保所有带 tool_calls 的 assistant 消息都有 reasoning_content
+        # （Kimi 等模型要求：thinking is enabled 时 assistant tool call 消息必须携带此字段）
+        if has_thinking and "reasoning_content" not in next_message:
+            next_message["reasoning_content"] = ""
+
+        # 清理非标准字段，避免被 OpenAI 兼容 API 拒绝
+        next_message.pop("provider_specific_fields", None)
+
         return next_message
 
     def _normalize_tool_call(self, tool_call: dict[str, Any]) -> dict[str, Any]:

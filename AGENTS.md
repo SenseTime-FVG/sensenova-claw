@@ -356,6 +356,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前环境下 Playwright 即使能拉起 `next dev` 和 headless Chromium，也可能长时间卡住不返回最终结果；浏览器级回归要和进程内/单元测试分层看，不能把这类环境挂起误判成业务失败。
 
+### 2026-03-31 LLM 连接测试错误提示补充
+
+成功经验：
+- 对 `/api/config/test-llm` 这类轻量接口，先在接口层统一产出 `error_hint`，前端单项测试和批量测试结果展示都能复用同一字段，不需要分别写 provider 特判。
+- `max_tokens` / `max_output_tokens` 超限提示的高价值回归，不是测真实 provider，而是直接锁住“原始 error 保留 + 归一化 error_hint 命中”这两个输出字段。
+
+失败/风险经验：
+- 这类前端交互回归虽然已补 Playwright 用例，但当前环境下浏览器级执行仍可能卡住不返回结果；交付时要明确区分“代码与单测已验证”与“浏览器级 e2e 未在本机跑通”。
+
 ### 2026-03-27 安装脚本 app 分支变量补充
 
 成功经验：
@@ -1646,3 +1655,125 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 当前仍有一个前端残余问题：`sensenova_claw/app/web/e2e/ask-user.spec.ts` 中“session 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input”持续失败，表现为答完问题后 `chat-input` 仍被禁用；说明 `/sessions/[id]` 页面在 `ask_user` 收口后仍有额外状态没释放，不能宣称该路径已完全回归。
+
+### 2026-03-30 QQ Channel 双协议移植补充
+
+成功经验：
+- 将 `qq` 设计成“单插件 + 单 `QQChannel` + 双 runtime (`official`/`onebot`)”最稳，能复用现有 `telegram/dingtalk/discord` 的会话桥接模式，同时把协议差异收敛在 runtime 层。
+- 先统一抽象 `QQInboundMessage(text/chat_type/chat_id/sender_id/target/mentioned_bot)` 再写 channel 逻辑最有效；这样官方 QQ 与 OneBot 都能直接复用同一套 `USER_INPUT / USER_QUESTION_ANSWERED / AGENT_STEP_COMPLETED` 事件链。
+- QQ 这类双协议接入，测试必须分三层：`config/plugin/channel` 单测、`runtime_official/runtime_onebot` 协议单测、进程内 e2e 各跑一条主链路；只测 channel 不测 runtime 很容易把协议字段差异漏掉。
+
+失败/风险经验：
+- `openclaw-cn/extensions/qqbot` 里的 QQ 插件只有元信息与 onboarding，没有可直接复用的 Python 收发 runtime；移植前必须先确认目标协议与当前仓库插件分层，不能误判为“直接复制就能跑”。
+- 用 `AsyncMock` 模拟 `httpx.Response` 时，`json()` 和 `raise_for_status()` 会变成 awaitable，容易把测试替身问题误判成 runtime bug；这类测试应优先使用同步 `Mock` 贴近 `httpx` 真实接口。
+
+### 2026-03-31 Telegram polling conflict 补充
+
+成功经验：
+- Telegram Bot API 返回 `409 Conflict: terminated by other getUpdates request` 时，应视为终止性占用错误，而不是普通瞬时异常；runtime 直接标记 `failed` 并退出 polling loop，状态和日志都更清晰。
+- 给 `tests/unit/test_telegram_runtime.py` 增加 `Conflict` 单测时，除了断言 `_sensenova_claw_status`，还要断言 `asyncio.sleep` 未被调用，才能真正防止“悄悄继续重试”回归。
+- 这类 runtime 修复后，再补跑 `tests/e2e/test_telegram_channel_e2e.py` 很有必要，能确认 channel -> gateway -> agent 的进程内主链路未受影响。
+
+失败/风险经验：
+- 即使代码已修复，只要外部还有其他 Telegram polling 实例占用同一个 bot token，服务仍会进入 `failed`；这种问题必须通过保证单实例或切换 webhook 解决，不能靠重试。
+- Telegram mention 相关测试夹具里的 `entities[*].length` 必须与 `@bot_username` 文本精确一致，否则 `mentioned_bot` 会误报失败，干扰真正的 runtime 回归判断。
+
+### 2026-03-31 QQ official 出站目标修复补充
+
+成功经验：
+- QQ official 的“已入站但不回复”要先看完整事件链日志；如果 `agent.step_completed` 已经产生，问题通常不在 LLM/Agent，而在 channel 出站目标映射。
+- 对照 botpy 源码确认协议细节最有效：`DIRECT_MESSAGE_CREATE.reply()` 走 `/dms/{guild_id}/messages`，`C2C_MESSAGE_CREATE.reply()` 走 `/v2/users/{author.user_openid}/messages`，这比猜字段名稳得多。
+- 这类协议修复应同时补两类单测：一类锁定入站事件规范化后的 `target`，一类锁定 `send_text()` 最终命中的 HTTP path 和 payload；否则很容易只修半边。
+
+失败/风险经验：
+- 官方 QQ 的 `DIRECT_MESSAGE_CREATE` 和 `C2C_MESSAGE_CREATE` 都属于私聊，但回复目标并不共用 `channel_id`；把两者统一映射成 `direct:{channel_id}` 会导致 `/dms//messages` 或错误路径。
+- `author.id` 不是所有 QQ official 事件都稳定存在；`C2C_MESSAGE_CREATE` 需要优先读取 `author.user_openid`，`GROUP_AT_MESSAGE_CREATE` 也可能依赖 `member_openid`，否则会话键和 allowlist 判断都会埋雷。
+
+### 2026-03-31 QQ official 4009 超时重连补充
+
+成功经验：
+- QQ official gateway 出现 `4009 Session timed out` 时，优先修 runtime 的连接生命周期而不是外围 channel；根因通常是旧 websocket 已关闭，但 `_recv_loop` 仍在失效连接上反复 `recv()`，同时没有重新建连。
+- 这类网关协议必须把“重连后等 `HELLO` 再发 `RESUME/IDENTIFY`”做成显式状态位（如 `_resume_requested`）；如果建连后立刻发送恢复包，测试看似合理，实际上不符合握手顺序。
+- 对协议级 bug，最有效的回归测试是直接构造真实风格的 `ConnectionClosedError(Close(4009, ...))`，再让新连接返回一帧 `HELLO`，断言最终发出的就是 `WS_RESUME`。
+
+失败/风险经验：
+- 当前 `tests/e2e/test_qq_channel_official_e2e.py` 仍有既有失败：用例断言回复里包含“当前没有可用的 LLM”，但当前 `mock` provider 已会返回正常自我介绍文本；这和本次 4009 重连修复无关，不能误判为回归。
+
+### 2026-03-31 ask_user 暗色输入框样式补充
+
+成功经验：
+- `ask_user` 的白底输入框在 dark 模式下如果继续复用 `text-foreground`，会跟随全局深色前景变成浅色文字；这类“白底局部控件”更稳的做法是直接给 textarea 指定固定深色文本类，如 `text-neutral-900`。
+- 在现有 `sensenova_claw/app/web/e2e/ask-user-action-toast.spec.ts` 上追加 dark 模式下的 `getComputedStyle(...).color` 断言，能低成本锁住主题回归，不需要引入截图比对。
+- Playwright 浏览器如果由 `npm run test:e2e` 通过 `PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers` 指定目录，首次安装浏览器时也必须带同一个环境变量；否则安装成功了，测试仍会报找不到 executable。
+
+失败/风险经验：
+- `sensenova_claw/app/web/e2e/ask-user.spec.ts` 中 `session 页面 ask_user 工具卡片内应显示内嵌回复框并可提交` 当前仍会失败，表现为 `inline-ask-user-q_session_inline_1` 未渲染；这更像既有测试夹具或页面状态问题，不能误归因到本次纯样式修改。
+
+### 2026-03-31 session 页 ask_user 主输入回归补充
+
+成功经验：
+- `/sessions/[id]` 复用 `ChatPanel` 时，`resetIfNeeded()` 必须对 React 开发态双调用幂等；先判断 `sessionIdRef.current` 是否已存在，可以避免第二次 effect 把刚绑定的会话清空。
+- ask_user 的“主输入优先回答问题”逻辑收敛到共享 `ChatPanel.handleSend()` 更稳，能让 `/chat`、`/ppt`、`/sessions` 统一走同一条发送分支。
+- 会话页 E2E 若要验证 ask_user，先等待 `current-session-id` 绑定到目标 session，再注入 mock `user_question_asked`，能把“页面绑定竞态”和“问答提交流程”分开定位。
+
+失败/风险经验：
+- 仅等待 mock WebSocket 就绪并不代表 `/sessions/[id]` 已完成 `switchSession`；如果过早注入 ask_user，表面上像“主输入不支持 ask_user”，实际是当前 session 仍为空。
+
+### 2026-04-01 ask_user 跨会话停止按钮补充
+
+成功经验：
+- `activeInteraction` 是全局 FIFO，只能代表“当前最上层待处理交互”，不能直接拿它判断“当前会话输入框是否该显示发送按钮”；跨会话 ask_user 并发时，必须额外计算 `currentSessionQuestionInteraction`。
+- 为 `InteractionContext` 增加“当前会话待回答问题”视图后，`ChatInput`、`ChatPanel`、`/chat` 页面都能统一使用它决定 `showStopButton` 和提交目标，避免一个地方修好、另一个入口仍走旧判断。
+- 这类回归最有效的 E2E 是同时构造两个会话：会话1先收到 ask_user，占住全局 active；会话2再通过 `/events` 标成 turn 进行中并收到 ask_user，断言当前会话应继续显示发送按钮且提交到会话2。
+
+失败/风险经验：
+- 若只模拟第二个会话的 `user_question_asked` 而不让它处于 `turnActive`，就复现不出“停止按钮误显示”的真实问题，测试会漏掉 UI 判断里的关键前提。
+
+### 2026-03-31 /llms 环境变量引用保存补充
+
+成功经验：
+- `ConfigManager.update/replace()` 是 `/llms` 批量保存与单项保存共享的最终写回入口；凡是“敏感字段保存行为”问题，优先在这里统一修，比只改前端或单个 API 更稳。
+- 对敏感字段不能只区分“普通字符串”和 `${secret:...}`；`${OPENAI_API_KEY}` 这类环境变量引用也必须保留原样，否则保存时会被误迁移成 `${secret:...}` 且 secret store 内没有对应值。
+- 这类回归至少要双测：一个测底层 `ConfigManager`，一个测 `/api/config/sections` 或 `/api/config/llm/providers/*` 实际入口，避免只修到底层却漏了页面使用路径。
+
+失败/风险经验：
+- 当前 `tests/unit/test_config_api.py` 仍有与本次无关的既有失败：`test_create_single_model_when_missing` 断言未包含默认写入的 `type: chat`；跑整文件时要区分历史失败和本次修复结果。
+
+### 2026-03-31 model_key/model_id 兜底收口补充
+
+成功经验：
+- 如果需求要求 `model_key` 与 `model_id` 完全解耦，不能只改 `Config.resolve_model()`；还要同步检查 `get_model_max_output_tokens()`、`get_model_extra_body()`、`agent_worker`、`llm_worker` 和 `title_runtime`，否则仍会在参数继承或事件透传路径残留旧兜底。
+- `LLMSessionWorker` 判断“是否显式传入 model/provider”时不能用 truthy；空字符串也是有效显式值。改成“字段存在且不为 `None`”后，空 `model_id` 才能原样透传到 provider。
+- `/llms` 页这类配置测试回归，直接抓 `/api/config/test-llm` 请求体最有效，能精确锁住“`model_id=''` 也必须发送空字符串，而不是回退到模型名”。
+
+失败/风险经验：
+- `Config(project_root=...)` 会走目录向上发现配置的加载路径，并忽略 `config_path`；给配置解析补单测时如果混用两种构造方式，很容易把夹具写错，误把测试问题当成实现回归。
+- 当前前端 Playwright 在本机容易受到已有 `localhost:3000` 服务和现有 dev server 状态影响；出现长时间挂起时，需先区分 webServer/页面环境问题和业务断言失败。
+
+### 2026-03-31 sessions 详情页 404 补充
+
+成功经验：
+- `/sessions/[id]` 页面除了会话列表、消息和事件，还会单独请求 `GET /api/sessions/{id}`；排查“详情页固定显示 Session not found”时，先对照页面请求链和后端 router 是否真的有这个 endpoint，能最快定位根因。
+- 对这类“前端已有调用、后端缺接口”的问题，最小修复是在 `tests/unit/test_sessions_api.py` 先补 `GET /api/sessions/{id}` 的红灯，再在 `interfaces/http/sessions.py` 增加详情接口；这样比先改页面更稳。
+- 现有 `chat-ime-enter.spec.ts` 已覆盖 `/sessions/[id]` 打开路径，补齐 `**/api/sessions/sess_existing` 的 mock 后，就能把详情页加载链一并纳入前端回归。
+
+失败/风险经验：
+- 如果 Playwright 夹具只 mock `/api/sessions` 列表而没 mock `/api/sessions/{id}`，`/sessions/[id]` 用例会因为页面初始化失败而拿不到 `chat-input`，表面像输入框回归，实际是测试数据不完整。
+
+### 2026-04-01 OpenAI 兼容 tool_calls 历史补齐补充
+
+成功经验：
+- `GeminiProvider` 已有“assistant tool_calls 与 tool 响应数量对齐”的现成模式；遇到 minimax、cloudsway 这类 OpenAI 兼容网关同类 400 时，优先对照 provider 侧消息清洗，而不是先改 worker 重试层。
+- 对这类兼容性 bug，最小高价值单测就是直接断言 `OpenAIProvider._normalize_messages()` 的输出：一条覆盖“缺失 tool 响应时补占位”，一条覆盖“孤儿 tool 消息丢弃”，能精确锁住请求体合法性。
+
+失败/风险经验：
+- 扩大到不相干测试集时，容易撞上仓库既有失败并干扰判断；本次 `tests/unit/test_gemini_provider_thought_signature.py` 当前就存在失败，验证 OpenAI 兼容修复时应优先跑聚焦的 provider 单测，不要把无关红灯误判成回归。
+
+### 2026-04-01 Anthropic tool_result 历史对齐补充
+
+成功经验：
+- `AnthropicProvider._normalize_messages()` 一旦同时承担“格式转换 + 合法性对齐”，旧单测就不该再用它验证“孤立 tool 消息如何转换”；这类断言应下沉到 `_normalize_tool_message()`，否则会和新加入的孤儿清理逻辑冲突。
+- 对 Anthropic 协议，最小有效修复是和 OpenAIProvider 保持同级策略：`assistant(tool_use)` 后缺失 `tool_result` 就补占位，孤儿 `tool_result` 直接丢弃，这样能在请求发出前保证消息序列合法。
+
+失败/风险经验：
+- `tests/unit/test_anthropic_provider.py` 之前把纯逻辑测试绑定到真实 API provider fixture，缺少 API key 时新增单测会被整体 skip；以后给这类文件补本地逻辑测试时，应优先拆出不依赖真实配置的 `local_provider` fixture。

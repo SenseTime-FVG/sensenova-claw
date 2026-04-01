@@ -182,6 +182,23 @@ test.describe('聊天输入框 IME 回车保护', () => {
       });
     });
 
+    await page.route('**/api/sessions/sess_existing', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          session: {
+            session_id: 'sess_existing',
+            created_at: Date.now() / 1000,
+            last_active: Date.now() / 1000,
+            status: 'active',
+            meta: JSON.stringify({ title: '现有会话', agent_id: 'default' }),
+            agent_id: 'default',
+          },
+        }),
+      });
+    });
+
     await page.route('**/api/sessions/*/messages', async (route) => {
       await route.fulfill({
         status: 200,

@@ -281,7 +281,7 @@ export function NotificationDropdown() {
     await switchSession(sessionId);
     const session = sessions.find(s => s.session_id === sessionId);
     const agentId = session ? getAgentId(session.meta) : 'default';
-    const targetPage = AGENT_PAGE_MAP[agentId] ?? '/';
+    const targetPage = AGENT_PAGE_MAP[agentId] ?? `/chat?agent=${encodeURIComponent(agentId)}`;
     router.push(targetPage);
   };
 

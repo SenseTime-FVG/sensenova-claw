@@ -248,8 +248,8 @@ function SessionListGroup({
 function ChatContent() {
   const { locale, t } = useI18n();
   const {
-    wsConnected, currentSessionId, sessions, messages, isTyping, activeInteraction, interactionSubmitting,
-    sendMessage, sendQuestionAnswer, switchSession, createSession, deleteSession, startNewChat,
+    wsConnected, currentSessionId, sessions, messages, isTyping, turnActive, activeInteraction, currentSessionQuestionInteraction, interactionSubmitting,
+    sendMessage, sendCurrentSessionQuestionAnswer, switchSession, createSession, deleteSession, startNewChat,
     refreshTaskGroups, loadingSessions, handleSkillInvoke, cancelTurn, cleanupEmptySession,
   } = useChatSession();
 
@@ -400,12 +400,12 @@ function ChatContent() {
     contextFiles?: ContextFileRef[],
     recommendation?: RecommendationSendMeta | null,
   ) => {
-    if (activeInteraction?.kind === 'question' && activeInteraction.sourceSessionId === currentSessionId) {
-      sendQuestionAnswer(content, false);
+    if (currentSessionQuestionInteraction) {
+      sendCurrentSessionQuestionAnswer(content, false);
     } else {
       sendMessage(content, contextFiles, selectedAgentId || 'default', recommendation);
     }
-  }, [activeInteraction, currentSessionId, sendMessage, sendQuestionAnswer, selectedAgentId]);
+  }, [currentSessionQuestionInteraction, sendCurrentSessionQuestionAnswer, sendMessage, selectedAgentId]);
 
   const emptyState = useMemo(() => (
     <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground animate-in fade-in zoom-in-95 duration-500">
@@ -419,8 +419,7 @@ function ChatContent() {
       </p>
     </div>
   ), [agents, selectedAgentId, t]);
-  const isCurrentSessionQuestionInteraction =
-    activeInteraction?.kind === 'question' && activeInteraction.sourceSessionId === currentSessionId;
+  const isCurrentSessionQuestionInteraction = Boolean(currentSessionQuestionInteraction);
 
   return (
     <ResizablePanelGroup orientation="horizontal" className="h-full overflow-hidden gap-3 bg-slate-50/50 dark:bg-slate-900/20">
@@ -497,7 +496,8 @@ function ChatContent() {
               onSend={handleSend}
               onSlashSubmit={() => false}
               onStop={cancelTurn}
-              disabled={activeInteraction?.kind === 'confirmation' || (isTyping && !isCurrentSessionQuestionInteraction)}
+              disabled={activeInteraction?.kind === 'confirmation'}
+              showStopButton={turnActive && !isCurrentSessionQuestionInteraction}
               wsConnected={wsConnected}
               handleSkillInvoke={handleSkillInvoke}
               hideAgentSelector

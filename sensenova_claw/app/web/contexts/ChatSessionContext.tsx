@@ -28,7 +28,7 @@ import {
   useEventDispatcher,
 } from '@/contexts/ws';
 import type { GlobalAgentActivity, ProactiveResultItem, PrefillInputPayload, RecommendationSendMeta } from '@/contexts/ws';
-import type { PendingInteraction } from '@/components/chat/QuestionDialog';
+import type { PendingInteraction, PendingQuestionInteraction } from '@/components/chat/QuestionDialog';
 import type {
   ChatMessage,
   SessionItem,
@@ -58,6 +58,7 @@ export interface ChatSessionContextValue {
   // 消息
   messages: ChatMessage[];
   isTyping: boolean;
+  turnActive: boolean;
   sendMessage: (
     content: string,
     contextFiles?: ContextFileRef[],
@@ -77,8 +78,10 @@ export interface ChatSessionContextValue {
 
   // 交互对话框
   activeInteraction: PendingInteraction | null;
+  currentSessionQuestionInteraction: PendingQuestionInteraction | null;
   interactionSubmitting: boolean;
   sendQuestionAnswer: (answer: string | string[] | null, cancelled: boolean) => void;
+  sendCurrentSessionQuestionAnswer: (answer: string | string[] | null, cancelled: boolean) => void;
   submitQuestionResponse: (params: {
     questionId: string;
     sourceSessionId: string;
@@ -169,6 +172,7 @@ export function useChatSession(): ChatSessionContextValue {
     // 消息
     messages: msg.messages,
     isTyping: msg.isTyping,
+    turnActive: msg.turnActive,
     sendMessage: msg.sendMessage,
     steps: msg.steps,
     taskProgress: msg.taskProgress,
@@ -179,8 +183,10 @@ export function useChatSession(): ChatSessionContextValue {
 
     // 交互
     activeInteraction: interaction.activeInteraction,
+    currentSessionQuestionInteraction: interaction.currentSessionQuestionInteraction,
     interactionSubmitting: interaction.interactionSubmitting,
     sendQuestionAnswer: interaction.sendQuestionAnswer,
+    sendCurrentSessionQuestionAnswer: interaction.sendCurrentSessionQuestionAnswer,
     submitQuestionResponse: interaction.submitQuestionResponse,
     sendConfirmationResponse: interaction.sendConfirmationResponse,
     handleInteractionTimeout: interaction.handleInteractionTimeout,

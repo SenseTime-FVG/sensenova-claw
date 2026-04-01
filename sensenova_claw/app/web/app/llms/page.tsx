@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle, ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, Save, Server, Trash2, X, XCircle, Zap } from 'lucide-react';
+import { CheckCircle, ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, RefreshCw, Save, Server, Trash2, X, XCircle, Zap } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -31,6 +31,7 @@ interface ModelConfig {
   timeout: number;
   max_tokens: number;
   max_output_tokens: number;
+  dimensions?: number;  // embedding 模型向量维度
 }
 
 interface ProviderDraft extends ProviderConfig {
@@ -56,6 +57,7 @@ interface ModelTestResult {
   success: boolean;
   message: string;
   detail?: string;
+  errorHint?: string;
 }
 
 interface BulkModelTestState extends ModelTestResult {
@@ -87,8 +89,10 @@ function isSecretRefLike(value: string | null | undefined): boolean {
 
 export default function LlmsPage() {
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
+  const [lastLoadedSnapshot, setLastLoadedSnapshot] = useState('');
 
   const [providers, setProviders] = useState<Record<string, ProviderConfig>>({});
   const [models, setModels] = useState<Record<string, ModelConfig>>({});
@@ -125,10 +129,15 @@ export default function LlmsPage() {
   const [hoveringBulkTestButton, setHoveringBulkTestButton] = useState(false);
   const [showBulkTestTooltip, setShowBulkTestTooltip] = useState(false);
 
-  const loadConfig = () => {
-    authFetch(`${API_BASE}/api/config/sections`)
-      .then((res) => res.json())
-      .then((data) => {
+  const loadConfig = async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setRefreshing(true);
+    }
+
+    try {
+      const res = await authFetch(`${API_BASE}/api/config/sections`);
+      const data = await res.json();
         const llm = data?.llm || {};
         const normalizedProviders = normalizeProviders(llm.providers || {});
         const explicitProviderNames = normalizeExplicitProviderNames(llm._meta);
@@ -143,10 +152,18 @@ export default function LlmsPage() {
         const visibleModels = Object.fromEntries(
           Object.entries(realModels).filter(([, model]) => model.provider in visibleProviders),
         );
+        const nextDefaultModel = llm.default_model && llm.default_model in visibleModels ? llm.default_model : '';
+        const nextDefaultEmbeddingModel = llm.default_embedding_model && llm.default_embedding_model in visibleModels ? llm.default_embedding_model : '';
         setProviders(visibleProviders);
         setModels(visibleModels);
-        setDefaultModel(llm.default_model && llm.default_model in visibleModels ? llm.default_model : '');
-        setDefaultEmbeddingModel(llm.default_embedding_model && llm.default_embedding_model in visibleModels ? llm.default_embedding_model : '');
+        setDefaultModel(nextDefaultModel);
+        setDefaultEmbeddingModel(nextDefaultEmbeddingModel);
+        setLastLoadedSnapshot(createConfigSnapshot({
+          providers: cloneProvidersToDrafts(visibleProviders),
+          models: cloneModelsToDrafts(visibleModels),
+          defaultModel: nextDefaultModel,
+          defaultEmbeddingModel: nextDefaultEmbeddingModel,
+        }));
         setExpandedProviders(
           Object.fromEntries(Object.keys(visibleProviders).map((name) => [name, false])),
         );
@@ -166,13 +183,16 @@ export default function LlmsPage() {
         setBulkTestResults({});
         setOpenBulkTestErrorModel(null);
         setHasBulkTestResults(false);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    } catch {
+      setSaveMsg('读取配置失败');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
-    loadConfig();
+    void loadConfig({ silent: true });
   }, []);
 
   useEffect(() => {
@@ -253,6 +273,7 @@ export default function LlmsPage() {
         timeout: draft.timeout,
         max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
+        dimensions: draft.dimensions,
       },
     ]));
   }, [editingAll, globalDraft, models]);
@@ -295,6 +316,55 @@ export default function LlmsPage() {
     if (editingAll && globalDraft) return globalDraft.models[name];
     return modelDrafts[name] || { ...models[name], name };
   };
+
+  const currentSnapshot = useMemo(() => {
+    if (editingAll && globalDraft) {
+      return createConfigSnapshot({
+        providers: globalDraft.providers,
+        models: globalDraft.models,
+        defaultModel: globalDraft.defaultModel,
+        defaultEmbeddingModel: globalDraft.defaultEmbeddingModel,
+      });
+    }
+
+    const currentProviderState = cloneProvidersToDrafts(providers);
+    if (editingProvider && providerDrafts[editingProvider]) {
+      const draft = providerDrafts[editingProvider];
+      delete currentProviderState[editingProvider];
+      currentProviderState[draft.name] = draft;
+    }
+
+    const currentModelState = cloneModelsToDrafts(models);
+    if (editingModel && modelDrafts[editingModel]) {
+      const draft = modelDrafts[editingModel];
+      delete currentModelState[editingModel];
+      currentModelState[draft.name] = draft;
+    }
+
+    return createConfigSnapshot({
+      providers: currentProviderState,
+      models: currentModelState,
+      defaultModel: editingDefaultModel ? defaultModelDraft : defaultModel,
+      defaultEmbeddingModel: editingDefaultEmbeddingModel ? defaultEmbeddingModelDraft : defaultEmbeddingModel,
+    });
+  }, [
+    defaultEmbeddingModel,
+    defaultEmbeddingModelDraft,
+    defaultModel,
+    defaultModelDraft,
+    editingAll,
+    editingDefaultEmbeddingModel,
+    editingDefaultModel,
+    editingModel,
+    editingProvider,
+    globalDraft,
+    modelDrafts,
+    models,
+    providerDrafts,
+    providers,
+  ]);
+
+  const hasUnsavedChanges = Boolean(lastLoadedSnapshot) && currentSnapshot !== lastLoadedSnapshot;
 
   const updateProviderField = (name: string, field: keyof ProviderConfig, value: string | number) => {
     if (editingAll && globalDraft) {
@@ -508,6 +578,7 @@ export default function LlmsPage() {
         timeout: 60,
         max_tokens: 128000,
         max_output_tokens: 16384,
+        dimensions: undefined,
         name: nextName,
       };
     if (editingAll && globalDraft) {
@@ -757,7 +828,7 @@ export default function LlmsPage() {
           provider: provider.source_type || 'openai',
           api_key: apiKey,
           base_url: provider.base_url || '',
-          model_id: model.model_id || modelName,
+          model_id: model.model_id ?? '',
           max_tokens: model.max_tokens || 128000,
           max_output_tokens: model.max_output_tokens || 16384,
         }),
@@ -768,7 +839,8 @@ export default function LlmsPage() {
       }
 
       const detail = typeof data.error === 'string' && data.error.trim() ? data.error : '测试失败';
-      return { success: false, message: '连接失败', detail };
+      const errorHint = typeof data.error_hint === 'string' && data.error_hint.trim() ? data.error_hint : undefined;
+      return { success: false, message: '连接失败', detail, errorHint };
     } catch (error) {
       return {
         success: false,
@@ -859,6 +931,7 @@ export default function LlmsPage() {
         timeout: draft.timeout,
         max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
+        ...(draft.dimensions ? { dimensions: draft.dimensions } : {}),
       }),
     });
     if (!res.ok) {
@@ -1025,6 +1098,17 @@ export default function LlmsPage() {
     setDefaultEmbeddingModelDraft('');
   };
 
+  const refreshConfig = async () => {
+    if (hasUnsavedChanges) {
+      const confirmed = window.confirm('当前有未保存修改，刷新将丢弃这些更改。是否继续刷新？');
+      if (!confirmed) {
+        return;
+      }
+    }
+    setSaveMsg('');
+    await loadConfig();
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -1054,6 +1138,16 @@ export default function LlmsPage() {
                 {saveMsg}
               </span>
             )}
+            <button
+              type="button"
+              data-testid="refresh-llm-config"
+              onClick={() => void refreshConfig()}
+              disabled={loading || refreshing || saving}
+              className="flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-bold text-foreground transition-all hover:bg-muted/40 disabled:opacity-50"
+            >
+              {refreshing ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+              刷新
+            </button>
             {editingAll ? (
               <>
                 <button
@@ -1572,6 +1666,17 @@ export default function LlmsPage() {
                                   />
                                 </>
                               )}
+                              {getModelDraft(modelName).type === 'embedding' && (
+                                <FieldInput
+                                  label="向量维度"
+                                  type="number"
+                                  value={String(getModelDraft(modelName).dimensions || '')}
+                                  placeholder="如: 1536"
+                                  dataTestId={`llm-dimensions-input-${modelName}`}
+                                  disabled={!isModelEditable(modelName)}
+                                  onChange={(value) => updateModelField(modelName, 'dimensions', value ? parseInt(value, 10) : 0)}
+                                />
+                              )}
                             </div>
                             <div className="flex min-w-0 flex-col items-end gap-2">
                               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1686,10 +1791,20 @@ export default function LlmsPage() {
                                       type="button"
                                       data-testid={`llm-test-result-${modelName}`}
                                       onClick={() => setOpenTestErrorModel((prev) => (prev === modelName ? null : modelName))}
-                                      className="inline-flex max-w-[220px] items-center justify-end gap-1.5 rounded-lg bg-destructive/10 px-3 py-1.5 text-right text-xs font-semibold text-destructive"
+                                      className="inline-flex max-w-[220px] flex-col items-end gap-1 rounded-lg bg-destructive/10 px-3 py-1.5 text-right text-xs font-semibold text-destructive"
                                     >
-                                      <XCircle size={14} />
-                                      {testResults[modelName].message}
+                                      <span className="inline-flex items-center gap-1.5">
+                                        <XCircle size={14} />
+                                        {testResults[modelName].message}
+                                      </span>
+                                      {testResults[modelName].errorHint ? (
+                                        <span
+                                          data-testid={`llm-test-error-hint-${modelName}`}
+                                          className="text-[11px] font-semibold text-amber-700 dark:text-amber-300"
+                                        >
+                                          {testResults[modelName].errorHint}
+                                        </span>
+                                      ) : null}
                                     </button>
                                   )}
                                 </div>
@@ -1785,15 +1900,25 @@ export default function LlmsPage() {
                               >
                                 <span className="pt-0.5 text-muted-foreground">-</span>
                                 <span className="min-w-0 flex-1 break-all text-foreground">{modelName}</span>
-                                <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                  isPending
-                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                                    : result?.success
-                                      ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                                      : 'bg-destructive/10 text-destructive'
-                                }`}>
-                                  {isPending ? <Loader2 size={14} className="animate-spin" /> : result?.success ? <CheckCircle size={14} /> : <XCircle size={14} />}
-                                  {isPending ? '连接中' : result?.message || '未开始'}
+                                <span className="flex flex-col items-end gap-1 text-right">
+                                  <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                                    isPending
+                                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                      : result?.success
+                                        ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                                        : 'bg-destructive/10 text-destructive'
+                                  }`}>
+                                    {isPending ? <Loader2 size={14} className="animate-spin" /> : result?.success ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                    {isPending ? '连接中' : result?.message || '未开始'}
+                                  </span>
+                                  {isFailed && result?.errorHint ? (
+                                    <span
+                                      data-testid={`test-all-llms-hint-${modelName}`}
+                                      className="text-[11px] font-semibold text-amber-700 dark:text-amber-300"
+                                    >
+                                      {result.errorHint}
+                                    </span>
+                                  ) : null}
                                 </span>
                               </button>
                               {isFailed && openBulkTestErrorModel === modelName && result?.detail ? (
@@ -1953,6 +2078,7 @@ function normalizeModels(input: Record<string, unknown>): Record<string, ModelCo
           timeout: Number(model.timeout || 60),
           max_tokens: Number(model.max_tokens || 128000),
           max_output_tokens: Number(model.max_output_tokens || 16384),
+          ...(model.dimensions ? { dimensions: Number(model.dimensions) } : {}),
         },
       ];
     }),
@@ -2008,7 +2134,34 @@ function buildModelPayloadsFromDrafts(models: Record<string, ModelDraft>): Recor
         timeout: draft.timeout,
         max_tokens: draft.max_tokens,
         max_output_tokens: draft.max_output_tokens,
+        ...(draft.dimensions ? { dimensions: draft.dimensions } : {}),
       },
     ]),
   );
+}
+
+function createConfigSnapshot({
+  providers,
+  models,
+  defaultModel,
+  defaultEmbeddingModel,
+}: {
+  providers: Record<string, ProviderDraft>;
+  models: Record<string, ModelDraft>;
+  defaultModel: string;
+  defaultEmbeddingModel: string;
+}) {
+  const providerPayloads = buildProviderPayloadsFromDrafts(providers);
+  const modelPayloads = buildModelPayloadsFromDrafts(models);
+
+  return JSON.stringify({
+    providers: Object.fromEntries(
+      Object.entries(providerPayloads).sort(([left], [right]) => left.localeCompare(right)),
+    ),
+    models: Object.fromEntries(
+      Object.entries(modelPayloads).sort(([left], [right]) => left.localeCompare(right)),
+    ),
+    defaultModel,
+    defaultEmbeddingModel,
+  });
 }

@@ -71,7 +71,7 @@ def test_gateway_stats_with_sessions(client, app):
 
     # 向 gateway 绑定 session（模拟 channel 注册）
     gw = app.state.services.gateway
-    gw._session_bindings["sess_a"] = "websocket_1"
+    gw._session_bindings["sess_a"] = {"websocket_1"}
 
     resp = client.get("/api/gateway/stats")
     assert resp.status_code == 200
@@ -208,6 +208,46 @@ def test_list_channels_marks_feishu_failed_when_channel_has_error(client, app):
     data = resp.json()
     assert data[0]["id"] == "feishu"
     assert data[0]["status"] == "failed"
+
+
+def test_list_channels_prefers_runtime_failure_over_stale_channel_connected(client, app):
+    gw = app.state.services.gateway
+
+    class _Runtime:
+        _sensenova_claw_status = {"status": "failed", "error": "session timed out"}
+
+    class _Channel:
+        _sensenova_claw_status = {"status": "connected", "error": ""}
+        _runtime = _Runtime()
+
+    gw._channels["qq"] = _Channel()
+
+    resp = client.get("/api/gateway/channels")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["id"] == "qq"
+    assert data[0]["status"] == "failed"
+    assert data[0]["error"] == "session timed out"
+
+
+def test_list_channels_prefers_runtime_connected_over_stale_channel_connecting(client, app):
+    gw = app.state.services.gateway
+
+    class _Runtime:
+        _sensenova_claw_status = {"status": "connected", "error": ""}
+
+    class _Channel:
+        _sensenova_claw_status = {"status": "connecting", "error": ""}
+        _runtime = _Runtime()
+
+    gw._channels["qq"] = _Channel()
+
+    resp = client.get("/api/gateway/channels")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["id"] == "qq"
+    assert data[0]["status"] == "connected"
+    assert data[0]["error"] == ""
 
 
 def test_list_channels_marks_whatsapp_failed_when_runtime_state_has_error(client, app):

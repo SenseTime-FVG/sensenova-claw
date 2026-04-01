@@ -91,7 +91,7 @@ async def test_gateway_bind_session():
     channel_id = "test-channel"
 
     gateway.bind_session(session_id, channel_id)
-    assert gateway._session_bindings[session_id] == channel_id
+    assert gateway._session_bindings[session_id] == {channel_id}
 
     gateway.unbind_session(session_id)
     assert session_id not in gateway._session_bindings
@@ -235,7 +235,7 @@ async def test_gateway_dispatch_event_inherits_channel_binding_from_parent():
 
     assert len(channel.received_events) == 1
     assert channel.received_events[0].session_id == "child_sess"
-    assert gateway._session_bindings.get("child_sess") == "websocket"
+    assert gateway._session_bindings.get("child_sess") == {"websocket"}
 
 
 @pytest.mark.asyncio

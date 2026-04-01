@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -36,6 +37,35 @@ class TestLLMBody(BaseModel):
     max_output_tokens: int = 16384
 
 
+def _normalize_llm_test_error(error_message: str) -> dict[str, str | None]:
+    """归一化 LLM 连接测试错误，提取前端可直接展示的专门提示。"""
+    normalized_message = error_message.replace("\\'", "'").replace('\\"', '"')
+
+    max_tokens_patterns = [
+        r"Range of max_tokens should be \[(\d+),\s*(\d+)\]",
+        r"valid range of max_tokens is \[(\d+),\s*(\d+)\]",
+        r"does not support max tokens >\s*(\d+)",
+        r"max_tokens is too large",
+        r"maxOutputTokens value of\s*\d+\s*but the supported range is from",
+        r"supports at most\s*(\d+)\s*completion tokens",
+        r"maximum tokens you requested exceeds the model limit of\s*(\d+)",
+        r"maximum context length is\s*(\d+)\s*tokens\..*requested\s*\d+\s*tokens.*in the completion",
+    ]
+    if any(re.search(pattern, normalized_message, flags=re.IGNORECASE) for pattern in max_tokens_patterns):
+        return {"error_hint": "max tokens 超限"}
+
+    max_output_patterns = [
+        r"max_output_tokens\s+is\s+too\s+large",
+        r"max output tokens?\s+(?:is\s+)?too\s+large",
+        r"supports at most\s*(\d+)\s*output tokens",
+        r"Range of max_output_tokens should be \[(\d+),\s*(\d+)\]",
+    ]
+    if any(re.search(pattern, normalized_message, flags=re.IGNORECASE) for pattern in max_output_patterns):
+        return {"error_hint": "max output tokens 超限"}
+
+    return {"error_hint": None}
+
+
 class ProviderUpdateBody(BaseModel):
     name: str | None = None
     source_type: str = "openai"
@@ -55,6 +85,7 @@ class ModelUpdateBody(BaseModel):
     timeout: int = 60
     max_tokens: int = 128000
     max_output_tokens: int = 16384
+    dimensions: int | None = None  # embedding 模型向量维度
 
 
 class DefaultModelUpdateBody(BaseModel):
@@ -227,7 +258,7 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
         raise HTTPException(400, f"Model 已存在: {next_name}")
 
     models.pop(model_name, None)
-    models[next_name] = {
+    model_data = {
         "provider": body.provider,
         "model_id": body.model_id,
         "type": body.model_type,
@@ -235,6 +266,9 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
         "max_tokens": body.max_tokens,
         "max_output_tokens": body.max_output_tokens,
     }
+    if body.dimensions:
+        model_data["dimensions"] = body.dimensions
+    models[next_name] = model_data
     llm_section["models"] = models
     if model_exists and llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
@@ -443,7 +477,8 @@ async def test_llm_connection(body: TestLLMBody):
             return {"success": True, **result}
     except Exception as e:
         logger.warning("LLM test failed: %s", e)
-        return {"success": False, "error": str(e)}
+        normalized = _normalize_llm_test_error(str(e))
+        return {"success": False, "error": str(e), **normalized}
 
 
 async def _test_openai_compatible(

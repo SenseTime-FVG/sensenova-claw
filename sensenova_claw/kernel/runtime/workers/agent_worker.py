@@ -75,18 +75,12 @@ class AgentSessionWorker(SessionWorker):
         """解析 provider 名称：从 agent_config.model → llm.models → provider"""
         model_key = self._get_model_key()
         provider, _ = config.resolve_model(model_key)
-        # 向后兼容：部分 Agent 仍直接填写 model_id，此时保留显式 provider。
-        explicit_provider = getattr(self.agent_config, "provider", None) if self.agent_config else None
-        if provider == "mock" and explicit_provider:
-            return explicit_provider
         return provider
 
     def _get_model(self) -> str:
         """解析实际 model_id（传给 LLM API 的模型名）"""
         model_key = self._get_model_key()
-        provider, model_id = config.resolve_model(model_key)
-        if provider == "mock" and self.agent_config and self.agent_config.model:
-            return self.agent_config.model
+        _, model_id = config.resolve_model(model_key)
         return model_id
 
     def _get_model_key(self) -> str:
@@ -259,6 +253,8 @@ class AgentSessionWorker(SessionWorker):
                 await self._handle_llm_result(event)
             elif event.type == LLM_CALL_COMPLETED:
                 await self._handle_llm_completed(event)
+            elif event.type == ERROR_RAISED:
+                await self._handle_error_raised(event)
             elif event.type == TOOL_CALL_RESULT:
                 await self._handle_tool_result(event)
             self._consecutive_errors = 0
@@ -291,6 +287,8 @@ class AgentSessionWorker(SessionWorker):
 
         reason = str(event.payload.get("reason", "user_cancel"))
         self.rt.state_store.mark_turn_cancelled(self.session_id, turn_id)
+        if latest_turn and latest_turn.turn_id == turn_id:
+            self.rt.state_store.append_turn_messages_to_history(self.session_id, latest_turn)
         await self.rt.repo.update_turn_status(turn_id, status="cancelled", agent_response=reason)
         await self.bus.publish(
             EventEnvelope(
@@ -308,6 +306,17 @@ class AgentSessionWorker(SessionWorker):
         )
         logger.info("已取消 turn session=%s turn=%s reason=%s", self.session_id, turn_id, reason)
 
+    async def _handle_error_raised(self, event: EventEnvelope) -> None:
+        """错误收尾时补齐当前轮次历史，避免后续上下文丢失最后一轮消息。"""
+        if not event.turn_id:
+            return
+        if self.rt.state_store.is_turn_cancelled(event.session_id, event.turn_id):
+            return
+        state = self.rt.state_store.get_turn(event.session_id, event.turn_id)
+        if not state:
+            return
+        self.rt.state_store.append_turn_messages_to_history(event.session_id, state)
+
     async def _handle_user_input(self, event: EventEnvelope) -> None:
         content = str(event.payload.get("content", ""))
         turn_id = event.turn_id or f"turn_{uuid.uuid4().hex[:12]}"
@@ -320,14 +329,11 @@ class AgentSessionWorker(SessionWorker):
         await self.rt.repo.update_session_activity(self.session_id)
         await self.rt.repo.create_turn(turn_id=turn_id, session_id=self.session_id, user_input=content)
 
-        # v0.5: 首轮加载 per-agent workspace 文件
-        context_files = None
-        if self.rt.state_store.is_first_turn(self.session_id):
-            from sensenova_claw.platform.config.workspace import load_workspace_files, resolve_sensenova_claw_home
-            sensenova_claw_home = str(resolve_sensenova_claw_home(config))
-            agent_id = self.agent_config.id if self.agent_config else "default"
-            context_files = await load_workspace_files(sensenova_claw_home, agent_id=agent_id)
-            self.rt.state_store.mark_first_turn_done(self.session_id)
+        # 每轮加载 per-agent workspace 文件（AGENTS.md / USER.md），确保长对话不丢失指令
+        from sensenova_claw.platform.config.workspace import load_workspace_files, resolve_sensenova_claw_home
+        sensenova_claw_home = str(resolve_sensenova_claw_home(config))
+        agent_id = self.agent_config.id if self.agent_config else "default"
+        context_files = await load_workspace_files(sensenova_claw_home, agent_id=agent_id)
 
         # 读取前端拖入的用户文件
         user_file_paths = event.payload.get("context_files", [])
@@ -551,8 +557,7 @@ class AgentSessionWorker(SessionWorker):
         await self.rt.repo.complete_turn(event.turn_id, agent_response=content)
 
         # 追加本轮新消息到内存历史（供后续 turn 上下文使用）
-        new_messages = state.messages[state.history_offset:]
-        self.rt.state_store.append_to_history(event.session_id, new_messages)
+        self.rt.state_store.append_turn_messages_to_history(event.session_id, state)
 
         # 注意：消息已在 _handle_user_input / _handle_llm_result / _handle_tool_result
         # 中增量持久化到 SQLite，此处无需再批量保存

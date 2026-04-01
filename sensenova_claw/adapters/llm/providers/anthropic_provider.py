@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator
 
 from anthropic import AsyncAnthropic
@@ -11,6 +12,8 @@ from sensenova_claw.adapters.llm.base import (
     LLMProvider,
     merge_sampling_extra_body,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AnthropicProvider(LLMProvider):
@@ -180,7 +183,128 @@ class AnthropicProvider(LLMProvider):
                 normalized.append(self._normalize_tool_message(message))
             else:
                 normalized.append({"role": role, "content": message.get("content", "")})
-        return normalized
+        return self._align_tool_results(normalized)
+
+    def _align_tool_results(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """确保每个 assistant tool_use 后面都有对应的 tool_result。"""
+        aligned: list[dict[str, Any]] = []
+        index = 0
+
+        while index < len(messages):
+            message = messages[index]
+            expected_ids = self._extract_tool_use_ids(message)
+
+            if not expected_ids:
+                if self._is_orphan_tool_result_message(message, aligned):
+                    logger.warning(
+                        "Anthropic align: 跳过孤儿 tool_result 消息 tool_use_id=%s",
+                        self._extract_tool_result_id(message),
+                    )
+                    index += 1
+                    continue
+                aligned.append(message)
+                index += 1
+                continue
+
+            aligned.append(message)
+            index += 1
+
+            tool_result_messages: list[dict[str, Any]] = []
+            while index < len(messages) and self._is_tool_result_message(messages[index]):
+                tool_result_messages.append(messages[index])
+                index += 1
+
+            if len(tool_result_messages) == len(expected_ids) and all(
+                self._extract_tool_result_id(tool_message) in expected_ids
+                for tool_message in tool_result_messages
+            ):
+                aligned.extend(tool_result_messages)
+                continue
+
+            logger.warning(
+                "Anthropic align: tool_uses=%d vs tool_results=%d, 修补对齐",
+                len(expected_ids),
+                len(tool_result_messages),
+            )
+            tool_by_id = {
+                self._extract_tool_result_id(tool_message): tool_message
+                for tool_message in tool_result_messages
+                if self._extract_tool_result_id(tool_message)
+            }
+
+            for tool_use_id in expected_ids:
+                if tool_use_id in tool_by_id:
+                    aligned.append(tool_by_id[tool_use_id])
+                    continue
+
+                logger.warning(
+                    "Anthropic align: 补齐缺失的 tool_result 响应 tool_use_id=%s",
+                    tool_use_id,
+                )
+                aligned.append({
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": "[tool response unavailable]",
+                        }
+                    ],
+                })
+
+        return aligned
+
+    def _extract_tool_use_ids(self, message: dict[str, Any]) -> list[str]:
+        if message.get("role") != "assistant":
+            return []
+
+        content = message.get("content")
+        if not isinstance(content, list):
+            return []
+
+        ids: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                tool_use_id = str(block.get("id") or "")
+                if tool_use_id:
+                    ids.append(tool_use_id)
+        return ids
+
+    def _is_tool_result_message(self, message: dict[str, Any]) -> bool:
+        return bool(self._extract_tool_result_id(message))
+
+    def _extract_tool_result_id(self, message: dict[str, Any]) -> str:
+        if message.get("role") != "user":
+            return ""
+
+        content = message.get("content")
+        if not isinstance(content, list):
+            return ""
+
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                return str(block.get("tool_use_id") or "")
+        return ""
+
+    def _is_orphan_tool_result_message(
+        self,
+        message: dict[str, Any],
+        aligned: list[dict[str, Any]],
+    ) -> bool:
+        tool_result_id = self._extract_tool_result_id(message)
+        if not tool_result_id:
+            return False
+        if not aligned:
+            return True
+        if self._extract_tool_use_ids(aligned[-1]):
+            return False
+
+        for previous in reversed(aligned):
+            if self._extract_tool_use_ids(previous):
+                return False
+            if previous.get("role") == "user" and not self._extract_tool_result_id(previous):
+                break
+        return True
 
     def _normalize_assistant_message(self, message: dict[str, Any]) -> dict[str, Any]:
         content: list[dict[str, Any]] = []

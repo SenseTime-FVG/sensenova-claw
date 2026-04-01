@@ -135,7 +135,7 @@ function QuestionToastBody({
           onKeyDown={handleKeyDown}
           placeholder="输入你的回复..."
           rows={2}
-          className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] text-foreground placeholder-muted-foreground/50 focus:outline-none focus:border-sky-400 resize-none"
+          className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-[13px] text-neutral-900 placeholder:text-neutral-500 focus:outline-none focus:border-sky-400 resize-none"
         />
       </div>
 
