@@ -302,7 +302,7 @@ export function finalizePendingToolMessages(
       content: `Tool Finished: ${message.toolInfo.name}`,
       toolInfo: {
         ...message.toolInfo,
-        status: 'completed',
+        status: 'completed' as const,
         success: false,
         error: message.toolInfo.error || errorText,
         askUser: message.toolInfo.askUser
