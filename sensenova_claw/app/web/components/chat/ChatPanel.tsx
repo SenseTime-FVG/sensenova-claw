@@ -40,9 +40,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     isTyping,
     turnActive,
     activeInteraction,
+    currentSessionQuestionInteraction,
     interactionSubmitting,
     sendMessage,
     sendQuestionAnswer,
+    sendCurrentSessionQuestionAnswer,
     resetIfNeeded,
     startNewChat,
     handleSkillInvoke,
@@ -130,12 +132,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     contextFiles?: ContextFileRef[],
     recommendation?: RecommendationSendMeta | null,
   ) => {
-    if (activeInteraction?.kind === 'question' && activeInteraction.sourceSessionId === currentSessionId) {
-      sendQuestionAnswer(content, false);
+    if (currentSessionQuestionInteraction) {
+      sendCurrentSessionQuestionAnswer(content, false);
       return;
     }
     sendMessage(content, contextFiles, selectedAgent, recommendation);
-  }, [activeInteraction, currentSessionId, sendMessage, sendQuestionAnswer, selectedAgent]);
+  }, [currentSessionQuestionInteraction, sendCurrentSessionQuestionAnswer, sendMessage, selectedAgent]);
 
   const fillInput = useCallback((text: string) => {
     chatInputRef.current?.setInput(text);
@@ -157,8 +159,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
 
   const showReturnToMain =
     Boolean(returnToMainLabel) && (Boolean(currentSessionId) || messages.length > 0);
-  const isCurrentSessionQuestionInteraction =
-    activeInteraction?.kind === 'question' && activeInteraction.sourceSessionId === currentSessionId;
+  const isCurrentSessionQuestionInteraction = Boolean(currentSessionQuestionInteraction);
 
   return (
     <div className="flex flex-col h-full min-w-0">
@@ -199,7 +200,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         onSend={handleSend}
         onSlashSubmit={() => false}
         onStop={cancelTurn}
-        disabled={activeInteraction?.kind === 'confirmation' || (turnActive && !isCurrentSessionQuestionInteraction)}
+        disabled={activeInteraction?.kind === 'confirmation'}
+        showStopButton={turnActive && !isCurrentSessionQuestionInteraction}
         wsConnected={wsConnected}
         handleSkillInvoke={handleSkillInvoke}
         hideAgentSelector={hideAgentSelector}

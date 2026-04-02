@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authGet, API_BASE } from '@/lib/authFetch';
 import { useSession, useMessages } from '@/contexts/ws';
 import type { ProactiveResultItem } from '@/contexts/ws/MessageContext';
@@ -209,13 +209,16 @@ export function aggregateRecommendations(proactiveResults: ProactiveResultItem[]
 
 export function useDashboardData(): DashboardData & { refresh: () => void } {
   const { sessions } = useSession();
-  const { proactiveResults } = useMessages();
+  const { proactiveResults, mergeRestoredRecommendations } = useMessages();
 
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
   const [cronRuns, setCronRuns] = useState<CronRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // 标记是否已从 REST API 恢复过推荐（仅在初次加载时恢复一次）
+  const recommendationsRestoredRef = useRef(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -236,6 +239,42 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
       setLoading(false);
     }
   }, []);
+
+  // 页面初始化时从 REST API 恢复推荐数据（仅执行一次）
+  useEffect(() => {
+    if (recommendationsRestoredRef.current) return;
+    recommendationsRestoredRef.current = true;
+
+    (async () => {
+      try {
+        const data = await authGet<{ recommendations: Array<{
+          job_id: string;
+          job_name: string;
+          session_id: string;
+          source_session_id: string;
+          recommendation_type: string;
+          received_at_ms: number;
+          items: Array<{ id: string; title: string; prompt: string; category?: string }>;
+        }> }>(`${API_BASE}/api/proactive/recommendations?limit=10`);
+        const recs = data?.recommendations;
+        if (Array.isArray(recs) && recs.length > 0) {
+          const restored: ProactiveResultItem[] = recs.map(r => ({
+            jobId: r.job_id,
+            jobName: r.job_name,
+            sessionId: r.session_id,
+            result: '',
+            receivedAt: r.received_at_ms,
+            sourceSessionId: r.source_session_id,
+            recommendationType: r.recommendation_type,
+            items: r.items,
+          }));
+          mergeRestoredRecommendations(restored);
+        }
+      } catch {
+        // 恢复推荐失败不阻塞主流程
+      }
+    })();
+  }, [mergeRestoredRecommendations]);
 
   useEffect(() => {
     fetchData();

@@ -1222,6 +1222,200 @@ test.describe('ask_user UI（mock websocket）', () => {
     )).toBeTruthy();
   });
 
+  test('chat 页面恢复到已被重启清理的 stale turn 时，不应继续显示停止按钮和工具执行中状态', async ({ page }) => {
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_stale_restore',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: '重启恢复会话', agent_id: 'default' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          events: [
+            {
+              event_type: 'user.input',
+              session_id: 'sess_stale_restore',
+              turn_id: 'turn_stale_restore',
+              payload: { content: '请继续上次的问题' },
+            },
+            {
+              event_type: 'tool.call_requested',
+              session_id: 'sess_stale_restore',
+              turn_id: 'turn_stale_restore',
+              payload: {
+                tool_call_id: 'tool_stale_restore',
+                tool_name: 'ask_user',
+                arguments: {},
+              },
+            },
+            {
+              event_type: 'user.question_asked',
+              session_id: 'sess_stale_restore',
+              turn_id: 'turn_stale_restore',
+              payload: {
+                question_id: 'q_stale_restore',
+                question: '这个问题在服务重启前尚未回答',
+                options: null,
+                multi_select: false,
+              },
+            },
+            {
+              event_type: 'error.raised',
+              session_id: 'sess_stale_restore',
+              turn_id: 'turn_stale_restore',
+              payload: {
+                error_type: 'TurnCancelled',
+                user_message: '服务已重启，上一轮未完成任务已自动终止。',
+                error_message: '服务已重启，上一轮未完成任务已自动终止。',
+                context: { cancelled: true, reason: 'restart_cleanup' },
+              },
+            },
+          ],
+        }),
+      });
+    });
+
+    await gotoChatPage(page);
+    await waitForMockWebSocketReady(page);
+
+    await page.getByTestId('session-list').getByText('重启恢复会话').click();
+
+    await expect(page.getByTestId('stop-button')).toHaveCount(0);
+    await expect(page.getByTestId('inline-ask-user-q_stale_restore')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.tool-status.running')).toHaveCount(0);
+    await expect(page.locator('.tool-status.failed')).toContainText('失败');
+  });
+
+  test('chat 页面在其他会话已有 ask_user 时，当前会话自己的 ask_user 仍应显示发送按钮并可直接回答', async ({ page }) => {
+    const sessionEvents: Record<string, Array<Record<string, unknown>>> = {
+      sess_chat_queue_1: [],
+      sess_chat_queue_2: [
+        {
+          event_type: 'user.input',
+          session_id: 'sess_chat_queue_2',
+          payload: {
+            content: '这是会话2里仍在进行的任务',
+          },
+        },
+      ],
+    };
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_chat_queue_1',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: '排队会话 1', agent_id: 'default' }),
+            },
+            {
+              session_id: 'sess_chat_queue_2',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000 - 10,
+              status: 'active',
+              meta: JSON.stringify({ title: '排队会话 2', agent_id: 'default' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      const url = route.request().url();
+      const match = url.match(/\/api\/sessions\/([^/]+)\/events/);
+      const sessionId = match?.[1] || '';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ events: sessionEvents[sessionId] || [] }),
+      });
+    });
+
+    await gotoChatPage(page);
+    await waitForMockWebSocketReady(page);
+
+    await page.getByTestId('session-list').getByText('排队会话 1').click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_chat_queue_1',
+        payload: {
+          question_id: 'q_chat_queue_1',
+          question: '这是会话1里的 ask_user',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await page.getByTestId('session-list').getByText('排队会话 2').click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.evaluate(() => {
+      ((window as any).__mockWsSent as string[]).length = 0;
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_chat_queue_2',
+        payload: {
+          question_id: 'q_chat_queue_2',
+          question: '这是会话2里的 ask_user',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await expect(page.getByTestId('stop-button')).toHaveCount(0);
+
+    await page.getByTestId('chat-input').fill('这是给会话2的回答');
+    await page.getByTestId('send-button').click();
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_chat_queue_2'
+          && msg.payload?.answer === '这是给会话2的回答'
+          && msg.session_id === 'sess_chat_queue_2'
+      )
+    ).toBeTruthy();
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_chat_queue_1'
+      )
+    ).toBeFalsy();
+  });
+
   test('ask_user 弹窗 textarea 按 Enter 可直接确认提交', async ({ page }) => {
     await gotoChatPage(page);
 

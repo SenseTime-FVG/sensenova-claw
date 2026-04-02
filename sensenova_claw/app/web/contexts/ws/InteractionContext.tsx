@@ -7,15 +7,17 @@ import { useEventDispatcher } from './EventDispatcherContext';
 import { useSession } from './SessionContext';
 import { useMessages } from './MessageContext';
 import { attachAskUserToLatestToolMessage, updateAskUserToolState } from '@/lib/chatTypes';
-import type { PendingInteraction } from '@/components/chat/QuestionDialog';
+import type { PendingInteraction, PendingQuestionInteraction } from '@/components/chat/QuestionDialog';
 import type { WsInboundEvent } from '@/lib/wsEvents';
 
 // ── Context 类型 ──
 
 export interface InteractionContextValue {
   activeInteraction: PendingInteraction | null;
+  currentSessionQuestionInteraction: PendingQuestionInteraction | null;
   interactionSubmitting: boolean;
   sendQuestionAnswer: (answer: string | string[] | null, cancelled: boolean) => void;
+  sendCurrentSessionQuestionAnswer: (answer: string | string[] | null, cancelled: boolean) => void;
   submitQuestionResponse: (params: {
     questionId: string;
     sourceSessionId: string;
@@ -34,14 +36,15 @@ const InteractionCtx = createContext<InteractionContextValue | null>(null);
 
 export function InteractionProvider({ children }: { children: React.ReactNode }) {
   const { wsSend } = useWebSocket();
-  const { subscribeCurrentSession } = useEventDispatcher();
-  const { pushCard, resolveCard, markCardPending } = useNotification();
+  const { subscribeCurrentSession, subscribeGlobal } = useEventDispatcher();
+  const { pushCard, pushToast, resolveCard, markCardPending } = useNotification();
   const { currentSessionId } = useSession();
   const { updateMessages, setTyping } = useMessages();
   const currentSessionIdRef = useRef<string | null>(null);
   currentSessionIdRef.current = currentSessionId;
 
   const [activeInteraction, setActiveInteraction] = useState<PendingInteraction | null>(null);
+  const [currentSessionQuestionInteraction, setCurrentSessionQuestionInteraction] = useState<PendingQuestionInteraction | null>(null);
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
 
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
@@ -51,6 +54,25 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
 
   const interactionKey = (interaction: PendingInteraction) =>
     `${interaction.kind}:${interaction.interactionId}`;
+
+  const findCurrentSessionQuestionInteraction = useCallback((): PendingQuestionInteraction | null => {
+    const currentSessionId = currentSessionIdRef.current;
+    if (!currentSessionId) return null;
+
+    const active = activeInteractionRef.current;
+    if (active?.kind === 'question' && active.sourceSessionId === currentSessionId) {
+      return active;
+    }
+
+    return interactionQueueRef.current.find(
+      (item): item is PendingQuestionInteraction =>
+        item.kind === 'question' && item.sourceSessionId === currentSessionId
+    ) || null;
+  }, []);
+
+  const syncCurrentSessionQuestionInteraction = useCallback(() => {
+    setCurrentSessionQuestionInteraction(findCurrentSessionQuestionInteraction());
+  }, [findCurrentSessionQuestionInteraction]);
 
   const enqueueInteraction = useCallback((interaction: PendingInteraction) => {
     const active = activeInteractionRef.current;
@@ -62,10 +84,12 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
     if (!active) {
       activeInteractionRef.current = interaction;
       setActiveInteraction(interaction);
+      syncCurrentSessionQuestionInteraction();
       return;
     }
     interactionQueueRef.current = [...queue, interaction];
-  }, []);
+    syncCurrentSessionQuestionInteraction();
+  }, [syncCurrentSessionQuestionInteraction]);
 
   const resolveInteraction = useCallback((kind: PendingInteraction['kind'], interactionId: string) => {
     const active = activeInteractionRef.current;
@@ -81,18 +105,21 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
         setActiveInteraction(null);
       }
       setInteractionSubmitting(false);
+      syncCurrentSessionQuestionInteraction();
       return;
     }
     const filtered = queue.filter((item) => !(item.kind === kind && item.interactionId === interactionId));
     if (filtered.length !== queue.length) {
       interactionQueueRef.current = filtered;
+      syncCurrentSessionQuestionInteraction();
     }
-  }, []);
+  }, [syncCurrentSessionQuestionInteraction]);
 
   const clearInteractions = useCallback(() => {
     interactionQueueRef.current = [];
     activeInteractionRef.current = null;
     setActiveInteraction(null);
+    setCurrentSessionQuestionInteraction(null);
     setInteractionSubmitting(false);
   }, []);
 
@@ -111,14 +138,20 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
       }
       activeInteractionRef.current = next;
       setActiveInteraction(next);
+      syncCurrentSessionQuestionInteraction();
       setInteractionSubmitting(false);
       return;
     }
 
     if (filteredQueue.length !== queue.length) {
       interactionQueueRef.current = filteredQueue;
+      syncCurrentSessionQuestionInteraction();
     }
-  }, []);
+  }, [syncCurrentSessionQuestionInteraction]);
+
+  useEffect(() => {
+    syncCurrentSessionQuestionInteraction();
+  }, [currentSessionId, syncCurrentSessionQuestionInteraction]);
 
   // ── 监听当前 session 事件 ──
 
@@ -129,7 +162,6 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
           const { tool_call_id: toolCallId, tool_name: toolName } = event.payload;
           const sourceSessionId = event.session_id || '';
           if (!toolCallId || !sourceSessionId) break;
-          // 重构前行为：enqueueInteraction 仅当前 session，pushCard 始终执行
           const isThisSession = sourceSessionId === currentSessionIdRef.current;
           if (isThisSession) {
             enqueueInteraction({
@@ -143,7 +175,7 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
               arguments: (event.payload.arguments || {}) as Record<string, unknown>,
             });
           }
-          pushCard({
+          const cardId = pushCard({
             id: `confirm_${toolCallId}`,
             kind: 'tool_confirmation',
             title: '需要授权',
@@ -156,6 +188,30 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
               { label: '批准', value: 'approve' },
               { label: '拒绝', value: 'deny' },
             ],
+          });
+          // 当前 session 也需要 toast 弹窗（聊天区域没有内嵌的确认 UI）
+          pushToast({
+            kind: 'tool_confirmation',
+            title: '需要授权',
+            body: `工具 "${toolName}" 需要你的确认才能执行`,
+            level: 'warning',
+            actions: [
+              { label: '批准', value: 'approve' },
+              { label: '拒绝', value: 'deny' },
+            ],
+            cardId,
+            sessionId: sourceSessionId,
+            eventKey: `confirm_${toolCallId}`,
+            onAction: (actionValue) => {
+              wsSend({
+                type: 'tool_confirmation_response',
+                session_id: sourceSessionId,
+                payload: { tool_call_id: toolCallId, approved: actionValue === 'approve' },
+                timestamp: Date.now() / 1000,
+              });
+              markCardPending(cardId, actionValue);
+              return true; // 需要等待服务端确认
+            },
           });
           break;
         }
@@ -262,6 +318,92 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
     setTyping,
   ]);
 
+  // ── 跨 session 交互弹窗 ──
+  // 当交互事件来自非当前 session 时，通过 pushToast 弹出可操作的悬浮提示
+  useEffect(() => {
+    return subscribeGlobal((event: WsInboundEvent) => {
+      switch (event.type) {
+        case 'tool_confirmation_requested': {
+          const { tool_call_id: toolCallId, tool_name: toolName } = event.payload;
+          const sourceSessionId = event.session_id || '';
+          if (!toolCallId || !sourceSessionId) break;
+          // 仅为跨 session 事件创建弹窗（当前 session 已有内联对话框）
+          if (sourceSessionId === currentSessionIdRef.current) break;
+          const cardId = `confirm_${toolCallId}`;
+          pushToast({
+            kind: 'tool_confirmation',
+            title: '工具授权请求',
+            body: `工具 "${toolName || '工具'}" 需要你的确认才能执行`,
+            level: 'warning',
+            actions: [
+              { label: '批准', value: 'approve' },
+              { label: '拒绝', value: 'deny' },
+            ],
+            cardId,
+            sessionId: sourceSessionId,
+            eventKey: `confirm_${toolCallId}`,
+            onAction: (actionValue) => {
+              wsSend({
+                type: 'tool_confirmation_response',
+                session_id: sourceSessionId,
+                payload: { tool_call_id: toolCallId, approved: actionValue === 'approve' },
+                timestamp: Date.now() / 1000,
+              });
+              markCardPending(cardId, actionValue);
+              return true; // 需要等待服务端确认
+            },
+          });
+          break;
+        }
+        case 'user_question_asked': {
+          const { question_id: questionId, question, source_agent_id, source_agent_name, options, multi_select: multiSelect } = event.payload;
+          const sourceSessionId = event.session_id || '';
+          if (!questionId || !sourceSessionId) break;
+          // 仅为跨 session 事件创建弹窗（当前 session 已有内联对话框）
+          if (sourceSessionId === currentSessionIdRef.current) break;
+          const sourceAgentId = (source_agent_id || 'default').trim() || 'default';
+          const sourceAgentName = (source_agent_name || sourceAgentId).trim() || sourceAgentId;
+          const rawOptions = Array.isArray(options) ? options : null;
+          const cardId = `question_${questionId}`;
+          const questionData = {
+            question: question || '',
+            options: rawOptions || null,
+            multiSelect: Boolean(multiSelect),
+            interactionId: questionId,
+            sessionId: sourceSessionId,
+          };
+          const questionCardActions = rawOptions
+            ? rawOptions.map((o: string) => ({ label: o, value: o }))
+            : undefined;
+          pushToast({
+            kind: 'user_question',
+            title: `${sourceAgentName} 需要你的回复`,
+            body: question || '请做出选择',
+            level: 'info',
+            actions: questionCardActions,
+            allowsInput: !questionCardActions || questionCardActions.length === 0,
+            inputPlaceholder: '请输入回复',
+            questionData,
+            cardId,
+            sessionId: sourceSessionId,
+            eventKey: `question_${questionId}`,
+            onAction: (actionValue, inputValue) => {
+              wsSend({
+                type: 'user_question_answered',
+                session_id: sourceSessionId,
+                payload: { question_id: questionId, answer: inputValue || actionValue, cancelled: false },
+                timestamp: Date.now() / 1000,
+              });
+              markCardPending(cardId, actionValue);
+              return true; // 需要等待服务端确认
+            },
+          });
+          break;
+        }
+      }
+    });
+  }, [subscribeGlobal, pushToast, wsSend, markCardPending]);
+
   // ── 对外接口 ──
 
   const submitQuestionResponse = useCallback((params: {
@@ -298,6 +440,17 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
     });
   }, [submitQuestionResponse]);
 
+  const sendCurrentSessionQuestionAnswer = useCallback((answer: string | string[] | null, cancelled: boolean) => {
+    const interaction = findCurrentSessionQuestionInteraction();
+    if (!interaction) return;
+    submitQuestionResponse({
+      questionId: interaction.interactionId,
+      sourceSessionId: interaction.sourceSessionId,
+      answer,
+      cancelled,
+    });
+  }, [findCurrentSessionQuestionInteraction, submitQuestionResponse]);
+
   const sendConfirmationResponse = useCallback((approved: boolean) => {
     const interaction = activeInteractionRef.current;
     if (!interaction || interaction.kind !== 'confirmation') return;
@@ -320,8 +473,10 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
 
   const value: InteractionContextValue = {
     activeInteraction,
+    currentSessionQuestionInteraction,
     interactionSubmitting,
     sendQuestionAnswer,
+    sendCurrentSessionQuestionAnswer,
     submitQuestionResponse,
     sendConfirmationResponse,
     handleInteractionTimeout,
