@@ -1777,3 +1777,33 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - `tests/unit/test_anthropic_provider.py` 之前把纯逻辑测试绑定到真实 API provider fixture，缺少 API key 时新增单测会被整体 skip；以后给这类文件补本地逻辑测试时，应优先拆出不依赖真实配置的 `local_provider` fixture。
+
+### 2026-04-01 重启后 stale turn 恢复补充
+
+成功经验：
+- 对“重启后仍显示停止按钮/工具执行中”这类问题，优先检查后端是否在启动时清理数据库里遗留的 `started` turn；只修前端展示会留下状态源不一致。
+- 前端历史恢复要双重收口：`isTurnStillActive(events)` 需要把 `error.raised` 视为终结事件，`rebuildMessagesFromEvents()` 还要把残留的 `running` 工具消息收敛为失败态，否则会出现“停止按钮没了，但工具还在执行中”的半残 UI。
+- 这类回归最稳的测试组合是：后端仓储单测断言“stale turn -> cancelled + error.raised”，前端再补 mock websocket 的 Playwright 历史恢复用例，直接验证浏览器里不再出现停止按钮。
+
+失败/风险经验：
+- 仅依赖历史里的 `user.input` 判断 turn 是否活跃，会把“进程重启前的遗留轮次”误判为仍在运行；以后凡是涉及重启恢复，都必须设计显式终结事件或启动清理逻辑。
+
+### 2026-04-01 Office 小羊待机动画补充
+
+成功经验：
+- `/office` 这类 Phaser 页面做前端回归时，直接从浏览器读取 `window.__phaserGame` 检查动画注册与精灵播放状态，比只看截图稳定得多，能精确锁住 `anims.get('star_idle')` 和 `idleSprite.anims.currentAnim`。
+- 待机小羊的素材源应以仓库内 `public/claw-icon.png` / `public/office/icon.png` 为准；不要拿运行截图反推资源，容易把环境缓存或其他对象误认成真实原图。
+- 这类轻量像素动效第一版用“原图拼 4 帧 spritesheet + 低帧率循环”最省改动，既能让角色动起来，也不会破坏现有 Phaser 场景结构。
+
+失败/风险经验：
+- Playwright 在本仓库里若使用带 `webServer` 的默认配置，容易先撞上已运行的 `localhost:3000`；验证已有前端服务时应优先用 `playwright.gateway.config.ts` 这类不拉起新 server 的配置。
+- Phaser 场景就绪不代表动画已注册完成；前端测试若只等 `scene` 存在就立即读 `game.anims.get(...)`，会拿到 `0` 帧的假阴性，需要额外等待动画资源注册完成。
+
+### 2026-04-01 Office 右下角小羊对象定位补充
+
+成功经验：
+- `/office` 页面里“看起来一样的羊”不一定走同一条渲染链；这次直接读取 `scene.children.list` 按坐标排查后，才确认右下角那只其实是 `syncAnimSprite`，不是 `agentSprites` 里的待命羊。
+- 当用户反馈“某个具体角落的对象没动”时，最有效的回归不是泛测动画资源，而是锁定该对象的运行时坐标、纹理 key、当前动画 key 和帧号变化，能快速排除“改到了相似但错误的对象”。
+
+失败/风险经验：
+- 只根据视觉相似度把右下角羊误判成 agent idle 精灵，会导致修复落到 `star_idle` 链路但对用户实际看到的对象完全无效；以后 Phaser 场景里有多个相似角色时，必须先做运行时对象级定位再改。

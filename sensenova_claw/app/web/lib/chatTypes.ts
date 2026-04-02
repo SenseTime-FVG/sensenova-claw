@@ -279,6 +279,46 @@ export function upsertAssistantTurnMessage(
   return [...messages, { ...nextMessage, id: makeId() }];
 }
 
+export function finalizePendingToolMessages(
+  messages: ChatMessage[],
+  options?: {
+    error?: string;
+    turnId?: string;
+  },
+): ChatMessage[] {
+  const errorText = options?.error || '该轮次已结束';
+  let changed = false;
+
+  const next = messages.map((message) => {
+    if (message.role !== 'tool' || !message.toolInfo || message.toolInfo.status !== 'running') {
+      return message;
+    }
+    if (options?.turnId && message.turnId && message.turnId !== options.turnId) {
+      return message;
+    }
+    changed = true;
+    return {
+      ...message,
+      content: `Tool Finished: ${message.toolInfo.name}`,
+      toolInfo: {
+        ...message.toolInfo,
+        status: 'completed',
+        success: false,
+        error: message.toolInfo.error || errorText,
+        askUser: message.toolInfo.askUser
+          ? {
+            ...message.toolInfo.askUser,
+            pending: false,
+            resolved: true,
+          }
+          : undefined,
+      },
+    };
+  });
+
+  return changed ? next : messages;
+}
+
 export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): ChatMessage[] {
   let rebuilt: ChatMessage[] = [];
   const toolMessageMap = new Map<string, string>();
@@ -337,6 +377,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
         role: 'tool',
         content: `Executing tool: ${payload.tool_name || ''}`,
         timestamp: Date.now(),
+        turnId,
         toolInfo,
       };
       rebuilt.push(message);
@@ -412,6 +453,24 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
             rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
           }
         }
+      }
+      continue;
+    }
+
+    if (eventType === 'error.raised') {
+      const errorType = String(payload.error_type || '');
+      const errorMessage = String(payload.user_message || payload.error_message || payload.message || '');
+      rebuilt = finalizePendingToolMessages(rebuilt, {
+        error: errorMessage || (errorType === 'TurnCancelled' ? '该轮次已取消' : '该轮次已结束'),
+        turnId,
+      });
+      if (errorType && errorType !== 'TurnCancelled') {
+        rebuilt.push({
+          id: makeId(),
+          role: 'system',
+          content: errorMessage || errorType,
+          timestamp: Date.now(),
+        });
       }
       continue;
     }

@@ -19,6 +19,7 @@ import {
   truncateResult,
   rebuildMessagesFromEvents,
   rebuildStepsFromEvents,
+  finalizePendingToolMessages,
   findLatestAssistantTurnMessage,
   upsertAssistantTurnMessage,
   getAgentId,
@@ -41,7 +42,7 @@ function isTurnStillActive(events: Record<string, unknown>[]): boolean {
     if (type === 'user_input' || type === 'user.input') {
       active = true;
     } else if (
-      type === 'turn_completed' || type === 'turn_cancelled' || type === 'error' ||
+      type === 'turn_completed' || type === 'turn_cancelled' || type === 'error' || type === 'error.raised' ||
       type === 'agent.step_completed'
     ) {
       active = false;
@@ -334,9 +335,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           break;
         }
         case 'tool_execution': {
-          const { tool_name: toolName, tool_call_id: toolCallId } = event.payload;
+          const { tool_name: toolName, tool_call_id: toolCallId, turn_id: turnId } = event.payload;
           const ti = { name: toolName, arguments: (event.payload.arguments || {}) as Record<string, unknown>, status: 'running' as const };
-          const msg: ChatMessage = { id: makeId(), role: 'tool', content: `Executing tool: ${toolName}`, timestamp: Date.now(), toolInfo: ti };
+          const msg: ChatMessage = { id: makeId(), role: 'tool', content: `Executing tool: ${toolName}`, timestamp: Date.now(), turnId, toolInfo: ti };
           setMessages(prev => [...prev, msg]);
           toolCallMapRef.current.set(toolCallId, msg.id);
           setRightSteps(prev => {
@@ -414,12 +415,20 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             cancelledTurnIdsRef.current.add(cancelledTurnId);
             if (lastStreamingTurnIdRef.current === cancelledTurnId) lastStreamingTurnIdRef.current = null;
           }
+          setMessages(prev => finalizePendingToolMessages(prev, {
+            error: String(event.payload.reason || '该轮次已取消'),
+            turnId: cancelledTurnId || undefined,
+          }));
           setIsTyping(false);
           setTurnActive(false);
           pendingSessionBootstrapIdRef.current = null;
           break;
         }
         case 'error':
+          setMessages(prev => finalizePendingToolMessages(prev, {
+            error: String(event.payload.user_message || event.payload.message || event.payload.error_type || 'Unknown Error'),
+            turnId: event.payload.turn_id || undefined,
+          }));
           addMsg('system', event.payload.user_message || event.payload.message || event.payload.error_type || 'Unknown Error');
           setIsTyping(false);
           setTurnActive(false);
