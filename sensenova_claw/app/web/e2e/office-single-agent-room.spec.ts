@@ -3,6 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
+type AgentSpriteGroup = {
+  idleSprite: { visible: boolean };
+  workingSprite: { visible: boolean };
+  nameLabel: { visible: boolean };
+};
+
 function readCurrentToken(): string {
   try {
     return fs.readFileSync(path.join(os.homedir(), '.sensenova-claw', 'token'), 'utf-8').trim();
@@ -32,7 +38,10 @@ test('单 agent 办公室只应显示当前 agent 的办公室视图', async ({ 
 
   const state = await page.evaluate(() => {
     const scene = window.__phaserGame?.scene?.scenes?.[0];
-    const entries = Array.from(scene?.agentSprites?.entries?.() ?? []).map(([id, group]) => ({
+    const rawEntries = Array.from(
+      (scene?.agentSprites?.entries?.() ?? []) as Iterable<[string, AgentSpriteGroup]>
+    );
+    const entries = rawEntries.map(([id, group]) => ({
       id,
       idleVisible: group.idleSprite.visible,
       workVisible: group.workingSprite.visible,
