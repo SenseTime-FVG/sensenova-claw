@@ -1,19 +1,23 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, type KeyboardEvent } from 'react';
 import {
   Folder, FolderOpen, File, ChevronRight, ChevronDown,
   Loader2, RefreshCw, CheckCircle2,
   Search, Presentation, Cog, Sparkles, Plus,
+  Eye, FolderOpen as FolderOpenIcon,
+  CornerDownLeft, X,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useDrag } from 'react-dnd';
 import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useFilePanel } from '@/contexts/FilePanelContext';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession, useMessages } from '@/contexts/ws';
 import { useFeatureNavItems } from '@/components/layout/DashboardNav';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu';
+import { getFilePreviewType, isPreviewable, isPPTFolder } from './fileTypes';
 
 interface FileItem {
   name: string;
@@ -27,10 +31,12 @@ function norm(p: string): string {
 
 /* ── 文件树节点 ── */
 
-function FileTreeItem({ item, depth = 0, expandToPath }: {
+function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu, onFileClick }: {
   item: FileItem;
   depth?: number;
   expandToPath?: string | null;
+  onContextMenu?: (e: React.MouseEvent, item: FileItem, children: FileItem[] | null) => void;
+  onFileClick?: (item: FileItem) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileItem[] | null>(null);
@@ -92,16 +98,19 @@ function FileTreeItem({ item, depth = 0, expandToPath }: {
     if (isTarget && el) (itemRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
   }, [dragRef, isTarget]);
 
-  const toggleFolder = async () => {
-    if (!isFolder) return;
-    if (expanded) {
-      userCollapsed.current = true;
-      setExpanded(false);
-      return;
+  const handleClick = async () => {
+    if (isFolder) {
+      if (expanded) {
+        userCollapsed.current = true;
+        setExpanded(false);
+        return;
+      }
+      userCollapsed.current = false;
+      if (!children) await loadChildren();
+      setExpanded(true);
+    } else {
+      onFileClick?.(item);
     }
-    userCollapsed.current = false;
-    if (!children) await loadChildren();
-    setExpanded(true);
   };
 
   return (
@@ -110,10 +119,12 @@ function FileTreeItem({ item, depth = 0, expandToPath }: {
         ref={setRefs}
         className={cn(
           'flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-muted cursor-grab active:cursor-grabbing text-sm transition-colors',
+          !isFolder && 'cursor-pointer',
           isTarget && 'bg-primary/10 text-primary font-semibold ring-1 ring-primary/30',
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
-        onClick={toggleFolder}
+        onClick={handleClick}
+        onContextMenu={(e) => onContextMenu?.(e, item, children)}
       >
         {isFolder && (expanded
           ? <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
@@ -135,7 +146,7 @@ function FileTreeItem({ item, depth = 0, expandToPath }: {
       {isFolder && expanded && children && (
         <div>
           {children.map(child => (
-            <FileTreeItem key={child.path} item={child} depth={depth + 1} expandToPath={expandToPath} />
+            <FileTreeItem key={child.path} item={child} depth={depth + 1} expandToPath={expandToPath} onContextMenu={onContextMenu} onFileClick={onFileClick} />
           ))}
           {children.length === 0 && (
             <div className="text-[10px] text-muted-foreground/50 py-1" style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}>
@@ -204,10 +215,14 @@ const FEATURE_ICONS: Record<string, React.ReactNode> = {
   '+ 创建': <Plus className="w-4 h-4" />,
 };
 
+const pptEntry = { path: '/ppt', label: 'PPT' };
+
 function AIWorkspace() {
-  const { currentSessionId, taskProgress } = useChatSession();
+  const { currentSessionId } = useSession();
+  const { taskProgress } = useMessages();
   const featureNavItems = useFeatureNavItems();
   const mergedProgress = useMemo(() => mergeProgress(taskProgress), [taskProgress]);
+  const allItems = useMemo(() => [pptEntry, ...featureNavItems], [featureNavItems]);
 
   const isInConversation = Boolean(currentSessionId);
   const hasProgress = mergedProgress.length > 0;
@@ -260,7 +275,7 @@ function AIWorkspace() {
         ) : (
           /* ── 空闲：显示功能入口 ── */
           <div className="space-y-1.5 pt-2">
-            {featureNavItems.map((item) => (
+            {allItems.map((item) => (
               <Link
                 key={item.path}
                 href={item.path}
@@ -296,9 +311,18 @@ function bestMatchRoot(roots: FileItem[], target: string | null): string | null 
 }
 
 export function GlobalFilePanel() {
-  const { focusPath, focusGeneration } = useFilePanel();
+  const { focusPath, focusGeneration, openToPath } = useFilePanel();
   const localTreeKey = `${focusPath ?? 'manual'}-${focusGeneration}`;
   const [roots, setRoots] = useState<FileItem[]>([]);
+  const [pathInputVisible, setPathInputVisible] = useState(false);
+  const [pathInputValue, setPathInputValue] = useState('');
+  const [pathInputError, setPathInputError] = useState<string | null>(null);
+  const pathInputRef = useRef<HTMLInputElement>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
 
   const loadRoots = useCallback(async () => {
     try {
@@ -313,6 +337,151 @@ export function GlobalFilePanel() {
 
   const bestRoot = bestMatchRoot(roots, focusPath);
 
+  /* ── 路径输入定位 ── */
+  const togglePathInput = useCallback(() => {
+    setPathInputVisible(v => {
+      if (!v) {
+        setPathInputValue(focusPath ?? '');
+        setPathInputError(null);
+        setTimeout(() => pathInputRef.current?.select(), 0);
+      }
+      return !v;
+    });
+  }, [focusPath]);
+
+  const handlePathSubmit = useCallback(async () => {
+    const raw = pathInputValue.trim();
+    if (!raw) return;
+    setPathInputError(null);
+    try {
+      // 验证路径是否存在
+      const res = await authFetch(`${API_BASE}/api/files?path=${encodeURIComponent(raw)}`);
+      if (res.ok) {
+        // 路径是文件夹，直接定位
+        openToPath(raw);
+        setPathInputVisible(false);
+        return;
+      }
+    } catch { /* ignore */ }
+    // 尝试把路径当文件处理（定位到其父目录并高亮该文件）
+    try {
+      const parent = raw.replace(/[\\/][^\\/]+$/, '');
+      if (parent && parent !== raw) {
+        const res = await authFetch(`${API_BASE}/api/files?path=${encodeURIComponent(parent)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const items: FileItem[] = data.items || [];
+          const normRaw = norm(raw);
+          const found = items.some(i => norm(i.path) === normRaw);
+          if (found) {
+            openToPath(raw);
+            setPathInputVisible(false);
+            return;
+          }
+        }
+      }
+    } catch { /* ignore */ }
+    setPathInputError('路径不存在');
+  }, [pathInputValue, openToPath]);
+
+  const handlePathKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handlePathSubmit();
+    } else if (e.key === 'Escape') {
+      setPathInputVisible(false);
+    }
+  }, [handlePathSubmit]);
+
+  const handleFileClick = useCallback((item: FileItem) => {
+    if (isPreviewable(item.name)) {
+      const previewType = getFilePreviewType(item.name);
+      window.dispatchEvent(new CustomEvent('sensenova-claw:open-file-preview', {
+        detail: { path: item.path, type: previewType },
+      }));
+    } else {
+      const downloadUrl = `${API_BASE}/api/files/download?path=${encodeURIComponent(item.path)}&inline=false`;
+      window.open(downloadUrl, '_blank');
+    }
+  }, []);
+
+  const handleContextMenu = useCallback(async (
+    e: React.MouseEvent,
+    item: FileItem,
+    loadedChildren: FileItem[] | null,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const items: ContextMenuItem[] = [];
+
+    if (item.type === 'folder') {
+      // 检测是否为 PPT 文件夹
+      let isPPT = false;
+      if (loadedChildren !== null) {
+        isPPT = isPPTFolder(loadedChildren);
+      }
+
+      if (isPPT) {
+        items.push({
+          label: '探索 (Explore)',
+          icon: <Eye className="w-3.5 h-3.5" />,
+          onClick: () => {
+            window.dispatchEvent(new CustomEvent('sensenova-claw:open-slide-preview', {
+              detail: { dir: item.path, isAbsolute: true },
+            }));
+          },
+        });
+      }
+
+      items.push({
+        label: '在文件夹中打开',
+        icon: <FolderOpenIcon className="w-3.5 h-3.5" />,
+        onClick: async () => {
+          try {
+            await authFetch(`${API_BASE}/api/files/open-in-explorer`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: item.path }),
+            });
+          } catch { /* ignore */ }
+        },
+      });
+    } else {
+      // 文件
+      const previewType = getFilePreviewType(item.name);
+      if (isPreviewable(item.name)) {
+        items.push({
+          label: '探索 (Explore)',
+          icon: <Eye className="w-3.5 h-3.5" />,
+          onClick: () => {
+            window.dispatchEvent(new CustomEvent('sensenova-claw:open-file-preview', {
+              detail: { path: item.path, type: previewType },
+            }));
+          },
+        });
+      }
+
+      items.push({
+        label: '在文件夹中打开',
+        icon: <FolderOpenIcon className="w-3.5 h-3.5" />,
+        onClick: async () => {
+          try {
+            await authFetch(`${API_BASE}/api/files/open-in-explorer`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: item.path }),
+            });
+          } catch { /* ignore */ }
+        },
+      });
+    }
+
+    if (items.length > 0) {
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
+    }
+  }, []);
+
   return (
     <ResizablePanelGroup orientation="vertical" className="h-full gap-2.5">
       {/* 文件区 */}
@@ -323,10 +492,50 @@ export function GlobalFilePanel() {
               <div className="w-1.5 h-1.5 rounded-full bg-teal-500/60" />
               <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-[0.15em]">文件区</span>
             </div>
-            <button onClick={loadRoots} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-all">
-              <RefreshCw className="w-3 h-3" />
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={togglePathInput}
+                title="输入路径定位"
+                className={cn(
+                  'p-1.5 rounded-lg hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-all',
+                  pathInputVisible && 'bg-muted text-foreground',
+                )}
+              >
+                <CornerDownLeft className="w-3 h-3" />
+              </button>
+              <button onClick={loadRoots} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-all">
+                <RefreshCw className="w-3 h-3" />
+              </button>
+            </div>
           </div>
+          {pathInputVisible && (
+            <div className="px-2 py-1.5 border-b border-border/40 bg-muted/30">
+              <div className="flex items-center gap-1">
+                <input
+                  ref={pathInputRef}
+                  type="text"
+                  value={pathInputValue}
+                  onChange={e => { setPathInputValue(e.target.value); setPathInputError(null); }}
+                  onKeyDown={handlePathKeyDown}
+                  placeholder="输入绝对路径，回车定位"
+                  className={cn(
+                    'flex-1 min-w-0 text-xs bg-background border rounded-md px-2 py-1 outline-none transition-colors',
+                    pathInputError ? 'border-destructive' : 'border-border focus:border-primary',
+                  )}
+                  autoFocus
+                />
+                <button
+                  onClick={() => setPathInputVisible(false)}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground shrink-0"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              {pathInputError && (
+                <p className="text-[10px] text-destructive mt-0.5 px-1">{pathInputError}</p>
+              )}
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto py-1">
             <div className="space-y-0.5 px-1" key={localTreeKey}>
               {roots.map(r => (
@@ -334,6 +543,8 @@ export function GlobalFilePanel() {
                   key={r.path}
                   item={r}
                   expandToPath={bestRoot === norm(r.path) ? focusPath : null}
+                  onContextMenu={handleContextMenu}
+                  onFileClick={handleFileClick}
                 />
               ))}
               {roots.length === 0 && (
@@ -353,6 +564,15 @@ export function GlobalFilePanel() {
       <ResizablePanel id="ai-workspace" defaultSize="50%" minSize="15%" className="rounded-[var(--panel-radius)] border border-border/40 overflow-hidden bg-background shadow-sm">
         <AIWorkspace />
       </ResizablePanel>
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </ResizablePanelGroup>
   );
 }

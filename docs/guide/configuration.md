@@ -169,7 +169,9 @@ tools:
   fetch_url:
     enabled: true
     # 请求超时（秒）
-    timeout: 30
+    timeout: 15
+    # 文本响应最大返回大小（MB）
+    max_response_mb: 10
 
   file_operations:
     enabled: true
@@ -205,7 +207,8 @@ tools:
 | `research_union` | `min_valid_evidence` | int | `6` | 最少有效证据条数（title+link） |
 | `research_union` | `union_timeout` | int | `90` | union 补充阶段超时（秒） |
 | `fetch_url` | `enabled` | bool | `true` | 是否启用网页抓取 |
-| `fetch_url` | `timeout` | int | `30` | 请求超时时间（秒） |
+| `fetch_url` | `timeout` | int | `15` | 请求超时时间（秒） |
+| `fetch_url` | `max_response_mb` | int | `10` | 文本响应最大返回大小（MB） |
 | `file_operations` | `enabled` | bool | `true` | 是否启用文件读写 |
 
 #### 搜索工具 API Key 获取方式
@@ -236,6 +239,9 @@ tools:
 
     # 权限确认超时时间（秒），超时默认拒绝
     confirmation_timeout: 30
+
+    # 超时后的行为策略：reject（拒绝）| approve（批准）| block（无限等待）
+    timeout_action: reject
 ```
 
 | 配置项 | 类型 | 默认值 | 说明 |
@@ -243,6 +249,7 @@ tools:
 | `enabled` | bool | `true` | 是否启用工具执行前的权限确认 |
 | `auto_approve_levels` | list | `["safe"]` | 自动批准的安全等级 |
 | `confirmation_timeout` | int | `30` | 用户确认超时时间（秒） |
+| `timeout_action` | string | `"reject"` | 超时策略：`reject` 自动拒绝、`approve` 自动批准、`block` 无限等待 |
 
 ### cron 段 — 定时任务配置
 
@@ -423,8 +430,7 @@ tools:
     auto_approve_levels:
       - safe
     confirmation_timeout: 30
-
-# --- 定时任务 ---
+    timeout_action: reject
 cron:
   enabled: false
 
@@ -461,7 +467,7 @@ llm:
 - `${VAR_NAME}`：从环境变量读取
 - `${secret:sensenova_claw/<dotted_path>}`：从系统 keyring 读取
 - 第一版敏感字段默认覆盖 `llm.providers.*.api_key`、`tools.*.api_key`、`tools.email.password`、`plugins.feishu.app_secret`、`plugins.wecom.secret`
-- 如果 keyring backend 不可用，secret 写入会失败，不会自动回退到明文
+- 如果 keyring backend 不可用或调用失败，系统会回退到本地文件 `~/.sensenova-claw/data/secret/secret.yml`
 
 ## 明文迁移到 keyring
 
@@ -483,6 +489,7 @@ POST /api/config/migrate-secrets
 - 已经是 `${secret:...}` 的值会跳过
 - `${ENV}` 环境变量引用会跳过
 - 迁移成功后，`config.yml` 中的明文会改写成 `${secret:sensenova_claw/<dotted_path>}`
+- 迁移后的真实值优先写入 keyring；如果 keyring 不可用或调用失败，会写入本地回退文件 `~/.sensenova-claw/data/secret/secret.yml`
 
 ## 下一步
 

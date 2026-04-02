@@ -1,18 +1,25 @@
 """通用文件列表 API - 浏览服务端文件系统目录 & 文件上传 & 文件下载"""
 from __future__ import annotations
 
+import asyncio
 import base64
+import hashlib
 import logging
 import mimetypes
 import os
 import platform
+import re
 import string
+import subprocess
 import time
 from pathlib import Path
 from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File as FastAPIFile
+from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
+
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +28,7 @@ router = APIRouter(prefix="/api", tags=["files"])
 
 def _resolve_workspace_dir(request: Request) -> Path:
     """获取 workspace 根目录"""
-    home = getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw")
+    home = getattr(request.app.state, "sensenova_claw_home", "") or str(default_sensenova_claw_home())
     return Path(home)
 
 
@@ -64,6 +71,10 @@ async def list_roots(request: Request):
         roots.append({"name": f"Home ({Path.home().name})", "path": home, "type": "folder"})
 
     workspace = _resolve_workspace_dir(request)
+    sensenova_claw_home = str(workspace)
+    if os.path.isdir(sensenova_claw_home):
+        roots.append({"name": "Sensenova-Claw", "path": sensenova_claw_home, "type": "folder"})
+
     workdir = str(workspace / "workdir")
     if os.path.isdir(workdir):
         roots.append({"name": "Agent 工作区", "path": workdir, "type": "folder"})
@@ -102,10 +113,11 @@ async def list_files(
     if not resolved.is_dir():
         raise HTTPException(400, f"不是目录: {path}")
 
+    sensenova_claw_dir = workspace.name  # ".sensenova-claw"
     items = []
     try:
         for entry in sorted(resolved.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
-            if entry.name.startswith('.'):
+            if entry.name.startswith('.') and entry.name != sensenova_claw_dir:
                 continue
             item = {
                 "name": entry.name,
@@ -132,18 +144,36 @@ def _uploads_dir(request: Request) -> Path:
     return uploads
 
 
+def _next_available_path(target: Path) -> Path:
+    """数字递增查找可用文件名: file.txt -> file_1.txt -> file_2.txt"""
+    if not target.exists():
+        return target
+    stem = target.stem
+    suffix = target.suffix
+    parent = target.parent
+    counter = 1
+    while True:
+        candidate = parent / f"{stem}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
 @router.post("/files/upload")
 async def upload_files(
     request: Request,
     files: list[UploadFile] = FastAPIFile(...),
+    agent_id: str = Form("default"),
 ):
     """接收文件上传，支持单文件、多文件和文件夹（webkitdirectory）。
 
+    文件保存到 workdir/{agent_id}/ 目录，同名文件使用数字递增后缀。
     文件夹上传时 filename 包含相对路径（如 ``mydir/sub/file.txt``），
-    服务端会在 uploads 目录下保留对应的目录结构。
+    服务端会在 workdir 目录下保留对应的目录结构。
     """
-    logger.info("收到上传请求: %d 个文件", len(files))
-    uploads = _uploads_dir(request)
+    logger.info("收到上传请求: %d 个文件, agent_id=%s", len(files), agent_id)
+    workdir = _resolve_agent_workdir(request, agent_id)
+    workdir.mkdir(parents=True, exist_ok=True)
     results = []
 
     for file in files:
@@ -159,16 +189,13 @@ async def upload_files(
             continue
 
         # 构建目标路径（保留目录结构）
-        target = uploads / Path(*parts)
+        target = workdir / Path(*parts)
 
         # 确保父目录存在
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        # 同名文件加时间戳后缀
-        if target.exists():
-            stem = target.stem
-            suffix = target.suffix
-            target = target.parent / f"{stem}_{int(time.time() * 1000)}{suffix}"
+        # 同名文件使用数字递增后缀
+        target = _next_available_path(target)
 
         try:
             content = await file.read()
@@ -269,12 +296,24 @@ async def list_workdir_slides(
         raise HTTPException(404, f"目录不存在: {dir}")
 
     slides: list[dict] = []
-    for entry in sorted(resolved.iterdir(), key=lambda e: e.name):
+    # 先扫描指定目录，找不到 HTML 时再扫描 pages/ 子目录
+    scan_dir = resolved
+    for entry in sorted(scan_dir.iterdir(), key=lambda e: e.name):
         if entry.is_file() and entry.suffix.lower() == ".html":
             slides.append({
                 "name": entry.name,
                 "path": str(entry.relative_to(workdir)).replace("\\", "/"),
             })
+
+    if not slides:
+        pages_dir = resolved / "pages"
+        if pages_dir.is_dir():
+            for entry in sorted(pages_dir.iterdir(), key=lambda e: e.name):
+                if entry.is_file() and entry.suffix.lower() == ".html":
+                    slides.append({
+                        "name": entry.name,
+                        "path": str(entry.relative_to(workdir)).replace("\\", "/"),
+                    })
 
     return {"dir": dir, "slides": slides}
 
@@ -362,6 +401,7 @@ async def serve_dir_file(request: Request, dir_token: str, filepath: str):
 async def download_file(
     request: Request,
     path: str = Query(..., description="要下载的文件绝对路径"),
+    inline: bool = Query(False, description="true 时内联显示，不触发下载"),
 ):
     """下载/预览指定路径的文件，Content-Type 根据扩展名自动推断"""
     workspace = _resolve_workspace_dir(request)
@@ -379,6 +419,8 @@ async def download_file(
         raise HTTPException(404, f"文件不存在: {path}")
 
     media_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    if inline:
+        return FileResponse(path=str(resolved), media_type=media_type)
     return FileResponse(
         path=str(resolved),
         filename=resolved.name,
@@ -400,3 +442,217 @@ async def delete_upload(request: Request, filename: str):
         raise HTTPException(403, "路径非法")
     target.unlink()
     return {"ok": True}
+
+
+# ── 在系统文件管理器中打开 ──
+
+# Windows 系统关键目录拒绝列表
+_WINDOWS_DENY_PREFIXES = [
+    "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)",
+    "C:\\ProgramData\\Microsoft",
+]
+# Unix 系统关键目录拒绝列表
+_UNIX_DENY_PREFIXES = ["/etc", "/root", "/var/run", "/proc", "/sys", "/boot", "/sbin"]
+
+
+def _is_explorer_path_allowed(target: Path, workspace: Path) -> bool:
+    """open-in-explorer 专用路径校验，比通用校验更严格"""
+    if not _is_path_allowed(target, workspace):
+        return False
+    resolved_str = str(target.resolve())
+    if platform.system() == "Windows":
+        for prefix in _WINDOWS_DENY_PREFIXES:
+            if resolved_str.lower().startswith(prefix.lower()):
+                return False
+    else:
+        for prefix in _UNIX_DENY_PREFIXES:
+            if resolved_str.startswith(prefix):
+                return False
+    return True
+
+
+class OpenInExplorerRequest(BaseModel):
+    path: str
+
+
+@router.post("/files/open-in-explorer")
+async def open_in_explorer(request: Request, body: OpenInExplorerRequest):
+    """在系统文件管理器中打开指定文件/文件夹的位置"""
+    workspace = _resolve_workspace_dir(request)
+    target = Path(body.path)
+
+    try:
+        resolved = target.resolve()
+    except (OSError, ValueError):
+        raise HTTPException(400, f"无效路径: {body.path}")
+
+    if not _is_explorer_path_allowed(resolved, workspace):
+        raise HTTPException(403, f"无权访问: {body.path}")
+
+    if not resolved.exists():
+        raise HTTPException(404, f"路径不存在: {body.path}")
+
+    try:
+        system = platform.system()
+        if system == "Windows":
+            if resolved.is_file():
+                subprocess.Popen(["explorer", "/select,", str(resolved)])
+            else:
+                subprocess.Popen(["explorer", str(resolved)])
+        elif system == "Darwin":
+            subprocess.Popen(["open", "-R", str(resolved)])
+        else:
+            dir_path = str(resolved) if resolved.is_dir() else str(resolved.parent)
+            subprocess.Popen(["xdg-open", dir_path])
+    except Exception as exc:
+        logger.error("打开文件管理器失败: %s", exc)
+        raise HTTPException(500, f"打开文件管理器失败: {exc}")
+
+    return {"success": True}
+
+# ---------------------------------------------------------------------------
+# 文件存在性检查
+# ---------------------------------------------------------------------------
+
+def _sanitize_path_parts(raw_path: str) -> list[str]:
+    """将相对路径字符串拆分为安全的路径组件列表，过滤空段和 '..'"""
+    return [p for p in raw_path.replace("\\", "/").split("/") if p and p != ".."]
+
+
+def _resolve_agent_workdir(request: Request, agent_id: str) -> Path:
+    """获取指定 agent 的 workdir 绝对路径"""
+    # 防止路径穿越：仅允许字母、数字、-、_、.
+    if not re.match(r'^[a-zA-Z0-9_.\-]+$', agent_id):
+        agent_id = "default"
+    home = getattr(request.app.state, "sensenova_claw_home", "") or str(default_sensenova_claw_home())
+    return Path(home) / "workdir" / agent_id
+
+
+def _sha256_file(filepath: Path) -> str:
+    """计算文件的 SHA-256 哈希"""
+    h = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class FileCheckRequest(BaseModel):
+    name: str
+    size: int
+    hash: str | None = None
+    agent_id: str = "default"
+
+
+class FileCheckResponse(BaseModel):
+    exists: bool
+    path: str = ""
+    need_hash: bool = False
+
+
+@router.post("/files/check")
+async def check_file(request: Request, body: FileCheckRequest) -> FileCheckResponse:
+    """检查文件是否已存在于 agent workdir 中。
+
+    比对策略：先比文件名+大小，匹配后再比 SHA-256 哈希。
+    """
+    workdir = _resolve_agent_workdir(request, body.agent_id)
+    # 防止路径穿越
+    parts = _sanitize_path_parts(body.name)
+    if not parts:
+        return FileCheckResponse(exists=False)
+    target = workdir / Path(*parts)
+
+    if not target.exists() or not target.is_file():
+        return FileCheckResponse(exists=False)
+
+    try:
+        file_size = target.stat().st_size
+    except OSError:
+        return FileCheckResponse(exists=False)
+
+    if file_size != body.size:
+        return FileCheckResponse(exists=False)
+
+    # name + size 匹配，需要 hash 精确比对
+    if not body.hash:
+        return FileCheckResponse(exists=False, need_hash=True)
+
+    file_hash = await asyncio.to_thread(_sha256_file, target)
+    if file_hash == body.hash:
+        return FileCheckResponse(exists=True, path=str(target.resolve()))
+    return FileCheckResponse(exists=False)
+
+
+class DirFileItem(BaseModel):
+    rel_path: str
+    size: int
+    hash: str | None = None
+
+
+class DirCheckRequest(BaseModel):
+    folder_name: str
+    files: list[DirFileItem]
+    agent_id: str = "default"
+
+
+class DirCheckResponse(BaseModel):
+    exists: bool
+    path: str = ""
+    need_hash: bool = False
+
+
+@router.post("/files/check-dir")
+async def check_dir(request: Request, body: DirCheckRequest) -> DirCheckResponse:
+    """检查文件夹是否已完整存在于 agent workdir 中。
+
+    全量匹配策略：所有文件的 name+size+hash 必须全部匹配才返回 exists=True。
+    """
+    workdir = _resolve_agent_workdir(request, body.agent_id)
+    # 空文件列表视为不匹配
+    if not body.files:
+        return DirCheckResponse(exists=False)
+    # 防止路径穿越
+    folder_parts = _sanitize_path_parts(body.folder_name)
+    if not folder_parts:
+        return DirCheckResponse(exists=False)
+    folder = workdir / Path(*folder_parts)
+
+    if not folder.exists() or not folder.is_dir():
+        return DirCheckResponse(exists=False)
+
+    # 逐个检查文件
+    all_size_match = True
+    for file_item in body.files:
+        parts = _sanitize_path_parts(file_item.rel_path)
+        if not parts:
+            return DirCheckResponse(exists=False)
+        target = folder / Path(*parts)
+
+        if not target.exists() or not target.is_file():
+            return DirCheckResponse(exists=False)
+
+        try:
+            if target.stat().st_size != file_item.size:
+                all_size_match = False
+                break
+        except OSError:
+            return DirCheckResponse(exists=False)
+
+    if not all_size_match:
+        return DirCheckResponse(exists=False)
+
+    # name+size 全部匹配，检查是否需要 hash
+    has_all_hashes = all(f.hash for f in body.files)
+    if not has_all_hashes:
+        return DirCheckResponse(exists=False, need_hash=True)
+
+    # 逐个比对 hash
+    for file_item in body.files:
+        parts = _sanitize_path_parts(file_item.rel_path)
+        target = folder / Path(*parts)
+        file_hash = await asyncio.to_thread(_sha256_file, target)
+        if file_hash != file_item.hash:
+            return DirCheckResponse(exists=False)
+
+    return DirCheckResponse(exists=True, path=str(folder.resolve()))

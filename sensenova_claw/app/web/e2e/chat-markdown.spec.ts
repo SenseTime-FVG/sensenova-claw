@@ -8,7 +8,28 @@ type MockWindow = Window & {
   WebSocket: typeof globalThis.WebSocket;
 };
 
+const E2E_TOKEN = 'e2e-sensenova-claw-token';
+
+async function loginForMarkdownTests(page: import('@playwright/test').Page) {
+  await page.goto('/login');
+  await page.getByLabel('Token').fill(E2E_TOKEN);
+  await page.getByRole('button', { name: '验证 Token' }).click();
+  await page.context().addCookies([
+    { name: 'sensenova_claw_token', value: E2E_TOKEN, domain: 'localhost', path: '/' },
+    { name: 'sensenova_claw_token', value: E2E_TOKEN, domain: '127.0.0.1', path: '/' },
+  ]);
+  await page.evaluate(() => {
+    sessionStorage.setItem('auth_just_verified', '1');
+    document.cookie = 'sensenova_claw_token=e2e-sensenova-claw-token; path=/';
+  });
+}
+
 function mockAuthAndWebSocket() {
+  document.cookie = 'sensenova_claw_token=e2e-sensenova-claw-token; path=/';
+  localStorage.setItem('access_token', 'e2e-access-token');
+  localStorage.setItem('refresh_token', 'e2e-refresh-token');
+  sessionStorage.setItem('auth_just_verified', '1');
+
   class MockWebSocket {
     static readonly CONNECTING = 0;
     static readonly OPEN = 1;
@@ -97,6 +118,14 @@ test.describe('chat markdown rendering（mock websocket）', () => {
       });
     });
 
+    await page.route('**/api/auth/verify-token', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ authenticated: true }),
+      });
+    });
+
     await page.route('**/api/auth/status', async (route) => {
       await route.fulfill({
         status: 200,
@@ -110,6 +139,22 @@ test.describe('chat markdown rendering（mock websocket）', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ configured: true }),
+      });
+    });
+
+    await page.route('**/api/custom-pages', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ pages: [] }),
+      });
+    });
+
+    await page.route('**/api/todolist/*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [] }),
       });
     });
 
@@ -135,6 +180,13 @@ test.describe('chat markdown rendering（mock websocket）', () => {
               last_active: Date.now() / 1000,
               status: 'active',
               meta: JSON.stringify({ title: 'Markdown History Session' }),
+            },
+            {
+              session_id: 'sess_md_think_history',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: 'Think History Session' }),
             },
           ],
         }),
@@ -169,6 +221,15 @@ test.describe('chat markdown rendering（mock websocket）', () => {
               },
             ],
           }
+        : url.includes('/api/sessions/sess_md_think_history/messages')
+          ? {
+              messages: [
+                {
+                  role: 'assistant',
+                  content: '<think>先梳理上下文\\n再决定回答结构</think>这是历史会话里的最终答案。',
+                },
+              ],
+            }
         : { messages: [] };
 
       await route.fulfill({
@@ -346,11 +407,173 @@ test.describe('chat markdown rendering（mock websocket）', () => {
   });
 
   test('session 详情页也应渲染 markdown 且忽略原始 html', async ({ page }) => {
+    await loginForMarkdownTests(page);
     await page.goto('/sessions/sess_md_history');
 
     await expect(page.getByRole('heading', { level: 1, name: '历史摘要' })).toBeVisible();
     await expect(page.locator('table')).toBeVisible();
     await expect(page.locator('input[type="checkbox"]')).toBeChecked();
     await expect(page.getByTestId('session-evil-html')).toHaveCount(0);
+  });
+
+  test('session 详情页应把 think 卡片渲染在 assistant 列内而不是贴左侧', async ({ page }) => {
+    await loginForMarkdownTests(page);
+    await page.goto('/sessions/sess_md_think_history');
+
+    const thinkToggle = page.getByTestId('assistant-think-toggle');
+    const answerText = page.getByText('这是历史会话里的最终答案。');
+    await expect(thinkToggle).toBeVisible();
+    await expect(answerText).toBeVisible();
+    await expect(page.getByTestId('assistant-think-content')).toBeHidden();
+
+    const toggleBox = await thinkToggle.boundingBox();
+    const answerBox = await answerText.boundingBox();
+    if (!toggleBox || !answerBox) {
+      throw new Error('无法获取 think 卡片或答案内容的位置');
+    }
+    expect(Math.abs(toggleBox.x - answerBox.x)).toBeLessThan(24);
+  });
+
+  test('chat 页面应只保留同一 turn 的最终 assistant 输出', async ({ page }) => {
+    await page.goto('/chat');
+    await page.waitForFunction(() => Boolean((window as unknown as MockWindow).__mockWs));
+
+    await page.evaluate(() => {
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'session_created',
+        session_id: 'sess_md_dedup_live',
+        payload: { created_at: Date.now() / 1000 },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'llm_result',
+        session_id: 'sess_md_dedup_live',
+        payload: {
+          turn_id: 'turn_dedup_live',
+          content: '工具前草稿',
+          tool_calls: [{ id: 'tc_live_1', name: 'serper_search', arguments: { q: 'multi agent' } }],
+        },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'tool_execution',
+        session_id: 'sess_md_dedup_live',
+        payload: {
+          turn_id: 'turn_dedup_live',
+          tool_call_id: 'tc_live_1',
+          tool_name: 'serper_search',
+          arguments: { q: 'multi agent' },
+        },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'tool_result',
+        session_id: 'sess_md_dedup_live',
+        payload: {
+          turn_id: 'turn_dedup_live',
+          tool_call_id: 'tc_live_1',
+          tool_name: 'serper_search',
+          result: { items: [{ title: 'A' }] },
+          success: true,
+        },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'llm_result',
+        session_id: 'sess_md_dedup_live',
+        payload: {
+          turn_id: 'turn_dedup_live',
+          content: '最终答案只显示一次',
+        },
+        timestamp: Date.now() / 1000,
+      });
+
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'turn_completed',
+        session_id: 'sess_md_dedup_live',
+        payload: {
+          turn_id: 'turn_dedup_live',
+          final_response: '最终答案只显示一次',
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByText('最终答案只显示一次', { exact: true })).toHaveCount(1);
+    await expect(page.getByText('工具前草稿', { exact: true })).toHaveCount(0);
+  });
+
+  test('chat 页面历史重建时不应把同一 turn 的草稿和最终答案同时渲染', async ({ page }) => {
+    await page.goto('/chat');
+    await page.waitForFunction(() => Boolean((window as unknown as MockWindow).__mockWs));
+
+    await page.evaluate(() => {
+      (window as unknown as MockWindow).__mockWs!.emit({
+        type: 'session_loaded',
+        session_id: 'sess_md_history',
+        payload: {
+          events: [
+            {
+              event_type: 'user.input',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({ content: '帮我查资料' }),
+            },
+            {
+              event_type: 'llm.call_result',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({
+                response: {
+                  content: '历史草稿',
+                  tool_calls: [{ id: 'tc_history_1', name: 'serper_search', arguments: { q: 'multi agent' } }],
+                },
+              }),
+            },
+            {
+              event_type: 'tool.call_requested',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({
+                tool_call_id: 'tc_history_1',
+                tool_name: 'serper_search',
+                arguments: { q: 'multi agent' },
+              }),
+            },
+            {
+              event_type: 'tool.call_result',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({
+                tool_call_id: 'tc_history_1',
+                tool_name: 'serper_search',
+                result: { items: [{ title: 'A' }] },
+                success: true,
+              }),
+            },
+            {
+              event_type: 'llm.call_result',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({
+                response: {
+                  content: '历史最终答案',
+                },
+              }),
+            },
+            {
+              event_type: 'agent.step_completed',
+              turn_id: 'turn_dedup_history',
+              payload_json: JSON.stringify({
+                result: { content: '历史最终答案' },
+              }),
+            },
+          ],
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await expect(page.getByText('历史最终答案', { exact: true })).toHaveCount(1);
+    await expect(page.getByText('历史草稿', { exact: true })).toHaveCount(0);
   });
 });

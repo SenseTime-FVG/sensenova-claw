@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -46,7 +47,7 @@ from sensenova_claw.platform.config.workspace import (
     ensure_agent_workspace,
     resolve_sensenova_claw_home,
 )
-from sensenova_claw.platform.secrets.store import KeyringSecretStore
+from sensenova_claw.platform.secrets.store import build_default_secret_store, describe_secret_store_status
 from sensenova_claw.interfaces.http import agents, tools, gateway, skills, workspace, config_api, sessions
 from sensenova_claw.interfaces.http import cron_api, notification_api, proactive_api
 
@@ -83,8 +84,13 @@ class Services:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    secret_store = getattr(config, "_secret_store", None) or KeyringSecretStore()
+    secret_store = getattr(config, "_secret_store", None) or build_default_secret_store()
     config._secret_store = secret_store
+    keyring_available, secret_store_message = describe_secret_store_status(secret_store)
+    if keyring_available:
+        logger.info(secret_store_message)
+    else:
+        logger.warning(secret_store_message)
 
     # 解析 SENSENOVA_CLAW_HOME（默认 ~/.sensenova-claw）
     from sensenova_claw.platform.config.config import PROJECT_ROOT
@@ -99,6 +105,9 @@ async def lifespan(app: FastAPI):
 
     repo = Repository(db_path=db_path)
     await repo.init()
+    cancelled_stale_turns = await repo.cancel_stale_started_turns()
+    if cancelled_stale_turns:
+        logger.warning("Recovered %s stale started turns after restart", cancelled_stale_turns)
 
     # 会话维护：清理过期会话
     maintenance = SessionMaintenance(repo=repo)
@@ -185,10 +194,8 @@ async def lifespan(app: FastAPI):
             db_path=mem_db_path,
             llm_factory=llm_factory,
         )
-        await memory_manager.sync_index()
-
-        # 为已有的 chunks 生成嵌入向量
-        await memory_manager.embed_pending_chunks()
+        # 后台异步同步索引 + 嵌入，避免阻塞启动（sync_index 内部已包含 embed_pending_chunks）
+        asyncio.create_task(memory_manager.sync_index())
 
         if mem_config.search.enabled:
             tool_registry.register(MemorySearchTool(memory_manager))
@@ -222,9 +229,9 @@ async def lifespan(app: FastAPI):
         jsonl_writer=jsonl_writer,
         context_compressor=context_compressor,
     )
-    llm_runtime = LLMRuntime(bus_router=bus_router, factory=llm_factory)
+    llm_runtime = LLMRuntime(bus_router=bus_router, factory=llm_factory, state_store=state_store)
     tool_runtime = ToolRuntime(bus_router=bus_router, registry=tool_registry,
-                               agent_registry=agent_registry)
+                               agent_registry=agent_registry, state_store=state_store)
     agent_message_coordinator = AgentMessageCoordinator(
         bus=bus,
         repo=repo,
@@ -233,7 +240,12 @@ async def lifespan(app: FastAPI):
     )
     title_runtime = TitleRuntime(bus=bus, repo=repo, agent_registry=agent_registry)
 
-    gateway = Gateway(publisher=publisher, repo=repo, agent_registry=agent_registry)
+    gateway = Gateway(
+        publisher=publisher,
+        repo=repo,
+        agent_registry=agent_registry,
+        bus_router=bus_router,
+    )
     custom_page_service.gateway = gateway
 
     # v1.1: 初始化 ProactiveRuntime（主动任务）
@@ -260,6 +272,8 @@ async def lifespan(app: FastAPI):
             coordinator=agent_message_coordinator,
             timeout=float(config.get("delegation.default_timeout", 300)),
             default_max_retries=int(config.get("delegation.retry.max_retries", 0)),
+            max_tool_calls=int(config.get("delegation.max_tool_calls", 30)),
+            max_llm_calls=int(config.get("delegation.max_llm_calls", 15)),
         )
         tool_registry.register(send_message_tool)
 
@@ -292,7 +306,6 @@ async def lifespan(app: FastAPI):
     await heartbeat_runtime.start()
 
     # 配置变更监听
-    import asyncio
     asyncio.create_task(llm_factory.start_config_listener(bus))
     asyncio.create_task(agent_registry.start_config_listener(bus, config))
     if memory_manager:
@@ -375,9 +388,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Sensenova-Claw Backend", version="0.1.0", lifespan=lifespan)
+# CORS 配置：开发环境允许所有 Origin（Cursor 端口转发兼容）
+cors_origins = config.get("server.cors_origins", [])
+if not cors_origins:
+    cors_origins = ["*"]  # 未配置时允许所有 Origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.get("server.cors_origins", []),
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -433,6 +450,8 @@ app.include_router(files.router)
 app.include_router(config_api.router)
 app.include_router(cron_api.router)
 app.include_router(notification_api.router)
+from sensenova_claw.interfaces.http import proactive_api
+app.include_router(proactive_api.router)
 from sensenova_claw.interfaces.http import todolist_api
 app.include_router(todolist_api.router)
 app.include_router(sessions.router)
@@ -443,44 +462,6 @@ app.include_router(custom_pages.router)
 @app.get("/health")
 async def health_check() -> dict:
     return {"status": "healthy", "timestamp": time.time(), "version": "0.1.0"}
-
-
-@app.get("/api/sessions")
-async def list_sessions():
-    """获取会话列表"""
-    sessions = await app.state.services.gateway.list_sessions()
-    return JSONResponse(content={"sessions": sessions})
-
-
-@app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str):
-    """删除会话及关联数据"""
-    try:
-        await app.state.services.gateway.delete_session(session_id)
-        return JSONResponse(content={"ok": True, "session_id": session_id})
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
-
-
-@app.get("/api/sessions/{session_id}/turns")
-async def get_session_turns(session_id: str):
-    """获取会话的所有轮次"""
-    turns = await app.state.services.gateway.get_session_turns(session_id)
-    return JSONResponse(content={"turns": turns})
-
-
-@app.get("/api/sessions/{session_id}/events")
-async def get_session_events(session_id: str):
-    """获取会话的所有事件"""
-    events = await app.state.services.gateway.get_session_events(session_id)
-    return JSONResponse(content={"events": events})
-
-
-@app.get("/api/sessions/{session_id}/messages")
-async def list_session_messages(session_id: str):
-    """获取会话的所有消息"""
-    messages = await app.state.services.gateway.get_messages(session_id)
-    return JSONResponse(content={"messages": messages})
 
 
 @app.websocket("/ws")

@@ -82,6 +82,10 @@ interface CronFormState {
   notifyNative: boolean;
 }
 
+const browserTimezone = typeof Intl !== 'undefined'
+  ? Intl.DateTimeFormat().resolvedOptions().timeZone
+  : 'Asia/Shanghai';
+
 const emptyForm: CronFormState = {
   name: '',
   description: '',
@@ -90,7 +94,7 @@ const emptyForm: CronFormState = {
   intervalValue: '60',
   intervalUnit: 'minutes',
   cronValue: '0 9 * * *',
-  timezone: 'Asia/Shanghai',
+  timezone: browserTimezone,
   text: '',
   wakeMode: 'now',
   deleteAfterRun: false,
@@ -189,7 +193,7 @@ function buildPayload(form: CronFormState) {
 }
 
 export default function CronPage() {
-  const { pushNotification } = useNotification();
+  const { pushToast } = useNotification();
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -238,7 +242,7 @@ export default function CronPage() {
       intervalValue: interval.value,
       intervalUnit: interval.unit,
       cronValue: job.schedule_type === 'cron' ? job.schedule_value : '0 9 * * *',
-      timezone: job.timezone || 'Asia/Shanghai',
+      timezone: job.timezone || browserTimezone,
       text: job.text || '',
       wakeMode: job.wake_mode || 'now',
       deleteAfterRun: Boolean(job.delete_after_run),
@@ -361,24 +365,20 @@ export default function CronPage() {
         await fetchRuns(job.id);
       }
 
-      pushNotification({
+      // 触发成功后显示 toast 通知
+      pushToast({
         title: 'Cron job triggered',
         body: `Triggered "${job.name}".`,
         level: 'success',
         source: 'cron',
-      }, {
-        toast: true,
-        browser: false,
       });
     } catch (error) {
-      pushNotification({
+      // 触发失败时显示错误 toast
+      pushToast({
         title: 'Failed to trigger cron job',
         body: error instanceof Error ? error.message : 'Failed to trigger cron job.',
         level: 'error',
         source: 'cron',
-      }, {
-        toast: true,
-        browser: false,
       });
     } finally {
       setTriggeringJobId(null);

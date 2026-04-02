@@ -52,6 +52,32 @@ async def _build_runtime(repo, tmp_path):
 
 
 class TestSendMessageTool:
+    async def test_send_message_blocked_when_delegation_disabled(self, test_repo, tmp_path):
+        bus, bus_router, registry, runtime, coordinator = await _build_runtime(test_repo, tmp_path)
+        registry.register(AgentConfig.create(id="default", name="Default", can_send_message_to=None))
+        await test_repo.create_session("parent", meta={"agent_id": "default"})
+
+        tool = SendMessageTool(
+            agent_registry=registry,
+            bus=bus,
+            repo=test_repo,
+            coordinator=coordinator,
+            timeout=5,
+        )
+        result = await tool.execute(
+            target_agent="helper",
+            message="请处理",
+            _session_id="parent",
+            _turn_id="turn_parent",
+            _tool_call_id="tool_1",
+        )
+
+        assert result == "发送失败：当前 Agent 未被授权向任何 Agent 发送消息。"
+
+        await coordinator.stop()
+        await runtime.stop()
+        await bus_router.stop()
+
     async def test_sync_send_message_success(self, test_repo, tmp_path):
         bus, bus_router, registry, runtime, coordinator = await _build_runtime(test_repo, tmp_path)
         await test_repo.create_session("parent", meta={"agent_id": "default"})

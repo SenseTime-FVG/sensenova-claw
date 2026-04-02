@@ -33,7 +33,6 @@ class TimeTrigger:
     kind: Literal["time"] = "time"
     cron: str | None = None
     every: str | None = None
-    condition: str | None = None
 
 
 @dataclass
@@ -43,18 +42,10 @@ class EventTrigger:
     event_type: str = ""
     filter: dict | None = None
     debounce_ms: int = 5000
-    condition: str | None = None
+    exclude_payload: dict | None = None  # 排除匹配：payload 中含有这些字段时不触发（用于防止自触发）
 
 
-@dataclass
-class ConditionTrigger:
-    """条件触发：按间隔检查条件是否满足"""
-    kind: Literal["condition"] = "condition"
-    check_interval: str = "5m"
-    condition: str = ""
-
-
-Trigger = TimeTrigger | EventTrigger | ConditionTrigger
+Trigger = TimeTrigger | EventTrigger
 
 
 # ---------- Task ----------
@@ -77,6 +68,7 @@ class DeliveryConfig:
     channels: list[str] = field(default_factory=list)
     feishu_target: str | None = None
     summary_prompt: str | None = None
+    recommendation_type: str | None = None  # 推荐类型，如 "turn_end"；前端据此渲染推荐卡片
 
 
 # ---------- Safety ----------
@@ -135,7 +127,6 @@ def trigger_to_json(trigger: Trigger) -> str:
             "kind": "time",
             "cron": trigger.cron,
             "every": trigger.every,
-            "condition": trigger.condition,
         })
     elif isinstance(trigger, EventTrigger):
         return json.dumps({
@@ -143,13 +134,7 @@ def trigger_to_json(trigger: Trigger) -> str:
             "event_type": trigger.event_type,
             "filter": trigger.filter,
             "debounce_ms": trigger.debounce_ms,
-            "condition": trigger.condition,
-        })
-    elif isinstance(trigger, ConditionTrigger):
-        return json.dumps({
-            "kind": "condition",
-            "check_interval": trigger.check_interval,
-            "condition": trigger.condition,
+            "exclude_payload": trigger.exclude_payload,
         })
     raise ValueError(f"未知 trigger 类型: {type(trigger)}")
 
@@ -162,21 +147,15 @@ def trigger_from_json(raw: str) -> Trigger:
         return TimeTrigger(
             cron=d.get("cron"),
             every=d.get("every"),
-            condition=d.get("condition"),
         )
     elif kind == "event":
         return EventTrigger(
             event_type=d.get("event_type", ""),
             filter=d.get("filter"),
             debounce_ms=d.get("debounce_ms", 5000),
-            condition=d.get("condition"),
+            exclude_payload=d.get("exclude_payload"),
         )
-    elif kind == "condition":
-        return ConditionTrigger(
-            check_interval=d.get("check_interval", "5m"),
-            condition=d.get("condition", ""),
-        )
-    raise ValueError(f"未知 trigger kind: {kind}")
+    raise ValueError(f"Unknown trigger kind: {kind}")
 
 
 def _task_to_dict(task: ProactiveTask) -> dict:
@@ -200,6 +179,7 @@ def _delivery_to_dict(delivery: DeliveryConfig) -> dict:
         "channels": delivery.channels,
         "feishu_target": delivery.feishu_target,
         "summary_prompt": delivery.summary_prompt,
+        "recommendation_type": delivery.recommendation_type,
     }
 
 
@@ -208,6 +188,7 @@ def _delivery_from_dict(d: dict) -> DeliveryConfig:
         channels=d.get("channels", []),
         feishu_target=d.get("feishu_target"),
         summary_prompt=d.get("summary_prompt"),
+        recommendation_type=d.get("recommendation_type"),
     )
 
 
@@ -262,7 +243,7 @@ def job_to_db_row(job: ProactiveJob) -> dict[str, Any]:
         "name": job.name,
         "agent_id": job.agent_id,
         "enabled": 1 if job.enabled else 0,
-        "trigger_json": trigger_to_json(job.trigger),
+        "trigger_json": trigger_to_json(job.trigger) if job.trigger else json.dumps({"kind": "manual"}),
         "task_json": json.dumps(_task_to_dict(job.task)),
         "delivery_json": json.dumps(_delivery_to_dict(job.delivery)),
         "safety_json": json.dumps(_safety_to_dict(job.safety)),

@@ -1,6 +1,10 @@
 <div align="center">
-  <h1>Sensenova-Claw</h1>
-  <p><strong>基于事件驱动架构的 AI Agent 平台</strong></p>
+  <table><tr><td>
+    <img src="assets/icon.png" alt="Sensenova-Claw Logo" width="80">
+  </td><td>
+    <h1>Sensenova-Claw</h1>
+    <strong>基于事件驱动架构的 AI Agent 平台</strong>
+  </td></tr></table>
   <p>
     <img src="https://img.shields.io/badge/python-≥3.12-blue" alt="Python">
     <img src="https://img.shields.io/badge/node-≥18-green" alt="Node.js">
@@ -82,8 +86,8 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/i
 
 > 详细说明见 [install/README.md](install/README.md)
 >
-> 如需验证某个发布分支或 tag，可在安装前指定 `SENSENOVA_CLAW_REPO_REF`，例如:
-> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_REPO_REF=v0.5.0 bash`
+> 如需验证某个发布分支或 tag，可在安装前指定 `SENSENOVA_CLAW_APP_BRANCH`，例如:
+> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_APP_BRANCH=v0.5.0 bash`
 
 ### Option B: 手动安装
 
@@ -188,7 +192,9 @@ tools:
 | **CLI** | 命令行交互客户端 | `python3 -m sensenova-claw.app.cli.cli_client` |
 | **飞书** | 企业 IM 集成，支持私聊/群聊 | `config.yml` plugins.feishu |
 | **Telegram** | Telegram Bot Channel，支持私聊/群组消息接入 | `config.yml` plugins.telegram |
+| **QQ** | QQ Channel，统一支持官方开放平台与 OneBot / NapCat | `config.yml` plugins.qq |
 | **企微** | 企业微信消息 Channel，支持私聊/群聊接入 | `config.yml` plugins.wecom |
+| **DingTalk** | 钉钉 Stream Bot Channel，支持私聊/群聊文本消息接入 | `config.yml` plugins.dingtalk |
 | **WhatsApp** | 核心版 WhatsApp Web 文本接入 | `config.yml` plugins.whatsapp |
 
 <details>
@@ -231,6 +237,46 @@ plugins:
 [怎么获取telegram bot_token](docs/channel/telegram.md)
 
 默认支持 polling 模式；如需公网回调，可切换 `mode: webhook` 并补充 `webhook_url`、`webhook_secret` 等字段。
+
+</details>
+
+<details>
+<summary><b>QQ 配置</b></summary>
+
+```yaml
+plugins:
+  qq:
+    enabled: true
+    mode: "onebot"             # official / onebot
+    dm_policy: "open"          # open / allowlist / disabled
+    group_policy: "open"       # open / allowlist / disabled
+    allowlist: []              # 私聊允许名单，填 QQ 用户 ID
+    group_allowlist: []        # 群聊允许名单，填 QQ 用户 ID
+    require_mention: true      # 群聊中是否必须 @bot
+    reply_to_message: true
+    show_tool_progress: false
+
+    # 官方 QQ 机器人
+    official_app_id: "1024xxxx"
+    official_client_secret: "qq-official-secret"
+    official_sandbox: false
+    official_intents: []
+
+    # OneBot / NapCat / Lagrange
+    onebot_ws_url: "ws://127.0.0.1:3001"
+    onebot_access_token: ""
+    onebot_api_base_url: "http://127.0.0.1:3000"
+    onebot_self_id: "123456789"
+```
+
+[怎么创建QQ bot](docs/channel/qq.md)
+
+使用说明：
+
+- `mode: "official"` 时，只需要填写 `official_app_id` 和 `official_client_secret`
+- `mode: "onebot"` 时，填写 `onebot_ws_url`、`onebot_api_base_url`，如启用了鉴权再补 `onebot_access_token`
+- `onebot_self_id` 用于识别群聊 `@bot` 消息；若群聊需要 `@` 才响应，建议显式填写
+- QQ 插件当前对外统一暴露为一个 `qq` channel，底层按 `mode` 选择协议实现
 
 </details>
 
@@ -283,6 +329,32 @@ plugins:
 [怎么创建企微bot](docs/channel/wecom.md)
 
 启动 Gateway 后会使用企微官方 WebSocket 地址建立连接；需要先在企微侧创建机器人并获取 `bot_id` 与 `secret`。
+
+</details>
+
+<details>
+<summary><b>DingTalk 配置</b></summary>
+
+```yaml
+plugins:
+  dingtalk:
+    enabled: true
+    client_id: "dingxxxx"
+    client_secret: "xxxx"
+    dm_policy: "open"          # open / allowlist / disabled
+    group_policy: "open"       # open / allowlist / disabled
+    allowlist: []              # 私聊允许名单，支持 staff_id
+    group_allowlist: []        # 群聊允许名单，支持 staff_id
+    require_mention: true      # 群聊中是否必须 @bot
+    show_tool_progress: false
+    reply_to_sender: false
+```
+
+[怎么创建钉钉机器人 / 获取 client_id 与 client_secret](docs/channel/dingtalk.md)
+
+启动gateway后钉钉机器人自动连接
+
+如何使用钉钉机器人：钉钉机器人默认不能在搜索栏搜到，只能在群聊里设置里在`机器人`添加，然后在群里@，或直接点进去私聊
 
 </details>
 

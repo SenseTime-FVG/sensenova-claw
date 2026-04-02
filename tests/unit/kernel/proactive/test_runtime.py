@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sensenova_claw.kernel.proactive.models import (
-    ConditionTrigger,
     DeliveryConfig,
     EventTrigger,
     JobState,
@@ -44,7 +43,8 @@ def _make_runtime(**overrides) -> ProactiveRuntime:
     bus._subscribers = set()
     bus.publish = AsyncMock()
     bus.subscribe = MagicMock()
-
+    bus.subscribe_queue = MagicMock(return_value=asyncio.Queue())
+    bus.unsubscribe_queue = MagicMock()
     repo = MagicMock()
     repo.create_proactive_job = AsyncMock()
     repo.get_proactive_job = AsyncMock(return_value=None)
@@ -87,7 +87,8 @@ def _make_runtime_with_jobs(jobs_list):
     bus._subscribers = set()
     bus.publish = AsyncMock()
     bus.subscribe = MagicMock()
-
+    bus.subscribe_queue = MagicMock(return_value=asyncio.Queue())
+    bus.unsubscribe_queue = MagicMock()
     repo = MagicMock()
     repo.create_proactive_job = AsyncMock()
     repo.get_proactive_job = AsyncMock(return_value=None)
@@ -164,23 +165,6 @@ class TestLoadJobsFromConfig:
         assert jobs[0].trigger.event_type == "email.received"
         assert jobs[0].trigger.debounce_ms == 10000
 
-    def test_load_condition_trigger(self):
-        _, jobs = _make_runtime_with_jobs([
-            {
-                "name": "condition-check",
-                "trigger": {
-                    "kind": "condition",
-                    "check_interval": "10m",
-                    "condition": "有未读邮件",
-                },
-                "task": {"prompt": "检查邮件"},
-            }
-        ])
-
-        assert len(jobs) == 1
-        assert isinstance(jobs[0].trigger, ConditionTrigger)
-        assert jobs[0].trigger.condition == "有未读邮件"
-
     def test_empty_jobs_returns_empty(self):
         _, jobs = _make_runtime_with_jobs([])
         assert jobs == []
@@ -218,7 +202,7 @@ class TestEvaluateAndExecute:
         rt = _make_runtime()
         job = _make_job()
         rt._jobs[job.id] = job
-        rt._running_jobs.add(job.id)
+        rt._executor._running_jobs.add(job.id)
 
         result = await rt._evaluate_and_execute(job)
         assert result is False
@@ -229,35 +213,13 @@ class TestEvaluateAndExecute:
         rt = _make_runtime()
         job = _make_job(trigger=TimeTrigger(every="30m"))
         rt._jobs[job.id] = job
-
-        # mock _execute_job 避免实际执行
-        rt._execute_job = AsyncMock()
-
+        rt._executor.execute_job = AsyncMock(return_value=("session-1", "result"))
         result = await rt._evaluate_and_execute(job)
         assert result is True
         # 应发布 PROACTIVE_JOB_TRIGGERED
         assert rt._bus.publish.call_count >= 1
         first_call = rt._bus.publish.call_args_list[0]
         assert first_call[0][0].type == "proactive.job_triggered"
-
-    @pytest.mark.asyncio
-    async def test_skip_when_condition_not_met(self):
-        """条件不满足时应跳过执行。"""
-        rt = _make_runtime()
-        job = _make_job(trigger=TimeTrigger(every="30m", condition="有未读邮件"))
-        rt._jobs[job.id] = job
-
-        # mock 条件评估返回 False
-        rt._evaluate_condition = AsyncMock(return_value=False)
-
-        result = await rt._evaluate_and_execute(job)
-        assert result is False
-        # 应发布 PROACTIVE_JOB_SKIPPED
-        skip_events = [
-            c for c in rt._bus.publish.call_args_list
-            if c[0][0].type == "proactive.job_skipped"
-        ]
-        assert len(skip_events) == 1
 
 
 # ---------- 事件索引测试 ----------
@@ -267,23 +229,25 @@ class TestEventIndex:
     def test_rebuild_event_index(self):
         """事件索引应包含所有启用的 EventTrigger 的 event_type。"""
         rt = _make_runtime()
-        rt._jobs = {
+        rt._jobs.clear()
+        rt._jobs.update({
             "j1": _make_job(id="j1", trigger=EventTrigger(event_type="email.received")),
             "j2": _make_job(id="j2", trigger=EventTrigger(event_type="file.changed")),
             "j3": _make_job(id="j3", trigger=TimeTrigger(every="1h")),
             "j4": _make_job(id="j4", trigger=EventTrigger(event_type="email.received"), enabled=False),
-        }
-        rt._rebuild_event_index()
+        })
+        rt._scheduler.rebuild_event_index()
 
-        assert rt._watched_event_types == {"email.received", "file.changed"}
+        assert rt._scheduler._watched_event_types == {"email.received", "file.changed"}
 
     def test_empty_index_when_no_event_jobs(self):
         rt = _make_runtime()
-        rt._jobs = {
+        rt._jobs.clear()
+        rt._jobs.update({
             "j1": _make_job(id="j1", trigger=TimeTrigger(every="1h")),
-        }
-        rt._rebuild_event_index()
-        assert rt._watched_event_types == set()
+        })
+        rt._scheduler.rebuild_event_index()
+        assert rt._scheduler._watched_event_types == set()
 
 
 # ---------- Safety meta 注入测试 ----------
@@ -304,7 +268,7 @@ class TestBuildSessionMeta:
         )
         job.task.system_prompt_override = "你是安全助手"
 
-        meta = rt._build_session_meta(job)
+        meta = rt._executor._build_session_meta(job)
 
         assert meta["agent_id"] == "proactive-agent"
         assert meta["type"] == "proactive"
@@ -321,7 +285,7 @@ class TestBuildSessionMeta:
         rt = _make_runtime()
         job = _make_job(safety=SafetyConfig(allowed_tools=None, blocked_tools=None))
 
-        meta = rt._build_session_meta(job)
+        meta = rt._executor._build_session_meta(job)
 
         assert "allowed_tools" not in meta
         assert "blocked_tools" not in meta
@@ -337,12 +301,11 @@ class TestAutoDisable:
         """连续失败达到阈值后应自动禁用 job。"""
         rt = _make_runtime()
         job = _make_job(safety=SafetyConfig(auto_disable_after_errors=2))
-        job.state.consecutive_errors = 1  # 已有 1 次失败
+        job.state.consecutive_errors = 1
         rt._jobs[job.id] = job
 
-        await rt._handle_failure(job, "run-1", "sess-1", "test error", int(time.time() * 1000))
+        await rt._executor._handle_failure(job, "run-1", "sess-1", "test error", int(time.time() * 1000))
 
-        # consecutive_errors 应增加到 2，触发自动禁用
         assert job.state.consecutive_errors == 2
         assert job.enabled is False
         rt._repo.update_proactive_job.assert_called()
@@ -355,7 +318,7 @@ class TestAutoDisable:
         job.state.consecutive_errors = 0
         rt._jobs[job.id] = job
 
-        await rt._handle_failure(job, "run-1", "sess-1", "test error", int(time.time() * 1000))
+        await rt._executor._handle_failure(job, "run-1", "sess-1", "test error", int(time.time() * 1000))
 
         assert job.state.consecutive_errors == 1
         assert job.enabled is True
@@ -370,7 +333,7 @@ class TestBuildPrompt:
         job = _make_job()
         job.task.prompt = "检查系统状态"
 
-        prompt = rt._build_prompt(job)
+        prompt = rt._executor._build_prompt(job)
         assert prompt == "检查系统状态"
 
     def test_prompt_with_memory(self):
@@ -382,6 +345,98 @@ class TestBuildPrompt:
         job.task.prompt = "检查系统状态"
         job.task.use_memory = True
 
-        prompt = rt._build_prompt(job)
+        prompt = rt._executor._build_prompt(job)
         assert "检查系统状态" in prompt
         assert "上次检查时间: 10:00" in prompt
+
+
+class TestRunAndDeliver:
+    @pytest.mark.asyncio
+    async def test_delivery_called_on_success(self):
+        rt = _make_runtime()
+        job = _make_job()
+        rt._jobs[job.id] = job
+        rt._executor.execute_job = AsyncMock(return_value=("session-1", "执行结果"))
+        job.state.last_status = "ok"
+        rt._delivery.deliver = AsyncMock()
+        await rt._run_and_deliver(job)
+        rt._delivery.deliver.assert_called_once_with(
+            job, "session-1", "执行结果",
+            source_session_id=None,
+            items=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_delivery_skipped_on_failure(self):
+        rt = _make_runtime()
+        job = _make_job()
+        rt._jobs[job.id] = job
+        rt._executor.execute_job = AsyncMock(return_value=("session-1", None))
+        job.state.last_status = "error"
+        rt._delivery.deliver = AsyncMock()
+        await rt._run_and_deliver(job)
+        rt._delivery.deliver.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delivery_skipped_when_no_result(self):
+        rt = _make_runtime()
+        job = _make_job()
+        rt._jobs[job.id] = job
+        rt._executor.execute_job = AsyncMock(return_value=("session-1", ""))
+        job.state.last_status = "ok"
+        rt._delivery.deliver = AsyncMock()
+        await rt._run_and_deliver(job)
+        # 空字符串 result 是 falsy，不应调用 delivery
+        rt._delivery.deliver.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_recommendation_delivery_maps_back_to_source_session(self):
+        rt = _make_runtime()
+        job = _make_job(delivery=DeliveryConfig(channels=["web"], recommendation_type="turn_end"))
+        rt._jobs[job.id] = job
+        rt._executor.execute_job = AsyncMock(return_value=(
+            "scratch-session-1",
+            '{"recommendations":[{"id":"rec_1","title":"继续追问","prompt":"请继续分析","category":"follow-up"}]}',
+        ))
+        job.state.last_status = "ok"
+        rt._delivery.deliver = AsyncMock()
+
+        trigger_event = MagicMock(session_id="source-session-1")
+
+        await rt._run_and_deliver(job, trigger_event=trigger_event)
+
+        rt._delivery.deliver.assert_called_once_with(
+            job,
+            "source-session-1",
+            '{"recommendations":[{"id":"rec_1","title":"继续追问","prompt":"请继续分析","category":"follow-up"}]}',
+            source_session_id="source-session-1",
+            scratch_session_id="scratch-session-1",
+            items=[{
+                "id": "rec_1",
+                "title": "继续追问",
+                "prompt": "请继续分析",
+                "category": "follow-up",
+            }],
+        )
+
+
+class TestParseRecommendationJson:
+    def test_plain_json(self):
+        text = '{"recommendations": [{"id": "1", "title": "t", "prompt": "p", "category": "action"}]}'
+        result = ProactiveRuntime._parse_recommendation_json(text)
+        assert len(result) == 1
+        assert result[0]["title"] == "t"
+
+    def test_code_block_json(self):
+        text = '```json\n{"recommendations": [{"id": "1", "title": "t", "prompt": "p"}]}\n```'
+        result = ProactiveRuntime._parse_recommendation_json(text)
+        assert len(result) == 1
+
+    def test_invalid_json_returns_none(self):
+        assert ProactiveRuntime._parse_recommendation_json("not json") is None
+
+    def test_missing_recommendations_key(self):
+        assert ProactiveRuntime._parse_recommendation_json('{"items": []}') is None
+
+    def test_empty_recommendations(self):
+        assert ProactiveRuntime._parse_recommendation_json('{"recommendations": []}') is None

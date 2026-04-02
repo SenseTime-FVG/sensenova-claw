@@ -10,20 +10,54 @@ from typing import Any
 import yaml
 
 from sensenova_claw.platform.secrets.refs import is_secret_ref, parse_secret_ref
-from sensenova_claw.platform.secrets.store import KeyringSecretStore, SecretStoreError
+from sensenova_claw.platform.secrets.store import SecretStoreError, build_default_secret_store
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
 logger = logging.getLogger(__name__)
+
+KNOWN_LLM_SOURCE_TYPES = {
+    "mock",
+    "openai",
+    "anthropic",
+    "gemini",
+    "qwen",
+    "deepseek",
+    "minimax",
+    "glm",
+    "kimi",
+    "step",
+    "openai-compatible",
+    "anthropic-compatible",
+    "gemini-compatible",
+}
+
+LEGACY_PROVIDER_SOURCE_TYPES = {
+    "mock",
+    "openai",
+    "anthropic",
+    "gemini",
+    "qwen",
+    "deepseek",
+    "minimax",
+    "glm",
+    "kimi",
+    "step",
+}
 
 # sensenova_claw/platform/config/config.py -> 往上 3 层到项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-# 默认配置文件路径：~/.sensenova-claw/config.yml
-DEFAULT_CONFIG_PATH = Path.home() / ".sensenova-claw" / "config.yml"
+def get_default_config_path() -> Path:
+    """返回默认配置文件路径。"""
+    return default_sensenova_claw_home() / "config.yml"
+
+
+# 默认配置文件路径：$SENSENOVA_CLAW_HOME/config.yml
+DEFAULT_CONFIG_PATH = get_default_config_path()
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "system": {
         "log_level": "DEBUG",
-        "sensenova_claw_home": "${SENSENOVA_CLAW_HOME}",           # 默认 ~/.sensenova-claw，支持环境变量覆盖
         "workspace_dir": "",                          # 已废弃，由 sensenova_claw_home 替代
         "database_path": "",                          # 空=自动用 {sensenova_claw_home}/data/sensenova-claw.db
         "max_concurrent_sessions": 10,
@@ -37,24 +71,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "llm": {
         "providers": {
             "mock": {
+                "source_type": "mock",
                 "api_key": "",
                 "base_url": "",
                 "timeout": 60,
                 "max_retries": 1,
             },
             "openai": {
+                "source_type": "openai",
                 "api_key": "${OPENAI_API_KEY}",
                 "base_url": "${OPENAI_BASE_URL}",
                 "timeout": 60,
                 "max_retries": 3,
             },
             "anthropic": {
+                "source_type": "anthropic",
                 "api_key": "${ANTHROPIC_API_KEY}",
                 "base_url": "${ANTHROPIC_BASE_URL}",
                 "timeout": 60,
                 "max_retries": 3,
             },
             "gemini": {
+                "source_type": "gemini",
                 "api_key": "${GEMINI_API_KEY}",
                 "base_url": "${GEMINI_BASE_URL}",
                 "timeout": 120,
@@ -96,12 +134,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
             },
         },
         "default_model": "mock",  # 引用 llm.models 中的 key
+        "default_embedding_model": "",  # 引用 llm.models 中 type=embedding 的 key
     },
     # agent 段保留作为所有 agent 的后备默认值
     "agent": {
-        "temperature": 0.2,
+        "temperature": 1.0,
+        "extra_body": {
+            "top_p": 0.95,
+            "top_k": 20,
+        },
         "max_turns_per_session": 50,
         "system_prompt": "你是一个有工具能力的AI助手，请在必要时调用工具。",
+        "stream": True,
     },
     "tools": {
         "bash_command": {"enabled": True, "timeout": 15},
@@ -126,6 +170,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "max_attachment_size_mb": 10,
             "timeout": 30,
         },
+        "obsidian": {
+            "enabled": False,
+            "vaults": [],                             # 本地 vault 路径列表，如 ["~/Documents/MyVault"]
+            "remote": [],                             # 远程 vault 列表，如 [{"name": "xx", "url": "http://...", "api_key": "..."}]
+        },
         "ask_user": {"enabled": True, "timeout": 300},
         "result_truncation": {
             "max_tokens": 8000,
@@ -135,6 +184,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "enabled": False,
             "auto_approve_levels": ["low"],
             "confirmation_timeout": 60,
+            "timeout_action": "reject",  # reject | approve | block
         },
     },
     "skills": {
@@ -181,6 +231,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "cron": {
         "enabled": True,
+        "timezone": "local",  # "local" = 读取系统时区，或指定如 "Asia/Shanghai"
         "max_concurrent_runs": 1,
         "retry": {
             "max_attempts": 3,
@@ -279,8 +330,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default": {
             "name": "Default Agent",
             "description": "默认 AI Agent",
-            "model": "mock",
-            "temperature": 0.2,
+            "temperature": 1.0,
             "tools": [],
             "skills": [],
         },
@@ -288,6 +338,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "delegation": {
         "max_depth": 3,
         "default_timeout": 300,
+        "max_tool_calls": 30,
+        "max_llm_calls": 15,
         "retry": {
             "max_retries": 0,
             "backoff_seconds": [0, 1, 3],
@@ -316,7 +368,7 @@ class Config:
         user_config_dir: Path | None = None,
         secret_store: Any | None = None,
     ):
-        self._secret_store = secret_store or KeyringSecretStore()
+        self._secret_store = secret_store or build_default_secret_store()
         # 新方式：通过 project_root 自动发现配置
         if project_root is not None:
             self._project_root = Path(project_root).resolve()
@@ -324,8 +376,8 @@ class Config:
             self._config_path = None  # 新方式不使用单一路径
             self.data = self._load_config_from_project_root()
         else:
-            # 默认配置路径：~/.sensenova-claw/config.yml
-            self._config_path = config_path or DEFAULT_CONFIG_PATH
+            # 默认配置路径：$SENSENOVA_CLAW_HOME/config.yml
+            self._config_path = config_path or get_default_config_path()
             self._project_root = None
             self._user_config_dir = None
             self.data = self._load_config()
@@ -377,6 +429,7 @@ class Config:
         for sensenova_claw_cfg in sensenova_claw_configs:
             config = self._deep_merge(config, sensenova_claw_cfg)
 
+        config = self._normalize_llm_provider_source_types(config)
         config = self._resolve_env(config)
         return config
 
@@ -415,8 +468,37 @@ class Config:
         else:
             logger.warning("配置文件不存在: %s，使用默认配置", self._config_path)
 
+        config = self._normalize_llm_provider_source_types(config)
         config = self._resolve_env(config)
         return config
+
+    def _normalize_llm_provider_source_types(self, config: dict[str, Any]) -> dict[str, Any]:
+        """为 provider 补齐 source_type，兼容旧配置。"""
+        result = deepcopy(config)
+        llm = result.get("llm")
+        if not isinstance(llm, dict):
+            return result
+
+        providers = llm.get("providers")
+        if not isinstance(providers, dict):
+            return result
+
+        normalized: dict[str, Any] = {}
+        for provider_id, provider_cfg in providers.items():
+            if not isinstance(provider_cfg, dict):
+                normalized[provider_id] = provider_cfg
+                continue
+            next_cfg = deepcopy(provider_cfg)
+            source_type = str(next_cfg.get("source_type", "") or "").strip()
+            if not source_type:
+                source_type = provider_id if provider_id in LEGACY_PROVIDER_SOURCE_TYPES else "openai-compatible"
+            if source_type not in KNOWN_LLM_SOURCE_TYPES:
+                source_type = "openai-compatible"
+            next_cfg["source_type"] = source_type
+            normalized[provider_id] = next_cfg
+
+        llm["providers"] = normalized
+        return result
 
     @staticmethod
     def _validate_config_format(user_config: dict[str, Any]) -> None:
@@ -518,8 +600,7 @@ class Config:
     def resolve_model(self, model_key: str | None = None) -> tuple[str, str]:
         """解析模型 key 为 (provider_name, model_id)。
 
-        优先从 llm.models 注册表查找；如果 model_key 不在注册表中，
-        则视为直接的 model_id（向后兼容），从注册表中反查 provider。
+        仅接受 llm.models 注册表中的 key；不会在 model_key 与 model_id 之间互相兜底。
 
         Args:
             model_key: llm.models 中的 key（如 "claude-sonnet"），
@@ -528,24 +609,51 @@ class Config:
             (provider_name, model_id) 元组
         """
         if not model_key:
-            model_key = self.get("llm.default_model", "mock")
+            model_key = self.get("llm.default_model") or None
 
         models = self.get("llm.models", {})
+
+        # default_model 未设置时，自动选取第一个有有效 api_key 的 model
+        if not model_key:
+            for key, entry in models.items():
+                if not isinstance(entry, dict):
+                    continue
+                provider_name = entry.get("provider", "")
+                provider_cfg = self.get(f"llm.providers.{provider_name}", {})
+                api_key = str(provider_cfg.get("api_key", ""))
+                if api_key and not api_key.startswith("${"):
+                    logger.info("default_model 未设置，自动选用: %s (provider=%s)", key, provider_name)
+                    return provider_name, str(entry.get("model_id", ""))
+            logger.warning("没有找到任何已配置 api_key 的模型，使用 mock provider")
+            return "mock", "mock"
 
         # 精确匹配 models 注册表
         if model_key in models:
             entry = models[model_key]
-            return entry.get("provider", "mock"), entry.get("model_id", model_key)
+            return entry.get("provider", "mock"), str(entry.get("model_id", ""))
 
-        # 向后兼容：model_key 可能是直接的 model_id（如 "gpt-4o-mini"）
-        # 从 models 注册表中反查
-        for _key, entry in models.items():
-            if isinstance(entry, dict) and entry.get("model_id") == model_key:
-                return entry.get("provider", "mock"), model_key
-
-        # 都找不到，返回 mock
         logger.warning("未知的模型 key: %s，使用 mock provider", model_key)
-        return "mock", model_key
+        return "mock", ""
+
+    def resolve_embedding_model(self) -> tuple[str, str] | None:
+        """解析 embedding 模型 key 为 (provider_name, model_id)。
+
+        优先使用 llm.default_embedding_model；未设置时返回 None（由调用方降级）。
+
+        Returns:
+            (provider_name, model_id) 元组，或 None
+        """
+        model_key = self.get("llm.default_embedding_model") or None
+        if not model_key:
+            return None
+
+        models = self.get("llm.models", {})
+        if model_key in models:
+            entry = models[model_key]
+            return entry.get("provider", "mock"), str(entry.get("model_id", ""))
+
+        logger.warning("未知的 embedding 模型 key: %s", model_key)
+        return None
 
     def get_model_max_output_tokens(self, model_key: str | None = None) -> int:
         """获取模型配置中的 max_output_tokens（最大输出 token 数）。
@@ -560,10 +668,6 @@ class Config:
         models = self.get("llm.models", {})
         if model_key in models:
             return int(models[model_key].get("max_output_tokens", 16384))
-        # 向后兼容：反查 model_id
-        for _key, entry in models.items():
-            if isinstance(entry, dict) and entry.get("model_id") == model_key:
-                return int(entry.get("max_output_tokens", 16384))
         return 16384
 
     def get_model_extra_body(self, model_key: str | None = None) -> dict:
@@ -579,10 +683,6 @@ class Config:
         models = self.get("llm.models", {})
         if model_key in models:
             return dict(models[model_key].get("extra_body", {}))
-        # 向后兼容：反查 model_id
-        for _key, entry in models.items():
-            if isinstance(entry, dict) and entry.get("model_id") == model_key:
-                return dict(entry.get("extra_body", {}))
         return {}
 
 

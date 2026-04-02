@@ -4,47 +4,98 @@ import { useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { Settings, ChevronDown, Zap } from 'lucide-react';
+import {
+  Settings, ChevronDown, Zap, Presentation, MessageCircle, Home,
+  Search, Clock, Brain, Server, Wrench, Star, Shield, Users,
+  type LucideIcon,
+} from 'lucide-react';
 import { useCustomPages } from '@/hooks/useCustomPages';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession } from '@/contexts/ws';
+import { useI18n } from '@/contexts/I18nContext';
 
-const mainNavItems = [
-  { path: '/', label: '工作台', exact: true },
-  { path: '/chat', label: '消息' },
-  { path: '/office', label: '办公室' },
+const iconMap: Record<string, LucideIcon> = {
+  zap: Zap,
+  presentation: Presentation,
+  'message-circle': MessageCircle,
+  home: Home,
+  search: Search,
+  settings: Settings,
+  users: Users,
+  clock: Clock,
+  brain: Brain,
+  server: Server,
+  tool: Wrench,
+  star: Star,
+  shield: Shield,
+};
+
+interface NavItem {
+  path: string;
+  label: string;
+  exact?: boolean;
+  icon?: string;
+}
+
+const mainNavItemDefs: { path: string; labelKey: string; exact?: boolean; icon?: string }[] = [
+  { path: '/', labelKey: 'nav.workspace', exact: true, icon: 'zap' },
+  { path: '/ppt', labelKey: 'nav.ppt', icon: 'presentation' },
+  { path: '/chat', labelKey: 'nav.chat', icon: 'message-circle' },
+  { path: '/office', labelKey: 'nav.office', icon: 'home' },
 ];
 
 export type SubNavGroup = 'features' | 'admin' | null;
 
-export const builtinFeatureNavItems = [
-  { path: '/research', label: '深度研究' },
-  { path: '/ppt', label: 'PPT' },
-  { path: '/automation', label: '自动化' },
+const builtinFeatureNavItemDefs: { path: string; labelKey: string; icon?: string }[] = [
+  { path: '/research', labelKey: 'nav.feature.research', icon: 'search' },
+  { path: '/automation', labelKey: 'nav.feature.automation', icon: 'settings' },
 ];
 
-export const adminNavItems = [
-  { path: '/agents', label: 'Agents' },
-  { path: '/sessions', label: 'Sessions' },
-  { path: '/llms', label: 'LLMs' },
-  { path: '/gateway', label: 'Gateway' },
-  { path: '/tools', label: 'Tools' },
-  { path: '/skills', label: 'Skills' },
-  { path: '/acp', label: 'ACP' },
+const adminNavItemDefs: { path: string; labelKey: string; icon?: string }[] = [
+  { path: '/agents', labelKey: 'nav.adminItems.agents', icon: 'users' },
+  { path: '/sessions', labelKey: 'nav.adminItems.sessions', icon: 'clock' },
+  { path: '/llms', labelKey: 'nav.adminItems.llms', icon: 'brain' },
+  { path: '/gateway', labelKey: 'nav.adminItems.gateway', icon: 'server' },
+  { path: '/tools', labelKey: 'nav.adminItems.tools', icon: 'tool' },
+  { path: '/skills', labelKey: 'nav.adminItems.skills', icon: 'star' },
+  { path: '/acp', labelKey: 'nav.adminItems.acp', icon: 'shield' },
 ];
 
 export function useFeatureNavItems() {
+  const { t } = useI18n();
   const { pages } = useCustomPages();
   return useMemo(() => {
+    const builtinItems = builtinFeatureNavItemDefs.map((item) => ({
+      path: item.path,
+      label: t(item.labelKey),
+      icon: item.icon,
+    }));
     const customItems = pages.map(p => ({
       path: `/features/${p.slug}`,
       label: p.name,
     }));
     return [
-      ...builtinFeatureNavItems,
+      ...builtinItems,
       ...customItems,
-      { path: '/create-feature', label: '+ 创建' },
+      { path: '/create-feature', label: t('nav.feature.create') },
     ];
-  }, [pages]);
+  }, [pages, t]);
+}
+
+export function useAdminNavItems(): NavItem[] {
+  const { t } = useI18n();
+  return useMemo(() => (
+    adminNavItemDefs.map((item) => ({
+      path: item.path,
+      label: t(item.labelKey),
+      icon: item.icon,
+    }))
+  ), [t]);
+}
+
+export function NavIcon({ name }: { name?: string }) {
+  if (!name || !iconMap[name]) return null;
+  const Icon = iconMap[name];
+  return <Icon className="w-3.5 h-3.5" />;
 }
 
 export function DashboardNav({
@@ -57,8 +108,18 @@ export function DashboardNav({
   onGroupToggle?: (group: SubNavGroup) => void;
 }) {
   const pathname = usePathname();
+  const { t } = useI18n();
   const featureNavItems = useFeatureNavItems();
-  const { startNewChat } = useChatSession();
+  const adminNavItems = useAdminNavItems();
+  const { startNewChat } = useSession();
+  const mainNavItems: NavItem[] = useMemo(() => (
+    mainNavItemDefs.map((item) => ({
+      path: item.path,
+      label: t(item.labelKey),
+      exact: item.exact,
+      icon: item.icon,
+    }))
+  ), [t]);
   const isActive = (item: { path: string; exact?: boolean }) => {
     if (item.exact) return pathname === item.path;
     return pathname?.startsWith(item.path);
@@ -94,12 +155,15 @@ export function DashboardNav({
           href={item.path}
           onClick={() => { if (isActive(item)) startNewChat(); }}
           className={cn(
-            'px-3 py-1.5 text-[13px] font-medium rounded-lg transition-all duration-150',
-            isActive(item)
-              ? 'text-foreground bg-[var(--nav-pill-active)]'
-              : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
+            'px-3 py-1.5 text-[13px] font-medium rounded-lg transition-all duration-150 flex items-center gap-1.5',
+            item.icon === 'presentation' && isActive(item)
+              ? 'text-primary bg-primary/10 font-semibold'
+              : isActive(item)
+                ? 'text-foreground bg-[var(--nav-pill-active)]'
+                : 'text-muted-foreground hover:text-foreground hover:bg-[var(--nav-pill-hover)]'
           )}
         >
+          <NavIcon name={item.icon} />
           {item.label}
         </Link>
       ))}
@@ -117,7 +181,7 @@ export function DashboardNav({
         )}
       >
         <Zap className="h-3.5 w-3.5" />
-        功能
+        {t('nav.features')}
         <ChevronDown
           className={cn(
             'h-3 w-3 transition-transform duration-200',
@@ -136,7 +200,7 @@ export function DashboardNav({
         )}
       >
         <Settings className="h-3.5 w-3.5" />
-        管理
+        {t('nav.admin')}
         <ChevronDown
           className={cn(
             'h-3 w-3 transition-transform duration-200',

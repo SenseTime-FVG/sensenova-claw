@@ -316,7 +316,7 @@ class MemoryManager:
                 {"role": "user", "content": f"请总结以下对话：\n\n{conversation}"},
             ],
             tools=None,
-            temperature=0.1,
+            temperature=1.0,
             max_tokens=500,
         )
         return str(response.get("content", "") or "")

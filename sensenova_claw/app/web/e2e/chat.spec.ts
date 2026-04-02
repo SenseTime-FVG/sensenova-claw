@@ -1,7 +1,24 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
+function readCurrentToken(): string {
+  try {
+    return fs.readFileSync(path.join(os.homedir(), '.sensenova-claw', 'token'), 'utf-8').trim();
+  } catch {
+    return 'test-token';
+  }
+}
+
+test.beforeEach(async ({ page }) => {
+  const token = readCurrentToken();
+  await page.goto(`/?token=${token}`);
+  await page.waitForURL('**/chat**');
+});
+
 test('用户可以发送消息并收到响应', async ({ page }) => {
-  await page.goto('/chat');
+  // 已经由 beforeEach 导航到 /chat
 
   await expect(page.getByText('WebSocket 已连接')).toBeVisible({ timeout: 30000 });
 
@@ -20,8 +37,6 @@ test('用户可以发送消息并收到响应', async ({ page }) => {
 });
 
 test('bash命令工具调用后应显示完整的assistant回复', async ({ page }) => {
-  await page.goto('/chat');
-
   await expect(page.getByText('WebSocket 已连接')).toBeVisible({ timeout: 30000 });
 
   const input = page.getByTestId('chat-input');
@@ -58,8 +73,6 @@ test('bash命令工具调用后应显示完整的assistant回复', async ({ page
 });
 
 test('工具消息应显示详细信息并支持展开/收起', async ({ page }) => {
-  await page.goto('/chat');
-
   await expect(page.getByText('WebSocket 已连接')).toBeVisible({ timeout: 30000 });
 
   const input = page.getByTestId('chat-input');

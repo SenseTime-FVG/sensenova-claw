@@ -31,8 +31,9 @@ class AskUserMockProvider(LLMProvider):
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         max_tokens: int | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        _ = (model, tools, temperature, max_tokens)
+        _ = (model, tools, temperature, max_tokens, extra_body)
         last = messages[-1] if messages else {"role": "user", "content": ""}
 
         if last.get("role") == "tool":

@@ -6,6 +6,10 @@ import sys
 from datetime import datetime
 from typing import Any, TYPE_CHECKING
 
+from sensenova_claw.capabilities.agents.preferences import (
+    load_preferences,
+    resolve_tool_enabled_from_prefs,
+)
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.runtime.prompt_builder import (
     ContextFile,
@@ -47,12 +51,26 @@ class ContextBuilder:
         # 收集工具信息（根据 agent_config 过滤）
         tool_names: list[str] = []
         tool_summaries: dict[str, str] = {}
+        prefs: dict[str, Any] = {}
+        home = self.sensenova_claw_home or str(resolve_sensenova_claw_home_default())
+        if agent_config:
+            prefs = load_preferences(home)
         if self.tool_registry:
             tools = self.tool_registry.as_llm_tools()
             # 根据 agent_config 过滤工具信息注入 prompt
             if agent_config and agent_config.tools:
-                allowed = set(agent_config.tools) | {"send_message"}
+                allowed = set(agent_config.tools)
+                # 保留 send_message（除非 can_delegate_to 为 None 表示禁止委托）
+                if agent_config.can_delegate_to is not None:
+                    allowed.add("send_message")
                 tools = [t for t in tools if t["name"] in allowed]
+            if agent_config and agent_config.can_delegate_to is None:
+                tools = [t for t in tools if t["name"] != "send_message"]
+            if agent_config:
+                tools = [
+                    t for t in tools
+                    if resolve_tool_enabled_from_prefs(prefs, agent_config.id, t["name"], default=True)
+                ]
             for t in tools:
                 tool_names.append(t["name"])
                 tool_summaries[t["name"]] = t.get("description", "")
@@ -67,14 +85,11 @@ class ContextBuilder:
         # 构建多 Agent 通信信息
         delegation_prompt = self._build_agent_to_agent_prompt(agent_config)
 
-        # 合并 extra_system_prompt
+        # 独立读取 extra_system_prompt（不混入 delegation）
         extra = config.get("agent.extra_system_prompt")
-        if delegation_prompt:
-            extra = f"{extra}\n\n{delegation_prompt}" if extra else delegation_prompt
 
         # 解析 per-agent workdir 注入 system prompt
         from sensenova_claw.platform.config.workspace import resolve_agent_workdir
-        home = self.sensenova_claw_home or str(resolve_sensenova_claw_home_default())
         effective_workdir = resolve_agent_workdir(home, agent_config)
 
         params = SystemPromptParams(
@@ -82,6 +97,7 @@ class ContextBuilder:
             tool_names=tool_names,
             tool_summaries=tool_summaries,
             skills_prompt=self._build_skills_section(agent_config),
+            delegation_prompt=delegation_prompt,
             memory_context=memory_context,
             context_files=context_files or [],
             extra_system_prompt=extra,
@@ -154,6 +170,10 @@ class ContextBuilder:
         """构建可通信 Agent 的信息（注入到 system prompt）"""
         if not self.agent_registry or not agent_config:
             return None
+        home = self.sensenova_claw_home or str(resolve_sensenova_claw_home_default())
+        prefs = load_preferences(home)
+        if not resolve_tool_enabled_from_prefs(prefs, agent_config.id, "send_message", default=True):
+            return None
         sendable = self.agent_registry.get_sendable(agent_config.id)
         if not sendable:
             return None
@@ -183,6 +203,6 @@ class ContextBuilder:
 
 def resolve_sensenova_claw_home_default() -> str:
     """快速获取 sensenova_claw_home 默认值（不依赖 config 对象）"""
-    import os
-    from pathlib import Path as _Path
-    return os.environ.get("SENSENOVA_CLAW_HOME", str(_Path.home() / ".sensenova-claw"))
+    from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
+    return str(default_sensenova_claw_home())

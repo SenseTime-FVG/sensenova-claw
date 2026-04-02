@@ -56,7 +56,7 @@ def _make_job(trigger, **kwargs):
 
 @pytest.mark.asyncio
 async def test_execute_job_success():
-    """验证 _execute_job 成功执行完整链路。"""
+    """验证 executor.execute_job 成功执行完整链路。"""
     bus, repo, agent_runtime, notification_service = _mock_deps()
     runtime = ProactiveRuntime(
         bus=bus,
@@ -69,13 +69,13 @@ async def test_execute_job_success():
     job = _make_job(TimeTrigger(cron="* * * * *"))
     runtime._jobs = {"pj-int-1": job}
 
-    # Mock _wait_for_completion to return immediately
-    async def fake_wait(session_id, timeout=300):
+    # Mock _wait_for_completion on the executor to return immediately
+    async def fake_wait(session_id, timeout_ms):
         return "测试结果"
 
-    runtime._wait_for_completion = fake_wait
+    runtime._executor._wait_for_completion = fake_wait
 
-    await runtime._execute_job(job)
+    await runtime._executor.execute_job(job)
 
     # spawn_agent_session was called with correct kwargs
     agent_runtime.spawn_agent_session.assert_called_once()
@@ -120,7 +120,7 @@ async def test_execute_job_failure_increments_errors():
     job = _make_job(TimeTrigger(cron="* * * * *"))
     runtime._jobs = {"pj-int-1": job}
 
-    await runtime._execute_job(job)
+    await runtime._executor.execute_job(job)
 
     assert job.state.consecutive_errors == 1
     assert job.state.last_status == "error"
@@ -153,12 +153,12 @@ async def test_auto_disable_after_errors():
     runtime._jobs = {"pj-int-1": job}
 
     # 第一次失败
-    await runtime._execute_job(job)
+    await runtime._executor.execute_job(job)
     assert job.state.consecutive_errors == 1
     assert job.enabled is True
 
     # 第二次失败 — 应触发自动禁用
-    await runtime._execute_job(job)
+    await runtime._executor.execute_job(job)
     assert job.state.consecutive_errors == 2
     assert job.enabled is False
 
@@ -206,7 +206,7 @@ async def test_evaluate_and_execute_skips_already_running():
 
     job = _make_job(TimeTrigger(cron="* * * * *"))
     runtime._jobs = {"pj-int-1": job}
-    runtime._running_jobs.add("pj-int-1")
+    runtime._executor._running_jobs.add("pj-int-1")
 
     result = await runtime._evaluate_and_execute(job)
 

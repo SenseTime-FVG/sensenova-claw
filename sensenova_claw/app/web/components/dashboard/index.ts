@@ -6,5 +6,6 @@ export { ScheduledTasks } from './ScheduledTasks';
 export { QuickStart } from './QuickStart';
 export { RecentOutputs } from './RecentOutputs';
 export { ProactiveOutputs } from './ProactiveOutputs';
+export { ProactiveAgentPanel } from './ProactiveAgentPanel';
 export { GlassPanel } from './GlassPanel';
 export { SectionHeader } from './SectionHeader';

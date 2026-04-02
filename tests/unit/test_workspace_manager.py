@@ -18,6 +18,7 @@ from sensenova_claw.platform.config.workspace import (
     ensure_workspace,
     load_workspace_files,
     resolve_agent_workdir,
+    resolve_session_artifact_dir,
     resolve_sensenova_claw_home,
 )
 
@@ -114,12 +115,35 @@ def test_resolve_sensenova_claw_home_default():
         assert result == Path.home() / ".sensenova-claw"
 
 
+def test_resolve_sensenova_claw_home_ignores_config_value(tmp_path):
+    """不再读取 config 中的 system.sensenova_claw_home"""
+
+    class DummyConfig:
+        def get(self, key: str, default: str = "") -> str:
+            if key == "system.sensenova_claw_home":
+                return str(tmp_path / "from_config")
+            return default
+
+    with patch.dict(os.environ, {}, clear=True):
+        result = resolve_sensenova_claw_home(DummyConfig())
+        assert result == Path.home() / ".sensenova-claw"
+
+
 def test_resolve_sensenova_claw_home_from_env(tmp_path):
     """环境变量 SENSENOVA_CLAW_HOME 覆盖默认值"""
     custom = str(tmp_path / "custom_home")
     with patch.dict(os.environ, {"SENSENOVA_CLAW_HOME": custom}):
         result = resolve_sensenova_claw_home(None)
         assert str(result) == str(Path(custom).resolve())
+
+
+def test_resolve_sensenova_claw_home_windows_default(tmp_path):
+    """Windows 下默认回退到用户目录下的 .sensenova-claw"""
+    expected_home = tmp_path / "WindowsUser"
+    with patch("pathlib.Path.home", return_value=expected_home):
+        with patch.dict(os.environ, {}, clear=True):
+            result = resolve_sensenova_claw_home(None)
+    assert result == expected_home / ".sensenova-claw"
 
 
 # ── ensure_agent_workspace ──────────────────────────
@@ -258,6 +282,38 @@ def test_resolve_agent_workdir_custom(tmp_path):
     custom = str(tmp_path / "custom_work")
     result = resolve_agent_workdir(str(tmp_path / ".sensenova-claw"), FakeConfig(workdir=custom))
     assert result == str((tmp_path / "custom_work").resolve())
+
+
+def test_resolve_session_artifact_dir_for_agent(tmp_path):
+    """session 附件应落到 agents/<agent>/sessions/<session_id>/ 下。"""
+    result = resolve_session_artifact_dir(
+        str(tmp_path / ".sensenova-claw"),
+        session_id="sess_123",
+        agent_id="doc-organizer",
+    )
+    assert result == (
+        (tmp_path / ".sensenova-claw").resolve()
+        / "agents"
+        / "doc-organizer"
+        / "sessions"
+        / "sess_123"
+    )
+
+
+def test_resolve_session_artifact_dir_defaults_to_default_agent(tmp_path):
+    """未提供 agent_id 时应回退到 default。"""
+    result = resolve_session_artifact_dir(
+        str(tmp_path / ".sensenova-claw"),
+        session_id="sess_456",
+        agent_id="",
+    )
+    assert result == (
+        (tmp_path / ".sensenova-claw").resolve()
+        / "agents"
+        / "default"
+        / "sessions"
+        / "sess_456"
+    )
 
 
 def test_resolve_agent_workdir_no_config():

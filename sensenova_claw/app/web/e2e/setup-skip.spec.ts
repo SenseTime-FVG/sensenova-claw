@@ -73,7 +73,7 @@ test('setup 页面点击跳过后不应被立刻重定向回 setup', async ({ pa
       };
 
       window.setTimeout(() => {
-        socket.onopen?.(new Event('open'));
+        (socket as any).onopen?.(new Event('open'));
       }, 0);
 
       return socket as unknown as WebSocket;

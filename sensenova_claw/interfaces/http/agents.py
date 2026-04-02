@@ -17,7 +17,13 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
 from sensenova_claw.capabilities.agents.config import AgentConfig
+from sensenova_claw.capabilities.agents.preferences import (
+    load_preferences,
+    save_preferences,
+)
 from sensenova_claw.capabilities.agents.registry import SYSTEM_PROMPT_FILENAME
+from sensenova_claw.capabilities.tools.registry import _is_tool_config_enabled
+from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
 logger = logging.getLogger(__name__)
 
@@ -41,27 +47,8 @@ def _get_config_manager(request: Request):
     return getattr(request.app.state, "config_manager", None)
 
 
-def _prefs_path(request: Request) -> Path:
-    cfg = request.app.state.config
-    home = Path(getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw"))
-    return home / ".agent_preferences.json"
-
-
-def _load_prefs(request: Request) -> dict:
-    p = _prefs_path(request)
-    if p.exists():
-        return json.loads(p.read_text(encoding="utf-8"))
-    return {}
-
-
-def _save_prefs(request: Request, prefs: dict) -> None:
-    p = _prefs_path(request)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(prefs, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
 def _sensenova_claw_home_path(request: Request) -> Path:
-    return Path(getattr(request.app.state, "sensenova_claw_home", "") or str(Path.home() / ".sensenova-claw"))
+    return Path(getattr(request.app.state, "sensenova_claw_home", "") or default_sensenova_claw_home())
 
 
 def _agent_prompt_path(request: Request, agent_id: str) -> Path:
@@ -77,7 +64,7 @@ def _serialize_agent_for_config(agent: AgentConfig) -> dict[str, Any]:
         "tools": list(agent.tools),
         "skills": list(agent.skills),
         "workdir": agent.workdir,
-        "can_delegate_to": list(agent.can_delegate_to),
+        "can_delegate_to": list(agent.can_delegate_to) if agent.can_delegate_to is not None else None,
         "max_delegation_depth": agent.max_delegation_depth,
         "max_pingpong_turns": agent.max_pingpong_turns,
         "enabled": agent.enabled,
@@ -123,16 +110,17 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
     tool_registry = request.app.state.tool_registry
     skill_registry = request.app.state.skill_registry
 
-    prefs = _load_prefs(request)
-    tool_prefs = prefs.get("tools", {})
+    prefs = load_preferences(_sensenova_claw_home_path(request))
     skill_prefs = prefs.get("skills", {})
 
     tools_detail = []
     for name, tool in tool_registry._tools.items():
+        if name == "send_message" and agent_cfg.can_delegate_to is None:
+            continue
         # 如果 Agent 配置了 tools 列表，过滤展示
         if agent_cfg.tools and name not in agent_cfg.tools:
             continue
-        enabled = tool_prefs.get(name, True)
+        enabled = _is_tool_config_enabled(name)
         tools_detail.append({
             "name": name,
             "description": tool.description or "",
@@ -141,9 +129,11 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
 
     skills_detail = []
     for skill in skill_registry.get_all():
-        if agent_cfg.skills and skill.name not in agent_cfg.skills:
-            continue
-        enabled = skill_prefs.get(skill.name, True)
+        # 显示所有技能，根据 Agent 配置决定 enabled 状态
+        if agent_cfg.skills:
+            enabled = skill.name in agent_cfg.skills
+        else:
+            enabled = skill_prefs.get(skill.name, True)
         # 分类: installed / builtin / workspace
         if skill.install_info:
             category = "installed"
@@ -169,10 +159,10 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
         "systemPrompt": agent_cfg.system_prompt,
         "temperature": agent_cfg.temperature,
         "maxTokens": agent_cfg.max_tokens,
-        "toolCount": len(tools_detail),
-        "skillCount": len(skills_detail),
-        "tools": [t["name"] for t in tools_detail],
-        "skills": [s["name"] for s in skills_detail],
+        "toolCount": sum(1 for t in tools_detail if t["enabled"]),
+        "skillCount": sum(1 for s in skills_detail if s["enabled"]),
+        "tools": [t["name"] for t in tools_detail if t["enabled"]],
+        "skills": [s["name"] for s in skills_detail if s["enabled"]],
         "toolsDetail": tools_detail,
         "skillsDetail": skills_detail,
         "canDelegateTo": agent_cfg.can_delegate_to,
@@ -315,7 +305,7 @@ async def create_agent(body: AgentCreate, request: Request):
         name=body.name,
         description=body.description,
         model=body.model or (default.model if default else "gpt-4o-mini"),
-        temperature=body.temperature if body.temperature is not None else (default.temperature if default else 0.2),
+        temperature=body.temperature if body.temperature is not None else (default.temperature if default else 1.0),
         max_tokens=body.max_tokens,
         system_prompt=body.system_prompt,
         tools=body.tools,
@@ -342,6 +332,7 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
     if not agent_cfg:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
+    provided_fields = body.model_dump(exclude_unset=True)
     updates: dict[str, Any] = {}
     if body.name is not None:
         updates["name"] = body.name
@@ -359,7 +350,7 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
         updates["tools"] = body.tools
     if body.skills is not None:
         updates["skills"] = body.skills
-    if body.can_delegate_to is not None:
+    if "can_delegate_to" in provided_fields:
         updates["can_delegate_to"] = body.can_delegate_to
     if body.max_delegation_depth is not None:
         updates["max_delegation_depth"] = body.max_delegation_depth
@@ -392,18 +383,21 @@ async def delete_agent(agent_id: str, request: Request):
 
 @router.put("/{agent_id}/preferences")
 async def update_agent_preferences(agent_id: str, body: AgentPreferences, request: Request):
-    """批量更新 agent 的 tools/skills 启用偏好"""
+    """批量更新 agent 的 tools/skills 启用偏好
+
+    注意：tools 开关已迁移到 config.yml，此端点仅保留对 skills 偏好的写入。
+    tools 字段如果传入将被忽略（应通过 PUT /api/tools/{name}/enabled 或 Agent 配置管理）。
+    """
     registry = _get_agent_registry(request)
     if not registry.get(agent_id):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    prefs = _load_prefs(request)
+    home = _sensenova_claw_home_path(request)
 
-    if body.tools is not None:
-        prefs["tools"] = {**prefs.get("tools", {}), **body.tools}
     if body.skills is not None:
+        prefs = load_preferences(home)
         prefs["skills"] = {**prefs.get("skills", {}), **body.skills}
+        save_preferences(home, prefs)
 
-    _save_prefs(request, prefs)
-    logger.info("Agent preferences updated: tools=%s, skills=%s", body.tools, body.skills)
+    logger.info("Agent preferences updated: skills=%s (tools ignored, use config.yml)", body.skills)
     return {"status": "saved"}

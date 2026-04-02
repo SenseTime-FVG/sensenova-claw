@@ -8,7 +8,8 @@ import pytest
 
 from sensenova_claw.kernel.events.bus import PublicEventBus
 from sensenova_claw.kernel.events.envelope import EventEnvelope
-from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED, USER_INPUT
+from sensenova_claw.kernel.events.router import BusRouter
+from sensenova_claw.kernel.events.types import AGENT_STEP_COMPLETED, USER_INPUT, USER_TURN_CANCEL_REQUESTED
 from sensenova_claw.adapters.channels.base import Channel
 from sensenova_claw.interfaces.ws.gateway import Gateway
 from sensenova_claw.kernel.runtime.publisher import EventPublisher
@@ -90,7 +91,7 @@ async def test_gateway_bind_session():
     channel_id = "test-channel"
 
     gateway.bind_session(session_id, channel_id)
-    assert gateway._session_bindings[session_id] == channel_id
+    assert gateway._session_bindings[session_id] == {channel_id}
 
     gateway.unbind_session(session_id)
     assert session_id not in gateway._session_bindings
@@ -161,6 +162,53 @@ async def test_gateway_publish_from_channel():
 
 
 @pytest.mark.asyncio
+async def test_gateway_cancel_turn_prefers_private_bus_publish_without_duplicate_delivery():
+    bus = PublicEventBus()
+    publisher = EventPublisher(bus=bus)
+    bus_router = BusRouter(public_bus=bus, ttl_seconds=3600, gc_interval=9999)
+    gateway = Gateway(publisher=publisher, bus_router=bus_router)
+
+    private_bus = bus_router.get_or_create("sess_123")
+    public_events: list[EventEnvelope] = []
+    private_events: list[EventEnvelope] = []
+    public_done = asyncio.Event()
+    private_done = asyncio.Event()
+
+    async def collect_public():
+        async for event in bus.subscribe():
+            if event.session_id != "sess_123":
+                continue
+            public_events.append(event)
+            public_done.set()
+            break
+
+    async def collect_private():
+        async for event in private_bus.subscribe():
+            private_events.append(event)
+            private_done.set()
+            if len(private_events) >= 2:
+                break
+
+    public_task = asyncio.create_task(collect_public())
+    private_task = asyncio.create_task(collect_private())
+    await asyncio.sleep(0.05)
+
+    await bus_router.start()
+    try:
+        await gateway.cancel_turn("sess_123", reason="user_cancel")
+        await asyncio.wait_for(public_done.wait(), timeout=1)
+        await asyncio.wait_for(private_done.wait(), timeout=1)
+        await asyncio.sleep(0.1)
+    finally:
+        public_task.cancel()
+        private_task.cancel()
+        await bus_router.stop()
+
+    assert [event.type for event in public_events] == [USER_TURN_CANCEL_REQUESTED]
+    assert [event.type for event in private_events] == [USER_TURN_CANCEL_REQUESTED]
+
+
+@pytest.mark.asyncio
 async def test_gateway_dispatch_event_inherits_channel_binding_from_parent():
     """子会话未绑定时，应继承父会话的 channel 绑定并缓存。"""
     bus = PublicEventBus()
@@ -187,7 +235,7 @@ async def test_gateway_dispatch_event_inherits_channel_binding_from_parent():
 
     assert len(channel.received_events) == 1
     assert channel.received_events[0].session_id == "child_sess"
-    assert gateway._session_bindings.get("child_sess") == "websocket"
+    assert gateway._session_bindings.get("child_sess") == {"websocket"}
 
 
 @pytest.mark.asyncio

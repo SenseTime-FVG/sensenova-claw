@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -103,6 +105,453 @@ def _resolve_bash_cwd(
     if resolved_cwd is None:
         return ".", None
     return str(resolved_cwd), None
+
+
+_FETCH_URL_ALLOWED_FORMATS = {"markdown", "text"}
+_FETCH_URL_HTML_CANDIDATE_SELECTORS = (
+    ".abstract",
+    "#abstract",
+    "[class*='abstract']",
+    "[id*='abstract']",
+    "blockquote.abstract",
+    "article",
+    "main",
+    "[role='main']",
+    ".main-content",
+    ".page-main",
+    ".page-content",
+    ".content",
+    ".post-content",
+    ".entry-content",
+    ".article-content",
+)
+_FETCH_URL_NOISE_KEYWORDS = (
+    "breadcrumb",
+    "cookie",
+    "footer",
+    "header",
+    "menu",
+    "nav",
+    "newsletter",
+    "promo",
+    "recommend",
+    "related",
+    "share",
+    "sidebar",
+    "social",
+    "subscribe",
+)
+_FETCH_URL_STOP_SECTION_KEYWORDS = (
+    "about arxivlabs",
+    "bibliographic",
+    "cite as",
+    "comments",
+    "references",
+    "related papers",
+    "submission history",
+    "subjects",
+)
+
+
+def _validate_fetch_url(raw_url: Any, raw_format: Any) -> tuple[str, str]:
+    """校验 fetch_url 的入参，避免进入真实请求后才失败。"""
+    url = str(raw_url or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise ValueError("fetch_url 的 url 必须以 http:// 或 https:// 开头")
+
+    output_format = str(raw_format or "markdown").strip().lower() or "markdown"
+    if output_format not in _FETCH_URL_ALLOWED_FORMATS:
+        raise ValueError("fetch_url 的 format 仅支持 markdown 或 text")
+    return url, output_format
+
+
+def _normalize_fetch_content_type(raw_content_type: Any, body: bytes) -> str:
+    """归一化 Content-Type，仅保留主 MIME type。"""
+    normalized = str(raw_content_type or "").split(";", 1)[0].strip().lower()
+    if normalized:
+        return normalized
+
+    sniff = body.lstrip()[:64].lower()
+    if sniff.startswith((b"{", b"[")):
+        return "application/json"
+    if sniff.startswith((b"<!doctype html", b"<html", b"<body")):
+        return "text/html"
+    return "application/octet-stream"
+
+
+def _truncate_fetch_text(text: str) -> str:
+    """限制 fetch_url 返回的文本大小，避免单工具结果过大。"""
+    max_size = int(config.get("tools.fetch_url.max_response_mb", 10) * 1024 * 1024)
+    if len(text) > max_size:
+        return text[:max_size]
+    return text
+
+
+def _looks_like_noise_element(tag: Any) -> bool:
+    tag_name = getattr(tag, "name", None)
+    if not tag_name:
+        return False
+    if tag_name in {"nav", "footer", "aside", "form"}:
+        return True
+    if tag_name == "header":
+        return tag.find("h1") is None
+    tag_attrs = getattr(tag, "attrs", None) or {}
+    attrs: list[str] = []
+    for key in ("class", "id", "role", "aria-label"):
+        value = tag_attrs.get(key)
+        if isinstance(value, list):
+            attrs.extend(str(item).lower() for item in value)
+        elif value:
+            attrs.append(str(value).lower())
+    haystack = " ".join(attrs)
+    if "abstract" in haystack:
+        return False
+    if tag.find("h1"):
+        return False
+    return any(keyword in haystack for keyword in _FETCH_URL_NOISE_KEYWORDS)
+
+
+def _is_link_heavy_noise(tag: Any) -> bool:
+    """识别正文里的高链接密度导航块、侧边栏和推荐列表。"""
+    tag_name = getattr(tag, "name", None)
+    if not tag_name:
+        return False
+    if tag_name not in {"div", "section", "aside", "ul", "ol"}:
+        return False
+    text = tag.get_text(" ", strip=True)
+    text_length = len(text)
+    if text_length < 40:
+        return False
+
+    links = tag.find_all("a")
+    link_count = len(links)
+    if link_count < 4:
+        return False
+
+    link_text_length = sum(len(link.get_text(" ", strip=True)) for link in links)
+    paragraph_count = len(tag.find_all("p"))
+    heading_count = len(tag.find_all(["h1", "h2", "h3", "h4"]))
+    link_ratio = link_text_length / max(text_length, 1)
+
+    if paragraph_count == 0 and link_ratio >= 0.45:
+        return True
+    if heading_count == 0 and paragraph_count <= 1 and link_count >= 8:
+        return True
+    return False
+
+
+def _score_html_candidate(node: Any) -> int:
+    text_length = len(node.get_text(" ", strip=True))
+    paragraph_count = len(node.find_all("p"))
+    list_count = len(node.find_all("li"))
+    links = node.find_all("a")
+    link_count = len(links)
+    link_text_length = sum(len(link.get_text(" ", strip=True)) for link in links)
+    score = text_length + paragraph_count * 350 + list_count * 80
+    score -= link_count * 120
+    score -= link_text_length * 2
+    if paragraph_count == 0 and list_count < 2:
+        score -= 400
+    attrs = " ".join(
+        str(item).lower()
+        for key in ("class", "id")
+        for item in (
+            getattr(node, "attrs", {}).get(key, [])
+            if isinstance(getattr(node, "attrs", {}).get(key), list)
+            else [getattr(node, "attrs", {}).get(key)]
+        )
+        if item
+    )
+    if "abstract" in attrs:
+        score += 2500
+    return score
+
+
+def _find_heading_anchored_container(body: Any) -> Any | None:
+    """优先围绕 h1 寻找最小正文容器，避免整页导航抢占候选。"""
+    heading = body.find("h1")
+    if not heading or len(heading.get_text(" ", strip=True)) < 12:
+        return None
+
+    fallback = None
+    current = heading.parent
+    while current and current != body:
+        text_length = len(current.get_text(" ", strip=True))
+        paragraphs = [
+            paragraph.get_text(" ", strip=True)
+            for paragraph in current.find_all("p")
+        ]
+        long_paragraphs = [paragraph for paragraph in paragraphs if len(paragraph) >= 80]
+        links = current.find_all("a")
+        link_text_length = sum(len(link.get_text(" ", strip=True)) for link in links)
+        link_ratio = link_text_length / max(text_length, 1)
+
+        if len(long_paragraphs) >= 2 and link_ratio <= 0.45 and text_length >= 200:
+            return current
+        if fallback is None and long_paragraphs and link_ratio <= 0.30 and text_length >= 160:
+            fallback = current
+        current = current.parent
+    return fallback
+
+
+def _normalize_markdown_text(text: str) -> str:
+    lines = [line.rstrip() for line in text.splitlines()]
+    normalized: list[str] = []
+    blank_count = 0
+    for line in lines:
+        if not line.strip():
+            blank_count += 1
+            if blank_count <= 1:
+                normalized.append("")
+            continue
+        blank_count = 0
+        normalized.append(line)
+    return "\n".join(normalized).strip()
+
+
+def _normalize_plain_text(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines()]
+    normalized: list[str] = []
+    blank_count = 0
+    for line in lines:
+        if not line:
+            blank_count += 1
+            if blank_count <= 1:
+                normalized.append("")
+            continue
+        blank_count = 0
+        normalized.append(line)
+    return "\n".join(normalized).strip()
+
+
+def _matches_stop_section(text: str) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
+    return any(keyword in normalized for keyword in _FETCH_URL_STOP_SECTION_KEYWORDS)
+
+
+def _prune_stop_sections(fragment: Any) -> None:
+    for tag in list(fragment.find_all(["h2", "h3", "h4", "strong", "dt", "summary"])):
+        text = tag.get_text(" ", strip=True)
+        if not _matches_stop_section(text):
+            continue
+        current = tag
+        while getattr(current, "parent", None) is not None and current.parent != fragment:
+            if getattr(current.parent, "name", None) in {"article", "main", "section", "div", "aside"}:
+                current = current.parent
+                break
+            current = current.parent
+        current.decompose()
+
+
+def _prepend_primary_heading(fragment: Any, body: Any) -> None:
+    if fragment.find("h1"):
+        return
+    heading = body.find("h1")
+    if not heading:
+        return
+    try:
+        from bs4 import BeautifulSoup
+    except Exception:
+        return
+    heading_fragment = BeautifulSoup(str(heading), "html.parser")
+    first_heading = heading_fragment.find("h1")
+    if not first_heading:
+        return
+    container = fragment.body or fragment
+    if getattr(container, "contents", None):
+        container.insert(0, "\n")
+        container.insert(0, first_heading)
+    else:
+        container.append(first_heading)
+
+
+def _extract_primary_heading_text(body: Any) -> str:
+    heading = body.find("h1")
+    if not heading:
+        return ""
+    return heading.get_text(" ", strip=True)
+
+
+def _extract_error_html_content(html: str, output_format: str) -> str:
+    try:
+        from bs4 import BeautifulSoup
+    except Exception:
+        return _fallback_extract_html_content(html, output_format)
+
+    soup = BeautifulSoup(html, "html.parser")
+    title = ""
+    title_tag = soup.find("title")
+    if title_tag:
+        title = title_tag.get_text(" ", strip=True)
+    heading = soup.find("h1")
+    heading_text = heading.get_text(" ", strip=True) if heading else ""
+    paragraphs: list[str] = []
+    for paragraph in soup.find_all("p"):
+        text = paragraph.get_text(" ", strip=True)
+        if text and len(text) >= 12:
+            paragraphs.append(text)
+        if len(paragraphs) >= 2:
+            break
+
+    parts: list[str] = []
+    primary_title = heading_text or title
+    if output_format == "markdown" and primary_title:
+        parts.append(f"# {primary_title}")
+    elif primary_title:
+        parts.append(primary_title)
+    if title and title != primary_title:
+        parts.append(title)
+    parts.extend(paragraphs)
+    summary = "\n\n".join(part for part in parts if part).strip()
+    if summary:
+        return summary
+    return _fallback_extract_html_content(html, output_format)
+
+
+def _fallback_extract_html_content(html: str, output_format: str) -> str:
+    """HTML 结构化提取失败时，回退到较保守的纯文本清洗。"""
+    text = re.sub(r"(?is)<script.*?>.*?</script>", " ", html)
+    text = re.sub(r"(?is)<style.*?>.*?</style>", " ", text)
+    text = re.sub(r"(?is)<noscript.*?>.*?</noscript>", " ", text)
+    text = re.sub(r"(?s)<[^>]+>", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    cleaned = _normalize_plain_text(text)
+    if output_format == "markdown":
+        return cleaned
+    return cleaned
+
+
+def _extract_html_content(html: str, output_format: str) -> str:
+    """抽取 HTML 正文，并按目标格式输出。"""
+    try:
+        from bs4 import BeautifulSoup, Comment
+        from markdownify import markdownify as to_markdown
+    except Exception:
+        return _fallback_extract_html_content(html, output_format)
+
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+
+        for comment in soup.find_all(string=lambda value: isinstance(value, Comment)):
+            comment.extract()
+        for tag in soup.find_all(["script", "style", "noscript", "svg"]):
+            tag.decompose()
+
+        for tag in list(soup.find_all(True)):
+            if _looks_like_noise_element(tag) or _is_link_heavy_noise(tag):
+                tag.decompose()
+
+        body = soup.body or soup
+        candidates: list[tuple[int, Any]] = []
+        anchored = _find_heading_anchored_container(body)
+        if anchored is not None:
+            candidates.append((_score_html_candidate(anchored) + 8000, anchored))
+
+        for selector in _FETCH_URL_HTML_CANDIDATE_SELECTORS:
+            for node in body.select(selector):
+                text_length = len(node.get_text(" ", strip=True))
+                if text_length >= 80:
+                    score = _score_html_candidate(node)
+                    candidates.append((score, node))
+
+        if not candidates:
+            for node in body.find_all(["article", "main", "section", "div"]):
+                text_length = len(node.get_text(" ", strip=True))
+                paragraph_count = len(node.find_all(["p", "li"]))
+                if text_length >= 120 and paragraph_count >= 1:
+                    score = _score_html_candidate(node)
+                    candidates.append((score, node))
+
+        container = max(candidates, key=lambda item: item[0])[1] if candidates else body
+        fragment = BeautifulSoup(str(container), "html.parser")
+        _prepend_primary_heading(fragment, body)
+        for tag in list(fragment.find_all(True)):
+            if _looks_like_noise_element(tag) or _is_link_heavy_noise(tag):
+                tag.decompose()
+        _prune_stop_sections(fragment)
+        primary_heading = _extract_primary_heading_text(body)
+
+        if output_format == "markdown":
+            markdown = to_markdown(
+                str(fragment),
+                heading_style="ATX",
+                bullets="-",
+                strip=["script", "style", "noscript", "svg"],
+            )
+            normalized = _normalize_markdown_text(markdown)
+            if primary_heading and primary_heading not in normalized:
+                normalized = _normalize_markdown_text(f"# {primary_heading}\n\n{normalized}")
+            if normalized:
+                return normalized
+        else:
+            plain_text = fragment.get_text("\n", strip=True)
+            normalized = _normalize_plain_text(plain_text)
+            if primary_heading and primary_heading not in normalized:
+                normalized = _normalize_plain_text(f"{primary_heading}\n\n{normalized}")
+            if normalized:
+                return normalized
+    except Exception:
+        pass
+
+    return _fallback_extract_html_content(html, output_format)
+
+
+def _extract_download_filename(headers: Any, url: str, content_type: str) -> str:
+    """优先从响应头提取下载文件名，失败时回退到 URL。"""
+    disposition = str(getattr(headers, "get", lambda *_: "")("Content-Disposition", "") or "")
+    file_name = ""
+
+    match = re.search(r"filename\*\s*=\s*UTF-8''([^;]+)", disposition, flags=re.IGNORECASE)
+    if match:
+        file_name = unquote(match.group(1).strip())
+    else:
+        match = re.search(r'filename\s*=\s*"([^"]+)"', disposition, flags=re.IGNORECASE)
+        if match:
+            file_name = match.group(1).strip()
+        else:
+            match = re.search(r"filename\s*=\s*([^;]+)", disposition, flags=re.IGNORECASE)
+            if match:
+                file_name = match.group(1).strip().strip('"')
+
+    if not file_name:
+        file_name = Path(urlparse(url).path).name
+
+    file_name = Path(file_name).name.strip() or "download"
+    file_name = re.sub(r"[^A-Za-z0-9._-]+", "_", file_name)
+    if "." not in file_name:
+        suffix = mimetypes.guess_extension(content_type or "") or ".bin"
+        file_name = f"{file_name}{suffix}"
+    return file_name
+
+
+def _save_downloaded_binary(
+    *,
+    data: bytes,
+    file_name: str,
+    session_id: str,
+    agent_id: str | None = None,
+) -> Path:
+    """保存非文本响应到当前 session 的附件目录。"""
+    from sensenova_claw.platform.config.workspace import (
+        resolve_sensenova_claw_home,
+        resolve_session_artifact_dir,
+    )
+
+    home = resolve_sensenova_claw_home(config)
+    safe_session_id = str(session_id or "").strip() or "fetch_url_default"
+    artifact_dir = resolve_session_artifact_dir(home, safe_session_id, agent_id=agent_id)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    target = artifact_dir / file_name
+    stem = target.stem
+    suffix = target.suffix
+    counter = 1
+    while target.exists():
+        target = artifact_dir / f"{stem}_{counter}{suffix}"
+        counter += 1
+
+    target.write_bytes(data)
+    return target
 
 
 class BashCommandTool(Tool):
@@ -514,29 +963,102 @@ class TavilySearchTool(Tool):
 
 class FetchUrlTool(Tool):
     name = "fetch_url"
-    description = "获取网页内容"
+    description = "获取指定 URL 的网页内容，适合用来读取和分析网页内容，内容过大时，返回结果会截断并将完整内容存入文件。"
     parameters = {
         "type": "object",
         "properties": {
             "url": {"type": "string"},
-            "method": {"type": "string", "default": "GET"},
+            "format": {
+                "type": "string",
+                "enum": ["markdown", "text"],
+                "default": "markdown",
+                "description": "输出格式：markdown 保留标题/链接/列表等基础结构，text 返回纯文本",
+            },
         },
         "required": ["url"],
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        url = str(kwargs["url"])
-        method = str(kwargs.get("method", "GET")).upper()
+        url, output_format = _validate_fetch_url(kwargs.get("url"), kwargs.get("format", "markdown"))
         timeout = config.get("tools.fetch_url.timeout", 15)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            resp = await client.request(method, url)
-        text = resp.text
-        # 内存保护截断：限制 HTTP 响应体大小，防止 OOM
-        max_size = int(config.get("tools.fetch_url.max_response_mb", 10) * 1024 * 1024)
-        if len(text) > max_size:
-            text = text[:max_size]
-        # 返回原始内容，由 ToolRuntime 层做 token 截断
-        return {"url": str(resp.url), "status_code": resp.status_code, "content": text}
+            resp = await client.get(url)
+
+        body = bytes(resp.content or b"")
+        content_type = _normalize_fetch_content_type(resp.headers.get("Content-Type", ""), body)
+        result: dict[str, Any] = {
+            "url": str(resp.url),
+            "status_code": resp.status_code,
+            "content_type": content_type,
+            "format": output_format,
+        }
+
+        if resp.status_code < 200 or resp.status_code >= 300:
+            detail = ""
+            if content_type in {"text/html", "application/xhtml+xml"}:
+                detail = _extract_error_html_content(resp.text, output_format)
+            elif content_type == "application/json" or content_type.endswith("+json"):
+                try:
+                    detail = json.dumps(resp.json(), ensure_ascii=False, indent=2)
+                except Exception:
+                    detail = resp.text
+            elif content_type.startswith("text/"):
+                detail = resp.text
+            else:
+                detail = f"响应类型: {content_type}"
+            detail = _truncate_fetch_text(str(detail).strip())
+            message = f"fetch_url 请求失败 ({resp.status_code})"
+            if detail:
+                message = f"{message}: {detail}"
+            raise ValueError(message)
+
+        if content_type == "application/json" or content_type.endswith("+json"):
+            try:
+                json_payload = resp.json()
+            except Exception as exc:
+                raise ValueError(f"fetch_url 无法解析 JSON 响应: {exc}") from exc
+            result["content"] = _truncate_fetch_text(
+                json.dumps(json_payload, ensure_ascii=False, indent=2)
+            )
+            return result
+
+        if content_type in {"text/html", "application/xhtml+xml"}:
+            result["content"] = _truncate_fetch_text(_extract_html_content(resp.text, output_format))
+            return result
+
+        if content_type == "text/plain":
+            result["content"] = _truncate_fetch_text(resp.text)
+            return result
+
+        if content_type == "text/markdown":
+            text = resp.text
+            if output_format == "text":
+                text = _normalize_plain_text(text)
+            result["content"] = _truncate_fetch_text(text)
+            return result
+
+        if content_type.startswith("text/"):
+            result["content"] = _truncate_fetch_text(resp.text)
+            return result
+
+        download_name = _extract_download_filename(resp.headers, str(resp.url), content_type)
+        download_path = _save_downloaded_binary(
+            data=body,
+            file_name=download_name,
+            session_id=str(kwargs.get("_session_id", "")).strip(),
+            agent_id=str(kwargs.get("_source_agent_id", "")).strip() or None,
+        )
+        summary = (
+            f"已下载非文本内容: {content_type}, 文件名: {download_name}, "
+            f"大小: {len(body)} bytes, 保存路径: {download_path}"
+        )
+        result.update({
+            "download_path": str(download_path),
+            "download_filename": download_name,
+            "summary": summary,
+            "content": summary,
+        })
+        return result
 
 
 class ReadFileTool(Tool):
@@ -650,3 +1172,208 @@ class WriteFileTool(Tool):
 
         return {"success": True, "file_path": str(file_path), "size": len(content), "mode": mode}
 
+
+# ── Todolist 专用工具 ──────────────────────────────────────────
+
+
+def _todolist_dir_from_config() -> Path:
+    """获取 todolist 目录，不存在则创建。"""
+    from sensenova_claw.platform.config.workspace import resolve_sensenova_claw_home
+    home = resolve_sensenova_claw_home(config)
+    d = home / "todolist"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _todolist_file(directory: Path, date_str: str) -> Path:
+    return directory / f"todolist_{date_str}.json"
+
+
+def _load_todolist_day(directory: Path, date_str: str) -> dict:
+    fp = _todolist_file(directory, date_str)
+    if fp.exists():
+        with open(fp, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"date": date_str, "items": []}
+
+
+def _save_todolist_day(directory: Path, date_str: str, data: dict) -> None:
+    fp = _todolist_file(directory, date_str)
+    with open(fp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+async def _publish_todolist_event(event_bus: Any, date_str: str, action: str) -> None:
+    """向事件总线发布 todolist 变更事件"""
+    if not event_bus:
+        return
+    from sensenova_claw.kernel.events.envelope import EventEnvelope
+    from sensenova_claw.kernel.events.types import TODOLIST_UPDATED, SYSTEM_SESSION_ID
+    await event_bus.publish(EventEnvelope(
+        type=TODOLIST_UPDATED,
+        session_id=SYSTEM_SESSION_ID,
+        source="tool",
+        payload={"date": date_str, "action": action},
+    ))
+
+
+class ManageTodolistTool(Tool):
+    name = "manage_todolist"
+    description = (
+        "管理个人待办事项。支持 add(新增)、complete(完成/标记已完成)、update(更新)、"
+        "toggle(切换完成/未完成状态)、delete(永久删除)、list(列出) 操作。"
+        "注意：用户说「完成」「做完了」时应使用 complete，不要使用 delete。"
+        "delete 仅用于用户明确要求「删除」「移除」待办时。"
+    )
+    risk_level = ToolRiskLevel.LOW
+    parameters = {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["add", "complete", "update", "toggle", "delete", "list"],
+                "description": (
+                    "操作类型：add=新增, complete=标记为已完成(设置status=done), "
+                    "update=更新属性, toggle=切换完成/未完成, delete=永久删除, list=列出"
+                ),
+            },
+            "date": {
+                "type": "string",
+                "description": "日期 YYYY-MM-DD，默认今天",
+            },
+            "title": {
+                "type": "string",
+                "description": "待办标题（add 必填）",
+            },
+            "item_id": {
+                "type": "string",
+                "description": "待办 ID（update/toggle/delete 时需要）",
+            },
+            "priority": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+                "description": "优先级，默认 medium",
+            },
+            "due_date": {
+                "type": "string",
+                "description": "截止日期 YYYY-MM-DD",
+            },
+            "status": {
+                "type": "string",
+                "enum": ["todo", "done"],
+                "description": "状态（update 时可指定）",
+            },
+        },
+        "required": ["action"],
+    }
+
+    async def execute(self, **kwargs: Any) -> Any:
+        import uuid
+        from datetime import datetime, date as date_mod
+
+        event_bus = kwargs.pop("_event_bus", None)
+        kwargs.pop("_agent_workdir", None)
+        kwargs.pop("_path_policy", None)
+        kwargs.pop("_session_id", None)
+        kwargs.pop("_agent_registry", None)
+        kwargs.pop("_ask_user_handler", None)
+        kwargs.pop("_source_agent_id", None)
+        kwargs.pop("_turn_id", None)
+        kwargs.pop("_tool_call_id", None)
+
+        action = str(kwargs.get("action", ""))
+        date_str = str(kwargs.get("date", "")) or date_mod.today().isoformat()
+
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return {"success": False, "error": f"日期格式错误，需要 YYYY-MM-DD，收到: {date_str}"}
+
+        d = _todolist_dir_from_config()
+        data = _load_todolist_day(d, date_str)
+
+        if action == "list":
+            data["items"].sort(key=lambda x: int(x.get("order", 0)))
+            return {"success": True, "date": date_str, "items": data["items"]}
+
+        if action == "add":
+            title = str(kwargs.get("title", "")).strip()
+            if not title:
+                return {"success": False, "error": "add 操作需要 title"}
+            item = {
+                "id": str(uuid.uuid4()),
+                "title": title,
+                "priority": str(kwargs.get("priority", "medium")),
+                "due_date": kwargs.get("due_date"),
+                "status": "todo",
+                "order": len(data["items"]),
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "completed_at": None,
+            }
+            data["items"].append(item)
+            _save_todolist_day(d, date_str, data)
+            await _publish_todolist_event(event_bus, date_str, "add")
+            return {"success": True, "item": item}
+
+        if action == "complete":
+            item_id = str(kwargs.get("item_id", ""))
+            for item in data["items"]:
+                if item["id"] == item_id:
+                    if item["status"] != "done":
+                        item["status"] = "done"
+                        item["completed_at"] = datetime.now().isoformat(timespec="seconds")
+                        _save_todolist_day(d, date_str, data)
+                        await _publish_todolist_event(event_bus, date_str, "complete")
+                    return {"success": True, "item": item}
+            return {"success": False, "error": f"待办项 '{item_id}' 不存在"}
+
+        if action == "toggle":
+            item_id = str(kwargs.get("item_id", ""))
+            for item in data["items"]:
+                if item["id"] == item_id:
+                    old_status = item["status"]
+                    item["status"] = "done" if old_status == "todo" else "todo"
+                    if item["status"] == "done":
+                        item["completed_at"] = datetime.now().isoformat(timespec="seconds")
+                    else:
+                        item["completed_at"] = None
+                    _save_todolist_day(d, date_str, data)
+                    await _publish_todolist_event(event_bus, date_str, "toggle")
+                    return {"success": True, "item": item}
+            return {"success": False, "error": f"待办项 '{item_id}' 不存在"}
+
+        if action == "update":
+            item_id = str(kwargs.get("item_id", ""))
+            for item in data["items"]:
+                if item["id"] == item_id:
+                    if kwargs.get("title"):
+                        item["title"] = str(kwargs["title"])
+                    if kwargs.get("priority"):
+                        item["priority"] = str(kwargs["priority"])
+                    if "due_date" in kwargs:
+                        item["due_date"] = kwargs["due_date"]
+                    if kwargs.get("status"):
+                        old_status = item["status"]
+                        item["status"] = str(kwargs["status"])
+                        if item["status"] == "done" and old_status != "done":
+                            item["completed_at"] = datetime.now().isoformat(timespec="seconds")
+                        elif item["status"] == "todo":
+                            item["completed_at"] = None
+                    _save_todolist_day(d, date_str, data)
+                    await _publish_todolist_event(event_bus, date_str, "update")
+                    return {"success": True, "item": item}
+            return {"success": False, "error": f"待办项 '{item_id}' 不存在"}
+
+        if action == "delete":
+            item_id = str(kwargs.get("item_id", ""))
+            original_len = len(data["items"])
+            data["items"] = [i for i in data["items"] if i["id"] != item_id]
+            if len(data["items"]) == original_len:
+                return {"success": False, "error": f"待办项 '{item_id}' 不存在"}
+            for idx, item in enumerate(data["items"]):
+                item["order"] = idx
+            _save_todolist_day(d, date_str, data)
+            await _publish_todolist_event(event_bus, date_str, "delete")
+            return {"success": True, "deleted": item_id}
+
+        return {"success": False, "error": f"未知操作: {action}"}

@@ -3,13 +3,16 @@ Config API - 按 section 读写 config.yml，管理 LLM provider/model
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 from copy import deepcopy
 from typing import Any
 
 from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from sensenova_claw.capabilities.miniapps.acp_wizard import ACPWizardInstallError, ACPWizardService
 from sensenova_claw.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
 from sensenova_claw.platform.secrets.migration import migrate_plaintext_secrets
 from sensenova_claw.platform.secrets.registry import is_secret_path
@@ -30,10 +33,42 @@ class TestLLMBody(BaseModel):
     api_key: str
     base_url: str = ""
     model_id: str
+    max_tokens: int = 128000
+    max_output_tokens: int = 16384
+
+
+def _normalize_llm_test_error(error_message: str) -> dict[str, str | None]:
+    """归一化 LLM 连接测试错误，提取前端可直接展示的专门提示。"""
+    normalized_message = error_message.replace("\\'", "'").replace('\\"', '"')
+
+    max_tokens_patterns = [
+        r"Range of max_tokens should be \[(\d+),\s*(\d+)\]",
+        r"valid range of max_tokens is \[(\d+),\s*(\d+)\]",
+        r"does not support max tokens >\s*(\d+)",
+        r"max_tokens is too large",
+        r"maxOutputTokens value of\s*\d+\s*but the supported range is from",
+        r"supports at most\s*(\d+)\s*completion tokens",
+        r"maximum tokens you requested exceeds the model limit of\s*(\d+)",
+        r"maximum context length is\s*(\d+)\s*tokens\..*requested\s*\d+\s*tokens.*in the completion",
+    ]
+    if any(re.search(pattern, normalized_message, flags=re.IGNORECASE) for pattern in max_tokens_patterns):
+        return {"error_hint": "max tokens 超限"}
+
+    max_output_patterns = [
+        r"max_output_tokens\s+is\s+too\s+large",
+        r"max output tokens?\s+(?:is\s+)?too\s+large",
+        r"supports at most\s*(\d+)\s*output tokens",
+        r"Range of max_output_tokens should be \[(\d+),\s*(\d+)\]",
+    ]
+    if any(re.search(pattern, normalized_message, flags=re.IGNORECASE) for pattern in max_output_patterns):
+        return {"error_hint": "max output tokens 超限"}
+
+    return {"error_hint": None}
 
 
 class ProviderUpdateBody(BaseModel):
     name: str | None = None
+    source_type: str = "openai"
     api_key: str | None = None
     base_url: str = ""
     timeout: int = 60
@@ -41,16 +76,38 @@ class ProviderUpdateBody(BaseModel):
 
 
 class ModelUpdateBody(BaseModel):
+    model_config = {"populate_by_name": True}
+
     name: str | None = None
     provider: str
     model_id: str
+    model_type: str = Field(default="chat", alias="type")  # "chat" | "embedding"
     timeout: int = 60
     max_tokens: int = 128000
     max_output_tokens: int = 16384
+    dimensions: int | None = None  # embedding 模型向量维度
 
 
 class DefaultModelUpdateBody(BaseModel):
     default_model: str = ""
+
+
+class DefaultEmbeddingModelUpdateBody(BaseModel):
+    default_embedding_model: str = ""
+
+
+class ACPWizardInstallBody(BaseModel):
+    agent_id: str
+    step_ids: list[str] = []
+
+
+def _get_acp_wizard(request: Request) -> ACPWizardService:
+    service = getattr(request.app.state, "acp_wizard_service", None)
+    if service is not None:
+        return service
+    service = ACPWizardService(project_root=getattr(request.app.state, "project_root", None))
+    request.app.state.acp_wizard_service = service
+    return service
 
 
 @router.get("/secret")
@@ -82,7 +139,43 @@ async def get_config_sections(request: Request):
     """返回 llm / agent / plugins / miniapps 四个 section 的当前值"""
     config_manager = request.app.state.config_manager
     default_sections = ["llm", "agent", "plugins", "miniapps"]
-    return config_manager.get_sections(default_sections)
+    sections = config_manager.get_sections(default_sections)
+    raw_config = config_manager._load_raw_yaml()
+    raw_llm = raw_config.get("llm", {}) if isinstance(raw_config, dict) else {}
+    raw_providers = raw_llm.get("providers", {}) if isinstance(raw_llm, dict) else {}
+    explicit_provider_names = [
+        name for name, value in raw_providers.items()
+        if isinstance(name, str) and isinstance(value, dict)
+    ]
+    llm_section = sections.get("llm", {})
+    if isinstance(llm_section, dict):
+        llm_section["_meta"] = {
+            "explicit_provider_names": explicit_provider_names,
+        }
+    return sections
+
+
+@router.get("/acp/wizard")
+async def get_acp_wizard(request: Request):
+    cfg = request.app.state.config
+    wizard = _get_acp_wizard(request)
+    return wizard.inspect(current_config=cfg.get("miniapps.acp", {}) or {})
+
+
+@router.post("/acp/wizard/install")
+async def install_acp_agent(body: ACPWizardInstallBody, request: Request):
+    cfg = request.app.state.config
+    wizard = _get_acp_wizard(request)
+    try:
+        return await wizard.install(
+            body.agent_id,
+            step_ids=body.step_ids,
+            current_config=cfg.get("miniapps.acp", {}) or {},
+        )
+    except ACPWizardInstallError as exc:
+        raise HTTPException(400, str(exc))
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(504, f"ACP 安装超时: {exc}")
 
 
 @router.put("/sections")
@@ -110,17 +203,16 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
     providers = deepcopy(llm_section.get("providers", {}))
     models = deepcopy(llm_section.get("models", {}))
 
-    if provider_name not in providers:
-        raise HTTPException(404, f"Provider 不存在: {provider_name}")
-
+    provider_exists = provider_name in providers
     next_name = (body.name or provider_name).strip().lower()
     if not next_name:
         raise HTTPException(400, "Provider 名称不能为空")
-    if next_name != provider_name and next_name in providers:
+    if provider_exists and next_name != provider_name and next_name in providers:
         raise HTTPException(400, f"Provider 已存在: {next_name}")
 
-    existing = providers.pop(provider_name)
+    existing = providers.pop(provider_name, {})
     provider_payload: dict[str, Any] = {
+        "source_type": body.source_type or (existing.get("source_type") if isinstance(existing, dict) else "openai"),
         "base_url": body.base_url,
         "timeout": body.timeout,
         "max_retries": body.max_retries,
@@ -133,7 +225,7 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
     providers[next_name] = provider_payload
     llm_section["providers"] = providers
 
-    if next_name != provider_name:
+    if provider_exists and next_name != provider_name:
         for model in models.values():
             if isinstance(model, dict) and model.get("provider") == provider_name:
                 model["provider"] = next_name
@@ -158,26 +250,30 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     llm_section = deepcopy(raw_config.get("llm", {}))
     models = deepcopy(llm_section.get("models", {}))
 
-    if model_name not in models:
-        raise HTTPException(404, f"Model 不存在: {model_name}")
-
+    model_exists = model_name in models
     next_name = (body.name or model_name).strip()
     if not next_name:
         raise HTTPException(400, "Model 名称不能为空")
-    if next_name != model_name and next_name in models:
+    if model_exists and next_name != model_name and next_name in models:
         raise HTTPException(400, f"Model 已存在: {next_name}")
 
-    models.pop(model_name)
-    models[next_name] = {
+    models.pop(model_name, None)
+    model_data = {
         "provider": body.provider,
         "model_id": body.model_id,
+        "type": body.model_type,
         "timeout": body.timeout,
         "max_tokens": body.max_tokens,
         "max_output_tokens": body.max_output_tokens,
     }
+    if body.dimensions:
+        model_data["dimensions"] = body.dimensions
+    models[next_name] = model_data
     llm_section["models"] = models
-    if llm_section.get("default_model") == model_name:
+    if model_exists and llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
+    if model_exists and llm_section.get("default_embedding_model") == model_name:
+        llm_section["default_embedding_model"] = next_name
 
     try:
         updated_llm = await config_manager.replace("llm", llm_section)
@@ -212,6 +308,31 @@ async def update_llm_default_model(body: DefaultModelUpdateBody, request: Reques
         "status": "saved",
         "default_model": updated_llm.get("default_model", ""),
     }
+
+
+@router.put("/llm/default-embedding-model")
+async def update_llm_default_embedding_model(body: DefaultEmbeddingModelUpdateBody, request: Request):
+    """更新默认 embedding 模型"""
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    models = deepcopy(llm_section.get("models", {}))
+
+    if body.default_embedding_model and body.default_embedding_model not in models:
+        raise HTTPException(400, f"Model 不存在: {body.default_embedding_model}")
+
+    llm_section["default_embedding_model"] = body.default_embedding_model
+
+    try:
+        updated_llm = await config_manager.replace("llm", llm_section)
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
+
+    return {
+        "status": "saved",
+        "default_embedding_model": updated_llm.get("default_embedding_model", ""),
+    }
+
 
 @router.get("/llm-status")
 async def get_llm_status(request: Request):
@@ -270,7 +391,7 @@ async def list_models(body: ListModelsBody):
     """通过 OpenAI 兼容的 GET /models 接口获取可用模型列表"""
     try:
         logger.debug("List models request: provider=%s base_url=%s", body.provider, body.base_url)
-        if body.provider == "anthropic":
+        if body.provider in ("anthropic", "anthropic-compatible"):
             models = await _list_models_anthropic(body.api_key, body.base_url)
         else:
             models = await _list_models_openai(body.api_key, body.base_url)
@@ -317,22 +438,31 @@ async def test_llm_connection(body: TestLLMBody):
     """用临时配置测试 LLM 连通性，发送一个简单请求验证 API key 和模型是否可用"""
     provider = body.provider
     try:
-        if provider in ("openai", "anthropic", "gemini"):
+        if provider in ("anthropic", "anthropic-compatible"):
+            result = await _test_anthropic(
+                api_key=body.api_key,
+                base_url=body.base_url,
+                model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
+            )
+            return {"success": True, **result}
+        if provider in ("gemini", "gemini-compatible"):
+            result = await _test_gemini(
+                api_key=body.api_key,
+                base_url=body.base_url,
+                model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
+            )
+            return {"success": True, **result}
+        if provider in ("openai", "openai-compatible"):
             result = await _test_openai_compatible(
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
-            ) if provider == "openai" else (
-                await _test_anthropic(
-                    api_key=body.api_key,
-                    base_url=body.base_url,
-                    model_id=body.model_id,
-                ) if provider == "anthropic" else
-                await _test_gemini(
-                    api_key=body.api_key,
-                    base_url=body.base_url,
-                    model_id=body.model_id,
-                )
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
         else:
@@ -341,14 +471,23 @@ async def test_llm_connection(body: TestLLMBody):
                 api_key=body.api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
+                max_tokens=body.max_tokens,
+                max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
     except Exception as e:
         logger.warning("LLM test failed: %s", e)
-        return {"success": False, "error": str(e)}
+        normalized = _normalize_llm_test_error(str(e))
+        return {"success": False, "error": str(e), **normalized}
 
 
-async def _test_openai_compatible(api_key: str, base_url: str, model_id: str) -> dict:
+async def _test_openai_compatible(
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    max_tokens: int,
+    max_output_tokens: int,
+) -> dict:
     """通过 OpenAI SDK 测试连通性"""
     from openai import AsyncOpenAI
     client = AsyncOpenAI(
@@ -358,14 +497,22 @@ async def _test_openai_compatible(api_key: str, base_url: str, model_id: str) ->
     )
     response = await client.chat.completions.create(
         model=model_id,
-        messages=[{"role": "user", "content": "Hi"}],
-        max_tokens=5,
+        messages=[{"role": "user", "content": "连接测试，回复我'hi'，不要多余的文字"}],
+        max_tokens=max_tokens,
+        extra_body={"max_output_tokens": max_output_tokens},
     )
     return {"model": response.model, "message": "连接成功"}
 
 
-async def _test_anthropic(api_key: str, base_url: str, model_id: str) -> dict:
+async def _test_anthropic(
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    max_tokens: int,
+    max_output_tokens: int,
+) -> dict:
     """通过 Anthropic SDK 测试连通性"""
+    _ = max_output_tokens
     import anthropic
     client = anthropic.AsyncAnthropic(
         api_key=api_key,
@@ -374,13 +521,19 @@ async def _test_anthropic(api_key: str, base_url: str, model_id: str) -> dict:
     )
     response = await client.messages.create(
         model=model_id,
-        messages=[{"role": "user", "content": "Hi"}],
-        max_tokens=5,
+        messages=[{"role": "user", "content": "连接测试，回复我'hi'，不要多余的文字"}],
+        max_tokens=max_tokens,
     )
     return {"model": response.model, "message": "连接成功"}
 
 
-async def _test_gemini(api_key: str, base_url: str, model_id: str) -> dict:
+async def _test_gemini(
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    max_tokens: int,
+    max_output_tokens: int,
+) -> dict:
     """通过 OpenAI 兼容方式测试 Gemini"""
     from openai import AsyncOpenAI
     gemini_base = base_url or "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -391,7 +544,8 @@ async def _test_gemini(api_key: str, base_url: str, model_id: str) -> dict:
     )
     response = await client.chat.completions.create(
         model=model_id,
-        messages=[{"role": "user", "content": "Hi"}],
-        max_tokens=5,
+        messages=[{"role": "user", "content": "连接测试，回复我'hi'，不要多余的文字"}],
+        max_tokens=max_tokens,
+        extra_body={"max_output_tokens": max_output_tokens},
     )
     return {"model": response.model, "message": "连接成功"}

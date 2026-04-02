@@ -85,6 +85,56 @@ def test_delete_session_missing_returns_404(client):
     assert resp.status_code == 404
 
 
+def test_list_sessions_hides_hidden_by_default(client, app):
+    _run(app.state.services.repo.create_session("sess_visible", meta={"title": "Visible"}))
+    _run(app.state.services.repo.create_session(
+        "sess_hidden",
+        meta={"title": "Hidden Scratch", "visibility": "hidden"},
+    ))
+
+    resp = client.get("/api/sessions")
+
+    assert resp.status_code == 200
+    session_ids = {item["session_id"] for item in resp.json()["sessions"]}
+    assert "sess_visible" in session_ids
+    assert "sess_hidden" not in session_ids
+
+
+def test_list_sessions_include_hidden_returns_hidden_sessions(client, app):
+    _run(app.state.services.repo.create_session("sess_visible", meta={"title": "Visible"}))
+    _run(app.state.services.repo.create_session(
+        "sess_hidden",
+        meta={"title": "Hidden Scratch", "visibility": "hidden"},
+    ))
+
+    resp = client.get("/api/sessions?include_hidden=1")
+
+    assert resp.status_code == 200
+    session_ids = {item["session_id"] for item in resp.json()["sessions"]}
+    assert "sess_visible" in session_ids
+    assert "sess_hidden" in session_ids
+
+
+def test_get_session_detail_returns_session_payload(client, app):
+    _run(app.state.services.repo.create_session(
+        "sess_detail_1",
+        meta={"title": "Detail Title", "agent_id": "helper"},
+    ))
+
+    resp = client.get("/api/sessions/sess_detail_1")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["session"]["session_id"] == "sess_detail_1"
+    assert payload["session"]["agent_id"] == "helper"
+
+
+def test_get_session_detail_missing_returns_404(client):
+    resp = client.get("/api/sessions/missing_session")
+
+    assert resp.status_code == 404
+
+
 def test_bulk_delete_sessions_by_ids(client, app):
     _run(app.state.services.repo.create_session("sess_batch_1", meta={"agent_id": "helper"}))
     _run(app.state.services.repo.create_session("sess_batch_2"))

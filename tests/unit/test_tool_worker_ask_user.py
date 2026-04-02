@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import sensenova_claw.kernel.runtime.workers.tool_worker as tool_worker_module
+from sensenova_claw.adapters.storage.repository import Repository
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
     ERROR_RAISED,
@@ -34,6 +36,16 @@ class _CaptureSourceAgentTool:
 
     async def execute(self, **kwargs):
         self.source_agent_id = kwargs.get("_source_agent_id")
+        return {"ok": True}
+
+
+class _ExecutedFlagTool:
+    def __init__(self):
+        self.executed = False
+
+    async def execute(self, **kwargs):
+        _ = kwargs
+        self.executed = True
         return {"ok": True}
 
 
@@ -79,6 +91,46 @@ async def test_ask_user_handler_creates_future(worker, mock_bus):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+@pytest.mark.asyncio
+async def test_truncate_result_saves_under_agent_session_dir(tmp_path, mock_bus, monkeypatch):
+    """超长工具结果应写到 agents/<agent>/sessions/<session_id>/ 下。"""
+    runtime = MagicMock()
+    runtime.registry = MagicMock()
+    runtime.agent_registry = None
+    runtime.repo = Repository(db_path=str(tmp_path / "test.db"))
+    await runtime.repo.init()
+    monkeypatch.setenv("SENSENOVA_CLAW_HOME", str(tmp_path))
+
+    worker = ToolSessionWorker("agent2agent_abc123", mock_bus, runtime)
+
+    original_get = tool_worker_module.config.get
+    tool_worker_module.config.get = lambda key, default=None: {
+        "tools.result_truncation.max_tokens": 1,
+        "tools.result_truncation.save_dir": "workspace",
+    }.get(key, original_get(key, default))
+    try:
+        result = worker._truncate_result(
+            "x" * 100,
+            "call_fun_123456",
+            agent_id="doc-organizer",
+        )
+    finally:
+        tool_worker_module.config.get = original_get
+
+    expected_dir = (
+        tmp_path
+        / "agents"
+        / "doc-organizer"
+        / "sessions"
+        / "agent2agent_abc123"
+    )
+    saved_files = list(expected_dir.glob("tool_result_call_fun_*.txt"))
+
+    assert saved_files
+    assert saved_files[0].read_text(encoding="utf-8") == "x" * 100
+    assert str(saved_files[0]) in result
 
 
 @pytest.mark.asyncio
@@ -300,3 +352,38 @@ async def test_tool_requested_injects_source_agent_id(worker, mock_runtime):
     await worker._handle_tool_requested(event)
 
     assert tool.source_agent_id == "research"
+
+
+@pytest.mark.asyncio
+async def test_tool_requested_rejects_disabled_tool_for_agent(worker, mock_runtime, mock_bus, tmp_path, monkeypatch):
+    """当工具被当前 agent 禁用时，不应真正执行工具。"""
+    tool = _ExecutedFlagTool()
+    mock_runtime.registry.get.return_value = tool
+    mock_runtime.sensenova_claw_home = str(tmp_path)
+    monkeypatch.setenv("SENSENOVA_CLAW_HOME", str(tmp_path))
+    (tmp_path / ".agent_preferences.json").write_text(
+        '{"agent_tools": {"research": {"read_file": false}}}',
+        encoding="utf-8",
+    )
+
+    event = EventEnvelope(
+        type="tool.call_requested",
+        session_id="test_session",
+        turn_id="turn1",
+        source="test",
+        payload={
+            "tool_call_id": "call_disabled",
+            "tool_name": "read_file",
+            "arguments": {"path": "README.md"},
+            "_source_agent_id": "research",
+        },
+    )
+
+    await worker._handle_tool_requested(event)
+
+    published = [call.args[0] for call in mock_bus.publish.await_args_list]
+    result_event = next(e for e in published if e.type == TOOL_CALL_RESULT)
+
+    assert tool.executed is False
+    assert result_event.payload["success"] is False
+    assert "工具已被当前 Agent 禁用" in str(result_event.payload["result"])

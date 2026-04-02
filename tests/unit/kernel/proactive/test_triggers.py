@@ -1,7 +1,7 @@
 import time
 import pytest
 from sensenova_claw.kernel.proactive.models import (
-    TimeTrigger, EventTrigger, ConditionTrigger, ProactiveJob,
+    TimeTrigger, EventTrigger, ProactiveJob,
     ProactiveTask, DeliveryConfig, SafetyConfig, JobState,
     parse_duration_ms,
 )
@@ -9,8 +9,6 @@ from sensenova_claw.kernel.proactive.triggers import (
     compute_next_fire_ms,
     is_event_match,
     should_debounce,
-    build_condition_prompt,
-    parse_condition_response,
 )
 
 
@@ -41,13 +39,6 @@ class TestComputeNextFireMs:
         assert next_ms is not None
         assert next_ms == now_ms + parse_duration_ms("30m")
 
-    def test_condition_trigger(self):
-        trigger = ConditionTrigger(condition="test", check_interval="10m")
-        job = _make_job(trigger)
-        now_ms = int(time.time() * 1000)
-        next_ms = compute_next_fire_ms(job, now_ms)
-        assert next_ms == now_ms + parse_duration_ms("10m")
-
     def test_event_trigger_returns_none(self):
         trigger = EventTrigger(event_type="email.received")
         job = _make_job(trigger)
@@ -70,6 +61,28 @@ class TestEventMatch:
         assert is_event_match(trigger, "email.received", {"source": "email-agent", "extra": 1}) is True
 
 
+    def test_exclude_payload_blocks_match(self):
+        trigger = EventTrigger(
+            event_type="agent.step_completed",
+            exclude_payload={"source": "recommendation"},
+        )
+        assert is_event_match(trigger, "agent.step_completed", {"source": "recommendation"}) is False
+
+    def test_exclude_payload_allows_normal(self):
+        trigger = EventTrigger(
+            event_type="agent.step_completed",
+            exclude_payload={"source": "recommendation"},
+        )
+        # 没有 source 字段
+        assert is_event_match(trigger, "agent.step_completed", {}) is True
+        # source 不同
+        assert is_event_match(trigger, "agent.step_completed", {"source": "user"}) is True
+
+    def test_exclude_payload_none_no_effect(self):
+        trigger = EventTrigger(event_type="agent.step_completed")
+        assert is_event_match(trigger, "agent.step_completed", {"source": "recommendation"}) is True
+
+
 class TestDebounce:
     def test_no_debounce_first_time(self):
         assert should_debounce("job-1", 5000, {}) is False
@@ -84,23 +97,11 @@ class TestDebounce:
         last_fires = {"job-1": now_ms - 6000}
         assert should_debounce("job-1", 5000, last_fires) is False
 
-
-class TestConditionEvaluation:
-    def test_build_prompt(self):
-        prompt = build_condition_prompt("有未读邮件", context="最近收到3封邮件")
-        assert "有未读邮件" in prompt
-        assert "最近收到3封邮件" in prompt
-        assert "YES" in prompt
-
-    def test_parse_yes(self):
-        assert parse_condition_response("YES") is True
-        assert parse_condition_response("yes") is True
-        assert parse_condition_response(" YES ") is True
-
-    def test_parse_no(self):
-        assert parse_condition_response("NO") is False
-        assert parse_condition_response("no") is False
-
-    def test_parse_invalid(self):
-        assert parse_condition_response("maybe") is False
-        assert parse_condition_response("") is False
+    def test_per_session_debounce_independent(self):
+        """不同 session 的同一 job 不应互相 debounce。"""
+        now_ms = int(time.time() * 1000)
+        last_fires = {"job-1:session-A": now_ms - 2000}
+        # session-A 在窗口内，应 debounce
+        assert should_debounce("job-1:session-A", 5000, last_fires) is True
+        # session-B 没有记录，不应 debounce
+        assert should_debounce("job-1:session-B", 5000, last_fires) is False

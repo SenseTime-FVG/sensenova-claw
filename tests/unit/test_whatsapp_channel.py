@@ -37,10 +37,14 @@ class _FakeWhatsAppBridge:
         self.started = False
         self.stopped = False
         self.handler = None
+        self.event_handler = None
         self.sent_messages: list[dict] = []
 
     def set_message_handler(self, handler) -> None:
         self.handler = handler
+
+    def set_event_handler(self, handler) -> None:
+        self.event_handler = handler
 
     async def start(self) -> None:
         self.started = True
@@ -56,6 +60,21 @@ class _FakeWhatsAppBridge:
 class _TimeoutOnStartBridge(_FakeWhatsAppBridge):
     async def start(self) -> None:
         self.started = True
+        raise TimeoutError("WhatsApp sidecar command timed out: start")
+
+
+class _TimeoutAfterDebugBridge(_FakeWhatsAppBridge):
+    async def start(self) -> None:
+        self.started = True
+        assert self.event_handler is not None
+        await self.event_handler(
+            {
+                "type": "debug",
+                "payload": {
+                    "message": "auth state loaded",
+                },
+            }
+        )
         raise TimeoutError("WhatsApp sidecar command timed out: start")
 
 
@@ -121,9 +140,36 @@ class TestLifecycle:
         await channel.start()
 
         assert bridge.started is True
+        assert channel._sensenova_claw_status == {
+            "status": "failed",
+            "error": "WhatsApp sidecar command timed out: start",
+        }
         assert channel._runtime_state.connected is False
         assert channel._runtime_state.state == "error"
         assert channel._runtime_state.last_error == "WhatsApp sidecar command timed out: start"
+
+    @pytest.mark.asyncio
+    async def test_start_timeout_preserves_last_bridge_debug_message(self):
+        bus = PublicEventBus()
+        publisher = EventPublisher(bus=bus)
+        gateway = Gateway(publisher=publisher)
+        bridge = _TimeoutAfterDebugBridge()
+        channel = WhatsAppChannel(
+            config=WhatsAppConfig(enabled=True, auth_dir="/tmp/sensenova_claw-whatsapp-auth"),
+            plugin_api=_SimplePluginApi(gateway=gateway),
+            bridge=bridge,
+        )
+
+        await channel.start()
+
+        assert bridge.started is True
+        assert channel._sensenova_claw_status == {
+            "status": "failed",
+            "error": "WhatsApp sidecar command timed out: start",
+        }
+        assert channel._runtime_state.state == "error"
+        assert channel._runtime_state.last_error == "WhatsApp sidecar command timed out: start"
+        assert channel._runtime_state.debug_message == "auth state loaded"
 
 
 class TestShouldRespond:
@@ -173,7 +219,7 @@ class TestInbound:
 
         assert len(gateway._session_bindings) == 1
         session_id = next(iter(gateway._session_bindings))
-        assert gateway._session_bindings[session_id] == "whatsapp"
+        assert gateway._session_bindings[session_id] == {"whatsapp"}
         assert collected[0].payload["content"] == "你好"
         assert collected[0].session_id == session_id
 

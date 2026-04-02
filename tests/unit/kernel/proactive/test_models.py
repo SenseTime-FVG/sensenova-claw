@@ -1,7 +1,7 @@
 import json
 import pytest
 from sensenova_claw.kernel.proactive.models import (
-    ProactiveJob, TimeTrigger, EventTrigger, ConditionTrigger,
+    ProactiveJob, TimeTrigger, EventTrigger,
     ProactiveTask, DeliveryConfig, SafetyConfig, JobState,
     trigger_to_json, trigger_from_json, job_to_db_row, job_from_db_row,
     parse_duration_ms,
@@ -27,17 +27,16 @@ def test_event_trigger():
     assert t.debounce_ms == 5000
 
 
-def test_condition_trigger():
-    t = ConditionTrigger(condition="有未读邮件")
-    assert t.kind == "condition"
-    assert t.check_interval == "5m"
+def test_condition_trigger_removed():
+    """ConditionTrigger 已被删除。"""
+    with pytest.raises(ImportError):
+        from sensenova_claw.kernel.proactive.models import ConditionTrigger  # noqa: F401
 
 
 def test_trigger_roundtrip_json():
     triggers = [
-        TimeTrigger(cron="0 9 * * *", condition="工作日"),
+        TimeTrigger(cron="0 9 * * *"),
         EventTrigger(event_type="email.received"),
-        ConditionTrigger(condition="有未读邮件"),
     ]
     for t in triggers:
         raw = trigger_to_json(t)
@@ -71,6 +70,35 @@ def test_parse_duration_ms():
     assert parse_duration_ms("2d") == 172_800_000
     with pytest.raises(ValueError):
         parse_duration_ms("invalid")
+
+
+def test_delivery_config_recommendation_type_roundtrip():
+    from sensenova_claw.kernel.proactive.models import _delivery_to_dict, _delivery_from_dict
+    dc = DeliveryConfig(channels=["web"], recommendation_type="turn_end")
+    d = _delivery_to_dict(dc)
+    assert d["recommendation_type"] == "turn_end"
+    restored = _delivery_from_dict(d)
+    assert restored.recommendation_type == "turn_end"
+
+
+def test_delivery_config_recommendation_type_default_none():
+    from sensenova_claw.kernel.proactive.models import _delivery_to_dict, _delivery_from_dict
+    dc = DeliveryConfig(channels=["web"])
+    assert dc.recommendation_type is None
+    d = _delivery_to_dict(dc)
+    restored = _delivery_from_dict(d)
+    assert restored.recommendation_type is None
+
+
+def test_event_trigger_exclude_payload_roundtrip():
+    t = EventTrigger(
+        event_type="agent.step_completed",
+        exclude_payload={"source": "recommendation"},
+    )
+    raw = trigger_to_json(t)
+    restored = trigger_from_json(raw)
+    assert restored == t
+    assert restored.exclude_payload == {"source": "recommendation"}
 
 
 # ---------- DB 操作测试 ----------

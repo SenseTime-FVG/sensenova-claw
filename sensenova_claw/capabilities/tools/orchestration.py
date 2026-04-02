@@ -90,7 +90,7 @@ class CreateAgentTool(Tool):
         model = kwargs.get("model") or (default.model if default else "gpt-4o-mini")
         temperature = kwargs.get("temperature")
         if temperature is None:
-            temperature = default.temperature if default else 0.2
+            temperature = default.temperature if default else 1.0
 
         agent = AgentConfig.create(
             id=agent_id,

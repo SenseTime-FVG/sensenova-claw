@@ -83,6 +83,26 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 每次你执行完成任务之后，需要总结成功和失败的经验，并选择会对后续任务有帮助的内容保存在这里
 
+### 2026-03-26 OpenAI 兼容 top_k 修复补充
+
+成功经验：
+- `agent.extra_body` 的全局默认采样参数不能直接假设所有 OpenAI 兼容网关都支持；对 `OpenAIProvider` 按 `source_type` 做请求级过滤，是修复 `Unknown parameter: 'top_k'` 这类报错的最小改动。
+- 这类问题要同时覆盖 `call` 和 `stream_call` 两条路径；工作台聊天默认走流式，只测非流式很容易漏回归。
+- 用伪造 `client.chat.completions.create` 捕获最终请求体的单测最直接，能精确断言 `extra_body` 到底发了什么，不依赖真实 API。
+
+失败/风险经验：
+- 当前 `tests/unit/test_llm_worker.py` 在本仓库环境下存在既有失败，且会混入与本次修复无关的 `llm.call_delta/notification` 断言差异；验证 provider 参数透传问题时，应优先跑更聚焦的 provider 单测，避免被无关失败干扰判断。
+
+### 2026-03-26 Unknown Parameter 自动重试补充
+
+成功经验：
+- 当用户明确要求“保留 provider 原始透传行为”时，把兼容性修复放在 `LLMSessionWorker._execute_request_block()` 的同目标重试层，比在 provider 里静态过滤更符合预期，也不会误伤其他支持扩展参数的网关。
+- “未知参数”重试应直接基于错误文本提取参数名，并一次移除同一条错误里识别出的全部参数再重试；这样比每次只移除一个参数更贴近真实网关返回，也能减少无效重试次数。
+- 将 `max_tokens` 自动收敛和 `unsupported_parameters` 自动剔除统一放进同一个请求块循环后，只要保留独立计数和通知文案，就能兼容两类自动修复策略。
+
+失败/风险经验：
+- `agent.extra_body` 会在 worker 层与默认 `top_p` 合并，写断言时不能只看测试显式传入的字段；否则很容易把默认值误判成实现缺陷。
+
 ### 2026-03-05 任务复盘
 
 成功经验：
@@ -210,6 +230,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 当前 Playwright 配置会联动启动整套 `npm run dev`，在受限环境下后端 watch 模式可能直接因为系统权限失败，导致前端 e2e 不是页面逻辑失败而是基础设施失败。
 - `next build` 在当前环境会因为 `next/font` 访问 Google Fonts 失败而中断；这种网络型失败不能误判为新页面或跳转逻辑本身有语法问题。
 
+### 2026-03-25 工具审批收口补充
+
+成功经验：
+- 对“用户点击”和“服务端最终裁决”分离的交互，最稳的协议是保留前端上行 `tool_confirmation_response`，新增后端下行 `tool_confirmation_resolved`，让前端只用 `resolved` 收口 UI，`tool_result` 只更新工具消息。
+- `/chat` 与 `/sessions/[id]` 并存时，修审批类 bug 必须同时检查“全局通知卡片/action toast”与“本地 InteractionDialog”两套状态机；只修其中一套很容易留下旧入口悬挂。
+- 对通知中心这类可操作 UI，给卡片和 toast 增加 `pending` 状态，比点击后立刻本地 `resolve` 更稳，能正确覆盖超时自动处理、跨窗口先处理和晚到点击被忽略的场景。
+
+失败/风险经验：
+- 当前环境运行 Playwright 仍缺 `libnspr4.so`，即使越权成功启动 webServer，也会在浏览器拉起阶段失败；前端浏览器级回归需要在具备系统库的环境执行，不能把这类环境错误误判为页面逻辑失败。
+- `npx tsc --noEmit` 目前会先撞上仓库既有类型错误（如 `app/settings/page.tsx`、`components/chat/MessageList.tsx` 等），验证本次前端改动时要明确区分“本次变更相关文件”与“仓库历史遗留错误”。
+
 ### 2026-03-18 Feishu 插件发现补充
 
 成功经验：
@@ -298,6 +329,93 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 邮件工具虽然注册后会暴露给运行时，但真实可用性仍依赖 `tools.email.enabled` 及 SMTP/IMAP 凭据；仅单元测试通过不能代表邮件链路已完成真实回归。
 
+### 2026-03-26 Skills 管理页禁用显示修复补充
+
+成功经验：
+- Skills 管理页需要区分“发现到的所有 skill”和“运行时已启用并注入的 skill”；前者用于 `/api/skills` 管理展示，后者继续由 `SkillRegistry.get_all()` 供 agent/runtime 使用，边界清晰后修复很小。
+- 对这类“禁用后消失”的回归，直接把 API 单测期望改成“仍返回该项但 `enabled=false`”最有效，能精确锁定问题落在后端列表源数据而不是前端渲染。
+
+失败/风险经验：
+- 如果继续让 `/api/skills` 直接遍历 `get_all()`，任何通过 `set_enabled(False)` 从内存移除的 skill 都会从管理页消失，用户无法直观看到已禁用项；以后不要把“管理视图”建立在“运行时启用集合”上。
+
+### 2026-03-26 Skills 详情弹窗 disabled 回归补充
+
+成功经验：
+- 本地 skill 详情接口不能只依赖 `SkillRegistry.get()`；disabled skill 已从运行时注册表移除，管理页详情应改为从 `discover_all_skills()` 回查落盘 skill，再读取 `SKILL.md` 和文件列表。
+- 前端详情弹窗对接口响应做 `res.ok` 检查和字段归一化（`files` 默认 `[]`）很有必要，能避免后端偶发返回错误结构时直接触发 `undefined.length`。
+
+失败/风险经验：
+- `/skills` 这类后台页的 Playwright 鉴权比 `/chat` 更脆，单靠 `page.route()` 不一定能稳定覆盖 `AuthProvider/ProtectedRoute` 初始化；更稳的方式是在 `addInitScript` 里直接接管 `window.fetch` 返回认证与页面所需数据。
+
+### 2026-03-26 LLM 连接测试 token 参数补充
+
+成功经验：
+- `/llms` 页面单项 `测试` 按钮若要读取“未保存草稿”配置，最关键的回归断言是直接抓 `/api/config/test-llm` 请求体，确认 `model_id/max_tokens/max_output_tokens` 都来自当前 draft，而不是已保存配置。
+- 对 provider 探活这类轻量接口，单测直接 mock SDK client 并断言最终 `create(...)` 参数最有效，能同时锁住提示词、`max_tokens` 和 `extra_body.max_output_tokens` 的透传行为。
+
+失败/风险经验：
+- 当前环境下 Playwright 即使能拉起 `next dev` 和 headless Chromium，也可能长时间卡住不返回最终结果；浏览器级回归要和进程内/单元测试分层看，不能把这类环境挂起误判成业务失败。
+
+### 2026-03-31 LLM 连接测试错误提示补充
+
+成功经验：
+- 对 `/api/config/test-llm` 这类轻量接口，先在接口层统一产出 `error_hint`，前端单项测试和批量测试结果展示都能复用同一字段，不需要分别写 provider 特判。
+- `max_tokens` / `max_output_tokens` 超限提示的高价值回归，不是测真实 provider，而是直接锁住“原始 error 保留 + 归一化 error_hint 命中”这两个输出字段。
+
+失败/风险经验：
+- 这类前端交互回归虽然已补 Playwright 用例，但当前环境下浏览器级执行仍可能卡住不返回结果；交付时要明确区分“代码与单测已验证”与“浏览器级 e2e 未在本机跑通”。
+
+### 2026-03-27 安装脚本 app 分支变量补充
+
+成功经验：
+- 对安装脚本这类 shell 逻辑，直接在 `tests/unit/test_install_scripts.py` 做脚本文本断言是最低成本回归方式，适合锁定环境变量优先级与关键日志文案。
+- `SENSENOVA_CLAW_APP_BRANCH` 这类更贴近业务语义的新变量，最好放在旧变量 `SENSENOVA_CLAW_REPO_REF` / `SENSENOVA_CLAW_REPO_BRANCH` 之前做兼容回退；这样既不破坏历史用法，也能让新入口更直观。
+- 当前仓库跑 pytest 前通常需要先执行 `UV_CACHE_DIR=/tmp/uv_cache uv sync --extra dev`，否则 `.venv` 和 `uv run` 都可能因缺少 `pytest` 直接失败。
+
+失败/风险经验：
+- 这次仅修改了 `install/install.sh` 和文档，`install/install.ps1` 仍沿用旧变量优先级；后续若要求跨平台一致，需要同步评估 PowerShell 脚本与文档示例。
+
+### 2026-03-27 PR171 同步补充
+
+成功经验：
+- 对”把某个既有 PR 的相关修改同步到当前分支”这类需求，先用 `gh pr view <id> --json commits,files` 和 `gh pr diff <id> --patch` 确认最终影响文件与提交顺序，再决定是 cherry-pick 整个序列还是手工摘取，能明显减少误带无关改动的风险。
+- 遇到 cherry-pick 冲突时，先保留当前分支独有改动，再仅引入 PR 冲突块里的最小增量，通常比整文件覆盖更稳，尤其是 `main.py` 这类在不同分支上都在演进的入口文件。
+- 给既有测试文件补新用例时必须先检查它是否已有历史断言；这次如果不先对照 `git show HEAD:<file>`，很容易误把原有进程管理测试覆盖掉。
+
+失败/风险经验：
+- `gh pr diff --patch` 展示的是 patch，不是”最终净效果说明”；如果直接照 patch 首个提交去整文件替换，容易把 PR 分支上的上下文改动一并带入当前分支。
+
+### 2026-03-27 ask_user 消息内联补充
+
+成功经验：
+- `/sessions/[id]` 这类“先拉历史、再收实时事件”的页面，若历史请求返回较慢，直接 `setMessages(history)` 会覆盖已收到的实时工具消息；应在详情页对历史消息与实时消息做合并，而不是盲覆盖。
+- Playwright 在 `next dev` 下会遇到 React 开发态重挂载，mock WebSocket 可能产生多个实例；测试基座里应把所有实例的 `send` 统一落到同一个全局数组，避免断言只读到“最后一个实例”的发送记录。
+- 对通知 toast / ask_user 这类前端交互回归，先验证“控件是否出现”，再验证“点击后是否真的发出 websocket 消息”，能更快区分是展示链断了还是提交链断了。
+
+失败/风险经验：
+- 仅等待 `window.__mockWs` 存在不够，测试若在 `onmessage` 尚未挂好时就发事件，消息会被静默丢掉；需要等到 mock socket 的 `send` 和 `onmessage` 都可用后再注入事件。
+- `/sessions/[id]` 的 `Thinking` 分组如果默认折叠，会把 ask_user 内联表单藏起来；这类“消息内联交互”不能依赖用户先展开二级容器才能操作。
+
+### 2026-03-27 ask_user 历史恢复补充
+
+成功经验：
+- `/api/sessions/{id}/events` 返回的是仓库落盘后的内核事件名，例如 `user.question_asked`、`user.question_answered`，而不是前端实时 WebSocket 的 `user_question_asked`、`user_question_answered_event`；聊天历史重建必须同时兼容两套命名。
+- 对“切换会话回来 UI 丢状态”这类问题，最有效的 e2e 是直接 mock `/api/sessions/*/events` 返回历史事件，再通过真实的 session 切换操作验证恢复结果；这样能把“实时链路正常但历史恢复失效”单独钉住。
+
+失败/风险经验：
+- 如果只用实时 WebSocket 事件写回归，`ask_user` 看起来是好的，但一旦用户离开当前会话再回来，依赖历史事件重建的内联卡片仍会消失；这类功能必须区分“实时显示”和“历史恢复”两条路径分别覆盖。
+
+### 2026-03-30 WhatsApp 428 断线补充
+
+成功经验：
+- 先查 `~/.sensenova-claw/logs/system.log*` 再猜原因最有效；这次日志明确显示链路是 `booting -> connecting -> ready -> 约 2 分钟后 428 Connection Terminated`，根本不是 sidecar 没启动。
+- 对 WhatsApp 登录故障，先验证 `auth_dir` 是否真的可写很关键；本次 `~/.sensenova-claw/data/plugins/whatsapp/auth` 可正常创建/更新 `creds.json` 和 `session-*.json`，因此可以快速排除目录权限问题。
+- Baileys 的 `DisconnectReason.connectionClosed = 428` 应走自动重连，不应直接留在 failed；给 sidecar runtime 补一条 `428 -> reconnect` 的 `node:test` 回归最直接。
+
+失败/风险经验：
+- 仅看到页面上的 `statusCode=428 / connection closed before ready` 容易误判为“旧登录态损坏必须先删目录”；实际上 428 也可能是已登录连接被服务端主动关闭，应该先尝试重连。
+- 当前 `creds.json` 出现 `me/account` 已存在但 `registered=false` 的半登录态迹象；如果补了自动重连后仍持续 428，再考虑人工清理 `auth_dir` 重扫，不要一上来就删缓存。
+
 ### 2026-03-18 前端重连恢复补充
 
 成功经验：
@@ -376,6 +494,46 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - WeCom 之前没有显式 `event_filter()`，默认 `None` 看起来“像是全订阅”，但如果 `send_event()` 不处理 `USER_QUESTION_ASKED`，实际效果仍然是静默丢弃；不能只看订阅层，不看分发层。
+
+### 2026-03-24 Workbench ask_user 输入修复补充
+
+成功经验：
+- 工作台 `/chat` 的 `ask_user` 不只是“输入框被禁用”问题，还要检查主输入框提交路径是否会把自由文本映射成 `user_question_answered`；只解锁输入框但仍发送普通 `user_input`，后端 `ask_user` 仍会一直挂起。
+- `ChatSessionContext` 已经暴露了 `activeInteraction/sendQuestionAnswer`，在聊天页直接复用这条能力，比重新造一套 `ask_user` 提交协议更稳，改动也更小。
+
+失败/风险经验：
+- `sensenova_claw/app/web/e2e/ask-user.spec.ts` 当前夹具陈旧，至少有三类问题会干扰业务回归：鉴权会落到登录页、mock WebSocket 会影响 Next dev HMR、旧断言仍假设 `/chat` 使用 `ask-user-dialog` 弹窗而不是通知卡片。
+- 对 `/chat` 做 Playwright 回归时，若直接全局替换 `window.WebSocket`，必须只拦截业务 `localhost:8000/ws`，并保留 Next dev/HMR 所需的 `addEventListener/removeEventListener`；否则页面会先 client-side exception，根本到不了业务断言。
+
+### 2026-03-24 WhatsApp sidecar 入口路径兼容补充
+
+成功经验：
+- 当 WhatsApp 状态接口显示 `WhatsApp sidecar command timed out: start` 时，先看 `~/.sensenova-claw/logs/system.log` 里的 sidecar `stderr`，可以快速区分“协议启动慢”和“Node 入口文件根本不存在”；这次真实根因是 `MODULE_NOT_FOUND`。
+- `plugins.whatsapp.bridge.entry` 的历史配置可能混入仓库目录名 `sensenova-claw/...`，而真实 Python 包路径是 `sensenova_claw/...`；在 `WhatsAppConfig._normalize_bridge_entry()` 里兼容这类连字符路径，比只依赖用户手动改配置更稳。
+- 用一个最小单测锁定 `bridge.entry` 的归一化行为最有效：先让 `sensenova-claw/.../index.mjs` 明确失败，再做最小修复转绿，能避免把问题误判成 sidecar 超时参数不足。
+
+失败/风险经验：
+- 当前 `SidecarBridgeClient.start()` 在 sidecar 进程启动即崩溃时，对外仍只会表现为 `start` 超时；若后续还要提升可观测性，可以考虑把“子进程已退出 + 最近 stderr”直接折叠进异常信息，避免用户只看到泛化 timeout。
+
+### 2026-03-24 WhatsApp sidecar 语法错误补充
+
+成功经验：
+- 当 `start` 超时在修正入口路径后仍存在，必须继续看 sidecar `stderr`，这次根因是 Node 在加载 `runtime.mjs` 时直接抛了 `SyntaxError: Invalid left-hand side in assignment`，并非 Baileys 启动卡住。
+- JavaScript 内部私有挂载字段如果想保留“项目名前缀”，不要写成 `sock._sensenova-clawXxx` 这种带 `-` 的点属性；应统一改成字符串常量 + `sock[KEY]` 访问，既合法又便于复用。
+- `node --test sensenova_claw/adapters/plugins/whatsapp/bridge/tests/runtime.test.mjs` 很适合做 sidecar 第一层红绿验证；模块级语法错误会在这里秒暴露，比等 Python 侧 30 秒超时高效得多。
+
+失败/风险经验：
+- Python 侧当前仍把“sidecar 进程启动后立即语法崩溃”包装成 `TimeoutError`，如果只看 `channel.py` 堆栈而不追 `stderr`，很容易误判成超时参数需要调大。
+
+### 2026-03-24 WhatsApp 登录页瞬时错误态补充
+
+成功经验：
+- WhatsApp 扫码后的 `515 restart required after pairing` 属于预期中的瞬时重连，不应在登录页当成真正失败态展示；前端应把 `connecting/restarting/reconnecting/refreshing_qr` 这类状态视为过渡态。
+- 登录页渲染错误卡时，除了 `lastError` 外，还要结合 `authorized/state/lastQrDataUrl` 一起判断；仅凭 `lastError` 很容易把“历史错误”误显示成“当前失败”。
+- 给 Playwright 加一个 `state=restarting + lastError` 的最小用例很有价值，即使本机浏览器受沙箱限制暂时跑不起来，也能把预期行为固化在测试文件里，方便后续在可运行环境回归。
+
+失败/风险经验：
+- 当前 macOS 受限环境下 Playwright Chromium 仍会因 `bootstrap_check_in ... Permission denied (1100)` 无法启动，前端浏览器级断言不能在本机作为是否修复成功的唯一依据。
 
 ### 2026-03-19 WhatsApp Self Chat 补充
 
@@ -554,6 +712,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 如果在 `AGENTS.md` 里继续硬编码 `tools`、`can_delegate_to` 之类清单，文案很容易和真实运行时配置漂移，后续维护成本会越来越高。
 - 强执行型 prompt 如果不显式加入”无重要变化时保持简洁””不要为了显得主动而主动”等约束，很容易把主动推送写成高频、低信息量的噪音输出。
 
+### 2026-03-24 Uvicorn 关闭噪音补充
+
+成功经验：
+- 当堆栈同时出现 `uvicorn.server.capture_signals -> signal.raise_signal(...) -> asyncio.runners._on_sigint -> KeyboardInterrupt`，并伴随 `starlette`/`uvicorn.lifespan.on.receive_queue.get()` 的 `CancelledError` 时，优先判断为”收到 SIGINT/SIGTERM 后的关闭链路”，不应先怀疑业务代码抛异常。
+- 判断是否是业务层 shutdown 真失败，最直接的方法是看堆栈里是否落到项目自己的 `lifespan finally` 清理代码；如果只有框架内部 `receive()`/`capture_signals()`，通常只是退出时的噪音日志。
+- 根目录 `npm run dev` 实际会走 `agentos.app.main` 的父进程监管逻辑；当前端退出、父进程收到 `Ctrl+C`，或 IDE 停止按钮终止父进程时，父进程会反向 `terminate()` 后端，后端打印这类信号关闭堆栈是符合预期的。
+
+失败/风险经验：
+- `uvicorn --reload` 会让”父进程/重载进程/工作进程”的信号传播更绕；如果只盯着后端最后那条 `CancelledError`，很容易误判为服务内部 bug，而忽略真正先退出的是前端、父进程或外层进程管理器。
+
 ### 2026-03-20 飞书 Wiki token 兼容修复补充
 
 成功经验：
@@ -664,6 +832,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅依赖前端不回传某些字段不够稳；一旦用户浏览器缓存了旧前端，或历史配置里已存在异常 secret ref，后端仍会再次踩到删除异常。对 secret 清空链路，后端必须保证幂等。
+
+### 2026-03-24 Secret 文件回退补充
+
+成功经验：
+- 把“keyring 主存储”和“本地 `secret.yml` 回退存储”拆成 `FallbackSecretStore(primary, fallback)` 最稳，`Config`、`ConfigManager`、迁移与 reveal API 都不需要改调用协议。
+- 回退文件用单个 YAML 扁平映射 `{ref: value}` 最省事，直接复用现有 secret ref（如 `sensenova_claw/llm.providers.openai.api_key`）作为 key，避免路径编码和目录散落问题。
+- `get()` 不能只在 keyring 抛错时回退；当历史写入曾回退到文件、而当前 keyring 恢复但查不到值时，也需要在 primary 返回空值时继续查 fallback，才能真正读回旧 secret。
+
+失败/风险经验：
+- 文档里“keyring 不可用时降级为明文写 config.yml”的旧口径容易过时；现在行为改成落到 `~/.sensenova-claw/data/secret/secret.yml` 后，配置与安全文档必须一起更新，否则会误导排查。
 
 ### 2026-03-21 LLM 编辑态补充
 
@@ -1044,6 +1222,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前仓库把 `.next/` 产物纳入版本管理，调试前端路由时很容易产生大量噪音改动；完成后需要显式回退 `.next/`，只保留真实源码变更。
 
+### 2026-03-24 Proactive Agent Prompt 收敛补充
+
+成功经验：
+- 对这类“runtime 自动触发 + 用户直聊”双入口 agent，`SYSTEM_PROMPT.md` 最适合承载硬规则、判断顺序和执行协议，`AGENTS.md` 更适合承载角色边界、默认协作策略和风格偏好；两者分层清楚后，提示词更稳也更容易维护。
+- Prompt 文案应尽量贴真实运行时能力来写，例如 proactive 当前稳定支持的是 `time/event` 触发，以及 `list/create/enable/disable/delete` 管理动作；把不存在的“条件触发”“字段级 update”写进 prompt，只会让模型产生幻觉。
+- 对这类 prompt-only 改动，跑 `./.venv/bin/python -m pytest tests/unit/test_agent_registry.py` 作为最小回归很高效，能快速确认 `SYSTEM_PROMPT.md` 的加载链路未被破坏。
+
+失败/风险经验：
+- 当前 `proactive` 任务虽然支持 `system_prompt_override` 元数据注入，但是否在完整消息构建链路中被最终消费，仍需后续单独核查；不能仅凭字段存在就默认该能力已稳定可用。
 ### 2026-03-24 setup 跳过按钮补充
 
 成功经验：
@@ -1055,3 +1242,568 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 根目录 Playwright 配置会同时拉起前后端，一旦 8000/3000 端口有残留进程，失败现象会混入大量非业务噪音；在这种情况下不能直接把浏览器断言失败等同于页面逻辑失败。
 - 当前 `npx tsc --noEmit` 仍会先撞到仓库既有类型问题（如 `app/settings/page.tsx`、`components/chat/MessageList.tsx`、`e2e/miniapp-workspace.spec.ts`），不能把这类全局红灯误判成这次 `setup` 修复引入的新错误。
+
+### 2026-03-24 Secret Skill 接入补充
+
+成功经验：
+- 给内置 skill 新增能力时，先补一个“从 `.sensenova-claw/skills` 加载该 skill”的最小单测最有效；可以快速证明失败原因是 skill 缺失，而不是 `SkillRegistry` 扫描路径不对。
+- 当前后端 secret 读取与写入不是同一个接口：读取走 `GET /api/config/secret?path=...`，写入应走 `PUT /api/config/sections`，由 `ConfigManager` 自动写入 keyring / fallback secret store 并将 `config.yml` 改写为 `${secret:...}`。
+- 适合作为通用桥接 skill 的敏感路径范围，应严格对齐 `platform/secrets/registry.py` 里的注册模式，尤其是 `tools.*.api_key` 与 `llm.providers.*.api_key`，这样像 Brave Search 这类 skill 才能稳定复用。
+- 如果希望 skill 自身保留“它依赖哪个 secret 标识”的可追踪信息，最轻量的约定是在目标 skill 目录下维护 `secret.yml`，只写映射不写明文，例如 `OPENAI_API_KEY: secret:openai-whisper-api:OPENAI_API_KEY`；读取时优先查这个文件，写入成功后同步创建或更新它。
+- 如果用户要求 skill 不经过 HTTP，而是直接调用项目内能力，最稳的做法是在 skill 目录下放脚本，通过 stdin JSON 契约驱动，并在脚本内部直接复用 `Config`、`ConfigManager` 与 `SecretStore`；这样行为可测、文档也不会再漂移回接口说明。
+- 用 `Skill Creator` 重写 `SKILL.md` 时，最有效的收敛方式是把正文压到“何时触发、唯一入口、输入输出契约、禁止事项”四块，其余实现细节交给 `scripts/`；这样既保住触发质量，也不会让 skill body 过长。
+- 对 `secret-config-bridge` 这类底层桥接 skill，如果用户只要“按路径读写 secret store”，就不要再耦合 `config.yml`、`ConfigManager` 或 skill 目录下的 `secret.yml`；直接把协议收敛成 `read(path)` / `write(path, value)` 最稳，`secret:` 仅作为 path 归一化的语法糖。
+- 当某个 skill 目录里的脚本已经变成“通用底层能力”时，下一步应把逻辑迁到 `sensenova_claw/capabilities/tools/` 做成正式 tool，并让 skill 只负责触发说明；这样模型能直接调用、测试也能直接覆盖 `ToolRegistry` 暴露行为。
+
+失败/风险经验：
+- 如果把 secret skill 设计成“任意 path 都可读写”的通用管理器，很容易和后端 `is_secret_path()` 的约束冲突，最终在运行时直接返回 400；文档必须明确只支持已注册敏感路径。
+- 测试这类脚本时不能直接依赖宿主机 keyring；需要显式加一个仅测试用的“禁用 keyring”分支，把写入强制落到指定 fallback `secret.yml`，否则结果会被本机已有 keyring 状态污染。
+
+### 2026-03-24 ask_user 提示框溢出补充
+
+成功经验：
+- 先确认当前真实渲染链路很关键；`chat` 页 ask_user 已不再走 `QuestionDialog`，而是通过 `NotificationToast` 的 action toast 展示选项，修 UI 前必须先对准现网组件。
+- 长选项按钮的稳定修法是组合处理：外层按钮容器加 `flex-wrap`，按钮本身加 `max-w-full`、`whitespace-normal`、`break-all` 和 `text-left`，这样长 URL 与中英文混排都能在卡片内换行。
+- 这类布局回归用 Playwright 几何断言最有效：直接比较按钮右边界和 toast 右边界，能避免“文本可见但其实已经溢出”的假通过。
+
+失败/风险经验：
+- 旧的 `sensenova_claw/app/web/e2e/ask-user.spec.ts` 仍按已废弃的弹窗交互建模，和当前通知卡片实现已漂移；后续若要维护整套 ask_user 前端回归，应该先统一到现有通知交互模型再扩展断言。
+
+### 2026-03-24 WhatsApp 授权页错误信息补充
+
+成功经验：
+- `/api/gateway/whatsapp/status` 已经返回了 `lastError/lastStatusCode/debugMessage/authDir`，如果授权页只展示 `state`，用户会把“可定位的启动失败”误看成泛化 `error`；前端应直接把这些字段展示出来。
+- 这类问题的最小修法通常不在 sidecar 或 channel，本质是“后端已有证据但前端没透出”；先核对接口 payload，再决定是否真的要改运行时。
+
+失败/风险经验：
+- 当前仓库的 Playwright 默认 `webServer` 仍依赖根目录 `npm run dev`，而这条链路会受 `uv` 缓存权限和 `uv` 自身 panic 影响；前端单用例失败时，必须先区分是页面断言失败还是测试基础设施没起来。
+
+### 2026-03-24 LLM 回退链路补充
+
+成功经验：
+- 当回退策略从“当前模型 -> default -> mock”扩展为“当前模型 -> default -> 任意可用 LLM -> mock”时，最稳的落点是集中改 `llm_worker._fallback_targets()`，不要把“找备用模型”的逻辑分散到 `LLMFactory` 或 `AgentWorker`。
+- “任意可用 LLM”如果不想引入额外配置，直接按 `llm.models` 的定义顺序扫描、结合 provider `api_key` 可用性判断即可，行为可预测，也方便测试锁定。
+- 这类回退改动最适合用 `tests/unit/test_llm_worker.py` 做 TDD：先写“default 失败后应落到第三跳可用模型”的失败用例，再跑整份文件补齐旧断言，能快速识别哪些是新行为，哪些只是历史测试文案过窄。
+
+失败/风险经验：
+- 现有 `MockProvider` 的兜底文案并不包含字符串 `mock`，而是“当前没有可用的 LLM...”；如果测试把“回退到 mock”硬编码成断言回复里必须出现 `mock`，会把文案实现细节误当成行为契约。
+### 2026-03-24 ACP Wizard 多平台补充
+
+成功经验：
+- ACP 多 agent 支持最适合收敛成一个后端 catalog/service：把 `agent 预设`、`平台支持`、`依赖探测`、`安装 recipe`、`推荐 command/args/env` 放在同一份 `ACPWizardService` 中，前端只消费结构化结果即可，避免在 UI 里硬编码平台分支。
+- Windows 支持不能只做 `platform == windows`；还要同时处理命令名归一化与真实可执行路径。像 `codex.cmd` / `python.exe` 的配置比对需要去掉扩展名，而安装步骤执行时又必须优先使用实际探测到的二进制路径，否则会出现“向导显示已检测，点击安装却起不来”的假成功。
+- `powershell` 相关 recipe 最容易踩坑：探测层应允许 `pwsh` 与 `powershell` 统一归到同一个 installer，执行层再把命令首项替换为实际探测到的路径，这样 Windows PowerShell 和 PowerShell 7 都能覆盖。
+- 前端 ACP 设置页做向导时，最稳的交互闭环是“三步走”：`检测 -> 一键安装缺失项 -> 回填推荐配置再统一保存`；把“安装”和“保存 config.yml”拆开后，用户更容易理解当前状态，也便于 Playwright 断言。
+- 这类 ACP 预设不要靠记忆猜命令；先对照 ACP 官方 agents 列表和各 CLI 官方文档确认真实入口，再写成预设，能显著减少 `args`/adapter 命名漂移。
+
+失败/风险经验：
+- 当前环境执行 `uv run ...` 会把 `uv.lock` 重写成本机镜像源 URL，即使业务代码没变也会产生超大噪音 diff；完成测试后要记得把 `uv.lock` 恢复回仓库版本，再做最终状态检查。
+
+### 2026-03-24 Default Agent 默认模型补充
+
+成功经验：
+- 当 `default agent` 看起来“用户没配 model 却仍固定走 mock”时，优先检查 `DEFAULT_CONFIG` 与用户配置的深度合并结果，而不是只盯着 `~/.sensenova-claw/config.yml`；这次根因正是内置默认值里的 `agents.default.model: mock` 被保留下来了。
+- 对这类配置继承问题，最高价值的回归测试应直接覆盖“真实 `Config` 加载 + `AgentRegistry.load_from_config()`”链路；仅测 `AgentWorker` 下游现象，不足以锁住错误来源。
+- `default agent` 若希望继承全局 `llm.default_model`，最干净的实现不是在运行时特殊判断 `mock`，而是从默认配置源头移除 `agents.default.model`，让缺省值真正表现为“未设置”。
+
+失败/风险经验：
+- 如果只修用户配置或手工在本机 `config.yml` 里补 `agents.default.model`，表面上能恢复真实 LLM，但无法阻止其他新环境继续因同一默认值设计再次落回 mock。
+### 2026-03-24 edit 工具移植补充
+
+成功经验：
+- 文件精确编辑工具最稳的落点是独立模块，而不是继续扩张 `builtin.py`；这次新增 `sensenova_claw/capabilities/tools/edit_tool.py` 后，路径解析、替换校验、diff 生成和恢复逻辑都能独立测试。
+- `edit` 的核心契约必须锁死为“`oldText` 恰好命中一次”；把“未命中 / 多次命中 / `_agent_workdir` 相对路径 / post-write recovery”都放进集成测试后，行为边界会清晰很多。
+- `openclaw` 的 post-write recovery 很值得保留：当文件已经写成功但 diff/格式化阶段报错时，重新读盘并按最终内容恢复成功结果，可以避免误向用户报告假失败。
+
+失败/风险经验：
+- 当前实现虽然兼容了 `old_text/new_text` 与 `old_string/new_string`，但对外主 schema 仍以 `oldText/newText` 为中心；若后续要继续补更多上游兼容别名，需要先核对各 provider 的 tool schema 约束，避免把参数面扩得过宽。
+
+### 2026-03-24 apply_patch 工具移植补充
+
+成功经验：
+- `apply_patch` 这类复杂文件变更能力，适合像 `edit` 一样拆成独立模块；把解析、路径解析、更新替换和 summary 输出都放在 `sensenova_claw/capabilities/tools/apply_patch_tool.py` 后，测试与后续演进都更稳。
+- 从 `openclaw` 移植时，优先保留补丁格式契约（`*** Begin/End Patch`、`Add/Delete/Update File`、`Move to`、`@@` chunk）而不是生搬硬套它的 sandbox 安全层，能更好地贴合当前仓库的 `_agent_workdir` 工具语义。
+- 对这类工具最有效的测试组合是“一个多 hunk 端到端用例 + 一个 `_agent_workdir` 相对路径用例 + 一个非法边界用例 + 一个 `_path_policy` 拦截用例”，既覆盖 happy path，也锁住关键失败态。
+
+失败/风险经验：
+- 当前 `apply_patch` 的 `_path_policy` 接入是按已解析的绝对路径做 `check_write`，这和 `PathPolicy` 内部“相对路径默认基于 workspace”语义并不完全一致；若后续要把所有文件工具统一到严格路径策略，需要整体收敛 `read_file/write_file/edit/apply_patch`，不能只单独加强一个。
+
+### 2026-03-24 apply_patch 解析器对齐补充
+
+成功经验：
+- 如果目标是“严格对齐上游解析器”，最稳的方法不是口头比对，而是直接把上游 parser 的失败态一个个翻译成测试：非法 hunk header、第二个 update chunk 缺 `@@`、update hunk 非法行、`<<EOF ... EOF` 包裹的 lenient boundary，都应先红后绿。
+- `openclaw` 的 parser 有一个关键细节：首个 update chunk 可以省略 `@@`，但后续 chunk 不行；只有把 `allowMissingContext` 这条规则一起移过来，错误行号和报错文案才能真正对齐。
+- 对模型友好的做法不是自动兼容错误方言，而是像上游一样在 schema/description 里只展示一种合法格式，并在解析失败时返回带“Valid hunk headers ...”的明确错误。
+
+失败/风险经验：
+- 看起来像“第二个 chunk 缺少 `@@`”的补丁，未必真的会分裂成第二个 chunk；像 `+tail` 这种行在上游仍会被视为同一个 chunk 的新增行，测试样例必须先按 parser 规则推演，不然容易把错误归因到实现。
+
+### 2026-03-25 LLM 新增项单项保存补充
+
+成功经验：
+- `/llms` 页面里“新增 provider/model 后再点单项保存”这类问题，先区分“前端按钮真不能点”和“点击后后端 404”；这次根因在后者，最有效的证据是补一个后端 API 红测，而不是只盯着前端交互。
+- 对配置编辑接口，前端允许“本地先新增，再单项保存”时，后端 `PUT /llm/providers/{name}` 与 `PUT /llm/models/{name}` 最好直接做 upsert；否则 UI 看起来支持新增，真实保存链路却只支持更新已存在项。
+- 这类修复适合双侧回归：`tests/unit/test_config_api.py` 锁住 provider/model upsert，`sensenova_claw/app/web/e2e/llms-edit-modes.spec.ts` 锁住新增 provider 后进入编辑并保存的页面行为。
+
+失败/风险经验：
+- 仅靠前端 mock 成功响应的 Playwright 用例，可能掩盖真实后端“不支持新建”的语义缺口；如果问题涉及接口契约，必须至少补一层真实后端测试。
+
+### 2026-03-25 LLM 批量测试弹窗补充
+
+成功经验：
+- `/llms` 页的批量连通性测试适合直接复用现有单个 `test-llm` 链路；把“读取当前 draft、reveal secret、统一映射 success/error”收敛成一个 helper 后，单项测试和批量测试都能共用，避免两套逻辑漂移。
+- 前端实现“最大并发 10”时，用固定 worker 数量消费共享游标就足够稳定；这类功能的高价值断言应是 `maxActiveRequests === 10`，而不只是“最终都测完了”。
+
+失败/风险经验：
+- Playwright 若通过手动阻塞 mock 请求来验证限流，放行首批请求后还要继续放行后续波次；否则最后几个模型会一直停在“连接中”，这是测试夹具问题，不是页面并发队列问题。
+
+### 2026-03-25 LLM 批量测试按钮态补充
+
+成功经验：
+- `/llms` 页这种“首次动作后入口切换”的需求，最简单稳妥的状态是单独维护 `hasBulkTestResults`：首次未测试显示 `测试全部`，一旦产生过结果就切成纵向 `重新测试全部 + 测试结果`，弹窗开关仍独立管理。
+
+失败/风险经验：
+- 当前环境下 Playwright 跑 `/llms` 相关用例偶发会在 `page.goto('/llms')` 直接报 `net::ERR_ABORTED; maybe frame was detached?` 并耗尽 60 秒超时；这类失败发生在页面加载前，不能直接归因到本次按钮态改动。
+
+### 2026-03-25 Dialog 层级补充
+
+成功经验：
+- 当弹窗“看起来被导航栏挡住”时，先直接比较真实计算后的 `z-index` 最有效；这次通过 Playwright 断言拿到 `header=200, dialog=50`，快速锁定为全局 `Dialog` 组件层级过低，而不是 `/llms` 页面局部布局问题。
+- 对这类全站弹窗层级问题，优先修 `components/ui/dialog.tsx` 的 overlay/content `z-index`，比在单页弹窗上单独加类名更稳，也更不容易留下别的页面继续被顶栏压住。
+
+失败/风险经验：
+- 如果用户明确要求“只修当前浮窗，不改其他层级”，就不能顺手调整全局 `Dialog`；应把局部 `z-index` 直接加在目标页面的 `DialogContent` 上，并保留专门的层级回归测试锁定该页面。
+
+### 2026-03-25 Dialog 内部滚动补充
+
+成功经验：
+- 模态框如果既要保住外层圆角、又要让滚动条看起来属于同一个面板，最稳的结构是 `DialogContent` 自身 `overflow-hidden`，再放一个 `flex-1 overflow-y-auto` 的内部内容区；不要直接让 `DialogContent` 滚动。
+
+### 2026-03-25 Agent 委托禁用语义补充
+
+成功经验：
+- 对“设置页取消所有勾选应禁用功能”这类需求，不能只改前端文案；这次必须把“前端提交 `null`、后端允许持久化 `None`、运行时隐藏 `send_message`、工具执行再次校验”四层一起收口，行为才真正一致。
+- FastAPI + Pydantic v2 下，如果接口需要区分“字段未传”和“显式传 null”，最稳的写法是 `body.model_dump(exclude_unset=True)` 后再判断字段是否出现在 payload 里。
+- `ContextBuilder` 里断言某个工具名是否出现在 system prompt 时，测试夹具最好清空其它内置工具；否则像 `create_agent` 这类工具描述里的文案会把字符串断言污染成假失败。
+
+失败/风险经验：
+- `send_message` 的授权判断不能只看 `get_sendable()` 返回值是否为空；当白名单被禁用或白名单里的 agent 已失效时，空结果若不结合原始配置解释，工具会错误放行。 
+
+### 2026-03-25 Agent 工具禁用运行时补充
+
+成功经验：
+- “工具被禁用后聊天里也不能调用”这类需求必须做双层防线：一层在 `ContextBuilder/AgentSessionWorker` 过滤掉传给 LLM 的工具列表，另一层在 `ToolSessionWorker` 执行前再次校验；只做前者会被模型的陈旧 tool_call 或 provider 异常输出绕过。
+- Agent 页面和 Tools 页面最好拆成两层语义：顶层 `tools` 继续做全局开关，`agent_tools.<agent_id>` 做按 agent 覆盖；最终生效规则应是“全局禁用优先，其次 agent 级禁用”，避免 agent 配置把全局关闭的工具重新打开。
+- 这类回归最稳的组合是：API 单测验证偏好写入与详情回显，worker 单测验证 LLM 可见工具过滤和执行前拦截，再补一个进程内聊天 e2e 验证首轮 `LLM_CALL_REQUESTED.tools` 已不含禁用工具且工具本体未执行。
+
+失败/风险经验：
+- 进程内 e2e 若依赖“当前默认模型”为 mock，很容易被本机 `config.yml` 漂移污染；更稳的做法是显式注册一个 `model=\"mock\"` 的 default agent，而不是只改全局 `llm.default_model`。
+
+### 2026-03-26 LLM 默认采样参数补充
+
+成功经验：
+- 这类“默认参数统一”问题不要只改 `DEFAULT_CONFIG`；最稳的做法是同时检查 `AgentConfig` 默认值、`AgentRegistry` fallback、`AgentSessionWorker` 合并链路、`LLMSessionWorker` 兜底链路，以及绕过主链路的直接 `provider.call()` 特例，否则很容易出现“普通聊天已更新，但标题生成/摘要仍是旧值”的半收敛状态。
+- `top_p/top_k` 这类额外采样参数放在 `agent.extra_body` 做全局默认，再在 worker/provider 里统一 merge，比为每个 provider 单独加新的函数参数更省改动，也更兼容现有 `extra_body` 透传设计。
+- 对带默认值的运行时链路，最划算的红测是“Config 默认值 + AgentConfig 默认值 + Worker 最终传给 provider 的参数”三层；这样能快速区分“配置没改”“对象默认没改”“链路没透传”。
+
+失败/风险经验：
+- 当前仓库的 `tests/unit/test_llm_worker.py` 本身存在一批与本次改动无关的既有失败，主要围绕流式事件顺序和 fallback 预期；验证这类默认值改动时，应单独抽出新增/相关用例运行，避免把历史问题误判成本次回归。
+
+### 2026-03-25 Action Toast 自动消失补充
+
+成功经验：
+- `action-toast` 这类浮层和通知中心卡片是两套状态，需求若只是“界面上自动收口”，最稳的落点是 `NotificationProvider` 里只移除 `actionToasts`，不要顺手改 `cards/resolved/pending`，否则很容易把“未处理”误判成“已处理”。
+- Playwright 1.52 已支持 `page.clock.install()` 和 `page.clock.fastForward()`；对 60 秒/15 秒这类前端定时器需求，优先用 mock clock 写回归，能把慢测压到秒级且更稳定。
+- `pending` 状态的 toast 不应继续保留旧定时器；在用户点击动作时先清掉 timer，再切 `pending`，可以避免“已提交但浮层被旧 timer 误删”的竞态。
+
+失败/风险经验：
+- `sensenova_claw/app/web/e2e/tool-confirmation-resolution.spec.ts` 里的 session 弹窗用例当前在本机仍会失败，现象是 `/sessions/[id]` 路径下拿不到 `tool-confirmation-dialog`；这和本次 toast 自动消失改动无直接证据关联，提交前需明确区分“本次新增回归通过”与“仓库既有用例仍失败”。
+
+### 2026-03-26 ask_user 消息内联补充
+
+成功经验：
+- `ask_user` 想同时显示在通知和聊天工具卡片里时，把问题元数据挂到工具消息本身最稳；仅靠通知中心状态，很难把”对应哪一个 ask_user 工具块”这件事关联准确。
+- `/chat` 页的前端 e2e 不能只 mock `auth/status` 和 `sessions`；当前工作台初始化还会请求 `agents`、`custom-pages`、`files/roots`、`todolist` 等接口，不补齐会让测试在真正进入聊天区前就偏到登录页或空态。
+- Mock WebSocket 时只拦业务 `localhost:8000/ws`，保留 Next dev 的 HMR socket；全量替换 `window.WebSocket` 会把页面自身运行搞崩，表面看像业务回归，实际是测试夹具问题。
+
+失败/风险经验：
+- 旧 `ask-user.spec.ts` 夹具和当前鉴权/工作台初始化流程已经漂移，新增聊天区行为回归前要先修测试基建，否则失败点会落在登录和页面初始化，而不是 `ask_user` 本身。
+
+### 2026-03-26 Proactive 推荐看板补充
+
+成功经验：
+- `proactive` 看板这类全局工作台数据，不能沿用普通会话事件的“按 `session_id` 绑定连接投递”策略；`PROACTIVE_RESULT` 若只发给绑定了源会话的 WebSocket，Dashboard 页面会完全收不到推荐。
+- 这类问题最有效的红测是直接打在 `WebSocketChannel.send_event()`：构造两个未绑定任何 session 的假连接，断言 `PROACTIVE_RESULT` 也会广播到两边，能快速锁定问题在路由层而不是前端渲染层。
+- 当前环境下前端没有成熟的 hook 单测基建时，先用后端 WebSocket 单测锁住“事件确实到达浏览器”这层契约，修复效率最高。
+
+失败/风险经验：
+- `useDashboardData` 里的推荐卡片目前仍主要依赖运行时 `proactiveResults` 内存态；如果后续用户要求“刷新页面后历史推荐仍可见”，还需要继续补后端持久化/回填链路，不能把这次广播修复误判为完整历史恢复。
+
+### 2026-03-26 下一问推荐展示补充
+
+成功经验：
+- 当“模型已经产出推荐，但看板没看到”时，要把“链路没到前端”和“前端组件还是旧展示”分开查；这次后端广播、前端状态聚合都已接上，真正落后的地方是 `ProactiveAgentPanel` 还停留在旧的“推荐操作”块。
+- 对这类 Dashboard 展示改动，直接让组件输出稳定的 `data-testid`（如 `next-question-recommendations`、`next-question-recommendation-item`）最划算，既能对齐 Playwright 断言，也能减少后续样式重构带来的测试脆弱性。
+- 当用户本机已手动启动 `localhost:3000` 时，Playwright 最稳的跑法是临时绕过默认 `webServer` 配置，直接复用现成服务；否则很容易把启动链路问题误判成页面逻辑失败。
+
+失败/风险经验：
+- 当前环境跑浏览器级 Playwright 仍缺系统库 `libnspr4.so`；即使页面服务可访问、用例能开始执行，也会在 Chromium 启动阶段直接失败，不能把这类错误当成“推荐还没显示”的业务证据。
+- `sensenova_claw/app/web` 的仓库级 `tsc --noEmit` 目前仍有与本次改动无关的既有错误（如 `contexts/SessionContext.tsx`、`e2e/miniapp-workspace.spec.ts`、`e2e/setup-skip.spec.ts`）；验证本次前端修复时要明确区分“本次文件无新增类型错误”和“全仓类型检查全绿”。
+
+### 2026-03-26 Hidden Scratch Session 补充
+
+成功经验：
+- 把“下一问推荐”从原会话注入改成 hidden scratch session 时，最小可行切口是四段一起改：`ProactiveExecutor` 改为 `spawn_agent_session(parent_session_id=source_session_id)`、`ProactiveRuntime` 投递时把展示 `session_id` 映射回 `source_session_id`、`ProactiveDelivery/WebSocketChannel` 增加 `scratch_session_id`、`/api/sessions` 默认过滤 `visibility=hidden`。
+- 推荐 scratch prompt 最稳的构造方式不是只传 `parent_session_id`，而是显式读取 `repo.get_session_messages(source_session_id)` 做历史快照，再优先复用 `agent_runtime.context_compressor.compress_if_needed(...)`；因为当前 `parent_session_id` 只负责路由/关系，不会自动继承父会话历史。
+- 对这类行为迁移，红测最划算的组合是：`tests/unit/kernel/proactive/test_executor.py` 锁“不能再 `send_user_input` 注入原会话”、`tests/unit/kernel/proactive/test_runtime.py` 锁“delivery 映射回 source session”、`tests/unit/test_repository.py` 与 `tests/unit/test_sessions_api.py` 锁 hidden 过滤。
+
+失败/风险经验：
+- 当前环境里 `uv` 通过 snap 安装，沙箱内直接跑会报 `snap-confine ... cap_dac_override not found`；需要越权后才能稳定执行 `uv run python -m pytest`。
+- Playwright 在当前环境即使越权成功启动 webServer，Chromium 仍会因为缺少 `libnspr4.so` 失败；浏览器级 e2e 不能在这里作为通过依据，只能保留 spec 并说明环境阻塞。
+
+### 2026-03-26 recommendation_id 推荐消费补充
+
+成功经验：
+- 对“下一问推荐刷新后恢复、发送后消失”这类需求，最稳的实现不是继续堆前端 `localStorage`，而是直接复用已有 `events` 持久化：从 `proactive.result(recommendation_type=turn_end)` 聚合最新推荐，再用后续 `user.input.meta.recommendation_id` 判断是否已消费。
+- `recommendation_id` 真正的关键不在生成 id，而在把它沿“推荐卡片点击 -> 输入框预填 -> WebSocket user_input -> events 表”整条链路透传；其中最容易漏的是 `Gateway.send_user_input()` 和 WebSocket channel 对 `meta` 字段的转发。
+- 前端如果要做到“点击只预填不消费、真正发送后立刻消失”，最省心的做法是让 `ChatInput` 本地持有当前草稿绑定的 `recommendationId/sourceSessionId`，发送时作为可选参数传给 `sendMessage()`；这样既支持用户改写文本，又不会因为只是点击卡片就提前消费。
+
+失败/风险经验：
+- 当前仓库的浏览器级 Playwright 仍受环境阻塞：即使绕过根目录 `webServer`、单独启动 `next dev`，Chromium 也会因为缺少 `libnspr4.so` 无法启动，所以新增的前端 e2e 目前只能保留用例，不能在本机作为通过依据。
+- 这个仓库当前工作区本身已有大量未提交改动；做此类前后端联动需求时，回顾 `git diff --stat` 很重要，避免把历史变更误判成这次 recommendation 改动带来的影响。
+
+### 2026-03-26 推荐分组展示补充
+
+成功经验：
+- 这类“不同来源的数据视觉上混在一起”的问题，先确认数据层是否已经分组很关键；这次 `useDashboardData` 其实早就按 `sourceSessionId` 聚合好了，真正缺的是 `ProactiveAgentPanel` 对分组头的显式渲染。
+- 对推荐卡片这类列表 UI，给“分组容器”和“分组标题”补稳定的 `data-testid`（如 `next-question-recommendation-group`、`next-question-recommendation-group-title`）很有价值，后续既能做 Playwright 分组断言，也能在重构样式时保住行为回归。
+- 当来源会话标题可能缺失时，展示层最好回退到 `sourceSessionId`，再配一个短 ID badge；这样即使元信息不完整，用户也能分辨推荐分别属于哪个会话。
+
+失败/风险经验：
+- 当前前端没有现成的 hook/component 单测基建，这类展示问题最终还是得靠 Playwright 场景兜底；如果环境里浏览器起不来，只能先做静态类型校验并保留 e2e 用例，不能把“没法启动 Chromium”误判为页面逻辑失败。
+
+### 2026-03-26 Proactive 看板统一滚动补充
+
+成功经验：
+- 当一个卡片内部看起来像“被拆成两段”时，优先检查 `overflow-auto` 放在哪一层；这次问题不是数据丢失，而是 `ProactiveAgentPanel` 只给下半段主动产出区加了滚动，导致上面的下一问推荐悬在滚动容器外。
+- 在缺少浏览器级测试条件时，可以先用 `node --test` 读取组件源码做轻量结构回归，至少把“统一滚动容器 + 推荐区 + 产出列表区”的关键约束锁住，再配合 `tsc` 检查避免改坏。
+
+失败/风险经验：
+- 这类源码结构测试只能验证布局骨架，不能替代真实浏览器中的滚动手感与高度表现；如果后续要继续调视觉或 sticky 行为，仍需要在可运行 Playwright 的环境做一次页面级回归。
+
+### 2026-03-25 Skills 市场认证补充
+
+成功经验：
+- 前端跨端口访问 `http://localhost:8000/api/...` 时，像 marketplace 这类页面请求不能直接用原生 `fetch`；统一走 `authFetch` 才能稳定带上 `credentials: 'include'` 和 `Authorization: Bearer <cookie-token>`，避免只在个别页面出现 401。
+- 对“浏览器请求到底有没有带 cookie”这类问题，最有效的前端回归不是只断言页面不报错，而是用 Playwright `page.route('**/api/**')` 直接读取 `route.request().allHeaders()`，把 `cookie` 与 `authorization` 都锁进断言。
+- Skills 页面同时存在“市场浏览”“市场内搜索”“统一搜索”三条请求路径；修复时要一起检查，不然很容易只修 `/market/browse`，却漏掉 `/market/search` 或 `/skills/search`。
+
+失败/风险经验：
+- 页面上存在 `Search` 和 `Search Market` 两个相似按钮，Playwright 若用宽松 `name: 'Search'` 会触发 strict mode 冲突；这类页面应优先用 `name: /^Search$/` 或更具体的 placeholder/data-testid 收窄选择器。
+
+### 2026-03-27 聊天稳态与重连补充
+
+成功经验：
+- 前端如果已经用 `request_id` 做 `session_created` 乱序保护，服务端 WebSocket 回执必须原样回传该字段；否则保护逻辑看似存在，实际在快速新建会话时完全失效。
+- 手动“重连 WebSocket”按钮不能只清空 `wsRef` 和重置 attempts；若连接 effect 只在 mount 时跑一次，最稳的做法是引入一个显式 `connectionNonce` 之类的状态，让手动重连能强制重跑连接 effect。
+- 像 `ChatPanel` 预览清理、`MessageArea` 空态显示、前端 node 测试脚本路径这类问题，虽然不一定立刻报错，但非常容易影响用户稳定性；在缺少完整组件测试基建时，可以复用仓库已有的 `node --test + 读取源码` 轻量回归方式先把关键约束锁住。
+- `SessionContext` 这类旧链路即使暂时未挂到页面树，只要仍参与 `tsc`，就必须维持最基本的类型正确；否则会持续污染前端基线，掩盖真正的新回归。
+
+失败/风险经验：
+- 目前仓库里仍同时存在 `ChatSessionContext` 和旧 `SessionContext/useSession/Sidebar/StatusBar` 两套路由；即使当前旧组件未挂载，后续若误接回页面树，仍有语义漂移和维护分叉风险，最好后续继续收敛。
+- 基于源码结构的 node 测试只能锁“关键实现仍存在”，不能替代真实浏览器里的交互回归；像拖拽上传、真实断线重连、预览面板视觉表现，后续仍应在可运行 Playwright 的环境补页面级验证。
+
+### 2026-03-27 前端 i18n 接入补充
+
+成功经验：
+- 对已有前端快速补 i18n，最小改动路径是复用现成的 `UserPreferencesContext` 持久化 `locale`，再在其内层挂一个轻量 `I18nProvider/useI18n`；这样不需要引入新库，也能让语言切换和主题/字号一样即时生效并落到 `localStorage`。
+- 相对时间和“未命名会话”这类分散在工具函数里的文案，不能只在页面层翻译；把 `timeLabel/getTitle` 收口到统一的 locale 感知工具后，像 `chat/ppt/workbench` 这些复用组件才不会继续漏出中文硬编码。
+- 前端 i18n 的回归里，`node --test` 读取源码检查“Provider 链、locale setter、关键页面已接 `useI18n`”性价比很高，适合在没有完整组件单测基建时先锁住架构层约束。
+- Playwright 需要真实鉴权 cookie 时，直接读取 `~/.sensenova-claw/token` 比在用例里硬编码假 token 更稳；同时后端至少要启动过一次，AuthContext 才会走到预期的 cookie/token 分支。
+
+失败/风险经验：
+- 当前环境下 `npx playwright test` 即使前后端都已启动、真实 token 也已注入，`Next dev + Playwright` 仍可能在 `page.goto('/chat')` 阶段长时间不稳定，表现为 `ERR_ABORTED`、frame detached 或页面迟迟不 ready；这类结果不能直接当成 i18n 逻辑失败。
+- `playwright.config.ts` 的 `webServer.command` 会直接拉起根目录 `npm run dev`，而仓库当前 dev 模式会顺带启动真实后端插件和外部连接；若只是验证纯前端文案，后续更稳的做法是给 i18n 场景单独配一个更轻的 webServer/路由 mock 环境。
+
+### 2026-03-27 聊天气泡双背景补充
+
+成功经验：
+- 当前聊天主界面已经把 user/assistant/system/tool 的视觉卡片下沉到 `MessageBubble.tsx` 局部 Tailwind 类里后，`globals.css` 里旧的 `.bubble.user/.assistant/.tool/.system` 全局背景样式就会变成“第二层皮肤”；这类问题优先检查“老全局类 + 新局部类”是否同时生效。
+- 当 `.bubble.*` 还被 Playwright 作为稳定选择器使用时，最小修复不是直接删类名，而是把全局样式降成仅保留语义/测试钩子，避免视觉修复顺手打断现有浏览器断言。
+- 对这种纯样式回归，用 `node --test` 读取 `globals.css` 锁住关键 CSS 约束很划算，能防止后续再把旧背景样式加回来。
+
+失败/风险经验：
+- 如果后续继续在 `MessageBubble.tsx` 做更大重构，要记得同步审视 `globals.css` 里的历史聊天样式块；只改 JSX 很容易留下“视觉上看起来像 bug、但类型和逻辑都正常”的残留问题。
+
+### 2026-03-25 Mini-App Workspace Server 化补充
+
+成功经验：
+- 把 mini-app 从”单页静态 HTML”提升为”`workspace_root/app + server.py + data/`”之后，最小可行预览链路不是直接暴露工作目录文件，而是由后端提供 `custom-pages/{slug}/preview` 反向代理到独立 workspace server；这样后续无论是 FastAPI、Flask 还是任意轻量 server，都能统一挂到现有工作区入口。
+- 为 workspace 动作显式补 `refresh_mode = none/background/immediate` 很关键；只要把”普通问答/记笔记/状态落盘”默认收敛到 `none`，把”夜间补课/静默补内容”归到 `background`，前端就能避免每次给 Agent 发消息都强刷整个 workspace。
+- 前端 Playwright 对这种纯 mock 的页面回归，`webServer` 应只启动 `app/web` 自己的 `next dev`；若沿用仓库级 `npm run dev`，会把后端和其他 watcher 一起拉起来，3000 端口很容易被拖挂，导致浏览器始终停在 `about:blank`。
+
+失败/风险经验：
+- `DashboardLayout` 会连带触发 `TodoDropdown`、侧边栏 agent 列表等外围请求；如果 e2e 只 mock 了 feature 页自身 API，而漏掉 `/api/todolist/**`、`/api/agents*` 这类布局层接口，`authFetch` 遇到 401 会直接把页面打回 `/login`，看起来像 workspace 页没加载，实际是测试夹具不完整。
+- 当前环境里 Playwright 浏览器访问 `localhost:3000`/`127.0.0.1:3000` 对”已挂死的 next dev”不会快速报错，而是长时间卡在 `page.goto(..., waitUntil='domcontentloaded')`；遇到这类超时，先用 `curl` 和 `ss -ltnp` 判定 3000 端口是否真在响应，再决定是改代码还是重启 dev server。
+
+### 2026-03-27 npm install 跨平台补充
+
+成功经验：
+- 对根目录 `npm install` 这类生命周期脚本，最稳的跨平台修复是把 `postinstall` 从 `bash` 切到 `node` 脚本；安装逻辑仍可复用原有 `uv sync + 子目录 npm install` 流程，但不会再要求 Windows 预装 Git Bash / WSL。
+- 若仓库里已经存在 `scripts/postinstall.sh` 之类的 Unix 入口，保留它作为薄包装并统一委托给新的 Node 实现，可以避免后续维护两份安装逻辑。
+- 这类安装链路回归适合双层测试：Python 测试锁住 `package.json` 和壳包装入口，`node --test` 锁住 Windows shell 分支和任务列表，成本低且足够防止再次回到 `bash ./xxx.sh`。
+
+失败/风险经验：
+- 当前修复只解决”生命周期脚本依赖 bash”的兼容性，不代表 `uv`、Node 原生模块或其他三方依赖在 Windows 上已经全部无差异可用；后续若继续报平台问题，需要按具体子依赖逐个排查。
+
+### 2026-03-27 npm 脚本 Python 命令补充
+
+成功经验：
+- 面向 Windows 的 npm 脚本不要硬编码 `python3`；对本仓库这类 `uv run ...` 场景，直接统一成 `uv run python -m ...` 最稳，既兼容 Windows 的 `python.exe`，也能在当前 Unix 环境正常解析。
+- 若某个子目录本身不是 npm package，但用户会自然地在该目录执行 `npm install`，补一个极小的包装 `package.json + Node postinstall` 比要求用户记住”必须切到更深一层目录”更可靠。
+- 对脚本兼容性改动，除了静态断言 `package.json`，再跑一次真实 `npm run dev -- --help` 或真实 `npm install` 很有价值，能直接验证 shell 解析和命令分发没有写错。
+
+失败/风险经验：
+- 在嵌套目录跑真实 `npm install` 时，npm 版本可能顺手重写下游 `package-lock.json` 的元数据；如果这些改动与需求无关，提交前应恢复，避免把环境噪音混进功能修复。
+
+### 2026-03-27 dev 启动器进程树补充
+
+成功经验：
+- 像 `npm run dev -> uv run python -m sensenova_claw.app.main run` 这类总控启动器，不能只盯包装进程 pid；更稳的启动成功判定是”端口开始监听”，否则在 Windows 下很容易因为 `npm`/批处理包装层提前退出而误判失败。
+- 前端开发服务优先直接启动 `node node_modules/next/dist/bin/next dev -p <port>`，比从父进程里再套一层 `npm run dev` 更稳定，也更不容易出现包装进程退出后子服务残留的问题。
+- Windows 清理子进程树时，单纯 `proc.terminate()` 不够；要准备 `taskkill /PID <pid> /T /F` 兜底，真实 smoke test 里再检查 8000/3000 端口是否释放，才能确认没有孤儿进程。
+
+失败/风险经验：
+- `Ctrl+C` 下 `uv run ...` 的顶层退出码不一定等于子脚本的返回码；判断”是否正常收尾”时不能只看 shell 退出码，还要同时看端口释放和后台进程是否残留。
+
+### 2026-03-27 PPT ask_user 发送按钮卡死补充
+
+成功经验：
+- 工作台类页面若复用 `ChatPanel`，其输入禁用条件必须与 `/chat` 主页面保持一致；像 `interactionSubmitting`、`activeInteraction.kind === 'confirmation'` 这类交互态如果漏传，`ask_user`/审批类流程就会在工作台里表现出与主聊天页不同的 bug。
+- `ChatInput` 的本地 `isSubmitting` 不能盲目覆盖所有发送场景；当主输入框实际上是在提交 `ask_user` 回复时，应跳过普通消息的本地提交锁，否则很容易在回复后把发送按钮永久卡成 disabled。
+- 这类”看起来像按钮坏了”的问题，最有效的前端回归是直接断言 WebSocket 出站序列：先验证第一条是 `user_question_answered`，再验证收到 `user_question_answered_event` 后第二条恢复为 `user_input`。
+- 对”旧会话 ask_user 未完成，点击新建后首条消息被劫持”的问题，不能只看 UI 状态；要额外锁住”点击新建后已经发出 `create_session`，则后续输入不得再走 `user_question_answered`”这条协议级约束。
+
+失败/风险经验：
+- 现有 `ask-user.spec.ts` 中部分旧用例对文案和 WebSocket 初始化时机依赖较强，补跑相邻回归时可能先撞到与本次修复无关的 strict mode 选择器冲突或 `__mockWs` 未就绪问题；验证本次改动时应优先使用更聚焦的新场景。
+- Playwright 在聊天页里若直接用 `getByText('E2E Session')` 这类宽泛选择器，容易同时命中 agent 列表和 session 列表；会话点击应优先收窄到 `getByTestId('session-list')`。
+- `/sessions/[id]` 这类页面的 mock WebSocket 挂载时机不一定和 `/chat` 一样快；凡是用 `page.evaluate(() => __mockWs.emit(...))` 的 session 场景，最好先显式 `waitForMockWebSocketReady(page)`，否则会偶发 `Cannot read properties of undefined (reading 'emit')`。
+- 工作台首页 `/`、PPT `/ppt`、研究页等复用 `ChatPanel` 的页面，只要 `ChatPanel` 的禁用逻辑和 `ChatInput` 的 `ask_user` 提交语义正确，这类”回复 ask_user 后发送按钮卡死”的问题就会一起收敛；验证时可以用一个根工作台页和一个专用工作台页做抽样回归。
+- `/ppt` 这类带全局通知浮层的页面，Playwright 直接点击右上角按钮可能被 toast 遮挡误伤；如果要验证按钮处理链本身，优先给目标按钮加 `data-testid`，必要时直接触发 DOM `click()`，否则很容易把”按钮没被真正点到”误判成业务状态机 bug。
+
+### 2026-03-28 npm run dev 误判生产构建补充
+
+成功经验：
+- 根启动器判断 Next 前端是否可走 `next start` 时，不能只看 `web/.next` 目录是否存在；开发态缓存或半成品构建也会留下 `.next`，最稳的最小判定是检查 `web/.next/BUILD_ID` 是否存在且非空。
+- 这类启动问题最有效的复现方式就是直接跑真实 `npm run dev`，并同时观察前端日志；本次就是通过 Next 的明确报错 `Could not find a production build in the '.next' directory` 快速定位到了错误分支。
+- 对启动器修复，单测应直接锁住”有 `.next` 但无 `BUILD_ID` 时必须回退 `next dev`，有 `BUILD_ID` 时才允许 `next start`”这两个分支，能精确防止回归。
+
+失败/风险经验：
+- 用 `timeout npm run dev` 做 smoke test 可能留下 `next dev` 孤儿进程，因为外层超时信号不一定能完整传递到总控脚本管理的整个子进程树；验证启动器时，最好使用可交互会话并显式发送 `Ctrl+C` 收尾，再检查 3000/8000 端口是否释放。
+- 当前仓库默认 `uv run python -m pytest ...` 依赖先执行 `uv sync --extra dev`；如果环境里还没同步 `pytest`，测试失败会先表现为”环境缺依赖”而不是业务回归。
+
+### 2026-03-30 npm run dev 端口探测误判补充
+
+成功经验：
+- `npm run dev` 走的是 `sensenova_claw.app.main` 的 Python 启动器，而 `scripts/dev.sh` 用的是 shell 级进程存活/端口检查；当两条链路的“启动成功判定”不一致时，就会出现“服务其实起来了，但 npm 仍判失败”的假象，排查时要先对照两边的判定逻辑。
+- 对这类本地启动误判，优先用 `lsof/ss/netstat` 读取系统监听状态，再退回 `127.0.0.1` 直连探测，比只靠 Python `socket.connect()` 更稳，尤其是在 WSL 或 `localhost` 访问受限环境下。
+- 回归测试最小切口可以直接锁 `_check_port()`：即使本地直连返回 `ConnectionRefusedError`，只要系统工具已经看到监听端口，就必须判定为“端口已占用”。
+- 当前网关在真实 `uvicorn --reload` 启动链路下，可能出现“子进程和 startup 日志都已起来，但 60 秒内仍未进入 LISTEN”的情况；这时总控启动器不应直接报错退出，而应提示“仍在初始化”并继续监控进程存活。
+
+失败/风险经验：
+- 当前环境下 `tests/unit/test_app_main.py` 里的 `test_terminate_managed_process_kills_child_process_tree` 仍会偶发失败，和本次端口探测修复无关；验证启动器改动时，应优先补并运行更聚焦的用例，避免被既有进程组问题干扰结论。
+- 当前仓库默认 `uv run python -m pytest ...` 依赖先执行 `uv sync --extra dev`；如果环境里还没同步 `pytest`，测试失败会先表现为“环境缺依赖”而不是业务回归。
+
+### 2026-03-30 ask_user 跨会话主输入修复补充
+
+成功经验：
+- “主输入首条消息可直接回答 ask_user” 的判定必须同时满足两点：`activeInteraction.kind == "question"` 且 `activeInteraction.sourceSessionId == 当前会话 sessionId`；只判断前者会导致切换会话后旧问题继续劫持新会话输入。
+- 这类问题最有效的回归不是只测正向“当前会话可回答”，而是必须补反向用例：`会话1收到 ask_user -> 切到会话2 -> 在会话2发送首条消息`，断言 `user_question_answered` 不出现且 `user_input` 发往会话2。
+- `/ppt` 和工作台首页复用了 `ChatSessionContext.sendMessage()`，在共享层收紧“当前会话匹配”后，两处页面可以一起修复；但 `/chat` 页还有本地 `handleSend` 的短路分支，也必须同步加同样的 session 校验，否则会绕过共享层。
+
+失败/风险经验：
+- Playwright 在当前环境经常被残留的 `next dev -p 3000` 进程干扰；若直接报 `localhost:3000 is already used`，应先清理监听 3000 端口的进程再重跑，不要把它误判成功能回归。
+
+### 2026-03-30 ask_user 跨会话完成事件补充
+
+成功经验：
+- 跨会话 ask_user 不能在共享上下文里被任意会话的 `turn_completed` / `turn_cancelled` / `error` 全量 `clearInteractions()` 清掉；正确做法是按 `incomingSessionId` 只移除对应 `sourceSessionId` 的交互。
+- 这类问题必须补“会话1收到 ask_user -> 切到会话2发普通消息并完成 -> 切回会话1继续回答”的回归；只测“切走时不误吃消息”不够，必须同时锁住“切回来仍能继续答”。
+- `clearInteractionsForSession(sessionId)` 这类按会话定向清理 helper 比在各事件分支里手写条件更稳，也更不容易后续在 `error`、`turn_cancelled` 等平行分支里漏修。
+
+失败/风险经验：
+- 如果只修主输入消费条件而不修完成事件清理逻辑，表面上“在会话2发消息不会被旧 ask_user 吃掉”会通过，但用户一旦让会话2真正跑完一轮，旧会话 ask_user 还是会被后台 silently 清掉，属于半修状态。
+
+### 2026-03-30 DingTalk 原生插件接入补充
+
+成功经验：
+- 钉钉原生接入在当前仓库里最稳的落点仍然是 `plugin/config/models/runtime/channel` 五层结构，直接复用 `telegram/discord` 的测试与会话路由模式，能很快把新 channel 拉到可维护状态。
+- 官方 `dingtalk-stream` 包的 PyPI 名称是 `dingtalk-stream`，实际导入名是 `dingtalk_stream`；插件缺依赖提示和 `pyproject.toml` 依赖声明必须分别对应这两个名字。
+- 官方 Stream SDK 回调分发调用的是 handler 的 `raw_process()`，不是直接调 `process()`；如果只实现 `process()`，真实连上后会在首条消息回调阶段失效。
+- 钉钉主动发送文本消息可先统一收敛为 `user:<staff_id>` 与 `conversation:<open_conversation_id>` 两种 target 语义，方便直接复用现有 `MessageTool` 抽象。
+
+失败/风险经验：
+- 官方 SDK 自带的便捷方法更偏“回复当前会话”，对任意目标主动发文本没有现成高层封装；这类能力需要在 runtime 层自行补 HTTP API 封装，不能假设 SDK 已经全包。
+- 当前实现只稳定覆盖文本消息；图片、富文本、AI Card 与更复杂的钉钉机器人特性仍需后续按真实接口继续补齐。
+
+### 2026-03-30 dev 合并到 wdh/dev 收口补充
+
+成功经验：
+- `dev` 的前端重构分支与 `wdh/dev` 的 ask_user 修复发生冲突时，优先保留 `contexts/ws/*` 新架构，再把旧 `ChatSessionContext` 中的行为补丁迁回 `InteractionContext` / `ChatInput`，比把旧大文件硬合回去更稳。
+- `/sessions/*` 这类 `DashboardLayout` 的 `hideRightPanel` 分支如果也会渲染 `ChatInput` / `useDrop()`，`DndProvider` 必须放到两条布局分支的共同外层；否则只在 session 页才会炸 `Expected drag drop context`，很容易被主聊天页验证漏掉。
+- `tests/e2e/test_ask_user_core_flow.py` 这类自定义 provider 注入测试要跟上 `LLMProvider.call(..., extra_body=...)` 新签名，否则会触发错误回退链，表面看像“功能逻辑变了”，实际只是测试替身失效。
+
+失败/风险经验：
+- 当前仍有一个前端残余问题：`sensenova_claw/app/web/e2e/ask-user.spec.ts` 中“session 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input”持续失败，表现为答完问题后 `chat-input` 仍被禁用；说明 `/sessions/[id]` 页面在 `ask_user` 收口后仍有额外状态没释放，不能宣称该路径已完全回归。
+
+### 2026-03-30 QQ Channel 双协议移植补充
+
+成功经验：
+- 将 `qq` 设计成“单插件 + 单 `QQChannel` + 双 runtime (`official`/`onebot`)”最稳，能复用现有 `telegram/dingtalk/discord` 的会话桥接模式，同时把协议差异收敛在 runtime 层。
+- 先统一抽象 `QQInboundMessage(text/chat_type/chat_id/sender_id/target/mentioned_bot)` 再写 channel 逻辑最有效；这样官方 QQ 与 OneBot 都能直接复用同一套 `USER_INPUT / USER_QUESTION_ANSWERED / AGENT_STEP_COMPLETED` 事件链。
+- QQ 这类双协议接入，测试必须分三层：`config/plugin/channel` 单测、`runtime_official/runtime_onebot` 协议单测、进程内 e2e 各跑一条主链路；只测 channel 不测 runtime 很容易把协议字段差异漏掉。
+
+失败/风险经验：
+- `openclaw-cn/extensions/qqbot` 里的 QQ 插件只有元信息与 onboarding，没有可直接复用的 Python 收发 runtime；移植前必须先确认目标协议与当前仓库插件分层，不能误判为“直接复制就能跑”。
+- 用 `AsyncMock` 模拟 `httpx.Response` 时，`json()` 和 `raise_for_status()` 会变成 awaitable，容易把测试替身问题误判成 runtime bug；这类测试应优先使用同步 `Mock` 贴近 `httpx` 真实接口。
+
+### 2026-03-31 Telegram polling conflict 补充
+
+成功经验：
+- Telegram Bot API 返回 `409 Conflict: terminated by other getUpdates request` 时，应视为终止性占用错误，而不是普通瞬时异常；runtime 直接标记 `failed` 并退出 polling loop，状态和日志都更清晰。
+- 给 `tests/unit/test_telegram_runtime.py` 增加 `Conflict` 单测时，除了断言 `_sensenova_claw_status`，还要断言 `asyncio.sleep` 未被调用，才能真正防止“悄悄继续重试”回归。
+- 这类 runtime 修复后，再补跑 `tests/e2e/test_telegram_channel_e2e.py` 很有必要，能确认 channel -> gateway -> agent 的进程内主链路未受影响。
+
+失败/风险经验：
+- 即使代码已修复，只要外部还有其他 Telegram polling 实例占用同一个 bot token，服务仍会进入 `failed`；这种问题必须通过保证单实例或切换 webhook 解决，不能靠重试。
+- Telegram mention 相关测试夹具里的 `entities[*].length` 必须与 `@bot_username` 文本精确一致，否则 `mentioned_bot` 会误报失败，干扰真正的 runtime 回归判断。
+
+### 2026-03-31 QQ official 出站目标修复补充
+
+成功经验：
+- QQ official 的“已入站但不回复”要先看完整事件链日志；如果 `agent.step_completed` 已经产生，问题通常不在 LLM/Agent，而在 channel 出站目标映射。
+- 对照 botpy 源码确认协议细节最有效：`DIRECT_MESSAGE_CREATE.reply()` 走 `/dms/{guild_id}/messages`，`C2C_MESSAGE_CREATE.reply()` 走 `/v2/users/{author.user_openid}/messages`，这比猜字段名稳得多。
+- 这类协议修复应同时补两类单测：一类锁定入站事件规范化后的 `target`，一类锁定 `send_text()` 最终命中的 HTTP path 和 payload；否则很容易只修半边。
+
+失败/风险经验：
+- 官方 QQ 的 `DIRECT_MESSAGE_CREATE` 和 `C2C_MESSAGE_CREATE` 都属于私聊，但回复目标并不共用 `channel_id`；把两者统一映射成 `direct:{channel_id}` 会导致 `/dms//messages` 或错误路径。
+- `author.id` 不是所有 QQ official 事件都稳定存在；`C2C_MESSAGE_CREATE` 需要优先读取 `author.user_openid`，`GROUP_AT_MESSAGE_CREATE` 也可能依赖 `member_openid`，否则会话键和 allowlist 判断都会埋雷。
+
+### 2026-03-31 QQ official 4009 超时重连补充
+
+成功经验：
+- QQ official gateway 出现 `4009 Session timed out` 时，优先修 runtime 的连接生命周期而不是外围 channel；根因通常是旧 websocket 已关闭，但 `_recv_loop` 仍在失效连接上反复 `recv()`，同时没有重新建连。
+- 这类网关协议必须把“重连后等 `HELLO` 再发 `RESUME/IDENTIFY`”做成显式状态位（如 `_resume_requested`）；如果建连后立刻发送恢复包，测试看似合理，实际上不符合握手顺序。
+- 对协议级 bug，最有效的回归测试是直接构造真实风格的 `ConnectionClosedError(Close(4009, ...))`，再让新连接返回一帧 `HELLO`，断言最终发出的就是 `WS_RESUME`。
+
+失败/风险经验：
+- 当前 `tests/e2e/test_qq_channel_official_e2e.py` 仍有既有失败：用例断言回复里包含“当前没有可用的 LLM”，但当前 `mock` provider 已会返回正常自我介绍文本；这和本次 4009 重连修复无关，不能误判为回归。
+
+### 2026-03-31 ask_user 暗色输入框样式补充
+
+成功经验：
+- `ask_user` 的白底输入框在 dark 模式下如果继续复用 `text-foreground`，会跟随全局深色前景变成浅色文字；这类“白底局部控件”更稳的做法是直接给 textarea 指定固定深色文本类，如 `text-neutral-900`。
+- 在现有 `sensenova_claw/app/web/e2e/ask-user-action-toast.spec.ts` 上追加 dark 模式下的 `getComputedStyle(...).color` 断言，能低成本锁住主题回归，不需要引入截图比对。
+- Playwright 浏览器如果由 `npm run test:e2e` 通过 `PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers` 指定目录，首次安装浏览器时也必须带同一个环境变量；否则安装成功了，测试仍会报找不到 executable。
+
+失败/风险经验：
+- `sensenova_claw/app/web/e2e/ask-user.spec.ts` 中 `session 页面 ask_user 工具卡片内应显示内嵌回复框并可提交` 当前仍会失败，表现为 `inline-ask-user-q_session_inline_1` 未渲染；这更像既有测试夹具或页面状态问题，不能误归因到本次纯样式修改。
+
+### 2026-03-31 session 页 ask_user 主输入回归补充
+
+成功经验：
+- `/sessions/[id]` 复用 `ChatPanel` 时，`resetIfNeeded()` 必须对 React 开发态双调用幂等；先判断 `sessionIdRef.current` 是否已存在，可以避免第二次 effect 把刚绑定的会话清空。
+- ask_user 的“主输入优先回答问题”逻辑收敛到共享 `ChatPanel.handleSend()` 更稳，能让 `/chat`、`/ppt`、`/sessions` 统一走同一条发送分支。
+- 会话页 E2E 若要验证 ask_user，先等待 `current-session-id` 绑定到目标 session，再注入 mock `user_question_asked`，能把“页面绑定竞态”和“问答提交流程”分开定位。
+
+失败/风险经验：
+- 仅等待 mock WebSocket 就绪并不代表 `/sessions/[id]` 已完成 `switchSession`；如果过早注入 ask_user，表面上像“主输入不支持 ask_user”，实际是当前 session 仍为空。
+
+### 2026-04-01 ask_user 跨会话停止按钮补充
+
+成功经验：
+- `activeInteraction` 是全局 FIFO，只能代表“当前最上层待处理交互”，不能直接拿它判断“当前会话输入框是否该显示发送按钮”；跨会话 ask_user 并发时，必须额外计算 `currentSessionQuestionInteraction`。
+- 为 `InteractionContext` 增加“当前会话待回答问题”视图后，`ChatInput`、`ChatPanel`、`/chat` 页面都能统一使用它决定 `showStopButton` 和提交目标，避免一个地方修好、另一个入口仍走旧判断。
+- 这类回归最有效的 E2E 是同时构造两个会话：会话1先收到 ask_user，占住全局 active；会话2再通过 `/events` 标成 turn 进行中并收到 ask_user，断言当前会话应继续显示发送按钮且提交到会话2。
+
+失败/风险经验：
+- 若只模拟第二个会话的 `user_question_asked` 而不让它处于 `turnActive`，就复现不出“停止按钮误显示”的真实问题，测试会漏掉 UI 判断里的关键前提。
+
+### 2026-03-31 /llms 环境变量引用保存补充
+
+成功经验：
+- `ConfigManager.update/replace()` 是 `/llms` 批量保存与单项保存共享的最终写回入口；凡是“敏感字段保存行为”问题，优先在这里统一修，比只改前端或单个 API 更稳。
+- 对敏感字段不能只区分“普通字符串”和 `${secret:...}`；`${OPENAI_API_KEY}` 这类环境变量引用也必须保留原样，否则保存时会被误迁移成 `${secret:...}` 且 secret store 内没有对应值。
+- 这类回归至少要双测：一个测底层 `ConfigManager`，一个测 `/api/config/sections` 或 `/api/config/llm/providers/*` 实际入口，避免只修到底层却漏了页面使用路径。
+
+失败/风险经验：
+- 当前 `tests/unit/test_config_api.py` 仍有与本次无关的既有失败：`test_create_single_model_when_missing` 断言未包含默认写入的 `type: chat`；跑整文件时要区分历史失败和本次修复结果。
+
+### 2026-03-31 model_key/model_id 兜底收口补充
+
+成功经验：
+- 如果需求要求 `model_key` 与 `model_id` 完全解耦，不能只改 `Config.resolve_model()`；还要同步检查 `get_model_max_output_tokens()`、`get_model_extra_body()`、`agent_worker`、`llm_worker` 和 `title_runtime`，否则仍会在参数继承或事件透传路径残留旧兜底。
+- `LLMSessionWorker` 判断“是否显式传入 model/provider”时不能用 truthy；空字符串也是有效显式值。改成“字段存在且不为 `None`”后，空 `model_id` 才能原样透传到 provider。
+- `/llms` 页这类配置测试回归，直接抓 `/api/config/test-llm` 请求体最有效，能精确锁住“`model_id=''` 也必须发送空字符串，而不是回退到模型名”。
+
+失败/风险经验：
+- `Config(project_root=...)` 会走目录向上发现配置的加载路径，并忽略 `config_path`；给配置解析补单测时如果混用两种构造方式，很容易把夹具写错，误把测试问题当成实现回归。
+- 当前前端 Playwright 在本机容易受到已有 `localhost:3000` 服务和现有 dev server 状态影响；出现长时间挂起时，需先区分 webServer/页面环境问题和业务断言失败。
+
+### 2026-03-31 sessions 详情页 404 补充
+
+成功经验：
+- `/sessions/[id]` 页面除了会话列表、消息和事件，还会单独请求 `GET /api/sessions/{id}`；排查“详情页固定显示 Session not found”时，先对照页面请求链和后端 router 是否真的有这个 endpoint，能最快定位根因。
+- 对这类“前端已有调用、后端缺接口”的问题，最小修复是在 `tests/unit/test_sessions_api.py` 先补 `GET /api/sessions/{id}` 的红灯，再在 `interfaces/http/sessions.py` 增加详情接口；这样比先改页面更稳。
+- 现有 `chat-ime-enter.spec.ts` 已覆盖 `/sessions/[id]` 打开路径，补齐 `**/api/sessions/sess_existing` 的 mock 后，就能把详情页加载链一并纳入前端回归。
+
+失败/风险经验：
+- 如果 Playwright 夹具只 mock `/api/sessions` 列表而没 mock `/api/sessions/{id}`，`/sessions/[id]` 用例会因为页面初始化失败而拿不到 `chat-input`，表面像输入框回归，实际是测试数据不完整。
+
+### 2026-04-01 OpenAI 兼容 tool_calls 历史补齐补充
+
+成功经验：
+- `GeminiProvider` 已有“assistant tool_calls 与 tool 响应数量对齐”的现成模式；遇到 minimax、cloudsway 这类 OpenAI 兼容网关同类 400 时，优先对照 provider 侧消息清洗，而不是先改 worker 重试层。
+- 对这类兼容性 bug，最小高价值单测就是直接断言 `OpenAIProvider._normalize_messages()` 的输出：一条覆盖“缺失 tool 响应时补占位”，一条覆盖“孤儿 tool 消息丢弃”，能精确锁住请求体合法性。
+
+失败/风险经验：
+- 扩大到不相干测试集时，容易撞上仓库既有失败并干扰判断；本次 `tests/unit/test_gemini_provider_thought_signature.py` 当前就存在失败，验证 OpenAI 兼容修复时应优先跑聚焦的 provider 单测，不要把无关红灯误判成回归。
+
+### 2026-04-01 Anthropic tool_result 历史对齐补充
+
+成功经验：
+- `AnthropicProvider._normalize_messages()` 一旦同时承担“格式转换 + 合法性对齐”，旧单测就不该再用它验证“孤立 tool 消息如何转换”；这类断言应下沉到 `_normalize_tool_message()`，否则会和新加入的孤儿清理逻辑冲突。
+- 对 Anthropic 协议，最小有效修复是和 OpenAIProvider 保持同级策略：`assistant(tool_use)` 后缺失 `tool_result` 就补占位，孤儿 `tool_result` 直接丢弃，这样能在请求发出前保证消息序列合法。
+
+失败/风险经验：
+- `tests/unit/test_anthropic_provider.py` 之前把纯逻辑测试绑定到真实 API provider fixture，缺少 API key 时新增单测会被整体 skip；以后给这类文件补本地逻辑测试时，应优先拆出不依赖真实配置的 `local_provider` fixture。
+
+### 2026-04-01 重启后 stale turn 恢复补充
+
+成功经验：
+- 对“重启后仍显示停止按钮/工具执行中”这类问题，优先检查后端是否在启动时清理数据库里遗留的 `started` turn；只修前端展示会留下状态源不一致。
+- 前端历史恢复要双重收口：`isTurnStillActive(events)` 需要把 `error.raised` 视为终结事件，`rebuildMessagesFromEvents()` 还要把残留的 `running` 工具消息收敛为失败态，否则会出现“停止按钮没了，但工具还在执行中”的半残 UI。
+- 这类回归最稳的测试组合是：后端仓储单测断言“stale turn -> cancelled + error.raised”，前端再补 mock websocket 的 Playwright 历史恢复用例，直接验证浏览器里不再出现停止按钮。
+
+失败/风险经验：
+- 仅依赖历史里的 `user.input` 判断 turn 是否活跃，会把“进程重启前的遗留轮次”误判为仍在运行；以后凡是涉及重启恢复，都必须设计显式终结事件或启动清理逻辑。
+
+### 2026-04-01 Office 小羊待机动画补充
+
+成功经验：
+- `/office` 这类 Phaser 页面做前端回归时，直接从浏览器读取 `window.__phaserGame` 检查动画注册与精灵播放状态，比只看截图稳定得多，能精确锁住 `anims.get('star_idle')` 和 `idleSprite.anims.currentAnim`。
+- 待机小羊的素材源应以仓库内 `public/claw-icon.png` / `public/office/icon.png` 为准；不要拿运行截图反推资源，容易把环境缓存或其他对象误认成真实原图。
+- 这类轻量像素动效第一版用“原图拼 4 帧 spritesheet + 低帧率循环”最省改动，既能让角色动起来，也不会破坏现有 Phaser 场景结构。
+
+失败/风险经验：
+- Playwright 在本仓库里若使用带 `webServer` 的默认配置，容易先撞上已运行的 `localhost:3000`；验证已有前端服务时应优先用 `playwright.gateway.config.ts` 这类不拉起新 server 的配置。
+- Phaser 场景就绪不代表动画已注册完成；前端测试若只等 `scene` 存在就立即读 `game.anims.get(...)`，会拿到 `0` 帧的假阴性，需要额外等待动画资源注册完成。
+
+### 2026-04-01 Office 右下角小羊对象定位补充
+
+成功经验：
+- `/office` 页面里“看起来一样的羊”不一定走同一条渲染链；这次直接读取 `scene.children.list` 按坐标排查后，才确认右下角那只其实是 `syncAnimSprite`，不是 `agentSprites` 里的待命羊。
+- 当用户反馈“某个具体角落的对象没动”时，最有效的回归不是泛测动画资源，而是锁定该对象的运行时坐标、纹理 key、当前动画 key 和帧号变化，能快速排除“改到了相似但错误的对象”。
+
+失败/风险经验：
+- 只根据视觉相似度把右下角羊误判成 agent idle 精灵，会导致修复落到 `star_idle` 链路但对用户实际看到的对象完全无效；以后 Phaser 场景里有多个相似角色时，必须先做运行时对象级定位再改。

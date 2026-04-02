@@ -46,6 +46,7 @@ class WecomChannel(Channel):
         super().__init__()
         self._config = config
         self._plugin_api = plugin_api
+        self._sensenova_claw_status = {"status": "initialized", "error": ""}
         self._client = client or WecomToolClient(
             config=config,
             on_text_message=self._on_client_text_message,
@@ -63,12 +64,30 @@ class WecomChannel(Channel):
             types.add(TOOL_CALL_STARTED)
         return types
 
+    def on_session_expired(self, session_id: str) -> None:
+        """BusRouter GC 清理 session 后，移除内部映射，下次消息自动新建。"""
+        self._session_meta.pop(session_id, None)
+        self._pending_questions.pop(session_id, None)
+        keys_to_remove = [
+            key for key, sid in self._chat_sessions.items() if sid == session_id
+        ]
+        for key in keys_to_remove:
+            del self._chat_sessions[key]
+
     async def start(self) -> None:
-        await self._client.start()
+        self._sensenova_claw_status = {"status": "connecting", "error": ""}
+        try:
+            await self._client.start()
+        except Exception as exc:
+            self._sensenova_claw_status = {"status": "failed", "error": str(exc).strip() or type(exc).__name__}
+            logger.exception("WecomChannel start failed")
+            raise
+        self._sensenova_claw_status = {"status": "connected", "error": ""}
         logger.info("WecomChannel started")
 
     async def stop(self) -> None:
         await self._client.stop()
+        self._sensenova_claw_status = {"status": "stopped", "error": ""}
         logger.info("WecomChannel stopped")
 
     async def send_event(self, event: EventEnvelope) -> None:

@@ -11,9 +11,10 @@ AGENT_STEP_STARTED = "agent.step_started"
 AGENT_STEP_COMPLETED = "agent.step_completed"
 AGENT_UPDATE_TITLE_COMPLETED = "agent.update_title_completed"
 
-# LLM 执行事件（四阶段：requested → started → result → completed）
+# LLM 执行事件（五阶段：requested → started → [delta...] → result → completed）
 LLM_CALL_REQUESTED = "llm.call_requested"
 LLM_CALL_STARTED = "llm.call_started"
+LLM_CALL_DELTA = "llm.call_delta"
 LLM_CALL_RESULT = "llm.call_result"
 LLM_CALL_COMPLETED = "llm.call_completed"
 
@@ -26,6 +27,7 @@ TOOL_CALL_COMPLETED = "tool.call_completed"
 # Tool 权限确认事件
 TOOL_CONFIRMATION_REQUESTED = "tool.confirmation_requested"
 TOOL_CONFIRMATION_RESPONSE = "tool.confirmation_response"
+TOOL_CONFIRMATION_RESOLVED = "tool.confirmation_resolved"
 
 # 错误事件
 ERROR_RAISED = "error.raised"
@@ -62,11 +64,13 @@ PROACTIVE_JOB_STARTED = "proactive.job_started"
 PROACTIVE_JOB_COMPLETED = "proactive.job_completed"
 PROACTIVE_JOB_FAILED = "proactive.job_failed"
 PROACTIVE_JOB_SKIPPED = "proactive.job_skipped"
-PROACTIVE_CONDITION_EVALUATED = "proactive.condition_evaluated"
 PROACTIVE_RESULT = "proactive.result"
 
 # 会话生命周期事件
 SESSION_CREATED = "session.created"
+
+# Todolist 变更事件
+TODOLIST_UPDATED = "todolist.updated"
 
 # 配置变更事件
 CONFIG_UPDATED = "config.updated"

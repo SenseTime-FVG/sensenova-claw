@@ -16,9 +16,22 @@ from sensenova_claw.kernel.scheduler.models import (
     SystemEventPayload,
 )
 from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
+from sensenova_claw.platform.config.config import config
 
 if TYPE_CHECKING:
     from sensenova_claw.kernel.scheduler.runtime import CronRuntime
+
+
+def _resolve_cron_timezone() -> str | None:
+    """从配置或系统时区解析 cron 使用的时区。
+    配置值 "local" 表示读取系统本地时区，其他值直接作为 IANA 时区名。
+    """
+    from sensenova_claw.kernel.scheduler.scheduler import get_local_timezone_name
+
+    tz_cfg = config.get("cron.timezone", "local")
+    if not tz_cfg or tz_cfg == "local":
+        return get_local_timezone_name()
+    return tz_cfg
 
 
 class CronTool(Tool):
@@ -102,7 +115,8 @@ class CronTool(Tool):
         elif schedule_type == "every":
             schedule = EverySchedule(every_ms=int(schedule_value))
         elif schedule_type == "cron":
-            schedule = CronSchedule(expr=schedule_value)
+            tz = _resolve_cron_timezone()
+            schedule = CronSchedule(expr=schedule_value, tz=tz)
         else:
             return {"error": f"未知调度类型: {schedule_type}"}
 

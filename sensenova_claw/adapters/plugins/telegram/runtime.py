@@ -9,6 +9,7 @@ import inspect
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from telegram import Bot, Message, Update
+from telegram.error import Conflict
 import uvicorn
 
 from .config import TelegramConfig
@@ -123,6 +124,13 @@ class TelegramRuntime:
                     await self.handle_update(update)
             except asyncio.CancelledError:
                 raise
+            except Conflict as exc:
+                self._sensenova_claw_status = {"status": "failed", "error": str(exc).strip() or type(exc).__name__}
+                logger.error(
+                    "Telegram polling stopped due to getUpdates conflict: %s",
+                    self._sensenova_claw_status["error"],
+                )
+                return
             except Exception as exc:
                 self._sensenova_claw_status = {"status": "failed", "error": str(exc)}
                 logger.exception("Telegram polling loop failed")

@@ -1,22 +1,6 @@
 ---
 name: mineru-document-extractor
-description: MinerU document extraction CLI that converts PDFs, images, into Markdown, HTML, LaTeX, or DOCX via the MinerU API. Supports token-free flash extraction for quick start, full extraction with table/formula recognition, web crawling, batch processing, and piped workflows. read_when:- Extracting text from PDF documents - Converting documents to Markdown - - Batch document processing - OCR on scanned documents - Converting PDF to HTML, LaTeX, or DOCX- Parsing document content- Reading PDF files - Extracting tables from documents - Converting Word documents - Quick document parsing without login
-metadata:
-  openclaw:
-    emoji: "📄"
-    install:
-      - id: install-unix
-        kind: download
-        os: ["darwin", "linux"]
-        bins: ["mineru-open-api"]
-        url: https://cdn-mineru.openxlab.org.cn/open-api-cli/install.sh
-        label: Install mineru-open-api (Linux/macOS)
-      - id: install-windows
-        kind: download
-        os: ["win32"]
-        bins: ["mineru-open-api"]
-        url: https://cdn-mineru.openxlab.org.cn/open-api-cli/install.ps1
-        label: Install mineru-open-api (Windows)
+description: 当需要解析 PDF 或文档图片并转换为 Markdown 时使用。此技能基于 MinerU 提取文档中的结构化内容，支持扫描件 OCR，并可按需导出为 Markdown、HTML、LaTeX 或 DOCX。适用于 PDF 转 Markdown、提取 PDF 正文、识别扫描版 PDF、提取表格或公式、批量解析文档等任务。
 ---
 
 # MinerU 渠道选择型文档解析
@@ -26,7 +10,7 @@ metadata:
 1. 先检查 `mineru-open-api` 是否存在
 2. 若不存在，执行官方安装命令
 3. 安装后执行 `mineru-open-api version`
-4. 自动检测 `MINERU_TOKEN` 环境变量或 `~/.mineru/config.yaml`：
+4. 使用`get_secret` tool 读取`MINERU_TOKEN`, 若读取不到则自动检测 `MINERU_TOKEN` 环境变量或 `~/.mineru/config.yaml`：
    - 若已配置 Token → 默认使用 `extract`（完整模式）
    - 若未配置 → 用 `ask_user` 询问用户选择免费或 Token 模式
 5. 统一输出到 `<workspace>/mineru_skill/<name>_<hash>/`
@@ -61,8 +45,9 @@ mineru-open-api version
 ### 自动检测逻辑
 
 按以下顺序检查 Token 是否存在：
-1. 环境变量 `MINERU_TOKEN`
-2. 配置文件 `~/.mineru/config.yaml`
+1. 使用`get_secret` tool 读取 `MINERU_TOKEN`
+2. 环境变量 `MINERU_TOKEN`
+3. 配置文件 `~/.mineru/config.yaml`
 
 检测命令：
 ```bash

@@ -2,7 +2,6 @@
 # 复制此文件为 config.yml 并填入真实的 API Key
 
 system:
-  workspace_dir: ~/.sensenova-claw/workspace
   database_path: ~/.sensenova-claw/db/sensenova-claw.db
 
 security:
@@ -16,70 +15,86 @@ llm:
     anthropic:
       api_key: ${ANTHROPIC_API_KEY}
       base_url: ${ANTHROPIC_BASE_URL}
-      timeout: 60
+      timeout: 180
       max_retries: 3
+      source_type: anthropic
 
     openai:
       api_key: ${OPENAI_API_KEY}
       base_url: ${OPENAI_BASE_URL}
-      timeout: 60
+      timeout: 180
       max_retries: 3
+      source_type: openai
 
     gemini:
       api_key: ${GEMINI_API_KEY}
       base_url: ${GEMINI_BASE_URL}
-      timeout: 120
+      timeout: 180
       max_retries: 3
+      source_type: gemini
 
     kimi:
       api_key: ${KIMI_API_KEY}
       base_url: https://api.moonshot.cn/v1
-      timeout: 60
+      timeout: 180
       max_retries: 3
+      source_type: kimi
 
     glm:
       api_key: ${GLM_API_KEY}
       base_url: https://open.bigmodel.cn/api/paas/v4/
-      timeout: 60
+      timeout: 180
       max_retries: 3
+      source_type: glm
 
     minimax:
       api_key: ${MINIMAX_API_KEY}
       base_url: https://api.minimax.chat/v1
-      timeout: 60
+      timeout: 180
       max_retries: 3
+      source_type: minimax
 
     qwen:
       api_key: ${QWEN_API_KEY}
       base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      timeout: 60
+      timeout: 180
       max_retries: 3
+      source_type: qwen
 
     deepseek:
       api_key: ${DEEPSEEK_API_KEY}
       base_url: https://api.deepseek.com
-      timeout: 60
+      timeout: 180
       max_retries: 3
+      source_type: deepseek
 
     step:
       api_key: ${STEP_API_KEY}
       base_url: https://api.stepfun.com/v1
-      timeout: 60
+      timeout: 180
       max_retries: 3
+      source_type: step
+    
+    qwen-embedding:
+      api_key: ${QWEN_EMBEDDING_API_KEY}
+      base_url: https://dl.yunstorm.com/v1
+      timeout: 180
+      max_retries: 3
+      source_type: qwen-embedding
 
   models:
     # ── Anthropic ──
     claude-opus:
       provider: anthropic
       model_id: claude-opus-4-6
-      timeout: 60
+      timeout: 180
       max_tokens: 200000
       max_output_tokens: 16384
 
     claude-sonnet:
       provider: anthropic
       model_id: claude-sonnet-4-6
-      timeout: 60
+      timeout: 180
       max_tokens: 200000
       max_output_tokens: 16384
 
@@ -87,7 +102,7 @@ llm:
     gpt-5.4:
       provider: openai
       model_id: gpt-5.4
-      timeout: 60
+      timeout: 180
       max_tokens: 128000
       max_output_tokens: 16384
 
@@ -95,7 +110,7 @@ llm:
     gemini-pro:
       provider: gemini
       model_id: gemini-2.0-flash
-      timeout: 120
+      timeout: 180
       max_tokens: 1048576
       max_output_tokens: 65536
 
@@ -103,7 +118,7 @@ llm:
     kimi-k2.5:
       provider: kimi
       model_id: kimi-k2.5
-      timeout: 60
+      timeout: 180
       max_tokens: 262144
       max_output_tokens: 16384
 
@@ -111,7 +126,7 @@ llm:
     glm-5:
       provider: glm
       model_id: GLM-5
-      timeout: 60
+      timeout: 180
       max_tokens: 200000
       max_output_tokens: 16384
 
@@ -119,7 +134,7 @@ llm:
     minimax-m2.7:
       provider: minimax
       model_id: MiniMax-M2.7-highspeed
-      timeout: 60
+      timeout: 180
       max_tokens: 204800
       max_output_tokens: 16384
 
@@ -127,7 +142,7 @@ llm:
     qwen-3.5-plus:
       provider: qwen
       model_id: qwen3.5-plus
-      timeout: 60
+      timeout: 180
       max_tokens: 1000000
       max_output_tokens: 16384
 
@@ -135,7 +150,7 @@ llm:
     deepseek-chat:
       provider: deepseek
       model_id: deepseek-chat
-      timeout: 60
+      timeout: 180
       max_tokens: 128000
       max_output_tokens: 16384
 
@@ -143,85 +158,193 @@ llm:
     step-3.5-flash:
       provider: step
       model_id: step-3.5-flash
-      timeout: 60
+      timeout: 180
       max_tokens: 256000
       max_output_tokens: 16384
 
+    # ── Embedding 模型 ──
+    qwen-embedding:
+      provider: qwen-embedding
+      model_id: text-embedding-v4
+      type: embedding
+      dimensions: 1024
+      timeout: 180
+
   default_model: null
+  default_embedding_model: qwen-embedding
 
 # ════════════════════════════════════════════════════
 # Agents 配置
 # ════════════════════════════════════════════════════
 # system_prompt 不在此文件配置，放在 .sensenova-claw/agents/<agent_id>/SYSTEM_PROMPT.md 中
+# 多 Agent 配置（dict 格式，key = agent id）
 agents:
   default:
     name: Default Agent
     description: 默认 AI Agent
-    model: gemini-pro
-    temperature: 0.6
+    temperature: 1.0
     tools: []
     skills: []
+    can_send_message_to: []
+    max_send_depth: 2
+    max_pingpong_turns: 10
+    enabled: true
 
   system-admin:
     name: 系统运维管理员
     description: 系统运维管理员，负责 Sensenova-Claw 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作
-    temperature: 0.2
-    tools: [read_file, write_file, bash_command]
-    skills: [system-admin-skill]
+    temperature: 1.0
+    tools: ["read_file", "write_file", "bash_command", "get_secret", "write_secret"]
+    skills: ["system-admin-skill"]
+    max_send_depth: 2
+    max_pingpong_turns: 10
+    enabled: true
+
+  proactive-agent:
+    name: Proactive Agent
+    description: 自主执行定时任务和信息推送的 agent
+    temperature: 1.0
+    tools: []
+    skills: []
+    max_send_depth: 2
+    max_pingpong_turns: 10
+    enabled: true
 
   office-main:
     name: 办公主助手
     description: 办公任务总调度，负责理解需求并委托给专业 agent
-    temperature: 0.2
-    tools: [send_message, ask_user]
+    temperature: 1.0
+    tools: []
     skills: []
-    max_delegation_depth: 2
-
-  search-agent:
-    name: 搜索调研助手
-    description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
-    temperature: 0.2
-    tools: [serper_search, fetch_url, read_file, write_file, image_search, send_message, ask_user]
-    skills: [paddleocr-doc-parsing, mineru-document-extractor-choice, research-union, union-search-plus]
+    max_send_depth: 3
+    enabled: true
 
   ppt-agent:
     name: PPT 生成助手
     description: 生成 PPT 演示文稿，支持一句话生成
-    temperature: 0.2
-    tools: [serper_search, fetch_url, read_file, write_file, bash_command, send_message, image_search, ask_user]
-    skills: [ppt-superpower, ppt-asset-plan, ppt-html-gen, ppt-image-selection, ppt-page-assets, ppt-page-html, ppt-page-plan, ppt-page-polish, ppt-research-pack, ppt-review, ppt-source-analysis, ppt-speaker-notes, ppt-story-refine, ppt-storyboard, ppt-style-refine, ppt-style-spec, ppt-task-pack, ppt-template-pack]
+    temperature: 1.0
+    tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "send_message", "image_search", "ask_user", "memory_search"]
+    skills: ["ppt-superpower", "ppt-asset-plan", "ppt-html-gen", "ppt-image-selection", "ppt-page-assets", "ppt-page-html", "ppt-page-plan", "ppt-page-polish", "ppt-research-pack", "ppt-review", "ppt-source-analysis", "ppt-speaker-notes", "ppt-story-refine", "ppt-storyboard", "ppt-style-refine", "ppt-style-spec", "ppt-task-pack", "ppt-template-pack"]
+    max_send_depth: 2
+    enabled: true
 
   data-analyst:
     name: 数据分析助手
     description: 数据分析、可视化和报告生成
-    temperature: 0.6
-    tools: [read_file, write_file, bash_command, send_message, feishu_doc, ask_user]
-    skills: [excel-xlsx, python-dataviz, pdf, csv-pipeline, mineru-document-extractor, openai-whisper-api]
+    temperature: 1.0
+    tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "ask_user", "memory_search", "get_secret", "write_secret"]
+    skills: ["excel-xlsx", "python-dataviz", "pdf", "csv-pipeline", "mineru-document-extractor", "openai-whisper-api"]
+    max_send_depth: 2
+    enabled: true
 
   doc-organizer:
     name: 文档整理助手
     description: 处理多种来源的文档，支持格式转换和整理
-    temperature: 0.2
-    tools: [read_file, write_file, bash_command, send_message, feishu_doc, feishu-wiki, feishu-drive, ask_user]
-    skills: [markdown-converter, docx-cn, excel-xlsx, pdf, pdf-generator, mineru-document-extractor, openai-whisper-api, feishu-doc, feishu-wiki, feishu-drive]
+    temperature: 1.0
+    tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "feishu-drive", "ask_user", "memory_search", "get_secret", "write_secret"]
+    skills: ["markdown-converter", "docx-cn", "excel-xlsx", "pdf", "pdf-generator", "mineru-document-extractor", "openai-whisper-api", "feishu-doc", "feishu-wiki", "feishu-drive"]
+    max_send_depth: 2
+    enabled: true
 
   email-agent:
     name: 邮件助手
     description: 邮件收发、管理和定时提醒
-    temperature: 0.2
-    tools: [bash_command, read_file, write_file, send_message, send_email, list_emails, read_email, download_attachment, mark_email, search_emails, ask_user]
+    temperature: 1.0
+    tools: ["bash_command", "read_file", "write_file", "send_message", "send_email", "list_emails", "read_email", "download_attachment", "mark_email", "search_emails", "ask_user", "memory_search"]
     skills: []
+    max_send_depth: 2
+    enabled: true
 
+  search-agent:
+    name: 搜索调研助手
+    description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
+    temperature: 1.0
+    tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search", "get_secret", "write_secret"]
+    skills: ["mineru-document-extractor", "research-union", "union-search-skill"]
+    max_send_depth: 2
+    enabled: true
+
+# ════════════════════════════════════════════════════
+# Proactive Agent 配置
+# ════════════════════════════════════════════════════
+proactive:
+  enabled: true
+  max_concurrent_runs: 3
+  jobs:
+    - name: "偏好发现与推送管理"
+      enabled: true
+      agent_id: proactive-agent
+      trigger:
+        kind: time
+        cron: "0 12 * * *"
+        # every: "3m"
+      task:
+        prompt: | 
+          你是每日信息推送助手。按以下步骤执行：
+
+          ## 步骤一：偏好发现
+          调用 memory_search 搜索用户的行为偏好。
+          分析结果，提取明确的、反复出现的兴趣主题（如"AI新闻"、"Python技术"、"股市"等）。
+          单次提及不算偏好，需要多次出现才确认。
+
+          ## 步骤二：内容搜索
+          根据步骤一的结果：
+          - 如果发现了明确偏好：针对每个偏好主题调用 serper_search 搜索今日相关内容
+          - 如果未发现偏好：执行以下默认搜索
+            1. 调用 serper_search(query="今日重要新闻 新华社 人民日报") 搜索当日新闻
+            2. 调用 memory_search(query="用户所在城市 位置 地点") 查找用户城市
+              - 找到城市 → 调用 serper_search(query="{城市}今日天气预报")
+              - 未找到 → 跳过天气
+
+          ## 步骤三：整理输出
+          将搜索结果整理为简洁的推送内容：
+          - 每条信息包含标题和一句话摘要
+          - 总条数不超过 10 条
+          - 如有天气信息，放在最前面
+        use_memory: true
+      delivery:
+        channels: ["web"]
+      safety:
+        max_llm_calls: 50
+        max_duration_ms: 2400000
+
+    # - name: "测试定时搜索"
+    #   enabled: true
+    #   agent_id: proactive-agent
+    #   trigger:
+    #     kind: time
+    #     every: "5m"
+    #   task:
+    #     prompt: "搜索今天的AI领域最新新闻，列出3条最重要的，每条包含标题和一句话摘要"
+    #     use_memory: false
+    #   delivery:
+    #     channels: ["web"]
+    #   safety:
+    #     allowed_tools: ["serper_search", "fetch_url"]
+    #     max_llm_calls: 50
+    #     max_duration_ms: 240000
 
 # ════════════════════════════════════════════════════
 # 工具配置
 # ════════════════════════════════════════════════════
 tools:
+  permission:
+    enabled: false
+    auto_approve_levels: ["high"]       # 自动批准的风险等级
+    confirmation_timeout: 60           # 确认超时（秒）
+    timeout_action: reject             # 超时策略：reject（拒绝）| approve（批准）| block（无限等待）
+
   serper_search:
     enabled: true
     api_key: ${SERPER_API_KEY}
     timeout: 15
     max_results: 10
+
+  image_search:
+    enabled: true
+    api_key: ""   # 留空时复用 SERPER_API_KEY 也可
+    timeout: 30
+    top_k: 10
 
 # Skills 配置
 skills:
@@ -276,6 +399,39 @@ plugins:
     require_mention: true  # 群里即使用户和频道都满足，还必须 @bot 才会响应
     show_tool_progress: false
     reply_in_thread: true
+  dingtalk:
+    enabled: false
+    client_id: "${DINGTALK_CLIENT_ID}"
+    client_secret: "${DINGTALK_CLIENT_SECRET}"
+    dm_policy: "open"  # open | allowlist | disabled
+    group_policy: "open"  # open | allowlist | disabled
+    allowlist: []
+    group_allowlist: []
+    require_mention: true
+    show_tool_progress: false
+    reply_to_sender: false
+  qq:
+    enabled: false
+    mode: "onebot"  # official | onebot
+    dm_policy: "open"  # open | allowlist | disabled
+    group_policy: "open"  # open | allowlist | disabled
+    allowlist: []
+    group_allowlist: []
+    require_mention: true
+    show_tool_progress: false
+    reply_to_message: true
+
+    # QQ 官方开放平台配置
+    official_app_id: "${QQ_OFFICIAL_APP_ID}"
+    official_client_secret: "${QQ_OFFICIAL_CLIENT_SECRET}"
+    official_sandbox: false
+    official_intents: []
+
+    # OneBot / NapCat / Lagrange 配置
+    onebot_ws_url: "ws://127.0.0.1:3001"
+    onebot_access_token: "${QQ_ONEBOT_ACCESS_TOKEN}"
+    onebot_api_base_url: "http://127.0.0.1:3000"
+    onebot_self_id: "${QQ_ONEBOT_SELF_ID}"
   whatsapp:
     enabled: false
     auth_dir: "~/.sensenova-claw/data/plugins/whatsapp/auth"
@@ -290,3 +446,15 @@ plugins:
       entry: "sensenova_claw/adapters/plugins/whatsapp/bridge/src/index.mjs"
       startup_timeout_seconds: 30
       send_timeout_seconds: 15
+
+delegation:
+  enabled: true
+  max_llm_calls: 300
+  max_tool_calls: 300
+  max_retries: 3
+  default_timeout: 600
+
+memory:
+  enabled: true
+  search:
+    enabled: true

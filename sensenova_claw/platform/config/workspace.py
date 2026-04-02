@@ -59,22 +59,31 @@ DEFAULT_USER_MD = """\
 
 # ---------- SENSENOVA_CLAW_HOME 解析 ----------
 
-def resolve_sensenova_claw_home(config: Any = None) -> Path:
-    """解析 SENSENOVA_CLAW_HOME 路径。
+def default_sensenova_claw_home() -> Path:
+    """返回默认 SENSENOVA_CLAW_HOME。
 
-    优先级：config 中显式设置 > 环境变量 SENSENOVA_CLAW_HOME > 默认 ~/.sensenova-claw
+    规则：
+    1. 优先读取环境变量 SENSENOVA_CLAW_HOME
+    2. 未设置时，回退到用户目录下的 .sensenova-claw
+
+    Windows 下 Path.home() 会解析到 %USERPROFILE%，因此默认目录会落到
+    %USERPROFILE%\\.sensenova-claw。
     """
     import os
-    home = None
-    if config:
-        raw = config.get("system.sensenova_claw_home", "") if hasattr(config, "get") else ""
-        if raw and raw != "${SENSENOVA_CLAW_HOME}":
-            home = raw
-    if not home:
-        home = os.environ.get("SENSENOVA_CLAW_HOME", "")
+
+    home = os.environ.get("SENSENOVA_CLAW_HOME", "")
     if not home:
         home = str(Path.home() / ".sensenova-claw")
     return Path(home).expanduser().resolve()
+
+
+def resolve_sensenova_claw_home(config: Any = None) -> Path:
+    """解析 SENSENOVA_CLAW_HOME 路径。
+
+    config 参数仅为兼容旧调用保留，当前不再读取
+    system.sensenova_claw_home 配置项，统一由环境变量控制。
+    """
+    return default_sensenova_claw_home()
 
 
 async def ensure_sensenova_claw_home(home: Path, project_root: Path | None = None) -> None:
@@ -174,6 +183,27 @@ def resolve_agent_workdir(sensenova_claw_home: str, agent_config: Any = None) ->
         return str(Path(agent_config.workdir).expanduser().resolve())
     agent_id = getattr(agent_config, "id", "default") if agent_config else "default"
     return str((Path(sensenova_claw_home).resolve() / "workdir" / agent_id))
+
+
+def resolve_session_artifact_dir(
+    sensenova_claw_home: str | Path,
+    session_id: str,
+    agent_id: str | None = None,
+) -> Path:
+    """解析 session 附件目录。
+
+    统一布局：
+        {sensenova_claw_home}/agents/{agent_id}/sessions/{session_id}/
+
+    这里专门存放与 session 相关的落盘附件，例如：
+    - tool_result_*.txt
+    - compression_phase*.json
+    """
+    home = Path(sensenova_claw_home).expanduser().resolve()
+    safe_agent = str(agent_id or "").strip() or "default"
+    safe_agent = safe_agent.replace("/", "_").replace("\\", "_")
+    safe_session = str(session_id).replace("/", "_").replace("\\", "_")
+    return home / "agents" / safe_agent / "sessions" / safe_session
 
 
 # ---------- 加载 workspace 文件 ----------

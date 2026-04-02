@@ -44,6 +44,9 @@ class Channel(ABC):
         """此 Channel 关心的事件类型集合。None = 全部（默认，向后兼容）。"""
         return None
 
+    def on_session_expired(self, session_id: str) -> None:
+        """BusRouter GC 销毁 session 时由 Gateway 调用，Channel 可清理内部映射。"""
+
 
 @runtime_checkable
 class OutboundCapable(Protocol):

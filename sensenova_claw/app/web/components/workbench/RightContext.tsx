@@ -4,10 +4,10 @@ import { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, FileText, Globe } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useMessages } from '@/contexts/ws';
 
 export function RightContext() {
-  const { steps, taskProgress } = useChatSession();
+  const { steps, taskProgress } = useMessages();
 
   const isCollapsed = steps.length === 0 && taskProgress.length === 0;
   const [expanded, setExpanded] = useState(!isCollapsed);
@@ -55,8 +55,8 @@ export function RightContext() {
                       <span className={cn(
                         'text-sm',
                         step.status === 'running' && 'text-foreground font-medium',
-                        step.status === 'done' && 'text-muted-foreground',
-                        step.status === 'pending' && 'text-muted-foreground/50'
+                        step.status === 'done' && 'text-muted-foreground dark:text-muted-foreground/80',
+                        step.status === 'pending' && 'text-muted-foreground/50 dark:text-muted-foreground/40'
                       )}>
                         {step.label}
                       </span>
@@ -79,7 +79,7 @@ export function RightContext() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-foreground truncate">{task.task}</p>
                       </div>
-                      <span className="text-xs text-amber-500 font-medium shrink-0">
+                      <span className="text-xs text-amber-600 dark:text-amber-400 font-medium shrink-0">
                         {task.step}/{task.total}
                       </span>
                     </div>

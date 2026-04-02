@@ -35,6 +35,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _extract_meta_source(payload: dict) -> str | None:
+    """从 USER_INPUT payload 中提取 meta.source。"""
+    meta = payload.get("meta")
+    if isinstance(meta, dict):
+        return meta.get("source")
+    return None
+
+
 class AgentSessionWorker(SessionWorker):
     """Agent 会话级 Worker：编排对话流程
 
@@ -67,18 +75,12 @@ class AgentSessionWorker(SessionWorker):
         """解析 provider 名称：从 agent_config.model → llm.models → provider"""
         model_key = self._get_model_key()
         provider, _ = config.resolve_model(model_key)
-        # 向后兼容：部分 Agent 仍直接填写 model_id，此时保留显式 provider。
-        explicit_provider = getattr(self.agent_config, "provider", None) if self.agent_config else None
-        if provider == "mock" and explicit_provider:
-            return explicit_provider
         return provider
 
     def _get_model(self) -> str:
         """解析实际 model_id（传给 LLM API 的模型名）"""
         model_key = self._get_model_key()
-        provider, model_id = config.resolve_model(model_key)
-        if provider == "mock" and self.agent_config and self.agent_config.model:
-            return self.agent_config.model
+        _, model_id = config.resolve_model(model_key)
         return model_id
 
     def _get_model_key(self) -> str:
@@ -90,7 +92,7 @@ class AgentSessionWorker(SessionWorker):
     def _get_temperature(self) -> float:
         if self.agent_config:
             return self.agent_config.temperature
-        return config.get("agent.temperature", 0.2)
+        return config.get("agent.temperature", 1.0)
 
     def _get_max_tokens(self) -> int:
         """获取 max_output_tokens：agent 级别覆盖 model 级别"""
@@ -101,29 +103,36 @@ class AgentSessionWorker(SessionWorker):
 
     def _get_extra_body(self) -> dict:
         """获取 extra_body：agent 级别覆盖 model 级别"""
+        model_extra = dict(config.get("agent.extra_body", {}))
         model_key = self._get_model_key()
-        model_extra = config.get_model_extra_body(model_key)
+        model_extra.update(config.get_model_extra_body(model_key))
         if self.agent_config and self.agent_config.extra_body:
             model_extra.update(self.agent_config.extra_body)
         return model_extra
 
     def _get_filtered_tools(self) -> list[dict]:
         """根据 Agent 配置过滤可用工具"""
-        all_tools = self.rt.tool_registry.as_llm_tools()
+        all_tools = self.rt.tool_registry.as_llm_tools()  # 已含 config enabled 过滤
         if not self.agent_config or not self.agent_config.tools:
             tools = all_tools  # 空列表 = 全部工具
         else:
             allowed = set(self.agent_config.tools)
-            # 始终保留 send_message 工具
-            always_keep = {"send_message"}
-            tools = [t for t in all_tools if t["name"] in allowed or t["name"] in always_keep]
+            # 保留 send_message 工具（除非 can_delegate_to 为 None 表示禁止委托）
+            if self.agent_config.can_delegate_to is not None:
+                allowed.add("send_message")
+            tools = [t for t in all_tools if t["name"] in allowed]
+        if self.agent_config and self.agent_config.can_delegate_to is None:
+            tools = [t for t in tools if t["name"] != "send_message"]
 
         # 仅对 proactive 会话应用安全限制
         if self._session_meta and self._session_meta.get("proactive_job_id"):
             allowed_tools = self._session_meta.get("allowed_tools")
             blocked_tools = self._session_meta.get("blocked_tools")
             if allowed_tools:
-                tools = [t for t in tools if t["name"] in allowed_tools or t["name"] == "send_message"]
+                keep = set(allowed_tools)
+                if self.agent_config and self.agent_config.can_delegate_to is not None:
+                    keep.add("send_message")
+                tools = [t for t in tools if t["name"] in keep]
             elif blocked_tools:
                 tools = [t for t in tools if t["name"] not in blocked_tools]
 
@@ -132,6 +141,15 @@ class AgentSessionWorker(SessionWorker):
     def _is_proactive_session(self) -> bool:
         """判断当前会话是否为 proactive 会话"""
         return bool(self._session_meta and self._session_meta.get("proactive_job_id"))
+
+    def _is_autonomous_session(self) -> bool:
+        """判断当前会话是否为自治会话（proactive 或 delegation）"""
+        if not self._session_meta:
+            return False
+        return bool(
+            self._session_meta.get("proactive_job_id")
+            or self._session_meta.get("message_trace_id")
+        )
 
     async def _force_complete_on_limit(
         self,
@@ -151,18 +169,25 @@ class AgentSessionWorker(SessionWorker):
             if state:
                 new_messages = state.messages[state.history_offset:]
                 self.rt.state_store.append_to_history(session_id, new_messages)
+        limit_payload: dict = {
+            "step_type": "final",
+            "result": {"content": msg},
+            "next_action": "end",
+            "exceeded_limit": limit_type,
+        }
+        if getattr(self, '_current_turn_meta_source', None):
+            limit_payload["source"] = self._current_turn_meta_source
+        if self._session_meta and self._session_meta.get("parent_session_id"):
+            limit_payload["is_delegated"] = True
+        if self._is_proactive_session():
+            limit_payload["is_proactive"] = True
         await self.bus.publish(
             EventEnvelope(
                 type=AGENT_STEP_COMPLETED,
                 session_id=session_id,
                 turn_id=turn_id,
                 source="agent",
-                payload={
-                    "step_type": "final",
-                    "result": {"content": msg},
-                    "next_action": "end",
-                    "exceeded_limit": limit_type,
-                },
+                payload=limit_payload,
             )
         )
 
@@ -228,6 +253,8 @@ class AgentSessionWorker(SessionWorker):
                 await self._handle_llm_result(event)
             elif event.type == LLM_CALL_COMPLETED:
                 await self._handle_llm_completed(event)
+            elif event.type == ERROR_RAISED:
+                await self._handle_error_raised(event)
             elif event.type == TOOL_CALL_RESULT:
                 await self._handle_tool_result(event)
             self._consecutive_errors = 0
@@ -260,6 +287,8 @@ class AgentSessionWorker(SessionWorker):
 
         reason = str(event.payload.get("reason", "user_cancel"))
         self.rt.state_store.mark_turn_cancelled(self.session_id, turn_id)
+        if latest_turn and latest_turn.turn_id == turn_id:
+            self.rt.state_store.append_turn_messages_to_history(self.session_id, latest_turn)
         await self.rt.repo.update_turn_status(turn_id, status="cancelled", agent_response=reason)
         await self.bus.publish(
             EventEnvelope(
@@ -277,22 +306,34 @@ class AgentSessionWorker(SessionWorker):
         )
         logger.info("已取消 turn session=%s turn=%s reason=%s", self.session_id, turn_id, reason)
 
+    async def _handle_error_raised(self, event: EventEnvelope) -> None:
+        """错误收尾时补齐当前轮次历史，避免后续上下文丢失最后一轮消息。"""
+        if not event.turn_id:
+            return
+        if self.rt.state_store.is_turn_cancelled(event.session_id, event.turn_id):
+            return
+        state = self.rt.state_store.get_turn(event.session_id, event.turn_id)
+        if not state:
+            return
+        self.rt.state_store.append_turn_messages_to_history(event.session_id, state)
+
     async def _handle_user_input(self, event: EventEnvelope) -> None:
         content = str(event.payload.get("content", ""))
         turn_id = event.turn_id or f"turn_{uuid.uuid4().hex[:12]}"
+        # 每轮重置安全计数，避免跨 turn 累计导致提前触发限制
+        self._llm_call_count = 0
+        self._tool_call_count = 0
+        self._current_turn_meta_source = _extract_meta_source(event.payload)
 
         await self.rt.repo.create_session(self.session_id, meta={"title": content[:20] or "新会话"})
         await self.rt.repo.update_session_activity(self.session_id)
         await self.rt.repo.create_turn(turn_id=turn_id, session_id=self.session_id, user_input=content)
 
-        # v0.5: 首轮加载 per-agent workspace 文件
-        context_files = None
-        if self.rt.state_store.is_first_turn(self.session_id):
-            from sensenova_claw.platform.config.workspace import load_workspace_files, resolve_sensenova_claw_home
-            sensenova_claw_home = str(resolve_sensenova_claw_home(config))
-            agent_id = self.agent_config.id if self.agent_config else "default"
-            context_files = await load_workspace_files(sensenova_claw_home, agent_id=agent_id)
-            self.rt.state_store.mark_first_turn_done(self.session_id)
+        # 每轮加载 per-agent workspace 文件（AGENTS.md / USER.md），确保长对话不丢失指令
+        from sensenova_claw.platform.config.workspace import load_workspace_files, resolve_sensenova_claw_home
+        sensenova_claw_home = str(resolve_sensenova_claw_home(config))
+        agent_id = self.agent_config.id if self.agent_config else "default"
+        context_files = await load_workspace_files(sensenova_claw_home, agent_id=agent_id)
 
         # 读取前端拖入的用户文件
         user_file_paths = event.payload.get("context_files", [])
@@ -349,9 +390,9 @@ class AgentSessionWorker(SessionWorker):
         )
 
         llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
-        # 计数并检查 LLM 调用限制（仅 proactive 会话）
+        # 计数并检查 LLM 调用限制（仅自治会话（proactive/delegation））
         self._llm_call_count += 1
-        if self._is_proactive_session():
+        if self._is_autonomous_session():
             max_llm = self._session_meta.get("max_llm_calls")  # type: ignore[union-attr]
             if max_llm and self._llm_call_count > max_llm:
                 await self._force_complete_on_limit(self.session_id, turn_id, "max_llm_calls")
@@ -469,7 +510,42 @@ class AgentSessionWorker(SessionWorker):
                 )
             return
 
-        # 没有工具调用，结束本轮对话
+        # 没有工具调用 — 如果 content 为空且本轮有工具执行记录，
+        # 追加一轮 LLM 调用要求生成文字总结，避免返回空响应给用户。
+        # 仅重试一次，防止无限循环。
+        if not content and state.tool_results and not getattr(state, "_summary_retry", False):
+            state._summary_retry = True  # type: ignore[attr-defined]
+            state.messages.append({
+                "role": "user",
+                "content": (
+                    "你刚才执行了一系列操作但没有给出文字回复。"
+                    "请根据上面的工具执行结果，向用户总结你完成了什么、"
+                    "生成的文件路径，以及后续可以做什么。"
+                ),
+            })
+            llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
+            self._llm_call_count += 1
+            await self.bus.publish(
+                EventEnvelope(
+                    type=LLM_CALL_REQUESTED,
+                    session_id=event.session_id,
+                    turn_id=event.turn_id,
+                    trace_id=llm_call_id,
+                    source="agent",
+                    payload={
+                        "llm_call_id": llm_call_id,
+                        "provider": self._get_provider(),
+                        "model": self._get_model(),
+                        "messages": state.messages,
+                        "tools": self._get_filtered_tools(),
+                        "temperature": self._get_temperature(),
+                        "max_tokens": self._get_max_tokens(),
+                        "extra_body": self._get_extra_body(),
+                    },
+                )
+            )
+            return
+
         # 后处理：将回复中的相对路径改写为绝对路径
         from sensenova_claw.platform.config.workspace import resolve_agent_workdir, resolve_sensenova_claw_home
         from sensenova_claw.kernel.runtime.path_rewriter import rewrite_relative_paths
@@ -481,8 +557,7 @@ class AgentSessionWorker(SessionWorker):
         await self.rt.repo.complete_turn(event.turn_id, agent_response=content)
 
         # 追加本轮新消息到内存历史（供后续 turn 上下文使用）
-        new_messages = state.messages[state.history_offset:]
-        self.rt.state_store.append_to_history(event.session_id, new_messages)
+        self.rt.state_store.append_turn_messages_to_history(event.session_id, state)
 
         # 注意：消息已在 _handle_user_input / _handle_llm_result / _handle_tool_result
         # 中增量持久化到 SQLite，此处无需再批量保存
@@ -491,17 +566,24 @@ class AgentSessionWorker(SessionWorker):
         if self.rt.context_compressor:
             asyncio.create_task(self._compress_history_safe(event.session_id))
 
+        step_completed_payload: dict = {
+            "step_type": "final",
+            "result": {"content": content},
+            "next_action": "end",
+        }
+        if getattr(self, '_current_turn_meta_source', None):
+            step_completed_payload["source"] = self._current_turn_meta_source
+        if self._session_meta and self._session_meta.get("parent_session_id"):
+            step_completed_payload["is_delegated"] = True
+        if self._is_proactive_session():
+            step_completed_payload["is_proactive"] = True
         await self.bus.publish(
             EventEnvelope(
                 type=AGENT_STEP_COMPLETED,
                 session_id=event.session_id,
                 turn_id=event.turn_id,
                 source="agent",
-                payload={
-                    "step_type": "final",
-                    "result": {"content": content},
-                    "next_action": "end",
-                },
+                payload=step_completed_payload,
             )
         )
 
@@ -560,8 +642,8 @@ class AgentSessionWorker(SessionWorker):
         if state.pending_tool_calls:
             return
 
-        # 计数并检查工具调用限制（仅 proactive 会话，每批工具完成后累计）
-        if self._is_proactive_session():
+        # 计数并检查工具调用限制（仅自治会话（proactive/delegation），每批工具完成后累计）
+        if self._is_autonomous_session():
             # 统计本批次完成的工具调用数（从 tool_results 推断）
             self._tool_call_count = len(state.tool_results)
             max_tools = self._session_meta.get("max_tool_calls")  # type: ignore[union-attr]
@@ -572,9 +654,9 @@ class AgentSessionWorker(SessionWorker):
                 return
 
         llm_call_id = f"llm_{uuid.uuid4().hex[:12]}"
-        # 计数并检查 LLM 调用限制（仅 proactive 会话）
+        # 计数并检查 LLM 调用限制（仅自治会话（proactive/delegation））
         self._llm_call_count += 1
-        if self._is_proactive_session():
+        if self._is_autonomous_session():
             max_llm = self._session_meta.get("max_llm_calls")  # type: ignore[union-attr]
             if max_llm and self._llm_call_count > max_llm:
                 await self._force_complete_on_limit(

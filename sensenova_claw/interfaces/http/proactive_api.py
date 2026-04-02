@@ -26,7 +26,7 @@ def _serialize_job(job) -> dict[str, Any]:
         "agent_id": job.agent_id,
         "enabled": job.enabled,
         "source": job.source,
-        "trigger": dataclasses.asdict(job.trigger),
+        "trigger": dataclasses.asdict(job.trigger) if job.trigger else {"kind": "manual"},
         "task": dataclasses.asdict(job.task),
         "delivery": dataclasses.asdict(job.delivery),
         "safety": dataclasses.asdict(job.safety),
@@ -57,7 +57,7 @@ class CreateJobRequest(BaseModel):
 async def create_job(body: CreateJobRequest, request: Request):
     """创建新的 proactive job。"""
     from sensenova_claw.kernel.proactive.models import (
-        ConditionTrigger, DeliveryConfig, EventTrigger, JobState,
+        DeliveryConfig, EventTrigger, JobState,
         ProactiveJob, ProactiveTask, SafetyConfig, TimeTrigger,
     )
     import uuid
@@ -68,19 +68,12 @@ async def create_job(body: CreateJobRequest, request: Request):
         trigger = TimeTrigger(
             cron=body.trigger.get("cron"),
             every=body.trigger.get("every"),
-            condition=body.trigger.get("condition"),
         )
     elif trigger_kind == "event":
         trigger = EventTrigger(
             event_type=body.trigger.get("event_type", ""),
             filter=body.trigger.get("filter"),
             debounce_ms=body.trigger.get("debounce_ms", 5000),
-            condition=body.trigger.get("condition"),
-        )
-    elif trigger_kind == "condition":
-        trigger = ConditionTrigger(
-            check_interval=body.trigger.get("check_interval", "5m"),
-            condition=body.trigger.get("condition", ""),
         )
     else:
         raise HTTPException(400, f"不支持的 trigger kind: {trigger_kind}")
@@ -159,6 +152,29 @@ async def delete_job(job_id: str, request: Request):
     return {"ok": True, "job_id": job_id}
 
 
+class TriggerJobRequest(BaseModel):
+    session_id: str | None = None
+
+
+@router.post("/jobs/{job_id}/trigger")
+async def trigger_job(job_id: str, body: TriggerJobRequest, request: Request):
+    """手动触发 proactive job。"""
+    rt = _runtime(request)
+    try:
+        await rt.trigger_job(job_id, body.session_id)
+        return {"status": "triggered", "job_id": job_id}
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg:
+            raise HTTPException(404, msg)
+        elif "disabled" in msg:
+            raise HTTPException(400, detail={"error": "job_disabled", "message": msg})
+        elif "running" in msg:
+            raise HTTPException(409, detail={"error": "job_running", "message": msg})
+        else:
+            raise HTTPException(500, msg)
+
+
 # ---------- Runs ----------
 
 @router.get("/runs")
@@ -184,3 +200,10 @@ async def get_run(run_id: str, request: Request):
     if not run:
         raise HTTPException(404, "Proactive run not found")
     return run
+
+
+@router.get("/recommendations")
+async def list_pending_recommendations(request: Request, limit: int = 3):
+    """返回最近未消费的下一问推荐。"""
+    recommendations = await _repo(request).list_pending_recommendations(limit=limit)
+    return {"recommendations": recommendations}

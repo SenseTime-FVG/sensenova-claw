@@ -61,7 +61,9 @@ def _build_schedule(schedule_type: str, schedule_value: str, timezone: str | Non
     if schedule_type == "every":
         return EverySchedule(every_ms=int(schedule_value))
     if schedule_type == "cron":
-        return CronSchedule(expr=schedule_value, tz=timezone)
+        from sensenova_claw.kernel.scheduler.scheduler import get_local_timezone_name
+        tz = timezone or get_local_timezone_name()
+        return CronSchedule(expr=schedule_value, tz=tz)
     raise HTTPException(400, f"Unsupported schedule_type: {schedule_type}")
 
 

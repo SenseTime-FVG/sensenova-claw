@@ -1,23 +1,34 @@
 'use client';
 
 import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect } from 'react';
-import { Send, Paperclip, File, FolderOpen } from 'lucide-react';
+import { Send, Square, Paperclip, File, FolderOpen } from 'lucide-react';
 import { useDrop } from 'react-dnd';
 import { TargetSelector } from './TargetSelector';
 import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
 import { type ContextFileRef } from '@/lib/chatTypes';
+import { UploadProgress } from './UploadProgress';
+import { useFileUpload } from '@/hooks/useFileUpload';
+import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
+import { useI18n } from '@/contexts/I18nContext';
 
 interface ChatInputProps {
   defaultAgentId: string;
   selectedAgent: string;
   onSelectAgent: (id: string) => void;
-  onSend: (content: string, contextFiles?: ContextFileRef[]) => void;
+  onSend: (
+    content: string,
+    contextFiles?: ContextFileRef[],
+    recommendation?: RecommendationSendMeta | null,
+  ) => void;
   onSlashSubmit: (content: string) => boolean;
+  onStop?: () => void;
   disabled: boolean;
+  showStopButton?: boolean;
   wsConnected: boolean;
   handleSkillInvoke: (skillName: string, args: string) => void;
   hideAgentSelector?: boolean;
   lockAgent?: boolean;
+  onReconnect?: () => void;
 }
 
 export interface ChatInputHandle {
@@ -30,18 +41,37 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onSelectAgent,
   onSend,
   onSlashSubmit,
+  onStop,
   disabled,
+  showStopButton,
   wsConnected,
   handleSkillInvoke,
   hideAgentSelector,
   lockAgent,
+  onReconnect,
 }, ref) {
+  const { t } = useI18n();
   const [inputValue, setInputValue] = useState('');
+  const [draftRecommendation, setDraftRecommendation] = useState<RecommendationSendMeta | null>(null);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
+  const {
+    currentSessionId,
+    pendingPrefill,
+    clearPendingPrefill,
+    currentSessionQuestionInteraction,
+    sendCurrentSessionQuestionAnswer,
+  } = useChatSession();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
+
+  // 当前轮次结束或 stop 按钮隐藏后，允许再次发送
+  useEffect(() => {
+    if (!showStopButton) setIsSubmitting(false);
+  }, [showStopButton]);
 
   useEffect(() => {
     if (!showUploadMenu) return;
@@ -54,22 +84,25 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     return () => document.removeEventListener('mousedown', handler);
   }, [showUploadMenu]);
 
-  useImperativeHandle(ref, () => ({
-    setInput: (text: string) => {
-      setInputValue(text);
-      setTimeout(() => {
-        if (textareaRef.current) {
-          textareaRef.current.style.height = 'auto';
-          textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 96) + 'px';
-          textareaRef.current.focus();
-        }
-      });
-    },
-  }), []);
+  useEffect(() => {
+    if (!pendingPrefill) return;
+    setInputValue(pendingPrefill.text);
+    setDraftRecommendation(pendingPrefill.recommendation || null);
+    clearPendingPrefill();
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 96) + 'px';
+        textareaRef.current.focus();
+      }
+    });
+  }, [pendingPrefill, clearPendingPrefill]);
 
-  const { showMenu, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmitHook } = useSlashCommand(
-    inputValue, setInputValue, handleSkillInvoke,
-  );
+  useEffect(() => {
+    if (draftRecommendation && currentSessionId && draftRecommendation.sourceSessionId !== currentSessionId) {
+      setDraftRecommendation(null);
+    }
+  }, [currentSessionId, draftRecommendation]);
 
   const resizeTextarea = useCallback(() => {
     setTimeout(() => {
@@ -99,33 +132,21 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }),
   }), [insertAtRef]);
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = e.target.files;
-    if (!selectedFiles || selectedFiles.length === 0) return;
+  const { uploadItems, handleFileSelect } = useFileUpload({
+    selectedAgent,
+    onUploadSuccess: insertAtRef,
+  });
 
-    // 本地应用无需真正上传，直接插入文件名引用
-    const inserted = new Set<string>();
-    for (let i = 0; i < selectedFiles.length; i++) {
-      const f = selectedFiles[i];
-      const relPath = (f as File & { webkitRelativePath?: string }).webkitRelativePath;
-      if (relPath) {
-        // webkitdirectory 模式：取顶层文件夹名（只插入一次）
-        const topFolder = relPath.split('/')[0];
-        if (!inserted.has(topFolder)) {
-          inserted.add(topFolder);
-          insertAtRef(topFolder);
-        }
-      } else {
-        if (!inserted.has(f.name)) {
-          inserted.add(f.name);
-          insertAtRef(f.name);
-        }
-      }
-    }
+  useImperativeHandle(ref, () => ({
+    setInput: (text: string) => {
+      setInputValue(text);
+      resizeTextarea();
+    },
+  }), [resizeTextarea]);
 
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (folderInputRef.current) folderInputRef.current.value = '';
-  }, [insertAtRef]);
+  const { showMenu, skills, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmitHook } = useSlashCommand(
+    inputValue, setInputValue, handleSkillInvoke,
+  );
 
   const parseAtRefs = useCallback((content: string): ContextFileRef[] => {
     const refs: ContextFileRef[] = [];
@@ -143,32 +164,64 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const handleSend = useCallback(() => {
     const content = inputValue.trim();
-    if (!content || !wsConnected || disabled) return;
+    if (!content || !wsConnected || disabled || isSubmitting || showStopButton) return;
 
     if (handleSlashSubmitHook(content)) {
+      setDraftRecommendation(null);
       setInputValue('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
 
     if (onSlashSubmit(content)) {
+      setDraftRecommendation(null);
       setInputValue('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
 
+    const isQuestionReply = Boolean(currentSessionQuestionInteraction);
+    if (isQuestionReply) {
+      sendCurrentSessionQuestionAnswer(content, false);
+      setDraftRecommendation(null);
+      setInputValue('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      return;
+    }
+
+    if (!isQuestionReply) {
+      setIsSubmitting(true);
+    }
     const contextFiles = parseAtRefs(content);
-    onSend(content, contextFiles.length > 0 ? contextFiles : undefined);
+    onSend(content, contextFiles.length > 0 ? contextFiles : undefined, draftRecommendation);
+    setDraftRecommendation(null);
     setInputValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [inputValue, wsConnected, disabled, handleSlashSubmitHook, onSlashSubmit, onSend, parseAtRefs]);
+  }, [
+    inputValue,
+    wsConnected,
+    disabled,
+    isSubmitting,
+    showStopButton,
+    handleSlashSubmitHook,
+    onSlashSubmit,
+    onSend,
+    parseAtRefs,
+    draftRecommendation,
+    currentSessionQuestionInteraction,
+    sendCurrentSessionQuestionAnswer,
+  ]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || isComposingRef.current) return;
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value);
+    if (!e.target.value.trim()) {
+      setDraftRecommendation(null);
+    }
     const ta = e.target;
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 96) + 'px';
@@ -177,14 +230,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   return (
     <div className="border-t bg-card/50 backdrop-blur-sm px-4 pt-2.5 pb-2 shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
       <div className="max-w-4xl mx-auto">
-        <div className="flex items-center gap-3 mb-2 pl-1">
-          {!hideAgentSelector && (
-            <TargetSelector selectedAgent={selectedAgent} onSelectAgent={onSelectAgent} locked={lockAgent} />
+        <div className="flex items-center justify-between mb-2 pl-1">
+          <div className="flex items-center gap-3">
+            {!hideAgentSelector && (
+              <TargetSelector selectedAgent={selectedAgent} onSelectAgent={onSelectAgent} locked={lockAgent} />
+            )}
+            <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full border">
+              <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
+              {wsConnected ? t('chat.connected') : t('chat.disconnected')}
+            </span>
+          </div>
+          {!wsConnected && onReconnect && (
+            <button
+              onClick={onReconnect}
+              className="text-[10px] text-primary hover:underline font-medium px-2"
+            >
+              {t('chat.reconnect')}
+            </button>
           )}
-          <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full border">
-            <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
-            {wsConnected ? 'Connected' : 'Offline'}
-          </span>
         </div>
 
         <div
@@ -203,7 +266,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               onClick={() => setShowUploadMenu(v => !v)}
               disabled={!wsConnected || disabled}
               className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="添加文件引用"
+              title={t('chat.addFileReference')}
             >
               <Paperclip size={16} />
             </button>
@@ -214,31 +277,34 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   onClick={() => { fileInputRef.current?.click(); setShowUploadMenu(false); }}
                 >
                   <File size={14} className="text-muted-foreground" />
-                  <span>选择文件</span>
+                  <span>{t('chat.chooseFile')}</span>
                 </button>
                 <button
                   className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-muted transition-colors text-left"
                   onClick={() => { folderInputRef.current?.click(); setShowUploadMenu(false); }}
                 >
                   <FolderOpen size={14} className="text-muted-foreground" />
-                  <span>选择文件夹</span>
+                  <span>{t('chat.chooseFolder')}</span>
                 </button>
               </div>
             )}
           </div>
 
           <div className="flex-1">
-            <SlashCommandMenu inputValue={inputValue} onSelect={handleSlashSelect} visible={showMenu} />
+            <UploadProgress items={uploadItems} />
+            <SlashCommandMenu inputValue={inputValue} skills={skills} onSelect={handleSlashSelect} visible={showMenu} />
             <textarea
               data-testid="chat-input"
               ref={textareaRef}
               value={inputValue}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
+              onCompositionStart={() => { isComposingRef.current = true; }}
+              onCompositionEnd={() => { isComposingRef.current = false; }}
               placeholder={
                 wsConnected
-                  ? '输入消息… 拖拽文件插入 @引用 (Enter 发送)'
-                  : 'Waiting for connection...'
+                  ? t('chat.inputPlaceholder')
+                  : t('chat.waitingConnection')
               }
               disabled={!wsConnected || disabled}
               rows={1}
@@ -246,17 +312,30 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               style={{ minHeight: '40px', maxHeight: '240px' }}
             />
           </div>
-          <button
-            data-testid="send-button"
-            onClick={handleSend}
-            disabled={!inputValue.trim() || !wsConnected || disabled}
-            className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-md shadow-primary/20"
-          >
-            <Send size={20} className="ml-0.5" />
-          </button>
+          {showStopButton && onStop ? (
+            <button
+              data-testid="stop-button"
+              onClick={onStop}
+              className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-red-500 text-white hover:bg-red-600 flex items-center justify-center shrink-0 transition-all active:scale-90 shadow-md shadow-red-500/20"
+              title={t('chat.stopGeneration')}
+            >
+              <Square size={16} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              data-testid="send-button"
+              onClick={handleSend}
+              disabled={!inputValue.trim() || !wsConnected || disabled || isSubmitting}
+              title={t('chat.sendMessage')}
+              aria-label={t('chat.sendMessage')}
+              className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-md shadow-primary/20"
+            >
+              <Send size={20} className="ml-0.5" />
+            </button>
+          )}
         </div>
         <div className="text-center mt-2 text-[10px] text-muted-foreground/70">
-          Sensenova-Claw can make mistakes. Consider verifying important information.
+          {t('chat.disclaimer')}
         </div>
       </div>
     </div>

@@ -1,48 +1,39 @@
 ---
 name: research-union
-description: 当用户需要深度调研、全网搜索、竞品或方案对比、事实核验、趋势梳理、资料汇总时，优先使用本技能。它会先判断任务是简单还是复杂：简单请求直接搜索并回答；复杂请求采用 8 阶段迭代式 deep research 架构（PLAN → DIVERGE → SEARCH → TRIAGE → READ → REASSESS → SYNTHESIZE），支持多轮搜索-阅读-评估循环，直到覆盖度达标。
+description: 当用户要求深度调研、系统梳理、研究报告、竞品分析、方案对比、趋势分析或事实核查时使用；不用于单点事实查询或快速摘要。
 ---
 
 # research-union（迭代式 Deep Research 编排）
 
-这是一个深度研究编排 skill，采用与市面 Deep Search 产品（OpenAI Deep Research、Gemini Deep Research、Perplexity Pro）相同的核心架构：**迭代式搜索-阅读-反思循环**。
-
-核心理念：不是"搜一轮就写报告"，而是"搜 → 读 → 评估 → 不够就再搜"，循环多轮直到证据充分。
-
-## 何时使用
-
-优先使用：
-
-- 用户明确要求"深度调研""全面梳理""系统研究""研究报告""deep research"
-- 问题涉及多来源对比、竞品/方案比较、趋势分析、事实核验
-- 问题需要拆成多个子问题才能回答
-- 用户强调结果要附依据、来源和分歧说明
-
-不要使用：
-
-- 单条事实问题，直接搜索即可
-- 只需要几个链接或一个简短摘要
-- 本地文件或已有上下文就足以回答
+核心理念：不是"搜一轮就写报告"，而是 **搜 → 读 → 评估 → 不够就再搜**，循环多轮直到证据充分。
 
 ## 路径选择
 
-### simple path
+```dot
+digraph path_select {
+  "用户请求" [shape=doublecircle];
+  "命中复杂信号 ≥2?" [shape=diamond];
+  "simple path" [shape=box];
+  "complex path（7 阶段）" [shape=box];
 
-适用于单点事实查询、少量链接、快速摘要。
+  "用户请求" -> "命中复杂信号 ≥2?";
+  "命中复杂信号 ≥2?" -> "simple path" [label="否"];
+  "命中复杂信号 ≥2?" -> "complex path（7 阶段）" [label="是"];
+}
+```
 
-执行：直接搜索 → 先结论后依据 → 完成。不走 planning，不落盘。
-
-### complex path
-
-当以下信号命中任意 2 条时进入：
-
+**复杂信号**（命中任意 2 条进入 complex path）：
 - 需要回答多个子问题
 - 需要多来源交叉验证
 - 涉及竞品对比、方案比较、趋势梳理、事实核验
 - 用户明确要求深入调研
 - 需要明确时间/地域/样本边界
 
-复杂路径采用 **7 阶段迭代架构**：
+**simple path**：直接搜索 → 先结论后依据 → 完成。不走 planning，不落盘。
+
+---
+
+## complex path：7 阶段迭代架构
 
 ```
 PLAN → DIVERGE → SEARCH → TRIAGE → READ → REASSESS → SYNTHESIZE
@@ -50,293 +41,159 @@ PLAN → DIVERGE → SEARCH → TRIAGE → READ → REASSESS → SYNTHESIZE
                     └── 覆盖度不足时回到这里 ───┘
 ```
 
----
+### 1. PLAN（研究规划 + 用户确认）
 
-## complex path 详细流程
+先做探索性搜索：确认术语准确性、判断信息可获取性、校准研究范围。
 
-### 阶段 1：PLAN（研究规划 + 用户确认）
-【
-探索性搜索的目的：确认术语准确性、判断信息可获取性、校准研究范围。不是正式搜索。
+产出 planning JSON（写入 `research/plan.json`），核心字段：
 
-产出一个可确认的 planning JSON：
+| 字段 | 说明 | 默认值 |
+|------|------|--------|
+| topic / goal | 研究主题和核心目标 | — |
+| scope | time_range, region, language, inclusions, exclusions | 近3年/全球/zh+en |
+| questions[] | 子问题列表，含 evidence_types 和 dimensions | — |
+| search_budget | min_queries / max_queries / max_iterations / min_sources_per_question | 15 / 40 / 3 / 2 |
+| success_criteria | min_total_sources / min_verified_claims / coverage_target | 8 / 5 / 0.8 |
+| source_plan | primary: serper_search + fetch_url; supplement: union-search-plus（仅主链不足时） | — |
 
-```json
-{
-  "mode": "deep_research",
-  "topic": "研究主题",
-  "goal": "核心目标",
-  "scope": {
-    "time_range": "近3年",
-    "region": "全球",
-    "language": ["zh", "en"],
-    "inclusions": [],
-    "exclusions": []
-  },
-  "questions": [
-    {
-      "id": "q1",
-      "question": "子问题1",
-      "evidence_types": ["官方文档", "技术博客", "论文"],
-      "dimensions": ["定义", "对比", "时间线"]
-    }
-  ],
-  "search_budget": {
-    "min_queries": 15,
-    "max_queries": 40,
-    "max_iterations": 3,
-    "min_sources_per_question": 2
-  },
-  "success_criteria": {
-    "min_total_sources": 8,
-    "min_verified_claims": 5,
-    "coverage_target": 0.8
-  },
-  "source_plan": {
-    "primary": ["serper_search", "fetch_url"],
-    "supplement": ["union-search-plus（仅在主链不足时启用）"]
-  },
-  "expected_output": {
-    "format": "report",
-    "sections": ["结论摘要", "关键发现", "证据与来源", "分歧与不确定点", "限制说明"]
-  }
-}
-```
+向用户展示时用简洁中文概括，只确认：范围、子问题、边界条件。确认后再进入下一阶段。
 
-向用户展示时用简洁中文概括，只确认：范围、子问题、边界条件。
+### 2. DIVERGE（发散式 Query 生成）
 
-确认后写入当前 session 工作区 `research/plan.json`，作为后续阶段的统一依据。
+对每个子问题生成多维度 query 矩阵（不是直接把子问题当搜索词）：
 
-### 阶段 2：DIVERGE（发散式 Query 生成）
-
-这是与传统 skill 最大的区别。不是直接把子问题当搜索词，而是对每个子问题生成多维度的 query 矩阵。
-
-对每个子问题，生成以下类型的 query：
-
-1. **直接查询**：子问题本身的自然语言表述
-2. **专业术语版**：用该领域的专业词汇重新表述（practitioner vocabulary）
-3. **反面查询**：`"X 的问题"` `"X 的缺点"` `"X alternatives"` `"why not X"`
+1. **直接查询**：自然语言表述
+2. **专业术语版**：领域专业词汇重新表述
+3. **反面查询**：`"X 的问题"` `"X 的缺点"` `"X alternatives"`
 4. **对比查询**：`"X vs Y"` `"X compared to Y"`
-5. **实体扩展**：通过已知实体（公司、人物、项目）做一跳关联搜索
-6. **聚合器查询**：搜索目录、排行榜、awesome-list 等聚合页面
+5. **实体扩展**：通过已知实体做一跳关联搜索
+6. **聚合器查询**：目录、排行榜、awesome-list 等聚合页面
 
-目标：每个子问题至少 3-5 个变体 query，整体 query 数量达到 `search_budget.min_queries` 以上。
+目标：每个子问题 3-5 个变体，整体 ≥ `min_queries`。多语言 scope 时生成双语 query。
 
-同时生成中英文双语 query（如果 scope.language 包含多语言）。
+记录到 `research/queries.json`。
 
-将所有 query 按子问题分组，记录到 `research/queries.json`。
+### 3. SEARCH（并发搜索）
 
-### 阶段 3：SEARCH（并发搜索爆发）
+尽可能并发执行所有 query（利用 tool_calls 并发能力）。超过单次并发上限时分 2-3 批，每批打满。
 
-将 DIVERGE 阶段生成的所有 query 尽可能并发执行。
+搜索源优先级：`serper_search`（主链） > 内置搜索工具（brave/tavily 等） > `union-search-plus`（仅主链不足时）
 
-执行策略：
+本阶段目标：收集候选 URL 和摘要，不做深度阅读。
 
-- 在单次 LLM 响应中，尽可能多地并发调用 `serper_search`（利用 tool_calls 并发能力）
-- 如果 query 数量超过单次并发上限，分 2-3 批执行，每批尽量打满
-- 每个 query 记录：query 文本、搜索引擎、返回结果数、top 结果标题和 URL
+### 4. TRIAGE（结果筛选与去重）
 
-搜索源优先级：
+| 规则 | 说明 |
+|------|------|
+| 去重 | URL 去重 + 镜像/转载去重（保留原始来源） |
+| 域名限制 | 同一域名最多 3 条 |
+| 视角多样性 | 覆盖支持方、反对方、中立方 |
+| 可信度分级 | L1 官方/一手 → L2 权威媒体/peer-reviewed → L3 行业博客/技术社区 → L4 一般媒体/聚合站 → L5 论坛/社交媒体 |
+| 相关性评分 | 与子问题匹配度：高/中/低 |
+| 时效性排序 | 同等相关性和可信度下，优先选择发布时间更近的来源；超过用户指定 time_range 的来源降为辅助参考 |
 
-1. `serper_search`（主链，始终优先）
-2. 内置搜索工具（`brave_search`、`tavily_search` 等，如果可用）
-3. `union-search-plus`（仅在主链覆盖不足时启用，不是默认选项）
+产出：按子问题分组的优先阅读列表，每个子问题 top 3-5 个高价值 URL。
 
-本阶段目标：收集尽可能多的候选 URL 和摘要，不做深度阅读。
+### 5. READ（深度阅读与证据提取）
 
-### 阶段 4：TRIAGE（结果筛选与去重）
+小批量抓取（每批 2-3 个 URL，用 `fetch_url`），避免超时扩散。
 
-对 SEARCH 阶段收集的所有结果进行质量筛选。
+对每个页面提取：关键事实和数据、直接引用（带原文）、发布时间和作者、页面中的有价值链接（可选一跳跟踪）。
 
-筛选规则：
+证据记录格式：`子问题ID | 证据摘要 | 原文引用 | 来源URL | 可信度等级 | 是否需要交叉验证`
 
-1. **去重**：完全相同的 URL 去重；同一内容的不同镜像/转载去重（保留原始来源）
-2. **域名限制**：同一域名最多保留 3 条结果，防止单一来源主导
-3. **视角多样性**：确保结果覆盖不同立场（支持方、反对方、中立方）
-4. **可信度分级**（5 级）：
-   - L1 官方文档/原始公告/一手数据
-   - L2 权威媒体/知名研究机构/peer-reviewed
-   - L3 行业博客/技术社区/知名个人
-   - L4 一般媒体/聚合站/二手报道
-   - L5 论坛评论/社交媒体/未验证来源
-5. **相关性评分**：与子问题的匹配度（高/中/低）
+抓取失败标记 FAILED，在 REASSESS 阶段考虑补充。
 
-产出：按子问题分组的优先阅读列表，每个子问题选出 top 3-5 个高价值 URL。
+### 6. REASSESS（覆盖度评估 + 迭代决策）
 
-### 阶段 5：READ（深度阅读与证据提取）
-
-对 TRIAGE 筛选出的高价值 URL 进行全文抓取和精读。
-
-执行策略：
-
-- 小批量抓取：每批 2-3 个 URL，使用 `fetch_url` 获取全文
-- 小批量的原因：避免超时影响扩散，单个失败不阻塞其他
-- 对每个页面提取：
-  - 与子问题相关的关键事实和数据
-  - 直接引用（带原文）
-  - 来源的发布时间和作者
-  - 页面中提到的其他有价值的链接（可选：一跳跟踪）
-
-证据记录格式：
-
-```
-子问题 ID | 证据摘要 | 原文引用 | 来源 URL | 可信度等级 | 是否需要交叉验证
-```
-
-如果某个 URL 抓取失败，标记为 FAILED 并在 REASSESS 阶段考虑补充。
-
-### 阶段 6：REASSESS（覆盖度评估 + 迭代决策）
-
-**这是整个 skill 的核心阶段，也是与传统线性 skill 最大的区别。**
-
-对每个子问题逐一评估：
-
-1. **来源充分性**：是否达到 `min_sources_per_question`（默认 2 个独立来源）？
-2. **证据强度**：关键结论是否有 L1-L2 级来源支撑？
-3. **交叉验证**：重要事实是否被 2+ 个独立来源确认？
-4. **视角覆盖**：是否只有单一立场的来源？是否缺少反面证据？
-5. **新发现**：阅读过程中是否发现了新的子问题、新术语、新角度？
+**这是核心阶段。** 对每个子问题逐一评估：来源充分性、证据强度（L1-L2 支撑）、交叉验证（2+ 独立来源）、视角覆盖、新发现。
 
 对每条关键结论标注验证状态：
 
-- **CONFIRMED**：2+ 个独立来源交叉确认
-- **LIKELY**：1 个可靠来源支撑，无矛盾信息
-- **DISPUTED**：来源之间存在矛盾
-- **UNVERIFIED**：仅有低可信度来源或单一来源
-- **GAP**：该子问题缺乏有效证据
+- **CONFIRMED**：2+ 独立来源交叉确认
+- **LIKELY**：1 个可靠来源，无矛盾
+- **DISPUTED**：来源间存在矛盾
+- **UNVERIFIED**：仅低可信度或单一来源
+- **GAP**：缺乏有效证据
 
-**迭代决策逻辑**：
+```dot
+digraph reassess {
+  "逐子问题评估" [shape=doublecircle];
+  "有 GAP?" [shape=diamond];
+  "有 UNVERIFIED 且 < L3?" [shape=diamond];
+  "发现新子问题?" [shape=diamond];
+  "在 scope 内?" [shape=diamond];
+  "全部 CONFIRMED/LIKELY?" [shape=diamond];
+  "达到 max_iterations?" [shape=diamond];
+  "回到 DIVERGE 补充" [shape=box];
+  "回到 SEARCH 验证" [shape=box];
+  "添加子问题，回到 DIVERGE" [shape=box];
+  "记录但不追踪" [shape=box];
+  "进入 SYNTHESIZE" [shape=box];
+  "进入 SYNTHESIZE（标注不足）" [shape=box];
 
+  "逐子问题评估" -> "有 GAP?";
+  "有 GAP?" -> "回到 DIVERGE 补充" [label="是"];
+  "有 GAP?" -> "有 UNVERIFIED 且 < L3?";
+  "有 UNVERIFIED 且 < L3?" -> "回到 SEARCH 验证" [label="是"];
+  "有 UNVERIFIED 且 < L3?" -> "发现新子问题?";
+  "发现新子问题?" -> "在 scope 内?" [label="是"];
+  "在 scope 内?" -> "添加子问题，回到 DIVERGE" [label="是"];
+  "在 scope 内?" -> "记录但不追踪" [label="否"];
+  "发现新子问题?" -> "全部 CONFIRMED/LIKELY?";
+  "全部 CONFIRMED/LIKELY?" -> "进入 SYNTHESIZE" [label="是"];
+  "全部 CONFIRMED/LIKELY?" -> "达到 max_iterations?";
+  "达到 max_iterations?" -> "进入 SYNTHESIZE（标注不足）" [label="是"];
+  "达到 max_iterations?" -> "回到 DIVERGE 补充" [label="否"];
+}
 ```
-IF 任何子问题标记为 GAP:
-    → 必须回到 DIVERGE，为该子问题生成补充 query
-IF 关键结论标记为 UNVERIFIED 且可信度 < L3:
-    → 应该回到 SEARCH，尝试交叉验证
-IF 发现新的重要子问题:
-    → 评估是否在原始 scope 内
-    → 如果在 scope 内：添加子问题，回到 DIVERGE
-    → 如果超出 scope：记录但不追踪，在报告中提及
-IF 所有子问题达到 min_sources 且关键结论均为 CONFIRMED/LIKELY:
-    → 进入 SYNTHESIZE
-IF 已达到 max_iterations:
-    → 即使覆盖不足也进入 SYNTHESIZE，但在报告中明确标注不足之处
-```
 
-**迭代约束**：
+**迭代约束**：最多 `max_iterations` 轮（默认 3），补充 query 递减（第2轮 ≤10，第3轮 ≤5），连续 2 轮无新信息则提前终止。
 
-- 最多迭代 `search_budget.max_iterations` 轮（默认 3 轮）
-- 每轮迭代的补充 query 数量递减（第 2 轮 ≤ 10，第 3 轮 ≤ 5）
-- 补充搜索优先使用不同的搜索词和搜索引擎，避免重复
-- 如果连续 2 轮迭代没有发现新的有效信息，提前终止
+**需要用户确认的情况**：研究范围需明显扩大、需启用 union-search-plus、发现前提假设可能有误。
 
-**迭代时需要用户确认的情况**：
+### 7. SYNTHESIZE（综合报告）
 
-- 研究范围需要明显扩大
-- 需要启用 `union-search-plus` 进行补充搜索
-- 发现原始问题的前提假设可能有误
+报告必须包含以下 6 个部分：
 
-### 阶段 7：SYNTHESIZE（综合报告）
+1. **结论摘要** — 3-5 句回答核心问题，标注整体置信度（高/中/低）
+2. **关键发现** — 按子问题组织，每条附 `[CONFIRMED]` `[LIKELY]` `[DISPUTED]` `[UNVERIFIED]` 标签
+3. **证据与来源** — 每条结论附来源链接和可信度等级（L1-L5）
+4. **分歧与不确定点** — 矛盾信息列出各方观点，DISPUTED 结论说明分歧原因
+5. **研究限制** — 未覆盖的子问题、搜索受限领域、建议后续方向
+6. **来源清单** — 格式：`[编号] 标题 | URL | 可信度等级 | 访问时间`
 
-将所有经过验证的证据整合为最终报告。
-
-报告结构：
-
-#### 1. 结论摘要（Executive Summary）
-- 用 3-5 句话回答用户的核心问题
-- 标注整体置信度（高/中/低）
-
-#### 2. 关键发现（Key Findings）
-- 按子问题组织
-- 每个发现附验证状态标签：`[CONFIRMED]` `[LIKELY]` `[DISPUTED]` `[UNVERIFIED]`
-- 关键数据和事实用原文引用
-
-#### 3. 证据与来源（Evidence & Sources）
-- 每条关键结论附来源链接
-- 标注来源可信度等级（L1-L5）
-- 多来源交叉确认的结论明确标注
-
-#### 4. 分歧与不确定点（Disagreements & Uncertainties）
-- 来源之间的矛盾信息，列出各方观点和来源
-- 标记为 DISPUTED 的结论，说明分歧原因
-- 无法确认的信息，说明为什么无法确认
-
-#### 5. 研究限制（Limitations）
-- 未覆盖的子问题及原因
-- 搜索受限的领域（如付费墙、语言限制）
-- 补充搜索未执行/失败的说明
-- 建议的后续研究方向
-
-#### 6. 附录：来源清单（Source Appendix）
-- 所有引用来源的完整列表
-- 格式：`[编号] 标题 | URL | 可信度等级 | 访问时间`
-
-报告同时生成两个版本：
-- Markdown 格式的完整报告（给用户阅读）
-- 结构化 YAML/JSON 附录（给后续处理使用），写入 `research/report_meta.json`
+同时生成结构化 `research/report_meta.json` 供后续处理。
 
 ---
 
 ## 与 union-search-plus 的衔接
 
-`union-search-plus` 定位不变：补充来源，不是默认主链。
+定位：补充来源，不是默认主链。
 
-启用条件（必须满足至少一条）：
+启用条件（至少一条）：REASSESS 发现主链覆盖不足（某子问题 0 有效来源）、用户在 PLAN 阶段明确要求、主链对特定领域覆盖差（中文社区、视频平台等）。
 
-- REASSESS 阶段发现主链搜索覆盖不足（某子问题 0 有效来源）
-- 用户在 PLAN 阶段明确要求使用补充来源
-- 主链搜索引擎对特定领域（如中文社区、视频平台）覆盖差
-
-启用顺序：先 `preferred` 来源 → 必要时升级到 `all`。
-
-补充搜索失败时：继续使用已有结果，在报告中明确说明限制。不得因补充失败而阻塞整个研究。
+启用顺序：先 `preferred` 来源 → 必要时升级到 `all`。补充搜索失败不阻塞研究，在报告中说明限制即可。
 
 ---
 
 ## 执行纪律
 
-### 必须做到
+**必须做到：**
+- SEARCH 阶段至少并发 5+ 个 query
+- REASSESS 必须逐子问题评估，不能笼统说"差不多够了"
+- CONFIRMED 必须有 2+ 独立来源交叉确认
+- 每轮循环结束后输出覆盖度状态
+- 迭代决策基于具体的 GAP/UNVERIFIED 标记
 
-- 每次 SEARCH 阶段至少并发 5+ 个 query（不是一个一个搜）
-- REASSESS 阶段必须逐子问题评估，不能笼统说"差不多够了"
-- 关键结论必须有 2+ 独立来源交叉确认才能标记 CONFIRMED
-- 每个 SEARCH → READ → REASSESS 循环结束后，明确输出当前覆盖度状态
-- 迭代决策必须基于具体的 GAP/UNVERIFIED 标记，不能凭感觉
+**禁止：**
+- 简单问题强行走复杂流程
+- PLAN 未确认就大规模搜索
+- union-search-plus 当默认主链
+- 编造来源或伪造引用
+- "搜索到"等同于"已验证"
+- 省略关键结论的来源链接
+- REASSESS 跳过迭代检查直接 SYNTHESIZE
+- 单次搜索后声称"覆盖充分"
 
-### 禁止事项
-
-- 不得在简单问题上强行走复杂流程
-- 不得在 PLAN 未确认前进入大规模搜索
-- 不得把 `union-search-plus` 当成默认主链
-- 不得编造来源或伪造引用
-- 不得把"搜索到"写成"已验证"
-- 不得省略关键结论的来源链接
-- 不得把 planning 只放在上下文里而不落盘
-- 不得在 REASSESS 阶段跳过迭代检查直接进入 SYNTHESIZE
-- 不得在单次搜索后就声称"覆盖充分"（除非确实所有子问题都有 2+ 来源）
-
-### 进度透明
-
-在每个阶段转换时，向用户简要报告：
-
-- 当前阶段和进度
-- 已搜索 query 数 / 已阅读页面数 / 已确认证据数
-- 下一步计划
-- 如果需要迭代，说明原因和补充方向
-
----
-
-## 执行检查清单
-
-结束前确认：
-
-- [ ] 是否先判断了 simple path 还是 complex path
-- [ ] 如果是复杂路径，是否生成并确认了 planning JSON
-- [ ] planning 是否写入 `research/plan.json`
-- [ ] DIVERGE 阶段是否为每个子问题生成了 3+ 变体 query（含反面查询）
-- [ ] SEARCH 阶段是否并发执行了 15+ 个 query
-- [ ] TRIAGE 阶段是否做了去重、域名限制和可信度分级
-- [ ] READ 阶段是否对 top 结果做了全文精读
-- [ ] REASSESS 阶段是否逐子问题评估了覆盖度
-- [ ] 关键结论是否标注了验证状态（CONFIRMED/LIKELY/DISPUTED/UNVERIFIED）
-- [ ] 覆盖不足的子问题是否触发了迭代回搜
-- [ ] 最终报告是否包含来源链接、分歧说明和限制声明
-- [ ] 来源清单是否完整且标注了可信度等级
+**进度透明：** 每个阶段转换时报告当前进度（已搜 query 数 / 已读页面数 / 已确认证据数）和下一步计划。

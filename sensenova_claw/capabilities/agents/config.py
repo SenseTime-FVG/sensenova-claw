@@ -10,6 +10,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def _parse_delegate_list(data: dict[str, Any]) -> list[str] | None:
+    """解析委托白名单：None = 禁止发消息，[] = 全部允许，[...] = 仅限指定。"""
+    raw = data.get("can_send_message_to", data.get("can_delegate_to", []))
+    if raw is None:
+        return None
+    return list(raw)
+
+
 @dataclass
 class AgentConfig:
     """一个 Agent 的完整配置。"""
@@ -20,7 +28,7 @@ class AgentConfig:
 
     # LLM 配置
     model: str = "gpt-4o-mini"                        # 模型名称（引用 llm.models 中的 key，provider 由 resolve_model 动态解析）
-    temperature: float = 0.2                          # 温度参数
+    temperature: float = 1.0                          # 温度参数
     max_tokens: int | None = None                     # 最大 token 数
     extra_body: dict[str, Any] = field(default_factory=dict)  # 透传给 LLM API 的额外参数
 
@@ -31,7 +39,7 @@ class AgentConfig:
     workdir: str = ""                                 # 工作目录（空=运行时解析为 workspace/workdir/{id}）
 
     # 委托配置
-    can_delegate_to: list[str] = field(default_factory=list)   # 可委托的 Agent ID 列表（空 = 全部）
+    can_delegate_to: list[str] | None = field(default_factory=list)   # 可委托的 Agent ID 列表（空 = 全部，None = 禁止）
     max_delegation_depth: int = 3                               # 最大委托深度
     max_pingpong_turns: int = 10                                # 单个子会话最大往返轮数
 
@@ -54,7 +62,7 @@ class AgentConfig:
             "tools": list(self.tools),
             "skills": list(self.skills),
             "workdir": self.workdir,
-            "can_delegate_to": list(self.can_delegate_to),
+            "can_delegate_to": list(self.can_delegate_to) if self.can_delegate_to is not None else None,
             "max_delegation_depth": self.max_delegation_depth,
             "max_pingpong_turns": self.max_pingpong_turns,
             "enabled": self.enabled,
@@ -70,16 +78,14 @@ class AgentConfig:
             name=data.get("name", data["id"]),
             description=data.get("description", ""),
             model=data.get("model", "gpt-4o-mini"),
-            temperature=data.get("temperature", 0.2),
+            temperature=data.get("temperature", 1.0),
             max_tokens=data.get("max_tokens"),
             extra_body=dict(data.get("extra_body", {})),
             system_prompt=data.get("system_prompt", ""),
             tools=list(data.get("tools", [])),
             skills=list(data.get("skills", [])),
             workdir=data.get("workdir", ""),
-            can_delegate_to=list(
-                data.get("can_send_message_to", data.get("can_delegate_to", []))
-            ),
+            can_delegate_to=_parse_delegate_list(data),
             max_delegation_depth=data.get(
                 "max_send_depth",
                 data.get("max_delegation_depth", 3),
@@ -103,13 +109,13 @@ class AgentConfig:
         return cls(**kwargs)
 
     @property
-    def can_send_message_to(self) -> list[str]:
+    def can_send_message_to(self) -> list[str] | None:
         """`send_message` 语义下的白名单别名。"""
         return self.can_delegate_to
 
     @can_send_message_to.setter
-    def can_send_message_to(self, value: list[str]) -> None:
-        self.can_delegate_to = list(value)
+    def can_send_message_to(self, value: list[str] | None) -> None:
+        self.can_delegate_to = list(value) if value is not None else None
 
     @property
     def max_send_depth(self) -> int:

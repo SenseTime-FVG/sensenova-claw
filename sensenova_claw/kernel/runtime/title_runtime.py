@@ -92,7 +92,7 @@ class TitleRuntime:
                 {"role": "user", "content": f"用户问题：{user_input}\n\n请生成会话标题："},
             ]
 
-            response = await provider.call(model=model, messages=messages, tools=None, temperature=0.7)
+            response = await provider.call(model=model, messages=messages, tools=None, temperature=1.0)
             title = response.get("content", "").strip()
 
             if len(title) > 10:
@@ -134,8 +134,4 @@ class TitleRuntime:
                 model_key = agent_config.model
 
         provider_name, model_id = config.resolve_model(model_key)
-
-        # 兼容仍直接填写 model_id 的 agent 配置。
-        if provider_name == "mock" and model_key:
-            return "mock", model_key
         return provider_name, model_id

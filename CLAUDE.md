@@ -175,13 +175,93 @@ QQ 邮箱:
 - IMAP: imap.qq.com:993
 - 需在设置中开启 IMAP/SMTP 服务并获取授权码
 
+#### Obsidian 工具
+
+Obsidian 工具支持本地和远程 vault。
+
+**本地配置（可选，支持自动检测）：**
+```yaml
+tools:
+  obsidian:
+    vaults:
+      - ~/Documents/MyVault
+```
+
+**远程配置（需安装 Local REST API 插件）：**
+```yaml
+tools:
+  obsidian:
+    remote:
+      - name: work-vault
+        url: http://192.168.1.100:27123
+        api_key: your-api-key
+```
+
+**知识库 Skill 配置（可选）：**
+```yaml
+skills:
+  knowledge-base:
+    enabled: true
+    root_folder: "Knowledge"
+    auto_load_profile: true
+    auto_save: true
+    index_on_start: true      # 会话开始时生成知识库索引
+    index_limit: 30           # 索引笔记数上限（按修改时间排序）
+```
+
+自动检测位置: `~/Documents/Obsidian`, `~/Obsidian`, macOS iCloud 等
+
+远程设置: 安装 [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) 插件并配置 API key
+
+#### 使用 obsidian_locate_and_setup 工具自动配置
+
+如果未在 `config.yml` 中配置 Obsidian vault，可以使用 `obsidian_locate_and_setup` 工具自动定位或创建：
+
+**system-admin 中的使用**：
+
+```bash
+# system-admin 会自动调用此工具并提示用户选择 vault
+obsidian_locate_and_setup
+```
+
+**手动调用**（如果需要）：
+
+```python
+from sensenova_claw.capabilities.tools.obsidian_locate import ObsidianLocateTool
+
+tool = ObsidianLocateTool()
+result = await tool.execute()
+# 返回格式：{
+#   "success": bool,
+#   "vaults": [{"name", "path", "source", "has_structure", "created_now", "accessible"}, ...],
+#   "primary_vault": {...},
+#   "note": "说明信息",
+#   "error": null or "错误信息"
+# }
+```
+
+**工具行为**：
+
+1. 优先检查 `tools.obsidian.vaults` 配置
+2. 若未配置，根据平台（Windows/macOS/Linux）自动检测标准位置
+3. 若系统中无 vault，在 `~/Obsidian` 创建默认 vault
+4. 为所有 vault 补全知识库必备结构（Knowledge/ 等）
+5. 返回排序后的 vault 列表，首选项为推荐使用的 vault
+
+**跨平台支持**：
+
+- **Windows**: 检查 OneDrive、Dropbox、Google Drive、本地 Documents 等位置，支持注册表查询
+- **macOS**: 检查 OneDrive、Documents、iCloud 位置，读取应用配置
+- **Linux**: 检查 Documents、主目录、.obsidian-vaults、中文 Documents
+
 ### Skills 系统
 
-Skills 是声明式任务编排机制（`sensenova_claw/capabilities/skills/`），23 个内置 skills 包括：
+Skills 是声明式任务编排机制（`sensenova_claw/capabilities/skills/`），24 个内置 skills 包括：
 - PPT 制作流水线: `ppt-superpower`, `ppt-research-pack`, `ppt-storyboard`, `ppt-page-plan` 等 13 个
 - 飞书集成: `feishu-doc`, `feishu-drive`, `feishu-perm`, `feishu-wiki`
 - 搜索增强: `research-union`, `union-search-plus`
 - 系统运维: `system-admin-skill`
+- 知识管理: `knowledge-base`（基于 Obsidian 的长期记忆、问答增强和知识管理）
 
 Skills 通过 YAML 配置定义，支持多步骤编排和条件分支。
 

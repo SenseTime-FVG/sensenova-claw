@@ -17,7 +17,7 @@ from sensenova_claw.kernel.events.bus import PublicEventBus
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import CONFIG_UPDATED, SYSTEM_SESSION_ID
 from sensenova_claw.platform.config.config import Config
-from sensenova_claw.platform.secrets.refs import build_secret_ref, is_secret_ref
+from sensenova_claw.platform.secrets.refs import build_secret_ref, is_env_ref, is_secret_ref
 from sensenova_claw.platform.secrets.registry import is_secret_path
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,17 @@ class ConfigManager:
             # 处理 secret 路径
             for path, value in flat_updates.items():
                 if is_secret_path(path) and self._secret_store is not None:
+                    if isinstance(value, str) and is_secret_ref(value):
+                        existing_raw = original_raw_values.get(path)
+                        _set_nested(
+                            raw_config,
+                            path,
+                            existing_raw if isinstance(existing_raw, str) and existing_raw else value,
+                        )
+                        continue
+                    if isinstance(value, str) and is_env_ref(value):
+                        _set_nested(raw_config, path, value)
+                        continue
                     if value:
                         ref = f"sensenova_claw/{path}"
                         try:
@@ -123,6 +134,17 @@ class ConfigManager:
 
             for path, value in flat_updates.items():
                 if is_secret_path(path) and self._secret_store is not None:
+                    if isinstance(value, str) and is_secret_ref(value):
+                        existing_raw = original_raw_values.get(path)
+                        _set_nested(
+                            raw_config,
+                            path,
+                            existing_raw if isinstance(existing_raw, str) and existing_raw else value,
+                        )
+                        continue
+                    if isinstance(value, str) and is_env_ref(value):
+                        _set_nested(raw_config, path, value)
+                        continue
                     if value:
                         ref = f"sensenova_claw/{path}"
                         try:

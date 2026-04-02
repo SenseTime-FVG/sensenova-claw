@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authGet, API_BASE } from '@/lib/authFetch';
-import { useChatSession } from '@/contexts/ChatSessionContext';
+import { useSession, useMessages } from '@/contexts/ws';
+import type { ProactiveResultItem } from '@/contexts/ws/MessageContext';
 
 // ── 类型定义 ──
 
@@ -81,6 +82,22 @@ export interface ProactiveItem {
   details: string[];
 }
 
+export interface RecommendationItem {
+  id: string;
+  title: string;
+  prompt: string;
+  category?: string;
+  sourceSessionId: string;
+  receivedAt: number;
+}
+
+export interface RecommendationGroup {
+  sourceSessionId: string;
+  sourceSessionTitle: string;
+  items: RecommendationItem[];
+  receivedAt: number;
+}
+
 export interface DashboardData {
   agents: AgentInfo[];
   cronJobs: CronJob[];
@@ -92,6 +109,8 @@ export interface DashboardData {
   kanbanColumns: KanbanColumn[];
   recentOutputs: RecentOutput[];
   proactiveItems: ProactiveItem[];
+  proactiveOutputs: RecentOutput[];
+  recommendations: RecommendationGroup[];
   loading: boolean;
   error: string | null;
 }
@@ -149,17 +168,57 @@ function timeLabel(ts: string | number): string {
 }
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
+const RECOMMENDATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+export function aggregateRecommendations(proactiveResults: ProactiveResultItem[]): RecommendationGroup[] {
+  const cutoff = Date.now() - RECOMMENDATION_MAX_AGE_MS;
+  const latestBySession = new Map<string, ProactiveResultItem>();
+
+  for (const result of proactiveResults) {
+    const sourceSessionId = result.sourceSessionId || result.sessionId;
+    if (!sourceSessionId) continue;
+    if (result.recommendationType !== 'turn_end') continue;
+    if (!Array.isArray(result.items) || result.items.length === 0) continue;
+    if (result.receivedAt < cutoff) continue;
+
+    const existing = latestBySession.get(sourceSessionId);
+    if (!existing || result.receivedAt > existing.receivedAt) {
+      latestBySession.set(sourceSessionId, result);
+    }
+  }
+
+  return Array.from(latestBySession.entries())
+    .map(([sourceSessionId, result]) => ({
+      sourceSessionId,
+      sourceSessionTitle: sourceSessionId,
+      receivedAt: result.receivedAt,
+      items: (result.items || []).slice(0, 5).map(item => ({
+        id: item.id,
+        title: item.title,
+        prompt: item.prompt,
+        category: item.category,
+        sourceSessionId,
+        receivedAt: result.receivedAt,
+      })),
+    }))
+    .sort((a, b) => b.receivedAt - a.receivedAt)
+    .slice(0, 3);
+}
 
 // ── Hook ──
 
 export function useDashboardData(): DashboardData & { refresh: () => void } {
-  const { sessions } = useChatSession();
+  const { sessions } = useSession();
+  const { proactiveResults, mergeRestoredRecommendations } = useMessages();
 
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
   const [cronRuns, setCronRuns] = useState<CronRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // 标记是否已从 REST API 恢复过推荐（仅在初次加载时恢复一次）
+  const recommendationsRestoredRef = useRef(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -180,6 +239,42 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
       setLoading(false);
     }
   }, []);
+
+  // 页面初始化时从 REST API 恢复推荐数据（仅执行一次）
+  useEffect(() => {
+    if (recommendationsRestoredRef.current) return;
+    recommendationsRestoredRef.current = true;
+
+    (async () => {
+      try {
+        const data = await authGet<{ recommendations: Array<{
+          job_id: string;
+          job_name: string;
+          session_id: string;
+          source_session_id: string;
+          recommendation_type: string;
+          received_at_ms: number;
+          items: Array<{ id: string; title: string; prompt: string; category?: string }>;
+        }> }>(`${API_BASE}/api/proactive/recommendations?limit=10`);
+        const recs = data?.recommendations;
+        if (Array.isArray(recs) && recs.length > 0) {
+          const restored: ProactiveResultItem[] = recs.map(r => ({
+            jobId: r.job_id,
+            jobName: r.job_name,
+            sessionId: r.session_id,
+            result: '',
+            receivedAt: r.received_at_ms,
+            sourceSessionId: r.source_session_id,
+            recommendationType: r.recommendation_type,
+            items: r.items,
+          }));
+          mergeRestoredRecommendations(restored);
+        }
+      } catch {
+        // 恢复推荐失败不阻塞主流程
+      }
+    })();
+  }, [mergeRestoredRecommendations]);
 
   useEffect(() => {
     fetchData();
@@ -282,6 +377,55 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
 
   // ── Proactive 输出（基于最近完成的 cron 和活跃会话生成建议） ──
   const proactiveItems: ProactiveItem[] = [];
+  const recommendations = useMemo(
+    () => {
+      const sessionTitleMap = new Map(
+        sessions.map((session: { session_id: string; meta: string }) => [session.session_id, getSessionTitle(session.meta)]),
+      );
+
+      return aggregateRecommendations(proactiveResults || []).map((group) => {
+        const sessionTitle = sessionTitleMap.get(group.sourceSessionId);
+        return {
+          ...group,
+          sourceSessionTitle: sessionTitle && sessionTitle !== '未命名会话'
+            ? sessionTitle
+            : group.sourceSessionId,
+        };
+      });
+    },
+    [proactiveResults, sessions],
+  );
+
+  // ── Proactive Agent 会话产出（session 派生 + 实时推送合并） ──
+  const PROACTIVE_AGENT_ID = 'proactive-agent';
+  const proactiveSessions = [...namedSessions]
+    .filter(s => getSessionAgentId(s.meta) === PROACTIVE_AGENT_ID)
+    .sort((a, b) => getLastActive(b) - getLastActive(a))
+    .slice(0, 20);
+
+  const sessionDerivedOutputs: RecentOutput[] = proactiveSessions.map((s, i) => ({
+    id: s.session_id,
+    title: getSessionTitle(s.meta),
+    agentName: 'Proactive Agent',
+    timeLabel: timeLabel(s.last_active),
+    tone: OUTPUT_TONES[i % OUTPUT_TONES.length],
+    preview: (s.last_agent_response || '').slice(0, 150) || undefined,
+  }));
+
+  // 合并实时推送结果：仅保留 session 列表中尚未出现的条目，排除推荐类型（推荐走独立卡片）
+  const existingSessionIds = new Set(sessionDerivedOutputs.map(o => o.id));
+  const realtimeOnly = (proactiveResults || [])
+    .filter(r => !existingSessionIds.has(r.sessionId) && !r.recommendationType)
+    .map((r, i): RecentOutput => ({
+      id: r.sessionId || r.jobId,
+      title: r.jobName || '主动推送',
+      agentName: 'Proactive Agent',
+      timeLabel: timeLabel(r.receivedAt),
+      tone: OUTPUT_TONES[(sessionDerivedOutputs.length + i) % OUTPUT_TONES.length],
+      preview: r.result.slice(0, 150) || undefined,
+    }));
+
+  const proactiveOutputs: RecentOutput[] = [...realtimeOnly, ...sessionDerivedOutputs].slice(0, 20);
 
   return {
     agents,
@@ -294,6 +438,8 @@ export function useDashboardData(): DashboardData & { refresh: () => void } {
     kanbanColumns,
     recentOutputs,
     proactiveItems,
+    proactiveOutputs,
+    recommendations,
     loading,
     error,
     refresh: fetchData,

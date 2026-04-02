@@ -26,6 +26,9 @@ dependencies = [
   "tiktoken>=0.7.0",
   "watchdog>=4.0.0",
   "discord.py>=2.4.0",
+  "dingtalk-stream>=0.23.0",
+  "beautifulsoup4>=4.12.3",
+  "markdownify>=0.13.1",
 ]
 
 [project.optional-dependencies]

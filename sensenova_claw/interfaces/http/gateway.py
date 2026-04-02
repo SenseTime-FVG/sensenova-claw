@@ -27,17 +27,36 @@ def _normalize_channel_status(value: object) -> str:
 
 def _read_channel_runtime_state(channel: object) -> tuple[str, str]:
     """从 channel 自身或其内部 runtime/client 上提取统一状态与错误。"""
-    status_sources = (
-        getattr(channel, "_sensenova_claw_status", None),
-        getattr(getattr(channel, "_runtime", None), "_sensenova_claw_status", None),
-        getattr(getattr(channel, "_client", None), "_sensenova_claw_status", None),
-    )
-    for source in status_sources:
+    whatsapp_runtime = getattr(channel, "_runtime_state", None)
+    if whatsapp_runtime is not None:
+        state = str(getattr(whatsapp_runtime, "state", "") or "").strip().lower()
+        connected = bool(getattr(whatsapp_runtime, "connected", False))
+        error = _normalize_error_message(getattr(whatsapp_runtime, "last_error", ""))
+        if connected or state in {"ready", "connected"}:
+            return "connected", ""
+        if state in {"error", "failed", "closed"} or error:
+            return "failed", error
+        if state in {"connecting", "refreshing_qr", "booting"}:
+            return "connecting", ""
+
+    runtime_status = getattr(getattr(channel, "_runtime", None), "_sensenova_claw_status", None)
+    client_status = getattr(getattr(channel, "_client", None), "_sensenova_claw_status", None)
+    channel_status = getattr(channel, "_sensenova_claw_status", None)
+
+    normalized_sources: list[tuple[str, str]] = []
+    for source in (runtime_status, client_status, channel_status):
         if isinstance(source, dict):
             status = _normalize_channel_status(source.get("status", ""))
             if status:
                 error = _normalize_error_message(source.get("error", ""))
-                return status, error
+                normalized_sources.append((status, error))
+
+    for status, error in normalized_sources:
+        if status == "failed" or error:
+            return "failed", error
+    for status, error in normalized_sources:
+        if status:
+            return status, error
     return "connected", ""
 
 

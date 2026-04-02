@@ -1,9 +1,55 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+const E2E_TOKEN = 'e2e-sensenova-claw-token';
+
+async function loginForAskUserTests(page: Page) {
+  await page.goto('/login');
+  await page.getByLabel('Token').fill(E2E_TOKEN);
+  await page.getByRole('button', { name: '验证 Token' }).click();
+  await page.evaluate(() => {
+    sessionStorage.setItem('auth_just_verified', '1');
+  });
+}
+
+async function gotoChatPage(page: Page) {
+  await loginForAskUserTests(page);
+  await page.goto('/chat');
+}
+
+async function gotoWorkbenchPage(page: Page) {
+  await loginForAskUserTests(page);
+  await page.goto('/');
+}
+
+async function gotoPptPage(page: Page) {
+  await loginForAskUserTests(page);
+  await page.goto('/ppt');
+}
+
+async function gotoSessionPage(page: Page, sessionId: string) {
+  await loginForAskUserTests(page);
+  await page.goto(`/sessions/${sessionId}`);
+}
+
+async function waitForMockWebSocketReady(page: Page) {
+  await page.waitForFunction(() => {
+    const ws = (window as {
+      __mockWs?: {
+        send?: unknown;
+        onmessage?: unknown;
+      };
+    }).__mockWs;
+    return typeof ws?.send === 'function' && typeof ws?.onmessage === 'function';
+  });
+}
 
 function mockAuthAndWebSocket() {
   // 登录态：避免被 ProtectedRoute 重定向到 /login
   localStorage.setItem('access_token', 'e2e-access-token');
   localStorage.setItem('refresh_token', 'e2e-refresh-token');
+  const NativeWebSocket = window.WebSocket;
+  const sharedSent = ((window as any).__mockWsSent as string[] | undefined) ?? [];
+  (window as any).__mockWsSent = sharedSent;
 
   class MockWebSocket {
     static readonly CONNECTING = 0;
@@ -16,11 +62,10 @@ function mockAuthAndWebSocket() {
     public onclose: ((event: Event) => void) | null = null;
     public onerror: ((event: Event) => void) | null = null;
     public onmessage: ((event: MessageEvent) => void) | null = null;
-    public sent: string[] = [];
+    public sent: string[] = sharedSent;
 
     constructor(_url: string) {
       (window as any).__mockWs = this;
-      (window as any).__mockWsSent = this.sent;
       window.setTimeout(() => {
         this.onopen?.(new Event('open'));
       }, 0);
@@ -41,11 +86,45 @@ function mockAuthAndWebSocket() {
     }
   }
 
-  (window as any).WebSocket = MockWebSocket;
+  function WrappedWebSocket(url: string | URL, protocols?: string | string[]) {
+    const urlString = String(url);
+    if (urlString.includes('localhost:8000/ws')) {
+      return new MockWebSocket(urlString);
+    }
+    return new NativeWebSocket(url, protocols);
+  }
+
+  Object.assign(WrappedWebSocket, {
+    CONNECTING: MockWebSocket.CONNECTING,
+    OPEN: MockWebSocket.OPEN,
+    CLOSING: MockWebSocket.CLOSING,
+    CLOSED: MockWebSocket.CLOSED,
+  });
+
+  Object.defineProperty(window, 'WebSocket', {
+    configurable: true,
+    writable: true,
+    value: WrappedWebSocket,
+  });
 }
 
 test.describe('ask_user UI（mock websocket）', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, context }) => {
+    await context.addCookies([
+      {
+        name: 'sensenova_claw_token',
+        value: E2E_TOKEN,
+        domain: '127.0.0.1',
+        path: '/',
+      },
+      {
+        name: 'sensenova_claw_token',
+        value: E2E_TOKEN,
+        domain: 'localhost',
+        path: '/',
+      },
+    ]);
+
     await page.route('**/api/auth/me', async (route) => {
       await route.fulfill({
         status: 200,
@@ -59,6 +138,70 @@ test.describe('ask_user UI（mock websocket）', () => {
           created_at: Date.now() / 1000,
           last_login: Date.now() / 1000,
         }),
+      });
+    });
+
+    await page.route('**/api/auth/verify-token', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ authenticated: true }),
+      });
+    });
+
+    await page.route('**/api/auth/status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ authenticated: true }),
+      });
+    });
+
+    await page.route('**/api/config/llm-status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ configured: true }),
+      });
+    });
+
+    await page.route('**/api/agents', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'default',
+            name: 'Default Agent',
+            description: '默认智能体',
+            status: 'active',
+            model: 'mock',
+          },
+        ]),
+      });
+    });
+
+    await page.route('**/api/custom-pages', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ pages: [] }),
+      });
+    });
+
+    await page.route('**/api/files/roots', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ roots: [] }),
+      });
+    });
+
+    await page.route('**/api/todolist/*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [] }),
       });
     });
 
@@ -88,11 +231,120 @@ test.describe('ask_user UI（mock websocket）', () => {
       });
     });
 
+    await page.route('**/api/**', async (route) => {
+      const url = route.request().url();
+
+      if (url.includes('/api/auth/verify-token')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ authenticated: true }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/auth/status')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ authenticated: true }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/config/llm-status')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ configured: true }),
+        });
+        return;
+      }
+
+      if (url.endsWith('/api/sessions')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            sessions: [
+              {
+                session_id: 'sess_e2e',
+                created_at: Date.now() / 1000,
+                last_active: Date.now() / 1000,
+                status: 'active',
+                meta: JSON.stringify({ title: 'E2E Session' }),
+              },
+            ],
+          }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/sessions/') && url.endsWith('/messages')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ messages: [] }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/agents')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              id: 'default',
+              name: 'Default Agent',
+              description: '默认智能体',
+              status: 'active',
+              model: 'mock',
+            },
+          ]),
+        });
+        return;
+      }
+
+      if (url.includes('/api/custom-pages')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ pages: [] }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/files/roots')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ roots: [] }),
+        });
+        return;
+      }
+
+      if (url.includes('/api/todolist/')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ items: [] }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({}),
+      });
+    });
+
     await page.addInitScript(mockAuthAndWebSocket);
   });
 
   test('ask_user 问题应显示弹窗', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -112,8 +364,138 @@ test.describe('ask_user UI（mock websocket）', () => {
     await expect(page.getByTestId('ask-user-dialog')).toBeVisible({ timeout: 10000 });
   });
 
+  test('ask_user 工具卡片内应显示内嵌回复框并可提交', async ({ page }) => {
+    await gotoChatPage(page);
+    await page.getByTestId('session-list').getByText('E2E Session').click();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'tool_execution',
+        session_id: 'sess_e2e',
+        payload: {
+          tool_call_id: 'tc_inline_1',
+          tool_name: 'ask_user',
+          arguments: {
+            question: '请选择部署环境',
+          },
+        },
+        timestamp: Date.now() / 1000,
+      });
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_inline_1',
+          question: '请选择部署环境',
+          options: ['dev', 'prod'],
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    const inlineCard = page.getByTestId('inline-ask-user-q_inline_1');
+    await expect(inlineCard).toBeVisible({ timeout: 10000 });
+    await expect(inlineCard).toContainText('请选择部署环境');
+    await expect(inlineCard).toContainText('dev');
+    await expect(inlineCard).toContainText('prod');
+    await inlineCard.getByTestId('ask-user-shared-custom-input').fill('staging');
+    await inlineCard.getByTestId('ask-user-shared-confirm').click();
+    await expect(inlineCard.getByText('已提交回复，等待服务端确认最终结果。')).toBeVisible({ timeout: 10000 });
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_inline_1'
+          && msg.payload?.answer === 'staging'
+          && msg.session_id === 'sess_e2e'
+      )
+    ).toBeTruthy();
+  });
+
+  test('chat 页面切换会话后再切回，应从历史 events 恢复 ask_user 内联卡片', async ({ page }) => {
+    const sessionEvents: Record<string, Record<string, unknown>[]> = {
+      sess_e2e: [
+        {
+          event_type: 'tool.call_requested',
+          session_id: 'sess_e2e',
+          payload_json: JSON.stringify({
+            tool_call_id: 'tc_history_ask_user_1',
+            tool_name: 'ask_user',
+            arguments: {
+              question: '请确认部署环境',
+            },
+          }),
+        },
+        {
+          event_type: 'user.question_asked',
+          session_id: 'sess_e2e',
+          payload_json: JSON.stringify({
+            question_id: 'q_history_ask_user_1',
+            question: '请确认部署环境',
+            options: ['dev', 'prod'],
+            multi_select: false,
+          }),
+        },
+      ],
+      sess_other: [],
+    };
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_e2e',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: 'E2E Session' }),
+            },
+            {
+              session_id: 'sess_other',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: 'Other Session' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      const url = route.request().url();
+      const match = url.match(/\/api\/sessions\/([^/]+)\/events/);
+      const sessionId = match?.[1] || '';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ events: sessionEvents[sessionId] || [] }),
+      });
+    });
+
+    await gotoChatPage(page);
+
+    await page.getByTestId('session-list').getByText('E2E Session').click();
+    await expect(page.getByTestId('inline-ask-user-q_history_ask_user_1')).toBeVisible({ timeout: 10000 });
+
+    await page.getByTestId('session-list').getByText('Other Session').click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.getByTestId('session-list').getByText('E2E Session').click();
+    await expect(page.getByTestId('inline-ask-user-q_history_ask_user_1')).toBeVisible({ timeout: 10000 });
+  });
+
   test('chat 页面可在当前会话接收其他 session 的 ask_user，并按来源 session 提交回答', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -158,8 +540,884 @@ test.describe('ask_user UI（mock websocket）', () => {
     ).toBeTruthy();
   });
 
+  test('ppt 页面通过主输入框回复 ask_user 后，应恢复正常发送按钮', async ({ page }) => {
+    await page.route('**/api/agents', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'default',
+            name: 'Default Agent',
+            description: '默认智能体',
+            status: 'active',
+            model: 'mock',
+          },
+          {
+            id: 'ppt-agent',
+            name: 'PPT Agent',
+            description: 'PPT 智能体',
+            status: 'active',
+            model: 'mock',
+          },
+        ]),
+      });
+    });
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_ppt_old',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: 'PPT 会话', agent_id: 'ppt-agent' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ events: [] }),
+      });
+    });
+
+    await gotoPptPage(page);
+    await waitForMockWebSocketReady(page);
+
+    await expect(page.getByText('PPT 会话')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+    await page.getByText('PPT 会话').click();
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_ppt_old',
+        payload: {
+          question_id: 'q_ppt_old_1',
+          question: '请确认旧会话中的审批信息',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await page.getByTestId('chat-input').fill('这是旧问题的回复');
+
+    const beforeSendCount = await page.evaluate(() => ((window as any).__mockWsSent as string[]).length);
+    await page.getByTestId('send-button').click();
+
+    await page.waitForFunction((count) => ((window as any).__mockWsSent as string[]).length > count, beforeSendCount);
+
+    const delta = await page.evaluate((count) => {
+      return ((window as any).__mockWsSent as string[]).slice(count).map((item) => JSON.parse(item));
+    }, beforeSendCount);
+
+    expect(delta.some((msg: any) => msg.type === 'user_question_answered')).toBeTruthy();
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_answered_event',
+        session_id: 'sess_ppt_old',
+        payload: {
+          question_id: 'q_ppt_old_1',
+          answer: '这是旧问题的回复',
+          cancelled: false,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await page.getByTestId('chat-input').fill('帮我生成一份关于行业趋势的 PPT');
+    await expect(page.getByTestId('send-button')).toBeEnabled({ timeout: 10000 });
+
+    const beforeNormalSendCount = await page.evaluate(() => ((window as any).__mockWsSent as string[]).length);
+    await page.getByTestId('send-button').click();
+    await page.waitForFunction((count) => ((window as any).__mockWsSent as string[]).length > count, beforeNormalSendCount);
+
+    const normalDelta = await page.evaluate((count) => {
+      return ((window as any).__mockWsSent as string[]).slice(count).map((item) => JSON.parse(item));
+    }, beforeNormalSendCount);
+
+    expect(normalDelta.some((msg: any) => msg.type === 'user_input')).toBeTruthy();
+  });
+
+  test('ppt 页面新建对话后，后续消息不应落到上一会话的 ask_user 下', async ({ page }) => {
+    await page.route('**/api/agents', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'default',
+            name: 'Default Agent',
+            description: '默认智能体',
+            status: 'active',
+            model: 'mock',
+          },
+          {
+            id: 'ppt-agent',
+            name: 'PPT Agent',
+            description: 'PPT 智能体',
+            status: 'active',
+            model: 'mock',
+          },
+        ]),
+      });
+    });
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_ppt_waiting',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: '待回答会话', agent_id: 'ppt-agent' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ events: [] }),
+      });
+    });
+
+    await gotoPptPage(page);
+    await waitForMockWebSocketReady(page);
+
+    await page.getByText('待回答会话').click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_ppt_waiting',
+        payload: {
+          question_id: 'q_ppt_waiting_1',
+          question: '这是旧会话里的 ask_user',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await page.getByTestId('ppt-new-chat-button').evaluate((node) => {
+      (node as HTMLButtonElement).click();
+    });
+    await page.getByTestId('chat-input').fill('这是新对话里的正常消息');
+
+    const beforeSendCount = await page.evaluate(() => ((window as any).__mockWsSent as string[]).length);
+    await page.getByTestId('send-button').click();
+    await page.waitForFunction((count) => ((window as any).__mockWsSent as string[]).length > count, beforeSendCount);
+
+    const delta = await page.evaluate((count) => {
+      return ((window as any).__mockWsSent as string[]).slice(count).map((item) => JSON.parse(item));
+    }, beforeSendCount);
+
+    expect(delta.some((msg: any) => msg.type === 'user_question_answered')).toBeFalsy();
+    expect(delta.some((msg: any) => {
+      if (msg.type === 'create_session') {
+        return msg.payload?.agent_id === 'ppt-agent';
+      }
+      if (msg.type === 'user_input') {
+        return msg.payload?.content === '这是新对话里的正常消息';
+      }
+      return false;
+    })).toBeTruthy();
+  });
+
+  test('ppt 页面切换到另一会话后，主输入首条消息不应被旧会话 ask_user 吃掉', async ({ page }) => {
+    await page.route('**/api/agents', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { id: 'default', name: 'Default Agent', description: '默认智能体', status: 'active', model: 'mock' },
+          { id: 'ppt-agent', name: 'PPT Agent', description: 'PPT 智能体', status: 'active', model: 'mock' },
+        ]),
+      });
+    });
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_ppt_1',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: 'PPT 会话 1', agent_id: 'ppt-agent' }),
+            },
+            {
+              session_id: 'sess_ppt_2',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000 - 10,
+              status: 'active',
+              meta: JSON.stringify({ title: 'PPT 会话 2', agent_id: 'ppt-agent' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ events: [] }) });
+    });
+
+    await gotoPptPage(page);
+    await waitForMockWebSocketReady(page);
+    await page.getByText('PPT 会话 1').click();
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_ppt_1',
+        payload: {
+          question_id: 'q_ppt_cross_1',
+          question: '这是会话1里的 ask_user',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await page.getByText('PPT 会话 2').click();
+    await page.getByTestId('chat-input').fill('这是会话2里的正常消息');
+
+    const beforeSendCount = await page.evaluate(() => ((window as any).__mockWsSent as string[]).length);
+    await page.getByTestId('send-button').click();
+    await page.waitForFunction((count) => ((window as any).__mockWsSent as string[]).length > count, beforeSendCount);
+
+    const delta = await page.evaluate((count) => {
+      return ((window as any).__mockWsSent as string[]).slice(count).map((item) => JSON.parse(item));
+    }, beforeSendCount);
+
+    expect(delta.some((msg: any) => msg.type === 'user_question_answered')).toBeFalsy();
+    expect(delta.some((msg: any) => msg.type === 'user_input'
+      && msg.session_id === 'sess_ppt_2'
+      && msg.payload?.content === '这是会话2里的正常消息')).toBeTruthy();
+  });
+
+  test('工作台首页通过主输入框回复 ask_user 后，应恢复正常发送按钮', async ({ page }) => {
+    await page.route('**/api/agents', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'office-main',
+            name: 'Office Main',
+            description: '工作台主智能体',
+            status: 'active',
+            model: 'mock',
+          },
+        ]),
+      });
+    });
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_workbench_old',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: '工作台会话', agent_id: 'office-main' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ events: [] }),
+      });
+    });
+
+    await gotoWorkbenchPage(page);
+    await waitForMockWebSocketReady(page);
+
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+    await page.getByText('工作台会话').click();
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_workbench_old',
+        payload: {
+          question_id: 'q_workbench_main_1',
+          question: '请确认工作台中的目标环境',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await page.waitForTimeout(200);
+    await page.getByTestId('chat-input').fill('工作台里的问答回复');
+
+    const beforeAnswerSendCount = await page.evaluate(() => ((window as any).__mockWsSent as string[]).length);
+    await page.getByTestId('send-button').click();
+    await page.waitForFunction((count) => ((window as any).__mockWsSent as string[]).length > count, beforeAnswerSendCount);
+
+    const answerDelta = await page.evaluate((count) => {
+      return ((window as any).__mockWsSent as string[]).slice(count).map((item) => JSON.parse(item));
+    }, beforeAnswerSendCount);
+
+    expect(answerDelta.some((msg: any) => msg.type === 'user_question_answered')).toBeTruthy();
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_answered_event',
+        session_id: 'sess_workbench_old',
+        payload: {
+          question_id: 'q_workbench_main_1',
+          answer: '工作台里的问答回复',
+          cancelled: false,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await page.getByTestId('chat-input').fill('继续发送正常工作台消息');
+    await expect(page.getByTestId('send-button')).toBeEnabled({ timeout: 10000 });
+
+    const beforeNormalSendCount = await page.evaluate(() => ((window as any).__mockWsSent as string[]).length);
+    await page.getByTestId('send-button').click();
+    await page.waitForFunction((count) => ((window as any).__mockWsSent as string[]).length > count, beforeNormalSendCount);
+
+    const normalDelta = await page.evaluate((count) => {
+      return ((window as any).__mockWsSent as string[]).slice(count).map((item) => JSON.parse(item));
+    }, beforeNormalSendCount);
+
+    expect(normalDelta.some((msg: any) => msg.type === 'user_input')).toBeTruthy();
+  });
+
+  test('工作台首页切换到另一会话后，主输入首条消息不应被旧会话 ask_user 吃掉', async ({ page }) => {
+    await page.route('**/api/agents', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { id: 'office-main', name: 'Office Main', description: '工作台主智能体', status: 'active', model: 'mock' },
+        ]),
+      });
+    });
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_workbench_1',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: '工作台会话 1', agent_id: 'office-main' }),
+            },
+            {
+              session_id: 'sess_workbench_2',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000 - 10,
+              status: 'active',
+              meta: JSON.stringify({ title: '工作台会话 2', agent_id: 'office-main' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ events: [] }) });
+    });
+
+    await gotoWorkbenchPage(page);
+    await waitForMockWebSocketReady(page);
+    await page.getByText('工作台会话 1').click();
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_workbench_1',
+        payload: {
+          question_id: 'q_workbench_cross_1',
+          question: '这是会话1里的 ask_user',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await page.getByText('工作台会话 2').click();
+    await page.getByTestId('chat-input').fill('这是会话2里的正常消息');
+
+    const beforeSendCount = await page.evaluate(() => ((window as any).__mockWsSent as string[]).length);
+    await page.getByTestId('send-button').click();
+    await page.waitForFunction((count) => ((window as any).__mockWsSent as string[]).length > count, beforeSendCount);
+
+    const delta = await page.evaluate((count) => {
+      return ((window as any).__mockWsSent as string[]).slice(count).map((item) => JSON.parse(item));
+    }, beforeSendCount);
+
+    expect(delta.some((msg: any) => msg.type === 'user_question_answered')).toBeFalsy();
+    expect(delta.some((msg: any) => msg.type === 'user_input'
+      && msg.session_id === 'sess_workbench_2'
+      && msg.payload?.content === '这是会话2里的正常消息')).toBeTruthy();
+  });
+
+  test('chat 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input', async ({ page }) => {
+    await gotoChatPage(page);
+    await page.getByTestId('session-list').getByText('E2E Session').click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_chat_main_1',
+          question: '请补充部署环境',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await page.waitForTimeout(200);
+    const chatInput = page.getByTestId('chat-input');
+    await expect(chatInput).toBeEditable();
+    await chatInput.fill('staging');
+    await chatInput.press('Enter');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_answered_event',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_chat_main_1',
+          cancelled: false,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await chatInput.fill('继续正常聊天');
+    await page.getByTestId('send-button').click();
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_chat_main_1'
+          && msg.payload?.answer === 'staging'
+          && msg.session_id === 'sess_e2e'
+      )
+    ).toBeTruthy();
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_input'
+          && msg.session_id === 'sess_e2e'
+          && msg.payload?.content === '继续正常聊天'
+      )
+    ).toBeTruthy();
+  });
+
+  test('chat 页面切换到另一会话后，主输入首条消息不应被旧会话 ask_user 吃掉', async ({ page }) => {
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_chat_1',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: '聊天会话 1', agent_id: 'default' }),
+            },
+            {
+              session_id: 'sess_chat_2',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000 - 10,
+              status: 'active',
+              meta: JSON.stringify({ title: '聊天会话 2', agent_id: 'default' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await gotoChatPage(page);
+    await waitForMockWebSocketReady(page);
+    await page.getByTestId('session-list').getByText('聊天会话 1').click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_chat_1',
+        payload: {
+          question_id: 'q_chat_cross_1',
+          question: '这是会话1里的 ask_user',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await page.getByTestId('session-list').getByText('聊天会话 2').click();
+    const chatInput = page.getByTestId('chat-input');
+    await chatInput.fill('这是会话2里的正常消息');
+    await page.getByTestId('send-button').click();
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_chat_cross_1'
+      )
+    ).toBeFalsy();
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_input'
+          && msg.session_id === 'sess_chat_2'
+          && msg.payload?.content === '这是会话2里的正常消息'
+      )
+    ).toBeTruthy();
+  });
+
+  test('chat 页面切到会话2完成一轮后，切回会话1仍可用主输入回答原 ask_user', async ({ page }) => {
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_chat_restore_1',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: '恢复会话 1', agent_id: 'default' }),
+            },
+            {
+              session_id: 'sess_chat_restore_2',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000 - 10,
+              status: 'active',
+              meta: JSON.stringify({ title: '恢复会话 2', agent_id: 'default' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await gotoChatPage(page);
+    await waitForMockWebSocketReady(page);
+
+    await page.getByTestId('session-list').getByText('恢复会话 1').click();
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_chat_restore_1',
+        payload: {
+          question_id: 'q_chat_restore_1',
+          question: '这是会话1里待恢复的 ask_user',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await page.getByTestId('session-list').getByText('恢复会话 2').click();
+    await page.getByTestId('chat-input').fill('这是会话2里的普通消息');
+    const beforeSession2SendCount = await page.evaluate(() => ((window as any).__mockWsSent as string[]).length);
+    await page.getByTestId('send-button').click();
+    await page.waitForFunction((count) => ((window as any).__mockWsSent as string[]).length > count, beforeSession2SendCount);
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'turn_completed',
+        session_id: 'sess_chat_restore_2',
+        payload: {
+          turn_id: 'turn_restore_2',
+          final_response: '会话2已完成',
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await page.getByTestId('session-list').getByText('恢复会话 1').click();
+    const chatInput = page.getByTestId('chat-input');
+    await chatInput.fill('这是切回会话1后的回答');
+    const beforeAnswerCount = await page.evaluate(() => ((window as any).__mockWsSent as string[]).length);
+    await page.getByTestId('send-button').click();
+    await page.waitForFunction((count) => ((window as any).__mockWsSent as string[]).length > count, beforeAnswerCount);
+
+    const delta = await page.evaluate((count) => {
+      return ((window as any).__mockWsSent as string[]).slice(count).map((item) => JSON.parse(item));
+    }, beforeAnswerCount);
+
+    expect(delta.some((msg: any) =>
+      msg.type === 'user_question_answered'
+      && msg.session_id === 'sess_chat_restore_1'
+      && msg.payload?.question_id === 'q_chat_restore_1'
+      && msg.payload?.answer === '这是切回会话1后的回答'
+    )).toBeTruthy();
+  });
+
+  test('chat 页面恢复到已被重启清理的 stale turn 时，不应继续显示停止按钮和工具执行中状态', async ({ page }) => {
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_stale_restore',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: '重启恢复会话', agent_id: 'default' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          events: [
+            {
+              event_type: 'user.input',
+              session_id: 'sess_stale_restore',
+              turn_id: 'turn_stale_restore',
+              payload: { content: '请继续上次的问题' },
+            },
+            {
+              event_type: 'tool.call_requested',
+              session_id: 'sess_stale_restore',
+              turn_id: 'turn_stale_restore',
+              payload: {
+                tool_call_id: 'tool_stale_restore',
+                tool_name: 'ask_user',
+                arguments: {},
+              },
+            },
+            {
+              event_type: 'user.question_asked',
+              session_id: 'sess_stale_restore',
+              turn_id: 'turn_stale_restore',
+              payload: {
+                question_id: 'q_stale_restore',
+                question: '这个问题在服务重启前尚未回答',
+                options: null,
+                multi_select: false,
+              },
+            },
+            {
+              event_type: 'error.raised',
+              session_id: 'sess_stale_restore',
+              turn_id: 'turn_stale_restore',
+              payload: {
+                error_type: 'TurnCancelled',
+                user_message: '服务已重启，上一轮未完成任务已自动终止。',
+                error_message: '服务已重启，上一轮未完成任务已自动终止。',
+                context: { cancelled: true, reason: 'restart_cleanup' },
+              },
+            },
+          ],
+        }),
+      });
+    });
+
+    await gotoChatPage(page);
+    await waitForMockWebSocketReady(page);
+
+    await page.getByTestId('session-list').getByText('重启恢复会话').click();
+
+    await expect(page.getByTestId('stop-button')).toHaveCount(0);
+    await expect(page.getByTestId('inline-ask-user-q_stale_restore')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.tool-status.running')).toHaveCount(0);
+    await expect(page.locator('.tool-status.failed')).toContainText('失败');
+  });
+
+  test('chat 页面在其他会话已有 ask_user 时，当前会话自己的 ask_user 仍应显示发送按钮并可直接回答', async ({ page }) => {
+    const sessionEvents: Record<string, Array<Record<string, unknown>>> = {
+      sess_chat_queue_1: [],
+      sess_chat_queue_2: [
+        {
+          event_type: 'user.input',
+          session_id: 'sess_chat_queue_2',
+          payload: {
+            content: '这是会话2里仍在进行的任务',
+          },
+        },
+      ],
+    };
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              session_id: 'sess_chat_queue_1',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000,
+              status: 'active',
+              meta: JSON.stringify({ title: '排队会话 1', agent_id: 'default' }),
+            },
+            {
+              session_id: 'sess_chat_queue_2',
+              created_at: Date.now() / 1000,
+              last_active: Date.now() / 1000 - 10,
+              status: 'active',
+              meta: JSON.stringify({ title: '排队会话 2', agent_id: 'default' }),
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions/*/events', async (route) => {
+      const url = route.request().url();
+      const match = url.match(/\/api\/sessions\/([^/]+)\/events/);
+      const sessionId = match?.[1] || '';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ events: sessionEvents[sessionId] || [] }),
+      });
+    });
+
+    await gotoChatPage(page);
+    await waitForMockWebSocketReady(page);
+
+    await page.getByTestId('session-list').getByText('排队会话 1').click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_chat_queue_1',
+        payload: {
+          question_id: 'q_chat_queue_1',
+          question: '这是会话1里的 ask_user',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await page.getByTestId('session-list').getByText('排队会话 2').click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 10000 });
+
+    await page.evaluate(() => {
+      ((window as any).__mockWsSent as string[]).length = 0;
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_chat_queue_2',
+        payload: {
+          question_id: 'q_chat_queue_2',
+          question: '这是会话2里的 ask_user',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+    await page.waitForTimeout(200);
+
+    await expect(page.getByTestId('stop-button')).toHaveCount(0);
+
+    await page.getByTestId('chat-input').fill('这是给会话2的回答');
+    await page.getByTestId('send-button').click();
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_chat_queue_2'
+          && msg.payload?.answer === '这是给会话2的回答'
+          && msg.session_id === 'sess_chat_queue_2'
+      )
+    ).toBeTruthy();
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_chat_queue_1'
+      )
+    ).toBeFalsy();
+  });
+
   test('ask_user 弹窗 textarea 按 Enter 可直接确认提交', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -196,7 +1454,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('ask_user 弹窗 textarea 按 Shift+Enter 仅换行不提交', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -234,7 +1492,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面多个 ask_user 按 FIFO 依次弹出', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -279,7 +1537,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面可处理 tool_confirmation_requested 并回传批准结果', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -315,7 +1573,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面审批与问答混合事件应按 FIFO 顺序处理', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -352,7 +1610,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面交互超时后应自动关闭当前弹窗', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -375,7 +1633,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('收到 user_question_answered_event 后应关闭对应问题弹窗', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -410,7 +1668,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面错误文案应优先回落到 error_type', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -428,7 +1686,7 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('chat 页面应忽略非当前 session 的完成事件，避免误关闭 ask_user 弹窗', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -461,7 +1719,8 @@ test.describe('ask_user UI（mock websocket）', () => {
   });
 
   test('session 页面可处理 ask_user', async ({ page }) => {
-    await page.goto('/sessions/sess_e2e');
+    await gotoSessionPage(page, 'sess_e2e');
+    await waitForMockWebSocketReady(page);
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -482,8 +1741,59 @@ test.describe('ask_user UI（mock websocket）', () => {
     await expect(page.getByTestId('current-session-id')).toHaveText('sess_e2e');
   });
 
+  test('session 页面 ask_user 工具卡片内应显示内嵌回复框并可提交', async ({ page }) => {
+    await gotoSessionPage(page, 'sess_e2e');
+    await waitForMockWebSocketReady(page);
+
+    await page.evaluate(() => {
+      ((window as any).__mockWsSent as string[]).length = 0;
+
+      (window as any).__mockWs.emit({
+        type: 'tool_execution',
+        session_id: 'sess_e2e',
+        payload: {
+          tool_call_id: 'tc_session_inline_1',
+          tool_name: 'ask_user',
+          arguments: {
+            question: '请选择会话环境',
+          },
+        },
+        timestamp: Date.now() / 1000,
+      });
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_session_inline_1',
+          question: '请选择会话环境',
+          options: ['dev', 'prod'],
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    const inlineCard = page.getByTestId('inline-ask-user-q_session_inline_1');
+    await expect(inlineCard).toBeVisible({ timeout: 10000 });
+    await inlineCard.getByTestId('ask-user-shared-custom-input').fill('staging');
+    await inlineCard.getByTestId('ask-user-shared-confirm').click();
+    await expect(inlineCard.getByText('已提交回复，等待服务端确认最终结果。')).toBeVisible({ timeout: 10000 });
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_session_inline_1'
+          && msg.payload?.answer === 'staging'
+          && msg.session_id === 'sess_e2e'
+      )
+    ).toBeTruthy();
+  });
+
   test('session 页面可接收其他 session 的 ask_user，并按来源 session 提交回答', async ({ page }) => {
-    await page.goto('/sessions/sess_e2e');
+    await gotoSessionPage(page, 'sess_e2e');
 
     await page.evaluate(() => {
       (window as any).__mockWs.emit({
@@ -516,13 +1826,73 @@ test.describe('ask_user UI（mock websocket）', () => {
       )
     ).toBeTruthy();
   });
+
+  test('session 页面主输入框首条输入可直接作为 ask_user 回复，随后恢复普通 user_input', async ({ page }) => {
+    await gotoSessionPage(page, 'sess_e2e');
+    await waitForMockWebSocketReady(page);
+    await expect(page.getByTestId('current-session-id')).toHaveText('sess_e2e');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_asked',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_session_main_1',
+          question: '请确认目标环境',
+          options: null,
+          multi_select: false,
+          timeout: 300,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await page.waitForTimeout(200);
+    const chatInput = page.getByTestId('chat-input');
+    await expect(chatInput).toBeEditable();
+    await chatInput.fill('prod');
+    await chatInput.press('Enter');
+
+    await page.evaluate(() => {
+      (window as any).__mockWs.emit({
+        type: 'user_question_answered_event',
+        session_id: 'sess_e2e',
+        payload: {
+          question_id: 'q_session_main_1',
+          cancelled: false,
+        },
+        timestamp: Date.now() / 1000,
+      });
+    });
+
+    await chatInput.fill('后续普通消息');
+    await page.getByTestId('send-button').click();
+
+    const sent = await page.evaluate(() => (window as any).__mockWsSent as string[]);
+    const parsed = sent.map((item) => JSON.parse(item));
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_question_answered'
+          && msg.payload?.question_id === 'q_session_main_1'
+          && msg.payload?.answer === 'prod'
+          && msg.session_id === 'sess_e2e'
+      )
+    ).toBeTruthy();
+    expect(
+      parsed.some(
+        (msg) => msg.type === 'user_input'
+          && msg.session_id === 'sess_e2e'
+          && msg.payload?.content === '后续普通消息'
+      )
+    ).toBeTruthy();
+  });
 });
 
 test.describe('真实 API ask_user 回归', () => {
   test.skip(process.env.ENABLE_REAL_API_E2E !== '1', '设置 ENABLE_REAL_API_E2E=1 后执行真实 API 回归');
 
   test('真实 API ask_user 回归', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoChatPage(page);
     await expect(page.getByText('已连接')).toBeVisible({ timeout: 30000 });
 
     await page.getByTestId('chat-input').fill(

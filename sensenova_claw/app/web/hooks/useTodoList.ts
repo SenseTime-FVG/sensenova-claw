@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { authGet, authPost, authPut, authDelete, API_BASE } from '@/lib/authFetch';
+import { useEventDispatcher } from '@/contexts/ws';
+import type { WsInboundEvent } from '@/lib/wsEvents';
 
 export interface TodoItem {
   id: string;
@@ -27,7 +29,6 @@ export function useTodoList(date?: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
-
   const fetchItems = useCallback(async () => {
     try {
       const data = await authGet<{ date: string; items: TodoItem[] }>(
@@ -46,16 +47,29 @@ export function useTodoList(date?: string) {
     }
   }, [dateStr]);
 
+  // 初始加载 + 兜底轮询（间隔拉长，主要靠事件驱动）
   useEffect(() => {
     mountedRef.current = true;
     setLoading(true);
     fetchItems();
-    const interval = setInterval(fetchItems, 30000);
+    const interval = setInterval(fetchItems, 120000);
     return () => {
       mountedRef.current = false;
       clearInterval(interval);
     };
   }, [fetchItems]);
+
+  // 监听 WebSocket todolist_updated 事件，收到后立即刷新
+  const { subscribeGlobal } = useEventDispatcher();
+  useEffect(() => {
+    return subscribeGlobal((event: WsInboundEvent) => {
+      if (event.type === 'todolist_updated') {
+        if (!event.payload.date || event.payload.date === dateStr) {
+          fetchItems();
+        }
+      }
+    });
+  }, [subscribeGlobal, dateStr, fetchItems]);
 
   const addItem = useCallback(async (
     title: string,

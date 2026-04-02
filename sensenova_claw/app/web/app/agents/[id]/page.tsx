@@ -29,7 +29,7 @@ interface AgentDetail {
   skills: string[];
   toolsDetail: ToolDetail[];
   skillsDetail: SkillDetail[];
-  canDelegateTo: string[];
+  canDelegateTo: string[] | null;
   maxDelegationDepth: number;
   sessions: { id: string; status: string; channel: string; messageCount: number }[];
 }
@@ -82,9 +82,9 @@ export default function AgentDetailPage() {
         setEditName(data.name || '');
         setEditDesc(data.description || '');
         setEditModel(data.model || '');
-        setEditTemp(String(data.temperature ?? 0.2));
+        setEditTemp(String(data.temperature ?? 1.0));
         setEditPrompt(data.systemPrompt || '');
-        setEditDelegateTo(data.canDelegateTo || []);
+        setEditDelegateTo(Array.isArray(data.canDelegateTo) ? data.canDelegateTo : []);
         setEditMaxDepth(String(data.maxDelegationDepth ?? 3));
         // tools/skills 状态
         const ts: Record<string, boolean> = {};
@@ -128,9 +128,9 @@ export default function AgentDetailPage() {
         name: editName,
         description: editDesc,
         model: editModel || undefined,
-        temperature: parseFloat(editTemp) || 0.2,
+        temperature: parseFloat(editTemp) || 1.0,
         systemPrompt: editPrompt,
-        can_delegate_to: editDelegateTo,
+        can_delegate_to: editDelegateTo.length > 0 ? editDelegateTo : null,
         max_delegation_depth: parseInt(editMaxDepth) || 3,
       };
       const res = await authFetch(`${API_BASE}/api/agents/${agentId}/config`, {
@@ -155,18 +155,18 @@ export default function AgentDetailPage() {
 
   // Workspace 文件操作
   const loadWsFiles = useCallback(() => {
-    authFetch(`${API_BASE}/api/workspace/files`)
+    authFetch(`${API_BASE}/api/workspace/files?agent_id=${agentId}`)
       .then(res => res.json())
       .then(data => setWsFiles(data))
       .catch(() => setWsFiles([]));
-  }, []);
+  }, [agentId]);
 
   useEffect(() => { if (activeTab === 'files') loadWsFiles(); }, [activeTab, loadWsFiles]);
 
   const loadFile = async (name: string) => {
     setSelectedFile(name); setFileLoading(true); setFileSaveMsg('');
     try {
-      const res = await authFetch(`${API_BASE}/api/workspace/files/${name}`);
+      const res = await authFetch(`${API_BASE}/api/workspace/files/${name}?agent_id=${agentId}`);
       const data = await res.json();
       setFileContent(data.content || '');
     } catch { setFileContent(''); }
@@ -177,7 +177,7 @@ export default function AgentDetailPage() {
     if (!selectedFile) return;
     setFileSaving(true); setFileSaveMsg('');
     try {
-      await authFetch(`${API_BASE}/api/workspace/files/${selectedFile}`, {
+      await authFetch(`${API_BASE}/api/workspace/files/${selectedFile}?agent_id=${agentId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: fileContent }),
       });
@@ -189,7 +189,7 @@ export default function AgentDetailPage() {
   const deleteFile = async (name: string) => {
     if (!confirm(`确定要删除 ${name} 吗?`)) return;
     try {
-      const res = await authFetch(`${API_BASE}/api/workspace/files/${name}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE}/api/workspace/files/${name}?agent_id=${agentId}`, { method: 'DELETE' });
       if (res.ok) { if (selectedFile === name) { setSelectedFile(null); setFileContent(''); } loadWsFiles(); }
     } catch { /* ignore */ }
   };
@@ -199,7 +199,7 @@ export default function AgentDetailPage() {
     if (!fname) return;
     if (!fname.endsWith('.md')) fname += '.md';
     try {
-      await authFetch(`${API_BASE}/api/workspace/files/${fname}`, {
+      await authFetch(`${API_BASE}/api/workspace/files/${fname}?agent_id=${agentId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: `# ${fname.replace('.md', '')}\n\n` }),
       });
@@ -207,15 +207,23 @@ export default function AgentDetailPage() {
     } catch { /* ignore */ }
   };
 
-  // 保存 tools/skills 偏好
+  // 保存 tools/skills 配置（更新 agent 的工具/技能列表）
   const savePreferences = async () => {
     setSaving(true); setSaveMsg('');
     try {
-      await authFetch(`${API_BASE}/api/agents/${agentId}/preferences`, {
+      const enabledTools = Object.entries(toolStates).filter(([, v]) => v).map(([k]) => k);
+      const enabledSkills = Object.entries(skillStates).filter(([, v]) => v).map(([k]) => k);
+      const res = await authFetch(`${API_BASE}/api/agents/${agentId}/config`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tools: toolStates, skills: skillStates }),
+        body: JSON.stringify({ tools: enabledTools, skills: enabledSkills }),
       });
-      setSaveMsg('已保存');
+      if (res.ok) {
+        setSaveMsg('已保存');
+        loadAgent();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setSaveMsg(err.detail || '保存失败');
+      }
     } catch { setSaveMsg('保存失败'); }
     finally { setSaving(false); setTimeout(() => setSaveMsg(''), 2000); }
   };
@@ -270,7 +278,7 @@ export default function AgentDetailPage() {
               <Wrench className="h-5 w-5 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-4xl font-black">{enabledToolCount}<span className="text-lg font-bold text-muted-foreground">/{agent.toolCount}</span></div>
+              <div className="text-4xl font-black">{enabledToolCount}<span className="text-lg font-bold text-muted-foreground">/{agent.toolsDetail?.length || 0}</span></div>
               <p className="text-sm font-medium text-muted-foreground mt-2">Enabled tool bindings</p>
             </CardContent>
           </Card>
@@ -280,7 +288,7 @@ export default function AgentDetailPage() {
               <Bot className="h-5 w-5 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-4xl font-black">{enabledSkillCount}<span className="text-lg font-bold text-muted-foreground">/{agent.skillCount}</span></div>
+              <div className="text-4xl font-black">{enabledSkillCount}<span className="text-lg font-bold text-muted-foreground">/{agent.skillsDetail?.length || 0}</span></div>
               <p className="text-sm font-medium text-muted-foreground mt-2">Loaded procedural skills</p>
             </CardContent>
           </Card>
@@ -376,7 +384,7 @@ export default function AgentDetailPage() {
                       <CfgInput label="Maximum Handoff Depth" type="number" value={editMaxDepth} onChange={setEditMaxDepth} />
                     </div>
                     <div>
-                      <label className="text-muted-foreground text-sm font-bold block mb-4 uppercase tracking-wider">Authorized Delegate Targets (Leave empty for all)</label>
+                      <label className="text-muted-foreground text-sm font-bold block mb-4 uppercase tracking-wider">Authorized Delegate Targets</label>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                         {allAgents.filter(a => a.id !== agentId).map(a => (
                           <label key={a.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all cursor-pointer shadow-sm ${
@@ -402,6 +410,9 @@ export default function AgentDetailPage() {
                           <p className="text-sm text-muted-foreground">No other active agents found in the system registry.</p>
                         </div>
                       )}
+                      <p className="mt-4 text-xs text-muted-foreground font-medium italic">
+                        If none are selected, delegation is disabled.
+                      </p>
                     </div>
                   </ConfigSection>
                 </div>

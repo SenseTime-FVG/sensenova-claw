@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sensenova_claw.adapters.llm.base import LLMProvider
+from sensenova_claw.adapters.llm.base import DEFAULT_LLM_TEMPERATURE, LLMProvider
 
 
 class MockProvider(LLMProvider):
@@ -11,7 +11,7 @@ class MockProvider(LLMProvider):
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.2,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -44,7 +44,10 @@ class MockProvider(LLMProvider):
             }
 
         return {
-            "content": f"这是 mock 回复：{content}",
+            "content": (
+                "当前没有可用的 LLM，请先前往「配置」页面添加至少一个可用的大模型，"
+                "然后联系运维工程师完成其余配置。"
+            ),
             "tool_calls": [],
             "finish_reason": "stop",
             "usage": {"prompt_tokens": 8, "completion_tokens": 12, "total_tokens": 20},

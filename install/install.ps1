@@ -1,7 +1,7 @@
-# Sensenova-Claw 一键安装脚本（Windows PowerShell）
+﻿# Sensenova-Claw 一键安装脚本（Windows PowerShell）
 #
 # 用法:
-#   irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/main/install/install.ps1 | iex
 #
 # 或本地执行:
 #   powershell -ExecutionPolicy Bypass -File install\install.ps1
@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 $SENSENOVA_CLAW_HOME = if ($env:SENSENOVA_CLAW_HOME) { $env:SENSENOVA_CLAW_HOME } else { "$env:USERPROFILE\.sensenova-claw" }
 $APP_DIR = "$SENSENOVA_CLAW_HOME\app"
 $REPO_URL = if ($env:SENSENOVA_CLAW_REPO_URL) { $env:SENSENOVA_CLAW_REPO_URL } else { "https://github.com/SenseTime-FVG/sensenova-claw.git" }
-$REPO_REF = if ($env:SENSENOVA_CLAW_REPO_REF) { $env:SENSENOVA_CLAW_REPO_REF } elseif ($env:SENSENOVA_CLAW_REPO_BRANCH) { $env:SENSENOVA_CLAW_REPO_BRANCH } else { "dev" }
+$REPO_REF = if ($env:SENSENOVA_CLAW_REPO_REF) { $env:SENSENOVA_CLAW_REPO_REF } elseif ($env:SENSENOVA_CLAW_REPO_BRANCH) { $env:SENSENOVA_CLAW_REPO_BRANCH } else { "main" }
 $REQUIRED_PYTHON = "3.12"
 $REQUIRED_NODE = 18
 
@@ -282,7 +282,7 @@ function Setup-HomeDir {
 # ── 步骤 6: 初始化配置文件 ──
 
 function Setup-Config {
-    $configFile = "$APP_DIR\config.yml"
+    $configFile = "$SENSENOVA_CLAW_HOME\config.yml"
     $exampleFile = "$APP_DIR\config_example.yml"
 
     if (Test-Path $configFile) {
@@ -306,16 +306,20 @@ function Register-Command {
     Info "注册 sensenova-claw 命令..."
     Push-Location $APP_DIR
 
-    try {
-        uv tool install --editable --from . --force sensenova-claw 2>$null
-    } catch {
-        Warn "uv tool install 失败，尝试 pip install..."
-        try {
-            uv pip install -e . 2>$null
-        } catch {
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+
+    uv tool install --editable --from . --force sensenova-claw 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Warn "uv tool install 失败，尝试 uv pip install..."
+        uv pip install -e . 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Warn "uv pip install 失败，尝试 pip install..."
             pip install -e . 2>$null
         }
     }
+
+    $ErrorActionPreference = $prevEAP
 
     Pop-Location
 
