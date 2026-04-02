@@ -85,7 +85,7 @@ detect_region() {
   if command_exists jq; then
     country_code=$(echo "$resp" | jq -r '.country_code // empty' 2>/dev/null)
   else
-    country_code=$(echo "$resp" | grep -o '"country_code":"[^"]*"' | head -1 | cut -d'"' -f4)
+    country_code=$(echo "$resp" | grep -o '"country_code":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
   fi
 
   if [ "$country_code" = "CN" ]; then
