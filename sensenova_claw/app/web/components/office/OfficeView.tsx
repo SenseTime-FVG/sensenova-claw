@@ -2,10 +2,13 @@
 
 // 办公室视图：Phaser Canvas + 状态栏
 
-import { useEffect, useRef, useState, memo } from 'react';
+import { useCallback, useEffect, useRef, useState, memo } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useOfficeState } from '@/hooks/useOfficeState';
+import { useWebSocket } from '@/contexts/ws';
 import { STATES, type OfficeStateName } from './types';
 import { authFetch, API_BASE } from '@/lib/authFetch';
+import { Button } from '@/components/ui/button';
 
 /**
  * Phaser 画布容器 — 独立 memo 组件，避免父组件重渲染导致画布闪烁。
@@ -61,20 +64,56 @@ const PhaserCanvas = memo(function PhaserCanvas({
 
 export function OfficeView() {
   const officeState = useOfficeState();
+  const { reconnect } = useWebSocket();
   const stateInfo = STATES[officeState.state];
   const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadAgents = useCallback(async () => {
+    try {
+      const res = await authFetch(`${API_BASE}/api/agents`);
+      const data = await res.json() as { id: string; name: string }[];
+      setAgents(data);
+    } catch {
+      setAgents([]);
+    }
+  }, []);
 
   useEffect(() => {
-    authFetch(`${API_BASE}/api/agents`)
-      .then(res => res.json())
-      .then((data: { id: string; name: string }[]) => setAgents(data))
-      .catch(() => setAgents([]));
-  }, []);
+    void loadAgents();
+  }, [loadAgents]);
+
+  const refreshOffice = useCallback(async () => {
+    setRefreshing(true);
+    reconnect();
+    try {
+      await loadAgents();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadAgents, reconnect]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Phaser 画布：固定宽高比容器，避免 flex 尺寸震荡触发 Scale.FIT 反复重绘 */}
       <div className="flex-1 min-h-0 relative rounded-lg overflow-hidden bg-black">
+        <div className="absolute top-3 right-3 z-10">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="border border-border/50 bg-background/80 text-foreground shadow-sm backdrop-blur-sm hover:bg-background"
+            aria-label="刷新办公室状态"
+            title="刷新办公室状态"
+            data-testid="office-refresh-button"
+            onClick={() => {
+              void refreshOffice();
+            }}
+            disabled={refreshing}
+          >
+            <RefreshCw className={refreshing ? 'animate-spin' : ''} />
+          </Button>
+        </div>
         <PhaserCanvas state={officeState.state} detail={officeState.detail} agents={agents} />
       </div>
       <div className="flex-shrink-0 h-9 flex items-center justify-between px-3 text-sm">
