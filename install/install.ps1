@@ -1,7 +1,7 @@
 ﻿# Sensenova-Claw 一键安装脚本（Windows PowerShell）
 #
 # 用法:
-#   irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/main/install/install.ps1 | iex
 #
 # 或本地执行:
 #   powershell -ExecutionPolicy Bypass -File install\install.ps1
@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 $SENSENOVA_CLAW_HOME = if ($env:SENSENOVA_CLAW_HOME) { $env:SENSENOVA_CLAW_HOME } else { "$env:USERPROFILE\.sensenova-claw" }
 $APP_DIR = "$SENSENOVA_CLAW_HOME\app"
 $REPO_URL = if ($env:SENSENOVA_CLAW_REPO_URL) { $env:SENSENOVA_CLAW_REPO_URL } else { "https://github.com/SenseTime-FVG/sensenova-claw.git" }
-$REPO_REF = if ($env:SENSENOVA_CLAW_REPO_REF) { $env:SENSENOVA_CLAW_REPO_REF } elseif ($env:SENSENOVA_CLAW_REPO_BRANCH) { $env:SENSENOVA_CLAW_REPO_BRANCH } else { "dev" }
+$REPO_REF = if ($env:SENSENOVA_CLAW_REPO_REF) { $env:SENSENOVA_CLAW_REPO_REF } elseif ($env:SENSENOVA_CLAW_REPO_BRANCH) { $env:SENSENOVA_CLAW_REPO_BRANCH } else { "main" }
 $REQUIRED_PYTHON = "3.12"
 $REQUIRED_NODE = 18
 

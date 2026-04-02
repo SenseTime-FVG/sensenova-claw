@@ -2,7 +2,7 @@
 # Sensenova-Claw 一键安装脚本（Linux/macOS）
 #
 # 用法:
-#   curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/main/install/install.sh | bash
 #
 # 或本地执行:
 #   bash install/install.sh
@@ -18,7 +18,7 @@ SENSENOVA_CLAW_HOME="${SENSENOVA_CLAW_HOME:-$HOME/.sensenova-claw}"
 APP_DIR="$SENSENOVA_CLAW_HOME/app"
 REPO_URL="${SENSENOVA_CLAW_REPO_URL:-https://github.com/SenseTime-FVG/sensenova-claw.git}"
 # app 目录 clone/update 使用的仓库分支或 tag，兼容旧变量名
-REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-dev}}}"
+REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-main}}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
 DEV_MODE=false

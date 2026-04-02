@@ -12,7 +12,7 @@ def test_install_sh_uses_editable_tool_install():
 
     assert "uv tool install --editable --from . --force sensenova-claw" in content
     assert (
-        'REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-dev}}}"'
+        'REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-main}}}"'
         in content
     )
     assert 'info "app 目录将使用仓库分支/引用: $REPO_REF"' in content
