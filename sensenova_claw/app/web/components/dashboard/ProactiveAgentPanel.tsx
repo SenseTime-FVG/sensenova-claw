@@ -103,7 +103,7 @@ function ProactiveCard({ item, onClick }: { item: RecentOutput; onClick?: () => 
 
 export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRecommendationClick }: ProactiveAgentPanelProps) {
   const [isTriggering, setIsTriggering] = useState(false);
-  const { pushNotification } = useNotification();
+  const { pushToast } = useNotification();
 
   const handleInterestPush = async () => {
     setIsTriggering(true);
@@ -116,21 +116,24 @@ export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRec
 
       if (!res.ok) {
         if (res.status === 409) {
-          pushNotification({
+          // 任务正在进行中，提示用户等待
+          pushToast({
             title: '兴趣推送进行中',
             body: '正在推送中，请稍后',
             level: 'warning',
             source: 'proactive',
           });
         } else if (res.status === 400) {
-          pushNotification({
+          // 功能被禁用，提示用户
+          pushToast({
             title: '兴趣推送不可用',
             body: '该功能已禁用',
             level: 'warning',
             source: 'proactive',
           });
         } else {
-          pushNotification({
+          // 其他错误，提示用户稍后重试
+          pushToast({
             title: '兴趣推送触发失败',
             body: '请稍后重试',
             level: 'error',
@@ -139,7 +142,8 @@ export function ProactiveAgentPanel({ items, onItemClick, recommendations, onRec
         }
       }
     } catch {
-      pushNotification({
+      // 网络异常时显示错误 toast
+      pushToast({
         title: '兴趣推送触发失败',
         body: '请稍后重试',
         level: 'error',

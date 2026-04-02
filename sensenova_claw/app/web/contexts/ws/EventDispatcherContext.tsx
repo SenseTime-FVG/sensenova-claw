@@ -151,8 +151,8 @@ export function EventDispatcherProvider({ children }: { children: React.ReactNod
         if (isCurrentSession || isInteraction) {
           currentSessionSubs.current.forEach((fn) => { try { fn(event); } catch (e) { console.error('[EventDispatcher] handler error:', e); } });
         }
-        // turn_completed / error：非当前 session 时分发到 global（跨会话通知）
-        if ((eventType === 'turn_completed' || eventType === 'error') && !isCurrentSession) {
+        // turn_completed / error / 交互事件：非当前 session 时分发到 global（跨会话通知/弹窗）
+        if ((eventType === 'turn_completed' || eventType === 'error' || isInteraction) && !isCurrentSession) {
           globalSubs.current.forEach((fn) => { try { fn(event); } catch (e) { console.error('[EventDispatcher] handler error:', e); } });
         }
       }

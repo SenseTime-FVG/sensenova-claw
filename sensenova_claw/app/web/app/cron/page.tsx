@@ -193,7 +193,7 @@ function buildPayload(form: CronFormState) {
 }
 
 export default function CronPage() {
-  const { pushNotification } = useNotification();
+  const { pushToast } = useNotification();
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -365,24 +365,20 @@ export default function CronPage() {
         await fetchRuns(job.id);
       }
 
-      pushNotification({
+      // 触发成功后显示 toast 通知
+      pushToast({
         title: 'Cron job triggered',
         body: `Triggered "${job.name}".`,
         level: 'success',
         source: 'cron',
-      }, {
-        toast: true,
-        browser: false,
       });
     } catch (error) {
-      pushNotification({
+      // 触发失败时显示错误 toast
+      pushToast({
         title: 'Failed to trigger cron job',
         body: error instanceof Error ? error.message : 'Failed to trigger cron job.',
         level: 'error',
         source: 'cron',
-      }, {
-        toast: true,
-        browser: false,
       });
     } finally {
       setTriggeringJobId(null);

@@ -122,7 +122,7 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
 
   const { switchSession, createSession } = useSession();
   const { prefillInput } = useMessages();
-  const { pushNotification } = useNotification();
+  const { pushToast } = useNotification();
 
   const { containerRef, width: containerWidth, mounted: containerMounted } = useContainerWidth({ initialWidth: 1200 });
 
@@ -191,17 +191,15 @@ export function Dashboard({ onSelectAgent }: DashboardProps) {
         },
       });
     } catch {
-      pushNotification(
-        {
-          title: '会话切换失败',
-          body: '该推荐对应的会话暂时不可用，请稍后重试',
-          level: 'warning',
-          source: 'system',
-        },
-        { toast: true, browser: false },
-      );
+      // 会话切换失败时显示 warning toast
+      pushToast({
+        title: '会话切换失败',
+        body: '该推荐对应的会话暂时不可用，请稍后重试',
+        level: 'warning',
+        source: 'system',
+      });
     }
-  }, [switchSession, prefillInput, pushNotification]);
+  }, [switchSession, prefillInput, pushToast]);
 
   const handleLayoutChange = useCallback((_layout: Layout, allLayouts: Layouts) => {
     setLayouts(allLayouts);
