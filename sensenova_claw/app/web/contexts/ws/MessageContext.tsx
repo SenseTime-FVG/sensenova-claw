@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useNotification } from '@/hooks/useNotification';
 import { useWebSocket } from './WebSocketContext';
@@ -21,9 +22,14 @@ import {
   finalizePendingToolMessages,
   findLatestAssistantTurnMessage,
   upsertAssistantTurnMessage,
+  getAgentId,
 } from '@/lib/chatTypes';
 
-/** 检查事件列表中 turn 是否仍在进行中（有 user_input 但无对应的终结事件） */
+// view_session 跳转时的 Agent → 页面路由映射
+const AGENT_PAGE_MAP: Record<string, string> = {
+  'ppt-agent': '/ppt',
+};
+
 /** 检查事件列表中 turn 是否仍在进行中：
  *  有 user_input 开启了 turn，但尚未收到终结事件。
  *  兼容两种事件格式：
@@ -91,10 +97,13 @@ export interface MessageContextValue {
   prefillInput: (value: string | PrefillInputPayload) => void;
   clearPendingPrefill: () => void;
 
-  sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string) => void;
+  sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string, recommendation?: RecommendationSendMeta | null) => void;
   cancelTurn: () => void;
   handleSkillInvoke: (skillName: string, args: string) => void;
   setTyping: (typing: boolean) => void;
+
+  /** 合并从 REST API 恢复的推荐数据（去重合并，不覆盖实时推送） */
+  mergeRestoredRecommendations: (items: ProactiveResultItem[]) => void;
 
   /** 供 InteractionContext 更新消息列表（如 ask_user 状态） */
   updateMessages: (updater: (prev: ChatMessage[]) => ChatMessage[]) => void;
@@ -105,6 +114,7 @@ const MessageCtx = createContext<MessageContextValue | null>(null);
 // ── Provider ──
 
 export function MessageProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const { wsSend } = useWebSocket();
   const {
     sessionIdRef,
@@ -113,9 +123,20 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     getCurrentSessionAgentId,
     refreshTaskGroups,
     bindSessionToCurrentSocket,
+    switchSession,
+    sessions,
   } = useSession();
   const { subscribeCurrentSession, subscribeGlobal, subscribeFrontendCreate, markFrontendCreate } = useEventDispatcher();
-  const { pushNotification, pushCard } = useNotification();
+  const { pushToast, pushCard } = useNotification();
+
+  // 导航到指定会话（switchSession + 页面路由跳转）
+  const navigateToSession = useCallback(async (sessionId: string) => {
+    await switchSession(sessionId);
+    const session = sessions.find((s: { session_id: string }) => s.session_id === sessionId);
+    const agentId = session ? getAgentId(session.meta) : 'default';
+    const targetPage = AGENT_PAGE_MAP[agentId] ?? '/';
+    router.push(targetPage);
+  }, [switchSession, sessions, router]);
 
   // 消息状态
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -153,7 +174,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
   const cancelledTurnIdsRef = useRef<Set<string>>(new Set());
   const lastStreamingTurnIdRef = useRef<string | null>(null);
-  const pendingInputRef = useRef<{ content: string; contextFiles?: string[] } | null>(null);
+  const pendingInputRef = useRef<{ content: string; contextFiles?: string[]; meta?: Record<string, string> } | null>(null);
   const pendingSessionBootstrapIdRef = useRef<string | null>(null);
 
   // ── helpers ──
@@ -433,17 +454,34 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     return subscribeGlobal((event: WsInboundEvent) => {
       switch (event.type) {
         case 'turn_completed': {
-          // 跨会话 turn_completed → 推送通知卡片
+          // 跨会话 turn_completed → 推送通知卡片 + toast
           const completedSessionId = event.session_id || '';
           const final = event.payload.final_response || '';
-          pushCard({
+          const taskActions = [{ label: '查看会话 →', value: 'view_session' }];
+          const cardId = pushCard({
             kind: 'task_completed',
             title: '任务完成',
             body: final ? (final.length > 100 ? final.slice(0, 100) + '...' : final) : '一个任务已完成',
             level: 'success',
             source: 'agent',
             sessionId: completedSessionId,
-            actions: [{ label: '查看会话 →', value: 'view_session' }],
+            actions: taskActions,
+          });
+          pushToast({
+            kind: 'task_completed',
+            title: '任务完成',
+            body: final ? (final.length > 100 ? final.slice(0, 100) + '...' : final) : '一个任务已完成',
+            level: 'success',
+            source: 'agent',
+            cardId,
+            actions: taskActions,
+            eventKey: `turn_completed_${(event as any).event_id || completedSessionId}`,
+            onAction: (actionValue) => {
+              if (actionValue === 'view_session' && completedSessionId) {
+                navigateToSession(completedSessionId);
+              }
+              // view_session 是纯前端操作，不需要 pending
+            },
           });
           break;
         }
@@ -452,26 +490,36 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           const body = event.payload.body || event.payload.text || '';
           const metadata = event.payload.metadata || {};
           if (body) {
-            pushNotification({
-              title,
-              body,
-              level: (event.payload.level || 'info') as 'info' | 'warning' | 'error' | 'success',
-              source: event.payload.source || 'system',
-              createdAtMs: event.payload.created_at_ms || Date.now(),
-            }, {
-              toast: metadata.show_toast !== false,
-              browser: metadata.show_browser === true,
-            });
             const notifSessionId = event.session_id;
-            pushCard({
+            const notifActions = notifSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined;
+            const cardId = pushCard({
               kind: 'general',
               title,
               body,
               level: (event.payload.level || 'info') as 'info' | 'warning' | 'error' | 'success',
               source: event.payload.source || 'system',
               sessionId: notifSessionId,
-              actions: notifSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined,
+              actions: notifActions,
             });
+            // 仅当 show_toast 不为 false 时显示 toast
+            if (metadata.show_toast !== false) {
+              pushToast({
+                kind: 'general',
+                title,
+                body,
+                level: (event.payload.level || 'info') as 'info' | 'warning' | 'error' | 'success',
+                source: event.payload.source || 'system',
+                cardId,
+                actions: notifActions,
+                eventKey: `notification_${(event as any).event_id || Date.now()}`,
+                browser: metadata.show_browser === true,
+                onAction: (actionValue) => {
+                  if (actionValue === 'view_session' && notifSessionId) {
+                    navigateToSession(notifSessionId);
+                  }
+                },
+              });
+            }
           }
           if (body && Boolean(metadata.append_to_chat)) {
             const targetSessionId = event.session_id || null;
@@ -503,28 +551,37 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
               return [newItem, ...deduped].slice(0, 50);
             });
             refreshTaskGroups();
-            pushNotification({
-              title: `[主动推送] ${jobName || 'Proactive Agent'}`,
-              body: resultText.slice(0, 200),
-              level: 'info',
-              source: 'proactive',
-              createdAtMs: Date.now(),
-            }, { toast: true, browser: false });
-            pushCard({
+            const proactiveActions = resultSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined;
+            const cardId = pushCard({
               kind: 'general',
               title: `主动推送 — ${jobName || 'Proactive Agent'}`,
               body: resultText.slice(0, 300),
               level: 'info',
               source: 'proactive',
               sessionId: resultSessionId || undefined,
-              actions: resultSessionId ? [{ label: '查看会话 →', value: 'view_session' }] : undefined,
+              actions: proactiveActions,
+            });
+            pushToast({
+              kind: 'proactive',
+              title: `[主动推送] ${jobName || 'Proactive Agent'}`,
+              body: resultText.slice(0, 200),
+              level: 'info',
+              source: 'proactive',
+              cardId,
+              actions: proactiveActions,
+              eventKey: `proactive_${jobId}_${resultSessionId}`,
+              onAction: (actionValue) => {
+                if (actionValue === 'view_session' && resultSessionId) {
+                  navigateToSession(resultSessionId);
+                }
+              },
             });
           }
           break;
         }
       }
     });
-  }, [subscribeGlobal, pushCard, pushNotification, refreshTaskGroups, sessionIdRef]);
+  }, [subscribeGlobal, pushCard, pushToast, refreshTaskGroups, sessionIdRef, navigateToSession]);
 
   // ── 前端创建 session 事件处理（pendingInput） ──
 
@@ -534,12 +591,14 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         const newSid = event.session_id;
         if (!newSid) return;
         if (pendingInputRef.current) {
-          const { content, contextFiles } = pendingInputRef.current;
+          const { content, contextFiles, meta } = pendingInputRef.current;
           pendingSessionBootstrapIdRef.current = newSid;
+          const payload: Record<string, unknown> = { content, attachments: [], context_files: contextFiles || [] };
+          if (meta) payload.meta = meta;
           wsSend({
             type: 'user_input',
             session_id: newSid,
-            payload: { content, attachments: [], context_files: contextFiles || [] },
+            payload,
             timestamp: Date.now() / 1000,
           });
           pendingInputRef.current = null;
@@ -553,7 +612,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
   // ── 对外接口 ──
 
-  const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string) => {
+  const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string, recommendation?: RecommendationSendMeta | null) => {
     if (!content.trim()) return;
 
     // 防止在 session 创建中重复发送：如果已有 pending input 且正在等待 session_created，忽略
@@ -571,21 +630,29 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
     const filePaths = contextFiles?.map(f => f.path) || [];
 
+    // 构造 meta：当有 recommendation 信息时，附加 recommendation_id 供后端消费标记
+    const meta: Record<string, string> | undefined =
+      recommendation?.recommendationId
+        ? { recommendation_id: recommendation.recommendationId }
+        : undefined;
+
     if (!sessionIdRef.current) {
-      pendingInputRef.current = { content, contextFiles: filePaths };
+      pendingInputRef.current = { content, contextFiles: filePaths, meta };
       markFrontendCreate();
-      const meta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
+      const sessionMeta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
       const requestId = makeId();
       wsSend({
         type: 'create_session',
-        payload: { agent_id: targetAgentId, meta, request_id: requestId },
+        payload: { agent_id: targetAgentId, meta: sessionMeta, request_id: requestId },
         timestamp: Date.now() / 1000,
       });
     } else {
+      const payload: Record<string, unknown> = { content, attachments: [], context_files: filePaths };
+      if (meta) payload.meta = meta;
       wsSend({
         type: 'user_input',
         session_id: sessionIdRef.current,
-        payload: { content, attachments: [], context_files: filePaths },
+        payload,
         timestamp: Date.now() / 1000,
       });
     }
@@ -593,9 +660,22 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     setTurnActive(true);
   }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsSend, sessionIdRef, emptySessionIdRef, markFrontendCreate]);
 
+  // 合并从 REST API 恢复的推荐数据（去重合并，不覆盖实时推送）
+  const mergeRestoredRecommendations = useCallback((items: ProactiveResultItem[]) => {
+    if (!items.length) return;
+    setProactiveResults(prev => {
+      // 用 (jobId, sessionId) 组合键去重，已有的实时推送优先保留
+      const existingKeys = new Set(prev.map(r => `${r.jobId}__${r.sessionId}`));
+      const newItems = items.filter(r => !existingKeys.has(`${r.jobId}__${r.sessionId}`));
+      if (!newItems.length) return prev;
+      return [...prev, ...newItems].slice(0, 50);
+    });
+  }, []);
+
   const handleSkillInvoke = useCallback(async (skillName: string, args: string) => {
     if (!sessionIdRef.current) {
-      pushNotification({
+      pushToast({
+        kind: 'info',
         title: '命令执行失败',
         body: '请先发送一条普通消息创建会话，再执行 / 命令',
         level: 'error',
@@ -611,7 +691,8 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       });
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
-        pushNotification({
+        pushToast({
+          kind: 'info',
           title: '命令执行失败',
           body: errData.detail || `未知错误 (${resp.status})`,
           level: 'error',
@@ -622,14 +703,15 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       setIsTyping(true);
       setTurnActive(true);
     } catch (err) {
-      pushNotification({
+      pushToast({
+        kind: 'info',
         title: '命令执行失败',
         body: '网络错误，请稍后重试',
         level: 'error',
         source: 'skill',
       });
     }
-  }, [sessionIdRef, pushNotification]);
+  }, [sessionIdRef, pushToast]);
 
   const cancelTurn = useCallback(() => {
     if (!sessionIdRef.current && !pendingInputRef.current) return;
@@ -669,6 +751,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     sendMessage,
     cancelTurn,
     handleSkillInvoke,
+    mergeRestoredRecommendations,
     setTyping: setIsTyping,
     updateMessages,
   };

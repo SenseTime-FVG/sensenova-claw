@@ -255,7 +255,6 @@ export function NotificationDropdown() {
     resolveCard,
     dismissCard,
     clearAllCards,
-    setOnActionToastAction,
   } = useNotification();
   const { sessions, switchSession } = useSession();
   const { wsSend } = useWebSocket();
@@ -321,19 +320,6 @@ export function NotificationDropdown() {
       return;
     }
   }, [cards, wsSend, markCardPending, resolveCard, handleNavigate, submitQuestionResponse]);
-
-  // 用 ref 持有最新 handleResolve，避免 useEffect 因 handleResolve 变化反复调用
-  // setOnActionToastAction 导致无限循环
-  const handleResolveRef = useRef(handleResolve);
-  handleResolveRef.current = handleResolve;
-
-  // 注册操作弹窗的回调，使弹窗按钮也能发送 WebSocket 响应
-  useEffect(() => {
-    setOnActionToastAction((cardId: string, actionValue: string, inputValue?: string) => {
-      handleResolveRef.current(cardId, actionValue, inputValue);
-    });
-    return () => setOnActionToastAction(null);
-  }, [setOnActionToastAction]);
 
   // 按类型分组
   const pendingCards = cards.filter(c => !c.resolved);
