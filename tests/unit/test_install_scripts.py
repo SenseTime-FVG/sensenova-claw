@@ -12,7 +12,7 @@ def test_install_sh_uses_editable_tool_install():
 
     assert "uv tool install --editable --from . --force sensenova-claw" in content
     assert (
-        'REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-main}}}"'
+        'REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-latest}}}"'
         in content
     )
     assert 'info "app 目录将使用仓库分支/引用: $REPO_REF"' in content
@@ -20,11 +20,22 @@ def test_install_sh_uses_editable_tool_install():
     assert "npm run build 2>&1 | tail -10" in content
 
 
+def test_install_sh_guards_nvm_use_under_nounset():
+    content = (ROOT / "install" / "install.sh").read_text(encoding="utf-8")
+
+    assert "set +u" in content
+    assert "nvm install --lts" in content
+    assert "nvm use --lts" in content
+    assert "set -u" in content
+
+
 def test_install_ps1_uses_editable_tool_install():
     content = (ROOT / "install" / "install.ps1").read_text(encoding="utf-8")
 
     assert "uv tool install --editable --from . --force sensenova-claw" in content
-    assert '$REPO_REF = if ($env:SENSENOVA_CLAW_REPO_REF)' in content
+    assert '$REPO_REF = if ($env:SENSENOVA_CLAW_APP_BRANCH)' in content
+    assert 'elseif ($env:SENSENOVA_CLAW_REPO_REF)' in content
+    assert 'else { "latest" }' in content
 
 
 def test_root_postinstall_uses_node_script_instead_of_bash():

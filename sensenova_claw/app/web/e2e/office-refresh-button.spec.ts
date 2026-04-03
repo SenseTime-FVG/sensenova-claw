@@ -15,7 +15,7 @@ test('office 右上角刷新按钮应重新拉取最新状态', async ({ page })
   const token = readCurrentToken();
   let agentsRequestCount = 0;
   let shouldDelayNextAgentsRequest = false;
-  let releaseRefreshRequest: (() => void) | null = null;
+  const refreshRequestController: { release: (() => void) | null } = { release: null };
 
   await page.route('**/api/auth/verify-token', async (route) => {
     await route.fulfill({
@@ -72,7 +72,7 @@ test('office 右上角刷新按钮应重新拉取最新状态', async ({ page })
     if (shouldDelayNextAgentsRequest) {
       shouldDelayNextAgentsRequest = false;
       await new Promise<void>((resolve) => {
-        releaseRefreshRequest = resolve;
+        refreshRequestController.release = resolve;
       });
     }
 
@@ -153,7 +153,7 @@ test('office 右上角刷新按钮应重新拉取最新状态', async ({ page })
     .poll(async () => (await refreshButton.locator('svg').getAttribute('class')) || '')
     .toContain('animate-spin');
 
-  releaseRefreshRequest?.();
+  refreshRequestController.release?.();
   await refreshClick;
 
   await expect(refreshButton).toBeEnabled();

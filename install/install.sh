@@ -2,7 +2,7 @@
 # Sensenova-Claw 一键安装脚本（Linux/macOS）
 #
 # 用法:
-#   curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/main/install/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash
 #
 # 或本地执行:
 #   bash install/install.sh
@@ -17,8 +17,8 @@ set -euo pipefail
 SENSENOVA_CLAW_HOME="${SENSENOVA_CLAW_HOME:-$HOME/.sensenova-claw}"
 APP_DIR="$SENSENOVA_CLAW_HOME/app"
 REPO_URL="${SENSENOVA_CLAW_REPO_URL:-https://github.com/SenseTime-FVG/sensenova-claw.git}"
-# app 目录 clone/update 使用的仓库分支或 tag，兼容旧变量名
-REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-main}}}"
+# app 目录 clone/update 使用的仓库分支或 tag，兼容旧变量名，默认安装 latest tag 指向的版本
+REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-latest}}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
 DEV_MODE=false
@@ -207,9 +207,12 @@ install_nvm() {
 
   # nvm 可能已安装但未加载
   local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  # nvm.sh 不兼容 set -u，临时关闭
+  set +u
   if [ -s "$nvm_dir/nvm.sh" ]; then
     source "$nvm_dir/nvm.sh"
     if command_exists nvm; then
+      set -u
       log "nvm 已安装（已加载）"
       return
     fi
@@ -232,6 +235,7 @@ install_nvm() {
 
   export NVM_DIR="$nvm_dir"
   [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
+  set -u
 
   if command_exists nvm; then
     log "nvm 安装成功"
@@ -259,8 +263,11 @@ install_node() {
     export NVM_NODEJS_ORG_MIRROR="$CN_NVM_MIRROR"
   fi
 
+  # nvm 不兼容 set -u，临时关闭
+  set +u
   nvm install --lts
   nvm use --lts
+  set -u
 
   if command_exists node && command_exists npm; then
     log "Node.js 安装成功: $(node -v)"

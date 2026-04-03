@@ -3,6 +3,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
+type OfficeIdleAgentGroup = {
+  idleSprite: {
+    visible: boolean;
+    anims: {
+      isPlaying: boolean;
+      currentAnim?: { key?: string };
+    };
+  };
+};
+
 function readCurrentToken(): string {
   try {
     return fs.readFileSync(path.join(os.homedir(), '.sensenova-claw', 'token'), 'utf-8').trim();
@@ -73,7 +83,9 @@ test('office 页面中的待命小羊应播放多帧 idle 动画', async ({ page
     }).__phaserGame;
     const idleAnim = game.anims.get('star_idle');
     const scene = game.scene.scenes[0];
-    const agents = Array.from(scene.agentSprites?.values?.() ?? []);
+    const agents = Array.from(
+      (scene.agentSprites?.values?.() ?? []) as Iterable<OfficeIdleAgentGroup>
+    );
     const visibleIdleAgents = agents.filter(agent => agent.idleSprite.visible);
     return {
       idleFrameCount: idleAnim?.frames.length ?? 0,
