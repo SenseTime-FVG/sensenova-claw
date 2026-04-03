@@ -1807,3 +1807,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 只根据视觉相似度把右下角羊误判成 agent idle 精灵，会导致修复落到 `star_idle` 链路但对用户实际看到的对象完全无效；以后 Phaser 场景里有多个相似角色时，必须先做运行时对象级定位再改。
+
+### 2026-04-02 Office agent 状态房间补充
+
+成功经验：
+- `/office/[agentId]` 这类 Phaser 页面首次同步不能只靠 `createOfficeGame(...)` 后立刻 `emit`；场景 `create()` 的监听器可能尚未挂好，初始化后再做一次短延迟回放 `setState/setAgents/setRoomContext`，能稳定避免首屏丢羊。
+- 对挂在后台壳里的 Office 页面做 Playwright 回归时，需要同时 mock `auth/status`、`custom-pages`、`llm-status`、`sessions`、`todolist` 等壳层接口；只 mock `/api/agents` 往往会被鉴权或导航依赖拖离目标页面。
+- agent 办公室展示适合把“房间模式”和“agent 运行态”分开建模：`global` 房间只展示 `running` agent，单 agent 房间则按 `idle/running` 在待命位和工位之间切换，这样既能保留总办公室的单羊待命设定，也能满足单房间状态表达。
+
+失败/风险经验：
+- 如果 e2e 只等待 `window.__phaserGame` 存在就开始断言，极易在 `agentSprites` 尚未同步完成时读到 `0`；这类测试必须等待 `scene.agentSprites.size` 或其他业务就绪信号，而不是只等游戏实例初始化。

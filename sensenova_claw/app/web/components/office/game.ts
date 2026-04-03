@@ -24,6 +24,9 @@ export class OfficeScene extends Phaser.Scene {
   private catSprite!: Phaser.GameObjects.Sprite;
 
   private currentState: OfficeStateName = 'idle';
+  private roomMode: 'global' | 'agent' = 'global';
+  private selectedAgentId: string | null = null;
+  private agentStatuses: Record<string, { status: 'idle' | 'running' | 'error' }> = {};
   private bubble: Phaser.GameObjects.Container | null = null;
   private catBubble: Phaser.GameObjects.Container | null = null;
   private lastBubble = 0;
@@ -167,6 +170,20 @@ export class OfficeScene extends Phaser.Scene {
     this.game.events.on('setAgents', (agents: { id: string; name: string }[]) => {
       this.handleAgentsUpdate(agents);
     });
+
+    this.game.events.on('setRoomContext', (
+      context: {
+        mode: 'global' | 'agent';
+        selectedAgentId: string | null;
+        agentStatuses: Record<string, { status: 'idle' | 'running' | 'error' }>;
+      },
+    ) => {
+      this.roomMode = context.mode;
+      this.selectedAgentId = context.selectedAgentId;
+      this.agentStatuses = context.agentStatuses || {};
+      this.syncAnimSprite.setVisible(this.roomMode === 'global');
+      this.applyStateToAllAgents();
+    });
   }
 
   update(time: number) {
@@ -193,8 +210,8 @@ export class OfficeScene extends Phaser.Scene {
       this.errorBug.setVisible(false);
     }
 
-    // 右下角羊保持待机动画，避免在 idle 下退回静态首帧
-    if (!this.syncAnimSprite.anims.isPlaying) {
+    // 右下角羊只在总办公室展示，避免单 agent 房间出现第二只羊
+    if (this.roomMode === 'global' && !this.syncAnimSprite.anims.isPlaying) {
       this.syncAnimSprite.play('sync_sheep_idle');
     }
 
@@ -255,19 +272,33 @@ export class OfficeScene extends Phaser.Scene {
 
   private applyStateToAllAgents() {
     const slots = LAYOUT.agentSlots;
-    for (const [, group] of this.agentSprites) {
+    for (const [agentId, group] of this.agentSprites) {
       const idx = group.slotIndex;
-      if (this.currentState === 'idle') {
+
+      const agentStatus = this.agentStatuses[agentId]?.status ?? 'idle';
+      if (this.roomMode === 'agent') {
         const slot = slots.idle[idx % slots.idle.length];
-        group.idleSprite.setPosition(slot.x, slot.y).setVisible(true);
-        group.workingSprite.setVisible(false);
-        group.nameLabel.setPosition(slot.x, slot.y + 50).setVisible(true);
-      } else if (['writing', 'researching', 'executing'].includes(this.currentState)) {
-        const slot = slots.working[idx % slots.working.length];
+        const workSlot = slots.working[idx % slots.working.length];
+        if (agentStatus === 'running') {
+          group.idleSprite.setVisible(false);
+          group.workingSprite.setPosition(workSlot.x, workSlot.y).setVisible(true);
+          group.workingSprite.play('star_working');
+          group.nameLabel.setPosition(workSlot.x, workSlot.y + 50).setVisible(true);
+        } else if (agentStatus === 'idle') {
+          group.idleSprite.setPosition(slot.x, slot.y).setVisible(true);
+          group.workingSprite.setVisible(false);
+          group.nameLabel.setPosition(slot.x, slot.y + 50).setVisible(true);
+        } else {
+          group.idleSprite.setVisible(false);
+          group.workingSprite.setVisible(false);
+          group.nameLabel.setVisible(false);
+        }
+      } else if (agentStatus === 'running') {
+        const workSlot = slots.working[idx % slots.working.length];
         group.idleSprite.setVisible(false);
-        group.workingSprite.setPosition(slot.x, slot.y).setVisible(true);
+        group.workingSprite.setPosition(workSlot.x, workSlot.y).setVisible(true);
         group.workingSprite.play('star_working');
-        group.nameLabel.setPosition(slot.x, slot.y + 50).setVisible(true);
+        group.nameLabel.setPosition(workSlot.x, workSlot.y + 50).setVisible(true);
       } else {
         group.idleSprite.setVisible(false);
         group.workingSprite.setVisible(false);
