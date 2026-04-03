@@ -36,19 +36,25 @@ irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/i
 
 ### 指定安装版本
 
-安装脚本默认拉取 `dev` 分支，也支持通过环境变量显式指定分支或 tag，便于发布验证与回滚。
-Linux / macOS 安装脚本优先读取 `SENSENOVA_CLAW_APP_BRANCH`，未设置时再回退到兼容变量 `SENSENOVA_CLAW_REPO_REF` / `SENSENOVA_CLAW_REPO_BRANCH`。
+安装脚本默认拉取 release 维护的 `latest` tag，也支持通过环境变量显式指定其他分支或 tag，便于发布验证与回滚。
+Linux / macOS 与 Windows 安装脚本都会优先读取 `SENSENOVA_CLAW_APP_BRANCH`，未设置时再回退到兼容变量 `SENSENOVA_CLAW_REPO_REF` / `SENSENOVA_CLAW_REPO_BRANCH`。
+
+常见用法：
+
+- 不传环境变量：安装 `latest` tag 指向的最新 release
+- `SENSENOVA_CLAW_APP_BRANCH=latest`：显式安装 `latest` tag
+- `SENSENOVA_CLAW_APP_BRANCH=v1.0-beta.1`：安装指定 release tag
 
 Linux / macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.sh | SENSENOVA_CLAW_APP_BRANCH=v0.5.0 bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/install/install.sh | SENSENOVA_CLAW_APP_BRANCH=latest bash
 ```
 
 Windows（PowerShell）:
 
 ```powershell
-$env:SENSENOVA_CLAW_REPO_REF="v0.5.0"
+$env:SENSENOVA_CLAW_APP_BRANCH="v1.0-beta.1"
 irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.ps1 | iex
 ```
 
