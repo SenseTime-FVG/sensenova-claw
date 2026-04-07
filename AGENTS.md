@@ -83,6 +83,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 每次你执行完成任务之后，需要总结成功和失败的经验，并选择会对后续任务有帮助的内容保存在这里
 
+### 2026-04-07 QQ Gateway reconnecting 状态修复补充
+
+成功经验：
+- QQ 官方网关断线恢复后不一定再次发 `READY`，也可能发 `RESUMED`；如果状态机只在 `READY` 时回写 `connected`，Gateway 页面就会长期显示 `reconnecting`。
+- 这类状态卡死问题最适合在 runtime 层补最小单测：直接构造 `reconnecting -> RESUMED` 的 payload，能快速确认根因在事件处理而不是前端展示。
+
+失败/风险经验：
+- 当前 `tests/e2e/test_qq_channel_official_e2e.py` 与 `tests/e2e/test_qq_channel_onebot_e2e.py` 断言了 mock LLM 的旧固定文案（`当前没有可用的 LLM`）；现在 mock provider 已返回正常自我介绍，这两条 e2e 会因历史断言漂移失败，不能拿来判断本次 QQ 状态修复是否回归。
+
 ### 2026-03-26 OpenAI 兼容 top_k 修复补充
 
 成功经验：

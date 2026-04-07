@@ -189,6 +189,11 @@ class QQOfficialRuntime:
             logger.info("QQ official gateway ready: bot=%s session=%s", self._bot_user.get("username", ""), self._session_id)
             return True
 
+        if event_type == "RESUMED":
+            self._sensenova_claw_status = {"status": "connected", "error": None}
+            logger.info("QQ official gateway resumed: session=%s", self._session_id)
+            return True
+
         if opcode == self.WS_DISPATCH:
             await self.handle_event(payload)
             return True
