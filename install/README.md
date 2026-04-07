@@ -5,7 +5,7 @@
 ### Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/install/install.sh | bash
 ```
 
 如果GITHUB请求失败（404），使用以下命令:
@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/in
 curl -fsSL \
   -H "Authorization: Bearer <GITHUB_TOKEN>" \
   -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/SenseTime-FVG/sensenova-claw/contents/install/install.sh?ref=dev" | bash
+  "https://api.github.com/repos/SenseTime-FVG/sensenova-claw/contents/install/install.sh?ref=main" | bash
 ```
 
 如果安装完成后当前终端提示 `sensenova-claw: command not found`，或提示找不到 `node` / `npm`，执行以下命令  或 重启终端：
@@ -29,7 +29,7 @@ nvm use --lts
 ### Windows（PowerShell）
 
 ```powershell
-irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/install/install.ps1 | iex
 ```
 
 > 如果 PowerShell 提示执行策略限制，先运行: `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`
@@ -55,7 +55,7 @@ Windows（PowerShell）:
 
 ```powershell
 $env:SENSENOVA_CLAW_APP_BRANCH="v1.0-beta.1"
-irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/install/install.ps1 | iex
 ```
 
 ## 安装脚本做了什么
@@ -238,7 +238,7 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ```bash
 cd ~/.sensenova-claw/app
-git pull origin dev
+git pull origin main
 npm install
 ```
 
