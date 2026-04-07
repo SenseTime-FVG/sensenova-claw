@@ -64,7 +64,7 @@ export class OfficeScene extends Phaser.Scene {
     this.load.spritesheet('error_bug', `${base}/error-bug-spritesheet-grid.webp`, { frameWidth: 180, frameHeight: 180 });
     this.load.spritesheet('cats', `${base}/cats-spritesheet.webp`, { frameWidth: 160, frameHeight: 160 });
     this.load.spritesheet('sync_anim', `${base}/star-idle-sheep-grid.png`, { frameWidth: 128, frameHeight: 128 });
-    this.load.spritesheet('flowers', `${base}/flowers-bloom-v2.webp`, { frameWidth: 65, frameHeight: 65 });
+    this.load.spritesheet('flowers', `${base}/flowers-bloom-v2.webp`, { frameWidth: 128, frameHeight: 128 });
   }
 
   private createBreathingAnimation(key: string, textureKey: string = 'star_idle') {
