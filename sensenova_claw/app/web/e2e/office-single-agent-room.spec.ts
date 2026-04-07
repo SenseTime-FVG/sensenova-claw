@@ -4,8 +4,24 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
 type AgentSpriteGroup = {
-  idleSprite: { visible: boolean; x: number; y: number };
-  workingSprite: { visible: boolean; x: number; y: number };
+  idleSprite: {
+    visible: boolean;
+    x: number;
+    y: number;
+    anims?: {
+      isPlaying?: boolean;
+      currentAnim?: { key?: string };
+    };
+  };
+  workingSprite: {
+    visible: boolean;
+    x: number;
+    y: number;
+    anims?: {
+      isPlaying?: boolean;
+      currentAnim?: { key?: string };
+    };
+  };
   nameLabel: { visible: boolean };
 };
 
@@ -153,6 +169,7 @@ test('单 agent 办公室中运行中的羊应移动到电脑前', async ({ page
   await page.waitForFunction(() => window.__phaserGame?.scene?.scenes?.[0]?.agentSprites?.size === 1);
 
   const state = await page.evaluate(() => {
+    const game = window.__phaserGame;
     const scene = window.__phaserGame?.scene?.scenes?.[0];
     const rawEntries = Array.from(
       (scene?.agentSprites?.entries?.() ?? []) as Iterable<[string, AgentSpriteGroup]>
@@ -167,6 +184,10 @@ test('单 agent 办公室中运行中的羊应移动到电脑前', async ({ page
       workVisible: group?.workingSprite.visible ?? false,
       workX: group?.workingSprite.x ?? null,
       workY: group?.workingSprite.y ?? null,
+      workAnimKey: group?.workingSprite.anims?.currentAnim?.key ?? null,
+      workAnimPlaying: group?.workingSprite.anims?.isPlaying ?? false,
+      idleFrameCount: game?.anims?.get?.('star_idle')?.frames?.length ?? 0,
+      workFrameCount: game?.anims?.get?.('star_working_breath')?.frames?.length ?? 0,
       syncVisible: syncSprite?.visible ?? null,
     };
   });
@@ -176,5 +197,9 @@ test('单 agent 办公室中运行中的羊应移动到电脑前', async ({ page
   expect(state.workVisible).toBe(true);
   expect(state.workX).toBe(217);
   expect(state.workY).toBe(333);
+  expect(state.workAnimKey).toBe('star_working_breath');
+  expect(state.workAnimPlaying).toBe(true);
+  expect(state.idleFrameCount).toBeGreaterThan(1);
+  expect(state.workFrameCount).toBe(state.idleFrameCount);
   expect(state.syncVisible).toBe(false);
 });

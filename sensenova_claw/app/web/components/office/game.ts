@@ -5,6 +5,16 @@ import { STATES, BUBBLE_TEXTS, type OfficeStateName } from './types';
 
 const BUBBLE_INTERVAL = 8000;
 const CAT_BUBBLE_INTERVAL = 18000;
+const BREATHING_FRAME_RANGE = { start: 0, end: 7 } as const;
+
+const STATE_BREATHING_ANIMATION_KEYS: Record<OfficeStateName, string> = {
+  idle: 'star_idle',
+  writing: 'star_writing_breath',
+  researching: 'star_researching_breath',
+  executing: 'star_executing_breath',
+  syncing: 'star_syncing_breath',
+  error: 'star_error_breath',
+};
 
 export class OfficeScene extends Phaser.Scene {
   // 多 agent 角色管理
@@ -57,6 +67,26 @@ export class OfficeScene extends Phaser.Scene {
     this.load.spritesheet('flowers', `${base}/flowers-bloom-v2.webp`, { frameWidth: 65, frameHeight: 65 });
   }
 
+  private createBreathingAnimation(key: string, textureKey: string = 'star_idle') {
+    this.anims.create({
+      key,
+      // 当前各状态先保持与 idle 完全相同的呼吸节奏，后续可独立调整
+      frames: this.anims.generateFrameNumbers(textureKey, BREATHING_FRAME_RANGE),
+      frameRate: 4,
+      repeat: -1,
+    });
+  }
+
+  private getBreathingAnimationKeyForAgentStatus(status: 'idle' | 'running' | 'error'): string {
+    if (status === 'idle') return STATE_BREATHING_ANIMATION_KEYS.idle;
+    if (status === 'error') return STATE_BREATHING_ANIMATION_KEYS.error;
+    return this.currentState === 'idle' ? 'star_working_breath' : this.getCurrentWorkingAnimationKey();
+  }
+
+  private getCurrentWorkingAnimationKey(): string {
+    return STATE_BREATHING_ANIMATION_KEYS[this.currentState] ?? STATE_BREATHING_ANIMATION_KEYS.idle;
+  }
+
   create() {
     // 背景
     this.add.image(640, 360, 'office_bg');
@@ -67,17 +97,13 @@ export class OfficeScene extends Phaser.Scene {
       .setOrigin(sf.origin.x, sf.origin.y).setDepth(sf.depth);
 
     // 主角动画定义（多 agent 复用）
-    this.anims.create({
-      key: 'star_idle',
-      // 8 帧更明显的呼吸、摆动和眨眼，让待机状态更有生命感
-      frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 7 }),
-      frameRate: 4, repeat: -1,
-    });
-    this.anims.create({
-      key: 'star_working',
-      frames: this.anims.generateFrameNumbers('star_working', { start: 0, end: 0 }),
-      frameRate: 1, repeat: -1,
-    });
+    this.createBreathingAnimation('star_idle');
+    this.createBreathingAnimation('star_working_breath');
+    this.createBreathingAnimation('star_writing_breath');
+    this.createBreathingAnimation('star_researching_breath');
+    this.createBreathingAnimation('star_executing_breath');
+    this.createBreathingAnimation('star_syncing_breath');
+    this.createBreathingAnimation('star_error_breath');
 
     // 办公桌
     const dk = LAYOUT.furniture.desk;
@@ -135,7 +161,7 @@ export class OfficeScene extends Phaser.Scene {
     this.anims.create({
       key: 'sync_sheep_idle',
       // 右下角展示羊使用同一套 8 帧待机动画
-      frames: this.anims.generateFrameNumbers('sync_anim', { start: 0, end: 7 }),
+      frames: this.anims.generateFrameNumbers('sync_anim', BREATHING_FRAME_RANGE),
       frameRate: 4, repeat: -1,
     });
     const sa = LAYOUT.furniture.syncAnim;
@@ -282,7 +308,7 @@ export class OfficeScene extends Phaser.Scene {
         if (agentStatus === 'running') {
           group.idleSprite.setVisible(false);
           group.workingSprite.setPosition(workSlot.x, workSlot.y).setVisible(true);
-          group.workingSprite.play('star_working');
+          group.workingSprite.play(this.getBreathingAnimationKeyForAgentStatus(agentStatus));
           group.nameLabel.setPosition(workSlot.x, workSlot.y + 50).setVisible(true);
         } else if (agentStatus === 'idle') {
           group.idleSprite.setPosition(slot.x, slot.y).setVisible(true);
@@ -297,7 +323,7 @@ export class OfficeScene extends Phaser.Scene {
         const workSlot = slots.working[idx % slots.working.length];
         group.idleSprite.setVisible(false);
         group.workingSprite.setPosition(workSlot.x, workSlot.y).setVisible(true);
-        group.workingSprite.play('star_working');
+        group.workingSprite.play(this.getBreathingAnimationKeyForAgentStatus(agentStatus));
         group.nameLabel.setPosition(workSlot.x, workSlot.y + 50).setVisible(true);
       } else {
         group.idleSprite.setVisible(false);
