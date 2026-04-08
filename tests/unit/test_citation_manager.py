@@ -230,31 +230,34 @@ def test_shared_citation_tracks_all_dimensions():
 # ─── export_json 测试 ─────────────────────────────────────────────────────────
 
 def test_export_structure():
-    """export_json 应返回字典，键为 URL，值包含 Citation 所有字段。"""
+    """export_json 应返回 {total_citations, citations: [...]} 格式。"""
     mgr = CitationManager()
     mgr.extract_and_register(SINGLE_SOURCE_REPORT, "dim_safety")
 
     result = mgr.export_json()
 
     assert isinstance(result, dict)
-    assert len(result) == 1
+    assert result["total_citations"] == 1
+    assert len(result["citations"]) == 1
 
-    citation_data = list(result.values())[0]
-    assert "id" in citation_data
-    assert "url" in citation_data
-    assert "title" in citation_data
-    assert "source_category" in citation_data
-    assert "snippet" in citation_data
-    assert "dimension_id" in citation_data
-    assert "credibility" in citation_data
-    assert "referenced_in" in citation_data
+    c = result["citations"][0]
+    assert c["index"] == 1
+    assert "id" in c
+    assert "url" in c
+    assert "title" in c
+    assert "source_category" in c
+    assert "snippet" in c
+    assert "dimension_id" in c
+    assert "credibility" in c
+    assert "referenced_in" in c
 
 
 def test_export_empty():
-    """空池的 export_json 应返回空字典。"""
+    """空池的 export_json 应返回 total_citations=0。"""
     mgr = CitationManager()
     result = mgr.export_json()
-    assert result == {}
+    assert result["total_citations"] == 0
+    assert result["citations"] == []
 
 
 def test_export_json_serializable():

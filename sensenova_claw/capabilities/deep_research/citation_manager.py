@@ -185,23 +185,28 @@ class CitationManager:
     def export_json(self) -> dict:
         """将引用池导出为 JSON 可序列化字典。
 
-        键为标准化 URL，值为包含 Citation 所有字段的字典。
+        返回格式：{total_citations: int, citations: [{index, id, url, title, ...}, ...]}
         """
-        result: dict = {}
-        for norm_url, citation in self._pool.items():
-            result[norm_url] = {
-                "id": citation.id,
-                "url": citation.url,
-                "title": citation.title,
-                "source_category": citation.source_category,
-                "snippet": citation.snippet,
-                "dimension_id": citation.dimension_id,
-                "credibility": citation.credibility,
-                "access_time": (
-                    citation.access_time.isoformat()
-                    if citation.access_time is not None
-                    else None
-                ),
-                "referenced_in": list(citation.referenced_in),
-            }
-        return result
+        all_citations = list(self._pool.values())
+        return {
+            "total_citations": len(all_citations),
+            "citations": [
+                {
+                    "id": c.id,
+                    "index": i + 1,
+                    "url": c.url,
+                    "title": c.title,
+                    "source_category": c.source_category,
+                    "snippet": c.snippet,
+                    "access_time": (
+                        c.access_time.isoformat()
+                        if c.access_time is not None
+                        else None
+                    ),
+                    "dimension_id": c.dimension_id,
+                    "credibility": c.credibility,
+                    "referenced_in": list(c.referenced_in),
+                }
+                for i, c in enumerate(all_citations)
+            ],
+        }
