@@ -334,6 +334,47 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "tools": [],
             "skills": [],
         },
+        "deep-research-controller": {
+            "name": "Deep Research 总控",
+            "description": "调度专家 Agent 完成深度研究任务",
+            "temperature": 0.2,
+            "tools": ["send_message", "ask_user", "write_file", "read_file"],
+            "skills": [],
+            "can_send_message_to": ["plan-agent", "research-agent", "review-agent", "report-agent"],
+            "max_send_depth": 3,
+        },
+        "plan-agent": {
+            "name": "Plan Agent",
+            "description": "分析研究需求，拆解维度，规划数据源和执行顺序",
+            "temperature": 0.3,
+            "tools": ["serper_search", "fetch_url"],
+            "skills": [],
+            "can_send_message_to": None,
+        },
+        "research-agent": {
+            "name": "Research Agent",
+            "description": "按指定维度搜集证据，输出带引用的子报告",
+            "temperature": 0.2,
+            "tools": ["serper_search", "brave_search", "tavily_search", "fetch_url", "image_search"],
+            "skills": ["union-search-skill"],
+            "can_send_message_to": None,
+        },
+        "review-agent": {
+            "name": "Review Agent",
+            "description": "审查子报告和终稿的证据充分性、来源冲突和逻辑问题",
+            "temperature": 0.1,
+            "tools": ["fetch_url"],
+            "skills": [],
+            "can_send_message_to": None,
+        },
+        "report-agent": {
+            "name": "Report Agent",
+            "description": "综合子报告生成结构化研究终稿",
+            "temperature": 0.3,
+            "tools": ["write_file"],
+            "skills": [],
+            "can_send_message_to": None,
+        },
     },
     "delegation": {
         "max_depth": 3,
@@ -345,6 +386,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "backoff_seconds": [0, 1, 3],
         },
         "enabled": True,
+    },
+    "deep_research": {
+        "enabled": True,
+        "user_involvement": "auto",        # auto / confirm_plan / interactive
+        "max_retries_per_dimension": 2,
+        "max_waves": 5,
+        "report_save_dir": "workspace/reports",
+        "controller_agent": "deep-research-controller",
     },
 }
 

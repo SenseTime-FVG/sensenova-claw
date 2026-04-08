@@ -75,5 +75,16 @@ TODOLIST_UPDATED = "todolist.updated"
 # 配置变更事件
 CONFIG_UPDATED = "config.updated"
 
+# Deep Research 深度研究事件
+RESEARCH_STARTED = "research.started"
+RESEARCH_PLAN_COMPLETED = "research.plan_completed"
+RESEARCH_PLAN_CONFIRMED = "research.plan_confirmed"
+RESEARCH_WAVE_STARTED = "research.wave_started"
+RESEARCH_DIMENSION_COMPLETED = "research.dimension_completed"
+RESEARCH_WAVE_COMPLETED = "research.wave_completed"
+RESEARCH_REPORT_GENERATED = "research.report_generated"
+RESEARCH_COMPLETED = "research.completed"
+RESEARCH_FAILED = "research.failed"
+
 # 系统级事件的 session_id（广播哨兵，不属于任何用户会话）
 SYSTEM_SESSION_ID = "__system__"
