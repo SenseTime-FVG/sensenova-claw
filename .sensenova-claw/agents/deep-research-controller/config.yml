@@ -1,0 +1,12 @@
+name: Deep Research 总控
+description: 调度专家 Agent 完成深度研究任务，自动拆解维度、分波搜集证据、审查质量、生成结构化报告
+
+temperature: 0.2
+max_turns_per_session: 100
+
+tools: ["send_message", "ask_user", "write_file", "read_file"]
+skills: []
+
+can_send_message_to: ["plan-agent", "research-agent", "review-agent", "report-agent"]
+max_send_depth: 3
+enabled: true

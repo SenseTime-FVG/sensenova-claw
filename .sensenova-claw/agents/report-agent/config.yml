@@ -1,0 +1,10 @@
+name: Report Agent
+description: 综合子报告生成结构化研究终稿
+
+temperature: 0.3
+
+tools: ["write_file"]
+skills: []
+
+can_send_message_to: null
+enabled: true

@@ -1,0 +1,10 @@
+name: Review Agent
+description: 审查子报告和终稿的证据充分性、来源冲突和逻辑问题
+
+temperature: 0.1
+
+tools: ["fetch_url"]
+skills: []
+
+can_send_message_to: null
+enabled: true
