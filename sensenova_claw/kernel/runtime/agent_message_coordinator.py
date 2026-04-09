@@ -61,6 +61,7 @@ class AgentMessageCoordinator:
         self._retry_tasks: dict[str, asyncio.Task] = {}
         self._last_heartbeat: dict[str, float] = {}
         self._record_parent_session: dict[str, str] = {}  # record_id → parent_session_id
+        self._on_child_completed_hooks: list = []
 
     async def start(self) -> None:
         self._agent_runtime.bus_router.on_destroy(self._on_session_destroy)
@@ -83,6 +84,10 @@ class AgentMessageCoordinator:
         future = asyncio.get_running_loop().create_future()
         self._sync_waiters[record_id] = future
         return future
+
+    def register_on_child_completed_hook(self, hook) -> None:
+        """注册子 agent 完成时的回调 hook（如 DeepResearchMiddleware）。"""
+        self._on_child_completed_hooks.append(hook)
 
     def cancel_sync_waiter(self, record_id: str) -> None:
         future = self._sync_waiters.pop(record_id, None)
@@ -350,6 +355,13 @@ class AgentMessageCoordinator:
             record.attempt_count,
             record.max_attempts,
         )
+
+        # 调用注册的 on_child_completed hooks（如 DeepResearchMiddleware）
+        for hook in self._on_child_completed_hooks:
+            try:
+                await hook(event)
+            except Exception:
+                logger.exception("on_child_completed hook error")
 
         payload = self._build_terminal_payload(record)
         await self._resolve_waiter_or_publish(
