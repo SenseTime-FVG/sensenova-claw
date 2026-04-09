@@ -206,6 +206,31 @@ function SessionListItem({
   );
 }
 
+function SessionTreeBranch({
+  children,
+  isChild,
+  isLast,
+}: {
+  children: React.ReactNode;
+  isChild?: boolean;
+  isLast?: boolean;
+}) {
+  if (!isChild) return <>{children}</>;
+
+  return (
+    <div className="flex items-stretch">
+      <div className="w-6 shrink-0 flex flex-col items-center">
+        <div className={cn('w-px flex-1 bg-violet-300/40 dark:bg-violet-400/30', isLast && 'max-h-[50%]')} />
+        {isLast && <div className="flex-1" />}
+      </div>
+      <div className="flex items-center -ml-[3px]">
+        <div className="w-3 h-px bg-violet-300/40 dark:bg-violet-400/30" />
+      </div>
+      <div className="flex-1 min-w-0">{children}</div>
+    </div>
+  );
+}
+
 function SessionListGroup({
   node, currentSessionId, switchSession, deleteSession, index, isChild = false, isLast = false,
 }: {
@@ -227,36 +252,38 @@ function SessionListGroup({
   }, [expanded, hasActiveChild]);
 
   return (
-    <div className={cn('mx-2 rounded-xl transition-colors', expanded && 'bg-violet-50/40 dark:bg-violet-950/20 pb-1.5')}>
-      <SessionListItem session={session} isActive={currentSessionId === session.session_id} onClick={() => switchSession(session.session_id)} onDelete={() => deleteSession(session.session_id)} index={index} noMargin isChild={isChild} isLast={isLast} />
-      <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} className={cn('flex items-center gap-1.5 w-full pr-3 py-1 text-[10px] font-medium', isChild ? 'pl-10' : 'pl-6', expanded ? 'text-violet-500' : 'text-muted-foreground/50')}>
+    <SessionTreeBranch isChild={isChild} isLast={isLast}>
+      <div className={cn('rounded-xl transition-colors', expanded && 'bg-violet-50/40 dark:bg-violet-950/20 pb-1.5')}>
+        <SessionListItem session={session} isActive={currentSessionId === session.session_id} onClick={() => switchSession(session.session_id)} onDelete={() => deleteSession(session.session_id)} index={index} noMargin />
+        <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} className={cn('flex items-center gap-1.5 w-full pr-3 py-1 text-[10px] font-medium', 'pl-6', expanded ? 'text-violet-500' : 'text-muted-foreground/50')}>
         <div className="flex items-center gap-1">
           {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           <GitBranch className="w-3 h-3" />
         </div>
         <span>{t('chat.teamSessionsCount', { count: childSessions.length })}</span>
-      </button>
-      {expanded && (
-        <div className="pl-4 pr-1">
-          {childSessions.map((child, childIdx) => (
-            child.children.length > 0 ? (
-              <SessionListGroup
-                key={child.session.session_id}
-                node={child}
-                currentSessionId={currentSessionId}
-                switchSession={switchSession}
-                deleteSession={deleteSession}
-                index={index + 1 + childIdx}
-                isChild
-                isLast={childIdx === childSessions.length - 1}
-              />
-            ) : (
-              <SessionListItem key={child.session.session_id} session={child.session} isActive={currentSessionId === child.session.session_id} onClick={() => switchSession(child.session.session_id)} onDelete={() => deleteSession(child.session.session_id)} index={index + 1 + childIdx} isChild isLast={childIdx === childSessions.length - 1} />
-            )
-          ))}
-        </div>
-      )}
-    </div>
+        </button>
+        {expanded && (
+          <div className="pl-4 pr-1">
+            {childSessions.map((child, childIdx) => (
+              child.children.length > 0 ? (
+                <SessionListGroup
+                  key={child.session.session_id}
+                  node={child}
+                  currentSessionId={currentSessionId}
+                  switchSession={switchSession}
+                  deleteSession={deleteSession}
+                  index={index + 1 + childIdx}
+                  isChild
+                  isLast={childIdx === childSessions.length - 1}
+                />
+              ) : (
+                <SessionListItem key={child.session.session_id} session={child.session} isActive={currentSessionId === child.session.session_id} onClick={() => switchSession(child.session.session_id)} onDelete={() => deleteSession(child.session.session_id)} index={index + 1 + childIdx} isChild isLast={childIdx === childSessions.length - 1} />
+              )
+            ))}
+          </div>
+        )}
+      </div>
+    </SessionTreeBranch>
   );
 }
 

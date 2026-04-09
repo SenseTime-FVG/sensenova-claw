@@ -136,6 +136,32 @@ function RecentChatItem({
   );
 }
 
+function ChildSessionBranch({
+  children,
+  isLast,
+}: {
+  children: React.ReactNode;
+  isLast?: boolean;
+}) {
+  return (
+    <div className="flex items-stretch">
+      <div className="w-6 shrink-0 flex flex-col items-center">
+        <div className={cn(
+          'w-px flex-1 bg-indigo-300/40 dark:bg-indigo-400/30',
+          isLast && 'max-h-[50%]',
+        )} />
+        {isLast && <div className="flex-1" />}
+      </div>
+      <div className="flex items-center -ml-[3px]">
+        <div className="w-3 h-px bg-indigo-300/40 dark:bg-indigo-400/30" />
+      </div>
+      <div className="flex-1 min-w-0">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // ── 可展开的主会话项（包含子会话下拉） ──
 
 function ParentSessionGroup({
@@ -168,7 +194,7 @@ function ParentSessionGroup({
     setExpanded(prev => !prev);
   };
 
-  return (
+  const content = (
     <div className={cn(
       'rounded-xl transition-colors',
       expanded && 'bg-indigo-50/40 dark:bg-indigo-900/25 pb-1.5',
@@ -180,8 +206,6 @@ function ParentSessionGroup({
         isActive={currentSessionId === session.session_id}
         onClick={() => switchSession(session.session_id)}
         onDelete={() => deleteSession(session.session_id)}
-        isChild={isChild}
-        isLast={isLast}
       />
 
       {/* 展开/收起按钮 */}
@@ -189,7 +213,7 @@ function ParentSessionGroup({
         onClick={toggleExpand}
         className={cn(
           'flex items-center gap-1.5 w-full pr-3 py-1 transition-colors',
-          isChild ? 'pl-10' : 'pl-6',
+          'pl-6',
           'text-[10px] font-medium',
           expanded
             ? 'text-indigo-600 dark:text-indigo-300'
@@ -238,6 +262,14 @@ function ParentSessionGroup({
         </div>
       )}
     </div>
+  );
+
+  if (!isChild) return content;
+
+  return (
+    <ChildSessionBranch isLast={isLast}>
+      {content}
+    </ChildSessionBranch>
   );
 }
 
