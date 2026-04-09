@@ -4,10 +4,13 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useWebSocket } from './WebSocketContext';
 import { useEventDispatcher } from './EventDispatcherContext';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   type SessionItem,
   type TaskGroup,
   getAgentId,
+  getTitle,
   groupSessionsToTasks,
   makeId,
 } from '@/lib/chatTypes';
@@ -24,7 +27,7 @@ export interface SessionContextValue {
   switchSession: (sessionId: string) => Promise<void>;
   createSession: (agentId: string, taskId?: string) => void;
   startNewChat: () => void;
-  deleteSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string, scope?: 'self' | 'self_and_descendants') => Promise<void>;
   resetIfNeeded: () => void;
   cleanupEmptySession: () => void;
   refreshTaskGroups: () => void;
@@ -49,6 +52,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loadingSessions, setLoadingSessions] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
 
   const sessionIdRef = useRef<string | null>(null);
   const switchedSessionRef = useRef(false);
@@ -137,18 +143,39 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     sessionIdRef.current = null;
   }, [doCleanupEmptySession]);
 
-  const deleteSession = useCallback(async (sid: string) => {
+  const performDeleteSession = useCallback(async (sid: string, scope: 'self' | 'self_and_descendants' = 'self') => {
+    setDeletingSessionId(sid);
+    setDeleteError('');
     try {
-      const res = await authFetch(`${API_BASE}/api/sessions/${sid}`, { method: 'DELETE' });
+      const suffix = scope === 'self_and_descendants' ? '?scope=self_and_descendants' : '';
+      const res = await authFetch(`${API_BASE}/api/sessions/${sid}${suffix}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('delete failed');
+      setDeleteTargetId(null);
     } catch {
-      // 忽略网络错误
+      setDeleteError('删除失败');
+      return;
+    } finally {
+      setDeletingSessionId(null);
     }
     setSessions(prev => prev.filter(s => s.session_id !== sid));
     if (sessionIdRef.current === sid) {
       startNewChat();
     }
   }, [startNewChat]);
+
+  const deleteSession = useCallback(async (sid: string, scope?: 'self' | 'self_and_descendants') => {
+    if (scope) {
+      await performDeleteSession(sid, scope);
+      return;
+    }
+    const target = sessions.find((session) => session.session_id === sid);
+    if (!target?.has_children) {
+      await performDeleteSession(sid, 'self');
+      return;
+    }
+    setDeleteError('');
+    setDeleteTargetId(sid);
+  }, [performDeleteSession, sessions]);
 
   const resetIfNeeded = useCallback(() => {
     if (sessionIdRef.current) {
@@ -245,7 +272,79 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     emptySessionIdRef,
   };
 
-  return <SessionCtx.Provider value={value}>{children}</SessionCtx.Provider>;
+  const deleteTargetSession = deleteTargetId
+    ? sessions.find((session) => session.session_id === deleteTargetId) ?? null
+    : null;
+
+  return (
+    <SessionCtx.Provider value={value}>
+      {children}
+      <Dialog
+        open={!!deleteTargetSession}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTargetId(null);
+            setDeleteError('');
+          }
+        }}
+      >
+        <DialogContent data-testid="workbench-session-delete-dialog">
+          <DialogHeader>
+            <DialogTitle>确认删除会话</DialogTitle>
+            <DialogDescription>
+              {deleteTargetSession
+                ? deleteTargetSession.has_children
+                  ? `会话 "${getTitle(deleteTargetSession.meta)}" 存在子会话。你可以仅删除当前会话，或删除当前会话和全部子会话。父会话不会被删除。`
+                  : `确定要删除会话 "${getTitle(deleteTargetSession.meta)}" 吗？`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteTargetId(null);
+                setDeleteError('');
+              }}
+              disabled={!!deletingSessionId}
+            >
+              取消
+            </Button>
+            {deleteTargetSession?.has_children ? (
+              <>
+                <Button
+                  variant="outline"
+                  data-testid="workbench-session-delete-self-confirm"
+                  disabled={!!deletingSessionId}
+                  onClick={() => void performDeleteSession(deleteTargetSession.session_id, 'self')}
+                >
+                  仅删除当前会话
+                </Button>
+                <Button
+                  variant="destructive"
+                  data-testid="workbench-session-delete-descendants-confirm"
+                  disabled={!!deletingSessionId}
+                  onClick={() => void performDeleteSession(deleteTargetSession.session_id, 'self_and_descendants')}
+                >
+                  删除当前会话和子会话
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="destructive"
+                data-testid="workbench-session-delete-confirm"
+                disabled={!!deletingSessionId}
+                onClick={() => void performDeleteSession(deleteTargetSession.session_id, 'self')}
+              >
+                删除
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </SessionCtx.Provider>
+  );
 }
 
 // ── Hooks ──

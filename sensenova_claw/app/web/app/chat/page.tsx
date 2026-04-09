@@ -135,16 +135,21 @@ function SessionListItem({
 }) {
   const { locale, t } = useI18n();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const hasChildren = Boolean(session.has_children);
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (hasChildren) {
+      onDelete();
+      return;
+    }
     if (confirmDelete) {
       onDelete();
       setConfirmDelete(false);
-    } else {
-      setConfirmDelete(true);
-      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
     }
+    setConfirmDelete(true);
+    setTimeout(() => setConfirmDelete(false), 3000);
   };
 
   if (isChild) {
@@ -177,7 +182,7 @@ function SessionListItem({
             <div className="truncate text-[11px] font-medium">{getTitle(session.meta, locale)}</div>
             <div className="text-[9px] text-muted-foreground/50 mt-0.5">{timeLabel(session.last_active, locale)}</div>
           </div>
-          <button onClick={handleDelete} className={cn('shrink-0 p-0.5 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive hover:bg-destructive/10' : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive')}>
+          <button data-testid={`chat-delete-session-${session.session_id}`} onClick={handleDelete} className={cn('shrink-0 p-0.5 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive hover:bg-destructive/10' : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive')}>
             <Trash2 className="w-2.5 h-2.5" />
           </button>
         </div>
@@ -199,7 +204,7 @@ function SessionListItem({
         <div className="truncate font-medium text-xs">{getTitle(session.meta, locale)}</div>
         <div className="text-[10px] text-muted-foreground mt-0.5">{timeLabel(session.last_active, locale)}</div>
       </div>
-      <button onClick={handleDelete} className={cn('shrink-0 p-1 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive' : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive')}>
+      <button data-testid={`chat-delete-session-${session.session_id}`} onClick={handleDelete} className={cn('shrink-0 p-1 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive' : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive')}>
         <Trash2 className="w-3.5 h-3.5" />
       </button>
     </div>

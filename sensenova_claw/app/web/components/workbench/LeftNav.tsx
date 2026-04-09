@@ -33,16 +33,21 @@ function RecentChatItem({
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const title = getTitle(session.meta);
+  const hasChildren = Boolean(session.has_children);
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (hasChildren) {
+      onDelete();
+      return;
+    }
     if (confirmDelete) {
       onDelete();
       setConfirmDelete(false);
-    } else {
-      setConfirmDelete(true);
-      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
     }
+    setConfirmDelete(true);
+    setTimeout(() => setConfirmDelete(false), 3000);
   };
 
   if (isChild) {
@@ -82,13 +87,14 @@ function RecentChatItem({
           </div>
           <button
             onClick={handleDelete}
+            data-testid={`workbench-delete-session-${session.session_id}`}
             className={cn(
               'shrink-0 p-0.5 rounded transition-colors',
               confirmDelete
                 ? 'opacity-100 text-destructive hover:bg-destructive/10'
                 : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10',
             )}
-            title={confirmDelete ? '确认删除' : '删除会话'}
+            title={hasChildren ? '删除会话' : confirmDelete ? '确认删除' : '删除会话'}
           >
             <Trash2 className="w-2.5 h-2.5" />
           </button>
@@ -122,13 +128,14 @@ function RecentChatItem({
       </div>
       <button
         onClick={handleDelete}
+        data-testid={`workbench-delete-session-${session.session_id}`}
         className={cn(
           'shrink-0 p-1 rounded-lg transition-colors mt-0.5',
           confirmDelete
             ? 'opacity-100 text-destructive hover:bg-destructive/10'
             : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10',
         )}
-        title={confirmDelete ? '确认删除' : '删除会话'}
+        title={hasChildren ? '删除会话' : confirmDelete ? '确认删除' : '删除会话'}
       >
         <Trash2 className="w-3 h-3" />
       </button>

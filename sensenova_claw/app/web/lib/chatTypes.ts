@@ -55,6 +55,7 @@ export interface SessionItem {
   last_active: number;
   meta: string;
   status: string;
+  has_children?: boolean;
   last_turn_status?: 'started' | 'completed' | 'cancelled' | 'error' | null;
   last_turn_ended_at?: number | null;
   last_agent_response?: string | null;
