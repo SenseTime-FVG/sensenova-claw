@@ -129,7 +129,7 @@ class AgentRegistry:
             max_tokens=agent_dict.get("max_tokens"),
             system_prompt=system_prompt,
             tools=list(agent_dict.get("tools", [])),
-            skills=list(agent_dict.get("skills", [])),
+            skills=None if agent_dict.get("skills") is None else list(agent_dict.get("skills", [])),
             workdir=agent_dict.get("workdir", ""),
             can_delegate_to=_parse_delegate_list(agent_dict),
             max_delegation_depth=agent_dict.get(
