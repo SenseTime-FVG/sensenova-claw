@@ -67,6 +67,11 @@ export interface TaskGroup {
   sessions: SessionItem[];
 }
 
+export interface SessionTreeNode {
+  session: SessionItem;
+  children: SessionTreeNode[];
+}
+
 export interface AgentOption {
   id: string;
   name: string;
@@ -647,4 +652,52 @@ export function groupSessionsToTasks(sessions: SessionItem[]): TaskGroup[] {
   }
 
   return Array.from(taskMap.values()).sort((a, b) => b.lastActive - a.lastActive);
+}
+
+export function buildSessionTree(sessions: SessionItem[]): SessionTreeNode[] {
+  const nodes = new Map<string, SessionTreeNode>();
+  const orderedSessions = [...sessions].sort((a, b) => b.last_active - a.last_active);
+
+  for (const session of orderedSessions) {
+    nodes.set(session.session_id, { session, children: [] });
+  }
+
+  const roots: SessionTreeNode[] = [];
+
+  for (const session of orderedSessions) {
+    const node = nodes.get(session.session_id);
+    if (!node) continue;
+    const parentId = getParentSessionId(session.meta);
+
+    if (!parentId || parentId === session.session_id) {
+      roots.push(node);
+      continue;
+    }
+
+    const parentNode = nodes.get(parentId);
+    if (!parentNode) {
+      roots.push(node);
+      continue;
+    }
+
+    let cursor: SessionTreeNode | undefined = parentNode;
+    let createsCycle = false;
+    while (cursor) {
+      if (cursor.session.session_id === session.session_id) {
+        createsCycle = true;
+        break;
+      }
+      const nextParentId = getParentSessionId(cursor.session.meta);
+      cursor = nextParentId ? nodes.get(nextParentId) : undefined;
+    }
+
+    if (createsCycle) {
+      roots.push(node);
+      continue;
+    }
+
+    parentNode.children.push(node);
+  }
+
+  return roots;
 }

@@ -9,7 +9,7 @@ import {
 import { cn } from '@/lib/utils';
 import { authFetch, authGet, API_BASE } from '@/lib/authFetch';
 import { useSession } from '@/contexts/ws';
-import { type SessionItem, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
+import { type SessionItem, type SessionTreeNode, buildSessionTree, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
 import type { CronJob } from '@/hooks/useDashboardData';
 
 // ── 最近对话列表项 ──
@@ -139,26 +139,29 @@ function RecentChatItem({
 // ── 可展开的主会话项（包含子会话下拉） ──
 
 function ParentSessionGroup({
-  session,
-  children: childSessions,
+  node,
   agentMap,
   currentSessionId,
   switchSession,
   deleteSession,
+  isChild = false,
+  isLast = false,
 }: {
-  session: SessionItem;
-  children: SessionItem[];
+  node: SessionTreeNode;
   agentMap: Record<string, string>;
   currentSessionId: string | null;
   switchSession: (sid: string) => void;
   deleteSession: (sid: string) => Promise<void>;
+  isChild?: boolean;
+  isLast?: boolean;
 }) {
-  const hasActiveChild = childSessions.some(c => c.session_id === currentSessionId);
+  const { session, children: childSessions } = node;
+  const hasActiveChild = childSessions.some(child => child.session.session_id === currentSessionId);
   const [expanded, setExpanded] = useState(hasActiveChild);
 
   useEffect(() => {
     if (hasActiveChild && !expanded) setExpanded(true);
-  }, [hasActiveChild]);
+  }, [expanded, hasActiveChild]);
 
   const toggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -177,13 +180,16 @@ function ParentSessionGroup({
         isActive={currentSessionId === session.session_id}
         onClick={() => switchSession(session.session_id)}
         onDelete={() => deleteSession(session.session_id)}
+        isChild={isChild}
+        isLast={isLast}
       />
 
       {/* 展开/收起按钮 */}
       <button
         onClick={toggleExpand}
         className={cn(
-          'flex items-center gap-1.5 w-full pl-6 pr-3 py-1 transition-colors',
+          'flex items-center gap-1.5 w-full pr-3 py-1 transition-colors',
+          isChild ? 'pl-10' : 'pl-6',
           'text-[10px] font-medium',
           expanded
             ? 'text-indigo-600 dark:text-indigo-300'
@@ -205,16 +211,29 @@ function ParentSessionGroup({
       {expanded && (
         <div className="pl-4 pr-1">
           {childSessions.map((child, idx) => (
-            <RecentChatItem
-              key={child.session_id}
-              session={child}
-              agentName={agentMap[getAgentId(child.meta)] || getAgentId(child.meta)}
-              isActive={currentSessionId === child.session_id}
-              onClick={() => switchSession(child.session_id)}
-              onDelete={() => deleteSession(child.session_id)}
-              isChild
-              isLast={idx === childSessions.length - 1}
-            />
+            child.children.length > 0 ? (
+              <ParentSessionGroup
+                key={child.session.session_id}
+                node={child}
+                agentMap={agentMap}
+                currentSessionId={currentSessionId}
+                switchSession={switchSession}
+                deleteSession={deleteSession}
+                isChild
+                isLast={idx === childSessions.length - 1}
+              />
+            ) : (
+              <RecentChatItem
+                key={child.session.session_id}
+                session={child.session}
+                agentName={agentMap[getAgentId(child.session.meta)] || getAgentId(child.session.meta)}
+                isActive={currentSessionId === child.session.session_id}
+                onClick={() => switchSession(child.session.session_id)}
+                onDelete={() => deleteSession(child.session.session_id)}
+                isChild
+                isLast={idx === childSessions.length - 1}
+              />
+            )
           ))}
         </div>
       )}
@@ -257,27 +276,11 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
 
   useEffect(() => { loadAgents(); }, [loadAgents]);
 
-  // 将 sessions 按父子关系分组
-  const { rootSessions, childrenMap } = (() => {
+  const sessionTree = (() => {
     const filtered = [...sessions]
       .filter(s => !agentFilter || getAgentId(s.meta) === agentFilter)
       .sort((a, b) => b.last_active - a.last_active);
-
-    const sessionIdSet = new Set(filtered.map(s => s.session_id));
-    const cMap: Record<string, SessionItem[]> = {};
-    const roots: SessionItem[] = [];
-
-    for (const s of filtered) {
-      const parentId = getParentSessionId(s.meta);
-      if (parentId && sessionIdSet.has(parentId)) {
-        if (!cMap[parentId]) cMap[parentId] = [];
-        cMap[parentId].push(s);
-      } else {
-        roots.push(s);
-      }
-    }
-
-    return { rootSessions: roots, childrenMap: cMap };
+    return buildSessionTree(filtered);
   })();
 
   const handleNewChat = () => {
@@ -317,9 +320,9 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-2.5 py-2.5 space-y-1">
-        {loadingSessions && rootSessions.length === 0 ? (
+        {loadingSessions && sessionTree.length === 0 ? (
           <p className="text-xs text-muted-foreground/50 px-1 py-8 text-center">加载中...</p>
-        ) : rootSessions.length === 0 ? (
+        ) : sessionTree.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <Clock className="w-8 h-8 text-muted-foreground/20 mb-2" />
             <p className="text-xs text-muted-foreground/50 mb-2">暂无对话记录</p>
@@ -331,31 +334,28 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
             </button>
           </div>
         ) : (
-          rootSessions.map(session => {
-            const children = childrenMap[session.session_id] || [];
-            if (children.length === 0) {
+          sessionTree.map(node => {
+            if (node.children.length === 0) {
               return (
                 <RecentChatItem
-                  key={session.session_id}
-                  session={session}
-                  agentName={agentMap[getAgentId(session.meta)] || getAgentId(session.meta)}
-                  isActive={currentSessionId === session.session_id}
-                  onClick={() => switchSession(session.session_id)}
-                  onDelete={() => deleteSession(session.session_id)}
+                  key={node.session.session_id}
+                  session={node.session}
+                  agentName={agentMap[getAgentId(node.session.meta)] || getAgentId(node.session.meta)}
+                  isActive={currentSessionId === node.session.session_id}
+                  onClick={() => switchSession(node.session.session_id)}
+                  onDelete={() => deleteSession(node.session.session_id)}
                 />
               );
             }
             return (
               <ParentSessionGroup
-                key={session.session_id}
-                session={session}
+                key={node.session.session_id}
+                node={node}
                 agentMap={agentMap}
                 currentSessionId={currentSessionId}
                 switchSession={switchSession}
                 deleteSession={deleteSession}
-              >
-                {children}
-              </ParentSessionGroup>
+              />
             );
           })
         )}
