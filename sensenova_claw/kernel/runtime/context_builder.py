@@ -141,8 +141,10 @@ class ContextBuilder:
         """格式化 skills 列表为 prompt 文本（支持 agent_config 过滤）"""
         if not self.skill_registry:
             return None
+        # 按 agent_config 过滤 skills：None = 禁止所有，[] = 全部，[...] = 白名单
+        if agent_config and agent_config.skills is None:
+            return None
         skills = self.skill_registry.get_all()
-        # 按 agent_config 过滤 skills
         if agent_config and agent_config.skills:
             allowed = set(agent_config.skills)
             skills = [s for s in skills if s.name in allowed]
