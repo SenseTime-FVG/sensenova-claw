@@ -38,6 +38,10 @@ class AgentConfig:
     skills: list[str] | None = field(default_factory=list)   # 允许使用的 Skills 列表（空 = 全部，None = 禁止）
     workdir: str = ""                                 # 工作目录（空=运行时解析为 workspace/workdir/{id}）
 
+    # Prompt 配置
+    exclude_prompt_sections: list[str] = field(default_factory=list)  # 排除的 prompt section（空 = 全部加载）
+    # 可选值: workspace, datetime, runtime, extra, tooling, delegation, skills, context_files, memory
+
     # 委托配置
     can_delegate_to: list[str] | None = field(default_factory=list)   # 可委托的 Agent ID 列表（空 = 全部，None = 禁止）
     max_delegation_depth: int = 3                               # 最大委托深度
@@ -62,6 +66,7 @@ class AgentConfig:
             "tools": list(self.tools),
             "skills": list(self.skills) if self.skills is not None else None,
             "workdir": self.workdir,
+            "exclude_prompt_sections": list(self.exclude_prompt_sections),
             "can_delegate_to": list(self.can_delegate_to) if self.can_delegate_to is not None else None,
             "max_delegation_depth": self.max_delegation_depth,
             "max_pingpong_turns": self.max_pingpong_turns,
@@ -85,6 +90,7 @@ class AgentConfig:
             tools=list(data.get("tools", [])),
             skills=None if data.get("skills") is None else list(data.get("skills", [])),
             workdir=data.get("workdir", ""),
+            exclude_prompt_sections=list(data.get("exclude_prompt_sections", [])),
             can_delegate_to=_parse_delegate_list(data),
             max_delegation_depth=data.get(
                 "max_send_depth",

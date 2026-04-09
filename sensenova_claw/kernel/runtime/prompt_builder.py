@@ -51,32 +51,43 @@ class SystemPromptParams:
     extra_system_prompt: str | None = None
     runtime_info: RuntimeInfo | None = None
     workspace_dir: str | None = None           # v1.2: 工作目录
+    exclude_prompt_sections: list[str] = field(default_factory=list)  # 排除的 section（空 = 全部加载）
 
 
 # ---------- 公开接口 ----------
 
 def build_system_prompt(params: SystemPromptParams) -> str:
-    """根据参数构建完整的 system prompt（纯函数，不做文件 I/O）"""
+    """根据参数构建完整的 system prompt（纯函数，不做文件 I/O）
+
+    当 params.prompt_sections 不为 None 时，仅加载白名单中的 section。
+    identity 始终包含（核心身份不可跳过）。
+    """
     if params.prompt_mode == "none":
         return "You are a personal assistant running inside Sensenova-Claw."
 
+    excluded = set(params.exclude_prompt_sections)
+
+    def _include(name: str) -> bool:
+        """判断 section 是否应包含（不在排除列表中）。"""
+        return name not in excluded
+
     sections = [
         # 1. 环境信息
-        _build_workspace(params.workspace_dir),
-        _build_datetime(),
-        _build_runtime(params.runtime_info),
-        # 2. 核心身份
+        _build_workspace(params.workspace_dir) if _include("workspace") else None,
+        _build_datetime() if _include("datetime") else None,
+        _build_runtime(params.runtime_info) if _include("runtime") else None,
+        # 2. 核心身份（始终包含，不受排除控制）
         _build_identity(params.base_prompt),
         # 3. 身份补充
-        _build_extra(params.extra_system_prompt),
+        _build_extra(params.extra_system_prompt) if _include("extra") else None,
         # 4. 能力声明
-        _build_tooling(params.tool_names, params.tool_summaries),
-        _build_delegation(params.delegation_prompt),
-        _build_skills(params.skills_prompt),
+        _build_tooling(params.tool_names, params.tool_summaries) if _include("tooling") else None,
+        _build_delegation(params.delegation_prompt) if _include("delegation") else None,
+        _build_skills(params.skills_prompt) if _include("skills") else None,
         # 5. 项目规则
-        _build_context_files(params.context_files),
+        _build_context_files(params.context_files) if _include("context_files") else None,
         # 6. 记忆召回
-        _build_memory(params.memory_context),
+        _build_memory(params.memory_context) if _include("memory") else None,
     ]
 
     lines: list[str] = []

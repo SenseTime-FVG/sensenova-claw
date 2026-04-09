@@ -103,6 +103,7 @@ class ContextBuilder:
             extra_system_prompt=extra,
             runtime_info=self._collect_runtime_info(agent_config),
             workspace_dir=effective_workdir,
+            exclude_prompt_sections=agent_config.exclude_prompt_sections if agent_config else [],
         )
         system_prompt = build_system_prompt(params)
 

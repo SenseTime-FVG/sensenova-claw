@@ -131,6 +131,7 @@ class AgentRegistry:
             tools=list(agent_dict.get("tools", [])),
             skills=None if agent_dict.get("skills") is None else list(agent_dict.get("skills", [])),
             workdir=agent_dict.get("workdir", ""),
+            exclude_prompt_sections=list(agent_dict.get("exclude_prompt_sections", [])),
             can_delegate_to=_parse_delegate_list(agent_dict),
             max_delegation_depth=agent_dict.get(
                 "max_send_depth",
