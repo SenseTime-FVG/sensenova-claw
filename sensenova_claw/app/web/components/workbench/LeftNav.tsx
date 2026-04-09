@@ -8,9 +8,37 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authFetch, authGet, API_BASE } from '@/lib/authFetch';
-import { useSession } from '@/contexts/ws';
+import { useEventDispatcher, useSession } from '@/contexts/ws';
 import { type SessionItem, type SessionTreeNode, buildSessionTree, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
 import type { CronJob } from '@/hooks/useDashboardData';
+
+function getSessionRunState(session: SessionItem, workingSessionIds: Set<string>): 'running' | 'idle' {
+  if (workingSessionIds.has(session.session_id)) return 'running';
+  return session.last_turn_status === 'started' ? 'running' : 'idle';
+}
+
+function SessionStatusDot({
+  session,
+  sizeClass,
+  workingSessionIds,
+}: {
+  session: SessionItem;
+  sizeClass: string;
+  workingSessionIds: Set<string>;
+}) {
+  const runState = getSessionRunState(session, workingSessionIds);
+  return (
+    <span
+      data-testid={`workbench-session-status-${session.session_id}`}
+      data-status={runState}
+      className={cn(
+        'rounded-full border border-background/80 shadow-sm',
+        sizeClass,
+        runState === 'running' ? 'bg-amber-400' : 'bg-emerald-400',
+      )}
+    />
+  );
+}
 
 // ── 最近对话列表项 ──
 
@@ -20,6 +48,7 @@ function RecentChatItem({
   isActive,
   onClick,
   onDelete,
+  workingSessionIds,
   isChild,
   isLast,
 }: {
@@ -28,6 +57,7 @@ function RecentChatItem({
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
+  workingSessionIds: Set<string>;
   isChild?: boolean;
   isLast?: boolean;
 }) {
@@ -73,10 +103,13 @@ function RecentChatItem({
               : 'hover:bg-indigo-50/60 text-foreground/70 dark:hover:bg-indigo-800/20 dark:text-foreground/80',
           )}
         >
-          <div className={cn(
-            'w-1.5 h-1.5 rounded-full shrink-0',
-            isActive ? 'bg-indigo-500 dark:bg-indigo-400' : 'bg-indigo-300/60 dark:bg-indigo-400/50',
-          )} />
+          <div className="shrink-0 w-3 flex flex-col items-center gap-1">
+            <div className={cn(
+              'w-1.5 h-1.5 rounded-full',
+              isActive ? 'bg-indigo-500 dark:bg-indigo-400' : 'bg-indigo-300/60 dark:bg-indigo-400/50',
+            )} />
+            <SessionStatusDot session={session} sizeClass="w-2 h-2" workingSessionIds={workingSessionIds} />
+          </div>
           <div className="flex-1 min-w-0">
             <div className="truncate text-[11px] font-medium">{title}</div>
             <div className="flex items-center gap-1 mt-0.5">
@@ -113,10 +146,13 @@ function RecentChatItem({
           : 'hover:bg-muted/60 text-foreground/80 border border-transparent dark:text-foreground/90',
       )}
     >
-      <MessageSquare className={cn(
-        'w-3.5 h-3.5 shrink-0 mt-0.5',
-        isActive ? 'text-primary' : 'text-muted-foreground',
-      )} />
+      <div className="shrink-0 w-4 flex flex-col items-center gap-1">
+        <MessageSquare className={cn(
+          'w-3.5 h-3.5 mt-0.5',
+          isActive ? 'text-primary' : 'text-muted-foreground',
+        )} />
+        <SessionStatusDot session={session} sizeClass="w-2 h-2" workingSessionIds={workingSessionIds} />
+      </div>
       <div className="flex-1 min-w-0">
         <div className="truncate font-medium text-xs">{title}</div>
         <div className="flex items-center gap-1.5 mt-0.5">
@@ -177,6 +213,7 @@ function ParentSessionGroup({
   currentSessionId,
   switchSession,
   deleteSession,
+  workingSessionIds,
   isChild = false,
   isLast = false,
 }: {
@@ -185,6 +222,7 @@ function ParentSessionGroup({
   currentSessionId: string | null;
   switchSession: (sid: string) => void;
   deleteSession: (sid: string) => Promise<void>;
+  workingSessionIds: Set<string>;
   isChild?: boolean;
   isLast?: boolean;
 }) {
@@ -213,6 +251,7 @@ function ParentSessionGroup({
         isActive={currentSessionId === session.session_id}
         onClick={() => switchSession(session.session_id)}
         onDelete={() => deleteSession(session.session_id)}
+        workingSessionIds={workingSessionIds}
       />
 
       {/* 展开/收起按钮 */}
@@ -250,6 +289,7 @@ function ParentSessionGroup({
                 currentSessionId={currentSessionId}
                 switchSession={switchSession}
                 deleteSession={deleteSession}
+                workingSessionIds={workingSessionIds}
                 isChild
                 isLast={idx === childSessions.length - 1}
               />
@@ -261,6 +301,7 @@ function ParentSessionGroup({
                 isActive={currentSessionId === child.session.session_id}
                 onClick={() => switchSession(child.session.session_id)}
                 onDelete={() => deleteSession(child.session.session_id)}
+                workingSessionIds={workingSessionIds}
                 isChild
                 isLast={idx === childSessions.length - 1}
               />
@@ -292,6 +333,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
     refreshTaskGroups,
     loadingSessions,
   } = useSession();
+  const { globalActivity } = useEventDispatcher();
 
   const [agentMap, setAgentMap] = useState<Record<string, string>>({});
   const [loadingAgents, setLoadingAgents] = useState(true);
@@ -383,6 +425,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
                   isActive={currentSessionId === node.session.session_id}
                   onClick={() => switchSession(node.session.session_id)}
                   onDelete={() => deleteSession(node.session.session_id)}
+                  workingSessionIds={globalActivity.workingSessionIds}
                 />
               );
             }
@@ -394,6 +437,7 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
                 currentSessionId={currentSessionId}
                 switchSession={switchSession}
                 deleteSession={deleteSession}
+                workingSessionIds={globalActivity.workingSessionIds}
               />
             );
           })

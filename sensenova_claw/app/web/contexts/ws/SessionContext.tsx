@@ -47,7 +47,13 @@ const SessionCtx = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { wsSend } = useWebSocket();
-  const { subscribeGlobal, subscribeFrontendCreate, setCurrentSessionId, markFrontendCreate } = useEventDispatcher();
+  const {
+    subscribeCurrentSession,
+    subscribeGlobal,
+    subscribeFrontendCreate,
+    setCurrentSessionId,
+    markFrontendCreate,
+  } = useEventDispatcher();
 
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -188,6 +194,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     startNewChat();
   }, [startNewChat]);
 
+  const updateSessionTurnStatus = useCallback((
+    sid: string | null | undefined,
+    nextStatus: SessionItem['last_turn_status'],
+  ) => {
+    if (!sid) return;
+    setSessions((prev) => prev.map((session) => (
+      session.session_id === sid
+        ? { ...session, last_turn_status: nextStatus }
+        : session
+    )));
+  }, []);
+
   // ── 监听全局事件 ──
 
   useEffect(() => {
@@ -222,6 +240,28 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       }
     });
   }, [subscribeGlobal, loadSessionList, startNewChat]);
+
+  useEffect(() => {
+    return subscribeCurrentSession((event: WsInboundEvent) => {
+      switch (event.type) {
+        case 'agent_thinking':
+        case 'tool_execution':
+        case 'llm_delta':
+        case 'llm_result':
+          updateSessionTurnStatus(event.session_id, 'started');
+          break;
+        case 'turn_completed':
+          updateSessionTurnStatus(event.session_id, 'completed');
+          break;
+        case 'turn_cancelled':
+          updateSessionTurnStatus(event.session_id, 'cancelled');
+          break;
+        case 'error':
+          updateSessionTurnStatus(event.session_id, 'error');
+          break;
+      }
+    });
+  }, [subscribeCurrentSession, updateSessionTurnStatus]);
 
   // ── 监听前端主动创建的 session ──
 
@@ -331,14 +371,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
                 </Button>
               </>
             ) : (
-              <Button
-                variant="destructive"
-                data-testid="workbench-session-delete-confirm"
-                disabled={!!deletingSessionId}
-                onClick={() => void performDeleteSession(deleteTargetSession.session_id, 'self')}
-              >
-                删除
-              </Button>
+                <Button
+                  variant="destructive"
+                  data-testid="workbench-session-delete-confirm"
+                  disabled={!!deletingSessionId}
+                  onClick={() => {
+                    if (!deleteTargetSession) return;
+                    void performDeleteSession(deleteTargetSession.session_id, 'self');
+                  }}
+                >
+                  删除
+                </Button>
             )}
           </DialogFooter>
         </DialogContent>

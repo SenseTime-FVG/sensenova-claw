@@ -118,12 +118,18 @@ export function EventDispatcherProvider({ children }: { children: React.ReactNod
 
       // 1. 全局活动追踪（在分发之前，对所有 session 生效）
       if (eventSessionId) {
-        if (eventType === 'agent_thinking') {
+        if (
+          eventType === 'agent_thinking' ||
+          eventType === 'llm_delta' ||
+          eventType === 'llm_result' ||
+          eventType === 'tool_execution'
+        ) {
           setGlobalWorkingSessions(prev => prev.has(eventSessionId) ? prev : new Set(prev).add(eventSessionId));
         } else if (eventType === 'turn_completed' || eventType === 'turn_cancelled' || eventType === 'error') {
           setGlobalWorkingSessions(prev => { if (!prev.has(eventSessionId)) return prev; const next = new Set(prev); next.delete(eventSessionId); return next; });
-        } else if (eventType === 'tool_execution') {
-          setGlobalLastToolName((event.payload as { tool_name?: string }).tool_name || '');
+        }
+        if (eventType === 'tool_execution') {
+          setGlobalLastToolName(event.payload.tool_name || '');
         }
       }
 
