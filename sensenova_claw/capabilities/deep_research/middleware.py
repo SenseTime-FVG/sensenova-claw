@@ -65,7 +65,7 @@ class DeepResearchMiddleware:
         from_agent = meta.get("from_agent", "")
         dimension_id = meta.get("dimension_id", "")
 
-        if from_agent == "research-agent":
+        if from_agent.startswith("research-agent"):
             await self._handle_research_completed(event, research_id, dimension_id)
         elif from_agent == "review-agent":
             await self._handle_review_completed(event, research_id)

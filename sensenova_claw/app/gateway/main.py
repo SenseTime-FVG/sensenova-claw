@@ -238,6 +238,21 @@ async def lifespan(app: FastAPI):
         agent_runtime=agent_runtime,
         retry_backoff_seconds=list(config.get("delegation.retry.backoff_seconds", [0, 1, 3])),
     )
+    # v1.3: Deep Research 中间件（透明治理层）
+    from sensenova_claw.capabilities.deep_research import (
+        CitationManager, StateTracker, DeepResearchMiddleware,
+    )
+    deep_research_cm = CitationManager()
+    deep_research_st = StateTracker()
+    deep_research_mw = DeepResearchMiddleware(
+        citation_manager=deep_research_cm,
+        state_tracker=deep_research_st,
+        bus=bus,
+    )
+    agent_message_coordinator.register_on_child_completed_hook(
+        deep_research_mw.on_child_completed
+    )
+
     title_runtime = TitleRuntime(bus=bus, repo=repo, agent_registry=agent_registry)
 
     gateway = Gateway(
