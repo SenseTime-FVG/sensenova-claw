@@ -108,10 +108,27 @@ test('工作台左侧删除含子会话的记录时应弹出作用域确认框',
     const request = route.request();
     if (request.method() === 'DELETE') {
       deleteCalls.push(request.url());
+      if (request.url().includes('sess-child')) {
+        await route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: "Session 'sess-child' not found" }),
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ status: 'deleted', session_id: request.url().includes('sess-root') ? 'sess-root' : 'sess-leaf' }),
+        body: JSON.stringify(
+          request.url().includes('scope=self_and_descendants')
+            ? {
+                status: 'deleted',
+                session_id: 'sess-root',
+                scope: 'self_and_descendants',
+                deleted_session_ids: ['sess-root', 'sess-child'],
+              }
+            : { status: 'deleted', session_id: 'sess-leaf' },
+        ),
       });
       return;
     }
@@ -196,6 +213,8 @@ test('工作台左侧删除含子会话的记录时应弹出作用域确认框',
   await page.getByTestId('workbench-session-delete-descendants-confirm').click();
 
   await expect.poll(() => deleteCalls.at(-1) ?? '').toContain('scope=self_and_descendants');
+  await expect(page.getByText('主任务会话')).toBeHidden();
+  await expect(page.getByText('[send_message] 子会话')).toBeHidden();
 
   await expect(page.getByText('普通会话')).toBeVisible();
   await page.getByTestId('workbench-delete-session-sess-leaf').click({ force: true });

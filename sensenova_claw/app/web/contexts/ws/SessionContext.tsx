@@ -152,10 +152,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const performDeleteSession = useCallback(async (sid: string, scope: 'self' | 'self_and_descendants' = 'self') => {
     setDeletingSessionId(sid);
     setDeleteError('');
+    let deletedSessionIds: string[] = [sid];
     try {
       const suffix = scope === 'self_and_descendants' ? '?scope=self_and_descendants' : '';
       const res = await authFetch(`${API_BASE}/api/sessions/${sid}${suffix}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('delete failed');
+      const data = await res.json().catch(() => ({}));
+      if (Array.isArray(data.deleted_session_ids) && data.deleted_session_ids.length > 0) {
+        deletedSessionIds = data.deleted_session_ids
+          .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
+      }
       setDeleteTargetId(null);
     } catch {
       setDeleteError('删除失败');
@@ -163,8 +169,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setDeletingSessionId(null);
     }
-    setSessions(prev => prev.filter(s => s.session_id !== sid));
-    if (sessionIdRef.current === sid) {
+    const deletedSet = new Set(deletedSessionIds);
+    setSessions(prev => prev.filter(s => !deletedSet.has(s.session_id)));
+    if (sessionIdRef.current && deletedSet.has(sessionIdRef.current)) {
       startNewChat();
     }
   }, [startNewChat]);
