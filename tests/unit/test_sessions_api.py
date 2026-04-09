@@ -85,6 +85,46 @@ def test_delete_session_missing_returns_404(client):
     assert resp.status_code == 404
 
 
+def test_delete_session_self_and_descendants_removes_child_sessions_only(client, app):
+    _run(app.state.services.repo.create_session("sess_root", meta={"title": "Root"}))
+    _run(app.state.services.repo.create_session(
+        "sess_parent",
+        meta={"title": "Parent", "parent_session_id": "sess_root", "agent_id": "helper"},
+    ))
+    _run(app.state.services.repo.create_session(
+        "sess_child",
+        meta={"title": "Child", "parent_session_id": "sess_parent"},
+    ))
+    _run(app.state.services.repo.create_session(
+        "sess_grandchild",
+        meta={"title": "Grandchild", "parent_session_id": "sess_child"},
+    ))
+
+    writer = SessionJsonlWriter(base_dir=app.state.sensenova_claw_home + "/agents")
+    writer.append("default", "sess_root", "turn_1", {"role": "user", "content": "root"})
+    writer.append("helper", "sess_parent", "turn_1", {"role": "user", "content": "parent"})
+    writer.append("default", "sess_child", "turn_1", {"role": "user", "content": "child"})
+    writer.append("default", "sess_grandchild", "turn_1", {"role": "user", "content": "grandchild"})
+
+    resp = client.delete("/api/sessions/sess_parent?scope=self_and_descendants")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "status": "deleted",
+        "session_id": "sess_parent",
+        "scope": "self_and_descendants",
+        "deleted_session_ids": ["sess_parent", "sess_child", "sess_grandchild"],
+    }
+    assert _run(app.state.services.repo.get_session_meta("sess_root")) is not None
+    assert _run(app.state.services.repo.get_session_meta("sess_parent")) is None
+    assert _run(app.state.services.repo.get_session_meta("sess_child")) is None
+    assert _run(app.state.services.repo.get_session_meta("sess_grandchild")) is None
+    assert writer._session_path("default", "sess_root").exists() is True
+    assert writer._session_path("helper", "sess_parent").exists() is False
+    assert writer._session_path("default", "sess_child").exists() is False
+    assert writer._session_path("default", "sess_grandchild").exists() is False
+
+
 def test_list_sessions_hides_hidden_by_default(client, app):
     _run(app.state.services.repo.create_session("sess_visible", meta={"title": "Visible"}))
     _run(app.state.services.repo.create_session(
@@ -113,6 +153,21 @@ def test_list_sessions_include_hidden_returns_hidden_sessions(client, app):
     session_ids = {item["session_id"] for item in resp.json()["sessions"]}
     assert "sess_visible" in session_ids
     assert "sess_hidden" in session_ids
+
+
+def test_list_sessions_marks_has_children(client, app):
+    _run(app.state.services.repo.create_session("sess_parent", meta={"title": "Parent"}))
+    _run(app.state.services.repo.create_session(
+        "sess_child",
+        meta={"title": "Child", "parent_session_id": "sess_parent"},
+    ))
+
+    resp = client.get("/api/sessions?include_hidden=1")
+
+    assert resp.status_code == 200
+    sessions = {item["session_id"]: item for item in resp.json()["sessions"]}
+    assert sessions["sess_parent"]["has_children"] is True
+    assert sessions["sess_child"]["has_children"] is False
 
 
 def test_get_session_detail_returns_session_payload(client, app):

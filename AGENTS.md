@@ -411,6 +411,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 - `/api/sessions/{id}/events` 返回的是仓库落盘后的内核事件名，例如 `user.question_asked`、`user.question_answered`，而不是前端实时 WebSocket 的 `user_question_asked`、`user_question_answered_event`；聊天历史重建必须同时兼容两套命名。
 - 对“切换会话回来 UI 丢状态”这类问题，最有效的 e2e 是直接 mock `/api/sessions/*/events` 返回历史事件，再通过真实的 session 切换操作验证恢复结果；这样能把“实时链路正常但历史恢复失效”单独钉住。
 
+### 2026-04-09 Sessions 子会话删除补充
+
+成功经验：
+- 对“删除当前会话还是删除整棵子树”这类分支行为，最稳的做法是在 `/api/sessions` 列表直接补 `has_children`，让前端只负责弹窗分流，不自己拼树。
+- 会话树删除语义应明确收口到 `DELETE /api/sessions/{id}?scope=self|self_and_descendants`；这样单删路径保持兼容，前端和 Playwright 也能直接断言请求参数。
+- 子会话递归删除建议仅沿 `meta.parent_session_id` 向下找后代，不回溯父会话；相应单测要明确断言“parent 保留、descendants 删除”。
+
+失败/风险经验：
+- 直接跑默认 `playwright.config.ts` 时，若本机已有 3000 端口服务会先被 `webServer` 阻塞；复用现有前端服务做定向回归时，更适合走不带 `webServer` 的 `playwright.gateway.config.ts`。
+
 失败/风险经验：
 - 如果只用实时 WebSocket 事件写回归，`ask_user` 看起来是好的，但一旦用户离开当前会话再回来，依赖历史事件重建的内联卡片仍会消失；这类功能必须区分“实时显示”和“历史恢复”两条路径分别覆盖。
 

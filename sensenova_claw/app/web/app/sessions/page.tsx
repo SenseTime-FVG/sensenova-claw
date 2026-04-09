@@ -25,12 +25,14 @@ interface Session {
   last_active: number;
   status: string;
   meta: string;
+  has_children?: boolean;
   channel?: string;
   message_count?: number;
 }
 
 interface AgentOption { id: string; name: string; description: string; }
 type SelectionMode = 'manual' | 'page' | 'filtered_all';
+type DeleteScope = 'self' | 'self_and_descendants';
 
 function formatTime(ts: number): string {
   if (!ts) return '-';
@@ -110,12 +112,13 @@ export default function SessionsPage() {
     setSessionToDelete(session);
   };
 
-  const deleteSession = async () => {
+  const deleteSession = async (scope: DeleteScope = 'self') => {
     if (!sessionToDelete) return;
     setDeletingSessionId(sessionToDelete.session_id);
     setDeleteError('');
     try {
-      const res = await authFetch(`${API_BASE}/api/sessions/${sessionToDelete.session_id}`, {
+      const suffix = scope === 'self_and_descendants' ? '?scope=self_and_descendants' : '';
+      const res = await authFetch(`${API_BASE}/api/sessions/${sessionToDelete.session_id}${suffix}`, {
         method: 'DELETE',
       });
       if (!res.ok) {
@@ -473,7 +476,9 @@ export default function SessionsPage() {
             <DialogTitle>确认删除会话</DialogTitle>
             <DialogDescription>
               {sessionToDelete
-                ? `确定要删除会话 "${parseTitle(sessionToDelete.meta)}" 吗？如果该会话仍在运行，将被强制终止并删除对应的 session 文件。`
+                ? sessionToDelete.has_children
+                  ? `会话 "${parseTitle(sessionToDelete.meta)}" 存在子会话。你可以仅删除当前会话，或删除当前会话和全部子会话。父会话不会被删除。`
+                  : `确定要删除会话 "${parseTitle(sessionToDelete.meta)}" 吗？如果该会话仍在运行，将被强制终止并删除对应的 session 文件。`
                 : ''}
             </DialogDescription>
           </DialogHeader>
@@ -489,16 +494,41 @@ export default function SessionsPage() {
             >
               取消
             </Button>
-            <Button
-              variant="destructive"
-              data-testid="session-delete-confirm"
-              onClick={deleteSession}
-              disabled={!sessionToDelete || !!deletingSessionId}
-              className="gap-2"
-            >
-              {deletingSessionId && <Loader2 size={16} className="animate-spin" />}
-              删除
-            </Button>
+            {sessionToDelete?.has_children ? (
+              <>
+                <Button
+                  variant="outline"
+                  data-testid="session-delete-self-confirm"
+                  onClick={() => deleteSession('self')}
+                  disabled={!sessionToDelete || !!deletingSessionId}
+                  className="gap-2"
+                >
+                  {deletingSessionId && <Loader2 size={16} className="animate-spin" />}
+                  仅删除当前会话
+                </Button>
+                <Button
+                  variant="destructive"
+                  data-testid="session-delete-descendants-confirm"
+                  onClick={() => deleteSession('self_and_descendants')}
+                  disabled={!sessionToDelete || !!deletingSessionId}
+                  className="gap-2"
+                >
+                  {deletingSessionId && <Loader2 size={16} className="animate-spin" />}
+                  删除当前会话和子会话
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="destructive"
+                data-testid="session-delete-confirm"
+                onClick={() => deleteSession('self')}
+                disabled={!sessionToDelete || !!deletingSessionId}
+                className="gap-2"
+              >
+                {deletingSessionId && <Loader2 size={16} className="animate-spin" />}
+                删除
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
