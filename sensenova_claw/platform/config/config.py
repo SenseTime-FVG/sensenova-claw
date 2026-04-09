@@ -379,10 +379,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "delegation": {
         "max_depth": 3,
         "default_timeout": 300,
-        "max_tool_calls": 30,
-        "max_llm_calls": 15,
+        "max_tool_calls": 100,
+        "max_llm_calls": 70,
         "retry": {
-            "max_retries": 0,
+            "max_retries": 3,
             "backoff_seconds": [0, 1, 3],
         },
         "enabled": True,
@@ -391,7 +391,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "user_involvement": "auto",        # auto / confirm_plan / interactive
         "max_retries_per_dimension": 2,
-        "max_waves": 5,
+        "max_waves": 10,
         "report_save_dir": "workspace/reports",
         "controller_agent": "deep-research-controller",
     },
