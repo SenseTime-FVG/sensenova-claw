@@ -1826,3 +1826,12 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 如果 e2e 只等待 `window.__phaserGame` 存在就开始断言，极易在 `agentSprites` 尚未同步完成时读到 `0`；这类测试必须等待 `scene.agentSprites.size` 或其他业务就绪信号，而不是只等游戏实例初始化。
+
+### 2026-04-09 CLI agent switch 鉴权补充
+
+成功经验：
+- CLI 同时依赖 WebSocket 和 HTTP 时，不能只保证 WS 自动带 token；`/agent switch` 这类命令会先请求 REST API，HTTP 客户端也必须自动附带 `Authorization: Bearer <token>`。
+- 这类问题最小红绿测试可以直接拦截 `urllib.request.urlopen`，断言 `CLIApp._http()` 发出的请求头；比先搭整套服务更快定位根因。
+
+失败/风险经验：
+- CLI 目前把 `/api/agents/{id}` 的所有错误都提示成“Agent 不存在”，会掩盖真实的 401/403；以后排查类似问题时要先看底层 HTTP 状态，不要只看终端文案。
