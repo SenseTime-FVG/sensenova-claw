@@ -53,6 +53,29 @@ class TestContextBuilder:
         # bash_command 不应出现（除非被允许）
         # 注意 send_message 等保留工具也可能被自动加入
 
+    def test_build_messages_tools_filter_does_not_hide_mcp_tools(self):
+        class _Registry:
+            def as_llm_tools(self, **kwargs):
+                return [
+                    {"name": "bash_command", "description": "bash", "parameters": {}},
+                    {"name": "read_file", "description": "read", "parameters": {}},
+                    {"name": "mcp__browsermcp__browser_snapshot", "description": "snapshot", "parameters": {}},
+                ]
+
+        agent = AgentConfig(
+            id="lim",
+            name="L",
+            tools=["bash_command"],
+            mcp_servers=["browsermcp"],
+            mcp_tools=["browsermcp/browser_snapshot"],
+        )
+        cb = ContextBuilder(tool_registry=_Registry(), sensenova_claw_home="/tmp")
+        msgs = cb.build_messages("hi", agent_config=agent)
+        sys_prompt = msgs[0]["content"]
+        assert "bash_command" in sys_prompt
+        assert "mcp__browsermcp__browser_snapshot" in sys_prompt
+        assert "read_file" not in sys_prompt
+
     def test_build_messages_with_agent_system_prompt(self):
         agent = AgentConfig(id="custom", name="C", system_prompt="你是代码助手")
         cb = ContextBuilder()

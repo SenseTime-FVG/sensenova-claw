@@ -135,7 +135,7 @@ class AgentSessionWorker(SessionWorker):
             # 保留 send_message 工具（除非 can_delegate_to 为 None 表示禁止委托）
             if self.agent_config.can_delegate_to is not None:
                 allowed.add("send_message")
-            tools = [t for t in all_tools if t["name"] in allowed]
+            tools = [t for t in all_tools if t["name"].startswith("mcp__") or t["name"] in allowed]
         if self.agent_config and self.agent_config.can_delegate_to is None:
             tools = [t for t in tools if t["name"] != "send_message"]
 
