@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import {
   Settings, ChevronDown, Zap, Presentation, MessageCircle, Home,
   Search, Clock, Brain, Server, Wrench, Star, Shield, Users,
+  Boxes,
   type LucideIcon,
 } from 'lucide-react';
 import { useCustomPages } from '@/hooks/useCustomPages';
@@ -27,6 +28,7 @@ const iconMap: Record<string, LucideIcon> = {
   tool: Wrench,
   star: Star,
   shield: Shield,
+  boxes: Boxes,
 };
 
 interface NavItem {
@@ -57,6 +59,7 @@ const adminNavItemDefs: { path: string; labelKey: string; icon?: string }[] = [
   { path: '/gateway', labelKey: 'nav.adminItems.gateway', icon: 'server' },
   { path: '/tools', labelKey: 'nav.adminItems.tools', icon: 'tool' },
   { path: '/skills', labelKey: 'nav.adminItems.skills', icon: 'star' },
+  { path: '/mcp', labelKey: 'nav.adminItems.mcp', icon: 'boxes' },
   { path: '/acp', labelKey: 'nav.adminItems.acp', icon: 'shield' },
 ];
 

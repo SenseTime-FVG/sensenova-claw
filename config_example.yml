@@ -174,6 +174,34 @@ llm:
   default_embedding_model: qwen-embedding
 
 # ════════════════════════════════════════════════════
+# MCP 配置
+# ════════════════════════════════════════════════════
+mcp:
+  servers:
+    filesystem:
+      transport: stdio
+      command: python3
+      args: ["/absolute/path/to/mcp_server.py"]
+      env:
+        MCP_API_KEY: ${MCP_API_KEY}
+      cwd: /absolute/path/to/workspace
+      timeout: 15
+
+    docs-search:
+      transport: sse
+      url: http://127.0.0.1:3100/sse
+      headers:
+        Authorization: Bearer ${DOCS_MCP_TOKEN}
+      timeout: 15
+
+    browser:
+      transport: streamable-http
+      url: http://127.0.0.1:3101/mcp
+      headers:
+        Authorization: Bearer ${BROWSER_MCP_TOKEN}
+      timeout: 20
+
+# ════════════════════════════════════════════════════
 # Agents 配置
 # ════════════════════════════════════════════════════
 # system_prompt 不在此文件配置，放在 .sensenova-claw/agents/<agent_id>/SYSTEM_PROMPT.md 中
@@ -185,6 +213,10 @@ agents:
     temperature: 1.0
     tools: []
     skills: []
+    mcp_servers_allow: []
+    mcp_servers_deny: []
+    mcp_tools_allow: []
+    mcp_tools_deny: []
     can_send_message_to: []
     max_send_depth: 2
     max_pingpong_turns: 10
@@ -261,6 +293,8 @@ agents:
     temperature: 1.0
     tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search", "get_secret", "write_secret"]
     skills: ["mineru-document-extractor", "research-union", "union-search-skill"]
+    mcp_servers_allow: ["docs-search"]
+    mcp_tools_allow: ["docs-search.search", "mcp__docs_search__fetch"]
     max_send_depth: 2
     enabled: true
 

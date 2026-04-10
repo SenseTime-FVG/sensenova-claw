@@ -46,6 +46,7 @@ class ContextBuilder:
         memory_context: str | None = None,
         context_files: list[ContextFile] | None = None,
         agent_config: AgentConfig | None = None,
+        session_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """构建 LLM 调用的完整消息列表"""
         # 收集工具信息（根据 agent_config 过滤）
@@ -56,7 +57,7 @@ class ContextBuilder:
         if agent_config:
             prefs = load_preferences(home)
         if self.tool_registry:
-            tools = self.tool_registry.as_llm_tools()
+            tools = self.tool_registry.as_llm_tools(session_id=session_id, agent_config=agent_config)
             # 根据 agent_config 过滤工具信息注入 prompt
             if agent_config and agent_config.tools:
                 allowed = set(agent_config.tools)

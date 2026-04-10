@@ -456,7 +456,7 @@ class ToolSessionWorker(SessionWorker):
             )
         )
 
-        tool = self.rt.registry.get(str(tool_name))
+        tool = self.rt.registry.get(str(tool_name), session_id=event.session_id)
         if not tool:
             await self.bus.publish(
                 EventEnvelope(

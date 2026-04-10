@@ -8,6 +8,7 @@
 ToolRegistry（工具注册表）
     ├── Tool 基类（定义工具接口）
     ├── 内置工具（BashCommand, SerperSearch, BraveSearch, BaiduSearch, TavilySearch, FetchUrl, ReadFile, WriteFile）
+    ├── 动态 MCP 工具（从外部 MCP server 拉取）
     ├── 编排工具（CreateAgent）
     └── 多 Agent 通信工具（SendMessage，Gateway 启动时注册）
 
@@ -51,15 +52,19 @@ class Tool:
 ```python
 class ToolRegistry:
     _tools: dict[str, Tool]           # 名称 → 工具实例
+    _mcp_manager: McpSessionManager   # session → MCP catalog/runtime
 
     def register(tool: Tool) -> None
         """注册工具到内存字典"""
 
-    def get(name: str) -> Tool | None
-        """按名称获取工具实例"""
+    def get(name: str, session_id: str | None = None) -> Tool | None
+        """按名称获取工具实例，必要时返回动态 MCP 工具适配器"""
 
-    def as_llm_tools() -> list[dict]
-        """转换为 LLM function calling 格式"""
+    async def ensure_mcp_session(session_id: str) -> None
+        """预热该 session 的 MCP catalog"""
+
+    def as_llm_tools(session_id: str | None = None) -> list[dict]
+        """转换为 LLM function calling 格式，含动态 MCP 工具"""
 ```
 
 **初始化流程**：
@@ -67,6 +72,7 @@ class ToolRegistry:
 2. 内置注册 9 个工具：`BashCommandTool`、`SerperSearchTool`、`BraveSearchTool`、`BaiduSearchTool`、`TavilySearchTool`、`FetchUrlTool`、`ReadFileTool`、`WriteFileTool`、`CreateAgentTool`
 3. `SendMessageTool` 因依赖注入需要，在 Gateway 启动时单独注册
 4. 搜索工具（serper/brave/baidu/tavily）在未配置对应 API key 时不暴露给 LLM
+5. MCP 工具按 session 懒加载：首轮对话前连接配置的 MCP server，执行 `listTools`，再物化进工具列表
 
 **`as_llm_tools()` 输出格式**：
 
@@ -108,6 +114,8 @@ payload: {
 ### 3. 查找工具实例
 
 从 `ToolRegistry` 按 `tool_name` 获取工具实例。若工具不存在，发布错误结果并返回。
+
+对于 MCP 工具，`ToolRegistry` 会返回一个轻量适配器；它仍通过统一的 `Tool.execute()` 入口执行，但内部会转发到 `McpSessionManager.call_tool(...)`。
 
 ### 4. 权限确认检查
 
@@ -204,6 +212,15 @@ tool.call_requested
   → tool.call_completed
   → [error.raised]  (异常时)
 ```
+
+## MCP 工具物化流程
+
+1. `AgentSessionWorker` 在处理用户输入前调用 `ToolRegistry.ensure_mcp_session(session_id)`
+2. `McpSessionManager` 读取 `mcp.servers`
+3. 对每个 server 执行 `listTools`
+4. 将结果归一化为 provider-safe 名称：`mcp__<server>__<tool>`
+5. `ToolRegistry.as_llm_tools(session_id=...)` 将这些动态工具和内置工具一起暴露给 LLM
+6. 当 LLM 调用动态 MCP 工具时，`ToolSessionWorker` 仍沿用统一的 `tool.call_requested -> tool.call_result` 事件链
 
 ## 路径安全（PathPolicy）
 

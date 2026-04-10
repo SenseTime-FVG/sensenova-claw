@@ -38,11 +38,27 @@ class TestAgentConfig:
         expected_keys = {
             "id", "name", "description", "model",
             "temperature", "max_tokens", "extra_body", "system_prompt", "tools",
-            "skills", "workdir", "can_delegate_to", "max_delegation_depth",
+            "skills", "mcp_servers_allow", "mcp_servers_deny", "mcp_tools_allow",
+            "mcp_tools_deny", "workdir", "can_delegate_to", "max_delegation_depth",
             "max_pingpong_turns",
             "enabled", "created_at", "updated_at",
         }
         assert set(d.keys()) == expected_keys
+
+    def test_mcp_policy_roundtrip(self):
+        a = AgentConfig.create(
+            id="mcp",
+            name="MCP",
+            mcp_servers_allow=["docs"],
+            mcp_servers_deny=["danger"],
+            mcp_tools_allow=["docs.search", "mcp__docs__fetch"],
+            mcp_tools_deny=["delete_all"],
+        )
+        b = AgentConfig.from_dict(a.to_dict())
+        assert b.mcp_servers_allow == ["docs"]
+        assert b.mcp_servers_deny == ["danger"]
+        assert b.mcp_tools_allow == ["docs.search", "mcp__docs__fetch"]
+        assert b.mcp_tools_deny == ["delete_all"]
 
     def test_create_supports_send_message_aliases(self):
         a = AgentConfig.create(

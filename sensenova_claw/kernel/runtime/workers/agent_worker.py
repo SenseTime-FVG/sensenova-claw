@@ -8,6 +8,10 @@ import uuid
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from sensenova_claw.capabilities.agents.preferences import (
+    load_preferences,
+    resolve_tool_enabled_from_prefs,
+)
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
@@ -74,12 +78,20 @@ class AgentSessionWorker(SessionWorker):
     def _get_provider(self) -> str:
         """解析 provider 名称：从 agent_config.model → llm.models → provider"""
         model_key = self._get_model_key()
+        if self.agent_config and self.agent_config.model:
+            provider_override = str(getattr(self.agent_config, "provider", "") or "").strip()
+            if provider_override and model_key not in config.get("llm.models", {}):
+                return provider_override
         provider, _ = config.resolve_model(model_key)
         return provider
 
     def _get_model(self) -> str:
         """解析实际 model_id（传给 LLM API 的模型名）"""
         model_key = self._get_model_key()
+        if self.agent_config and self.agent_config.model:
+            provider_override = str(getattr(self.agent_config, "provider", "") or "").strip()
+            if provider_override and model_key not in config.get("llm.models", {}):
+                return model_key
         _, model_id = config.resolve_model(model_key)
         return model_id
 
@@ -112,7 +124,10 @@ class AgentSessionWorker(SessionWorker):
 
     def _get_filtered_tools(self) -> list[dict]:
         """根据 Agent 配置过滤可用工具"""
-        all_tools = self.rt.tool_registry.as_llm_tools()  # 已含 config enabled 过滤
+        all_tools = self.rt.tool_registry.as_llm_tools(
+            session_id=self.session_id,
+            agent_config=self.agent_config,
+        )  # 已含 config enabled 过滤
         if not self.agent_config or not self.agent_config.tools:
             tools = all_tools  # 空列表 = 全部工具
         else:
@@ -123,6 +138,20 @@ class AgentSessionWorker(SessionWorker):
             tools = [t for t in all_tools if t["name"] in allowed]
         if self.agent_config and self.agent_config.can_delegate_to is None:
             tools = [t for t in tools if t["name"] != "send_message"]
+
+        if self.agent_config:
+            home = self.rt.context_builder.sensenova_claw_home if self.rt.context_builder else None
+            if home:
+                prefs = load_preferences(home)
+                tools = [
+                    tool for tool in tools
+                    if resolve_tool_enabled_from_prefs(
+                        prefs,
+                        self.agent_config.id,
+                        tool["name"],
+                        default=True,
+                    )
+                ]
 
         # 仅对 proactive 会话应用安全限制
         if self._session_meta and self._session_meta.get("proactive_job_id"):
@@ -363,11 +392,14 @@ class AgentSessionWorker(SessionWorker):
             agent_id = self.agent_config.id if self.agent_config else None
             memory_context = await self.rt.memory_manager.load_memory_md(agent_id=agent_id)
 
+        await self.rt.tool_registry.ensure_mcp_session(self.session_id)
+
         messages = self.rt.context_builder.build_messages(
             content, history,
             memory_context=memory_context,
             context_files=context_files,
             agent_config=self.agent_config,
+            session_id=self.session_id,
         )
         state = TurnState(turn_id=turn_id, user_input=content, messages=messages)
         # 记录新消息的起始位置：跳过 system prompt(1条) + 旧历史

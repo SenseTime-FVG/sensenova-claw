@@ -85,6 +85,26 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 ### 2026-04-07 QQ Gateway reconnecting 状态修复补充
 
+### 2026-04-09 MCP 一期接入补充
+
+成功经验：
+- 在现有 `ToolRegistry -> AgentSessionWorker -> ToolSessionWorker` 架构里接 MCP，最小落点是“把 MCP tool 物化成动态 Tool”，而不是单独平行做一套 agent runtime；这样 LLM tool schema、权限控制、事件流和结果落盘都能直接复用。
+- Python MCP SDK 的 `stdio_client`/`ClientSession` 若跨任务关闭会触发 `Attempted to exit cancel scope in a different task than it was entered in`；第一版用“catalog/listTools 和 callTool 都在同一协程内临时连接并关闭”更稳，先保证功能闭环，再考虑状态复用。
+- 进程内 e2e 要覆盖 MCP 最稳的方式是：`mock provider + 本地 FastMCP stdio 假服务`。这样能稳定验证 `llm -> mcp tool -> 二轮 llm -> step_completed`，不依赖外部网络。
+
+失败/风险经验：
+- `tests/e2e/run_e2e.py` 仍会加载本地 `config.yml`，mock provider 场景可能被用户本机真实 provider 配置污染；涉及 provider 固定行为的 e2e 断言不要依赖某个 mock 固定文案或固定参数值，优先断言事件链和结构化工具结果。
+
+### 2026-04-10 MCP 管理页补充
+
+成功经验：
+- MCP 管理页这类“表单较长 + 动态列表”的后台页面，给关键输入补 `data-testid` 比在 Playwright 里依赖 `getByText/getByDisplayValue` 更稳，尤其是 JSON 导入后会新增同构表单行。
+- 将前端导入能力限定为标准 `mcpServers` JSON，并在页面本地先解析成 draft、用户再手动 `Save All` 落库，能把“导入错误”和“持久化错误”两段问题明显分开，排查更快。
+- 后端单独提供 `/api/mcp/servers` 的列表/保存接口，比让前端直接修改整段 config 更利于做字段校验、格式归一化和后续扩展“连接测试”能力。
+
+失败/风险经验：
+- 当前前端 dev server 会自动探测其他后台接口与 `/ws`，即使 MCP 页面测试已经把核心 `fetch` mock 掉，终端仍会出现一批 `ECONNREFUSED localhost:8000` 代理噪音；这类日志不能直接视为 MCP 页面失败，需要看 Playwright 断言结果。
+
 成功经验：
 - QQ 官方网关断线恢复后不一定再次发 `READY`，也可能发 `RESUMED`；如果状态机只在 `READY` 时回写 `connected`，Gateway 页面就会长期显示 `reconnecting`。
 - 这类状态卡死问题最适合在 runtime 层补最小单测：直接构造 `reconnecting -> RESUMED` 的 payload，能快速确认根因在事件处理而不是前端展示。
