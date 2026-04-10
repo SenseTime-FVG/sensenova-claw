@@ -19,6 +19,28 @@ class MockProvider(LLMProvider):
         last = messages[-1] if messages else {"content": ""}
         content = str(last.get("content", ""))
 
+        mcp_tool_name = ""
+        if tools:
+            for tool in tools:
+                name = str(tool.get("name", ""))
+                if name.startswith("mcp__"):
+                    mcp_tool_name = name
+                    break
+
+        if ("MCP" in content or "mcp" in content) and mcp_tool_name:
+            return {
+                "content": "我将调用 MCP 工具完成这次请求。",
+                "tool_calls": [
+                    {
+                        "id": "mock_mcp_tool_1",
+                        "name": mcp_tool_name,
+                        "arguments": {"text": "hello-from-mock"},
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+            }
+
         # mock规则：若用户询问英超冠亚军且可用工具，则先触发工具调用。
         if "英超" in content and "冠亚军" in content and tools:
             return {
@@ -36,6 +58,14 @@ class MockProvider(LLMProvider):
 
         # 若最后一条是工具结果，则返回整理后的答案。
         if last.get("role") == "tool":
+            tool_content = str(last.get("content", ""))
+            if "MCP_ECHO:" in tool_content:
+                return {
+                    "content": f"根据 MCP 工具结果，收到 {tool_content}",
+                    "tool_calls": [],
+                    "finish_reason": "stop",
+                    "usage": {"prompt_tokens": 20, "completion_tokens": 30, "total_tokens": 50},
+                }
             return {
                 "content": "根据工具返回结果，已整理最近3年的英超冠亚军信息。",
                 "tool_calls": [],

@@ -192,6 +192,31 @@ class TestConfigHelpers:
         names = {t["name"] for t in tools}
         assert "bash_command" in names
 
+    def test_get_filtered_tools_keeps_mcp_tools_when_tools_are_explicit(self, private_bus, runtime, monkeypatch):
+        """agent.tools 只过滤内置工具，不应误过滤 MCP 工具。"""
+        monkeypatch.setattr(
+            runtime.tool_registry,
+            "as_llm_tools",
+            lambda **kwargs: [
+                {"name": "bash_command", "description": "bash", "parameters": {}},
+                {"name": "read_file", "description": "read", "parameters": {}},
+                {"name": "mcp__browsermcp__browser_snapshot", "description": "snapshot", "parameters": {}},
+            ],
+        )
+        agent_cfg = AgentConfig(
+            id="test",
+            name="test",
+            tools=["bash_command"],
+            mcp_servers=["browsermcp"],
+            mcp_tools=["browsermcp/browser_snapshot"],
+        )
+        worker = AgentSessionWorker("s1", private_bus, runtime, agent_config=agent_cfg)
+        tools = worker._get_filtered_tools()
+        names = {t["name"] for t in tools}
+        assert "bash_command" in names
+        assert "mcp__browsermcp__browser_snapshot" in names
+        assert "read_file" not in names
+
     def test_get_filtered_tools_hides_send_message_when_delegation_disabled(self, private_bus, runtime):
         """禁用委托后，不应再向 LLM 暴露 send_message。"""
         runtime.tool_registry.register(_SendMessageTool())
