@@ -113,7 +113,12 @@ def _persist_agent_prompt(request: Request, agent_id: str, system_prompt: str) -
         prompt_path.unlink()
 
 
-async def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, Any]:
+async def _build_agent_detail(
+    agent_cfg: AgentConfig,
+    request: Request,
+    *,
+    include_mcp_detail: bool = True,
+) -> dict[str, Any]:
     """构建 Agent 的完整描述（含工具和技能详情）"""
     tool_registry = request.app.state.tool_registry
     skill_registry = request.app.state.skill_registry
@@ -161,7 +166,7 @@ async def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[
     mcp_servers_detail: list[dict[str, Any]] = []
     mcp_tools_detail: list[dict[str, Any]] = []
     mcp_servers = normalize_mcp_servers(getattr(request.app.state, "config").get("mcp.servers", {}))
-    if mcp_servers:
+    if include_mcp_detail and mcp_servers:
         runtime = SessionMcpRuntime(session_id=f"agent-detail:{agent_cfg.id}", servers=mcp_servers)
         try:
             catalog = await runtime.ensure_catalog()
@@ -191,7 +196,7 @@ async def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[
                 "toolCount": len(server_tools),
             })
 
-    return {
+    payload = {
         "id": agent_cfg.id,
         "name": agent_cfg.name,
         "status": "active" if agent_cfg.enabled else "disabled",
@@ -210,13 +215,15 @@ async def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[
         "mcpTools": [t["name"] for t in mcp_tools_detail if t["enabled"]],
         "toolsDetail": tools_detail,
         "skillsDetail": skills_detail,
-        "mcpServersDetail": mcp_servers_detail,
-        "mcpToolsDetail": mcp_tools_detail,
         "canDelegateTo": agent_cfg.can_delegate_to,
         "maxDelegationDepth": agent_cfg.max_delegation_depth,
         "createdAt": agent_cfg.created_at,
         "updatedAt": agent_cfg.updated_at,
     }
+    if include_mcp_detail:
+        payload["mcpServersDetail"] = mcp_servers_detail
+        payload["mcpToolsDetail"] = mcp_tools_detail
+    return payload
 
 
 # ── Pydantic 模型 ──────────────────────────────────────
@@ -287,7 +294,7 @@ async def list_agents(request: Request):
 
     result = []
     for agent_cfg in registry.list_all():
-        agent = await _build_agent_detail(agent_cfg, request)
+        agent = await _build_agent_detail(agent_cfg, request, include_mcp_detail=False)
 
         # 统计该 Agent 的会话数（兼容 agent_id 列与 meta JSON）
         agent_sessions = [s for s in sessions if _resolve_agent_id(s) == agent_cfg.id]

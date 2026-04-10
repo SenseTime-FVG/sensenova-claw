@@ -158,6 +158,8 @@ def test_list_agents(client):
         assert "toolCount" in agent
         assert "sessionCount" in agent
         assert "lastActive" in agent
+        assert "mcpServersDetail" not in agent
+        assert "mcpToolsDetail" not in agent
 
 
 def test_list_agents_no_sessions(client):
