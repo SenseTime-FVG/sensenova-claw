@@ -266,6 +266,27 @@ async def test_ready_event_updates_session_state():
 
 
 @pytest.mark.asyncio
+async def test_resumed_event_restores_connected_status_after_reconnect():
+    runtime = QQOfficialRuntime(config=_make_config())
+    runtime._sensenova_claw_status = {"status": "reconnecting", "error": None}
+    runtime._session_id = "sess-1"
+    runtime._last_seq = 42
+
+    handled = await runtime._handle_gateway_payload(
+        {
+            "op": 0,
+            "s": 43,
+            "t": "RESUMED",
+            "d": {},
+        }
+    )
+
+    assert handled is True
+    assert runtime._last_seq == 43
+    assert runtime._sensenova_claw_status == {"status": "connected", "error": None}
+
+
+@pytest.mark.asyncio
 async def test_recv_loop_reconnects_and_resumes_after_session_timeout():
     runtime = QQOfficialRuntime(config=_make_config())
     runtime._access_token = "token-1"

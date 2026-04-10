@@ -83,6 +83,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 每次你执行完成任务之后，需要总结成功和失败的经验，并选择会对后续任务有帮助的内容保存在这里
 
+### 2026-04-07 QQ Gateway reconnecting 状态修复补充
+
+成功经验：
+- QQ 官方网关断线恢复后不一定再次发 `READY`，也可能发 `RESUMED`；如果状态机只在 `READY` 时回写 `connected`，Gateway 页面就会长期显示 `reconnecting`。
+- 这类状态卡死问题最适合在 runtime 层补最小单测：直接构造 `reconnecting -> RESUMED` 的 payload，能快速确认根因在事件处理而不是前端展示。
+
+失败/风险经验：
+- 当前 `tests/e2e/test_qq_channel_official_e2e.py` 与 `tests/e2e/test_qq_channel_onebot_e2e.py` 断言了 mock LLM 的旧固定文案（`当前没有可用的 LLM`）；现在 mock provider 已返回正常自我介绍，这两条 e2e 会因历史断言漂移失败，不能拿来判断本次 QQ 状态修复是否回归。
+
 ### 2026-03-26 OpenAI 兼容 top_k 修复补充
 
 成功经验：
@@ -401,6 +410,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 成功经验：
 - `/api/sessions/{id}/events` 返回的是仓库落盘后的内核事件名，例如 `user.question_asked`、`user.question_answered`，而不是前端实时 WebSocket 的 `user_question_asked`、`user_question_answered_event`；聊天历史重建必须同时兼容两套命名。
 - 对“切换会话回来 UI 丢状态”这类问题，最有效的 e2e 是直接 mock `/api/sessions/*/events` 返回历史事件，再通过真实的 session 切换操作验证恢复结果；这样能把“实时链路正常但历史恢复失效”单独钉住。
+
+### 2026-04-09 Sessions 子会话删除补充
+
+成功经验：
+- 对“删除当前会话还是删除整棵子树”这类分支行为，最稳的做法是在 `/api/sessions` 列表直接补 `has_children`，让前端只负责弹窗分流，不自己拼树。
+- 会话树删除语义应明确收口到 `DELETE /api/sessions/{id}?scope=self|self_and_descendants`；这样单删路径保持兼容，前端和 Playwright 也能直接断言请求参数。
+- 子会话递归删除建议仅沿 `meta.parent_session_id` 向下找后代，不回溯父会话；相应单测要明确断言“parent 保留、descendants 删除”。
+
+失败/风险经验：
+- 直接跑默认 `playwright.config.ts` 时，若本机已有 3000 端口服务会先被 `webServer` 阻塞；复用现有前端服务做定向回归时，更适合走不带 `webServer` 的 `playwright.gateway.config.ts`。
 
 失败/风险经验：
 - 如果只用实时 WebSocket 事件写回归，`ask_user` 看起来是好的，但一旦用户离开当前会话再回来，依赖历史事件重建的内联卡片仍会消失；这类功能必须区分“实时显示”和“历史恢复”两条路径分别覆盖。
@@ -1807,3 +1826,22 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 只根据视觉相似度把右下角羊误判成 agent idle 精灵，会导致修复落到 `star_idle` 链路但对用户实际看到的对象完全无效；以后 Phaser 场景里有多个相似角色时，必须先做运行时对象级定位再改。
+
+### 2026-04-02 Office agent 状态房间补充
+
+成功经验：
+- `/office/[agentId]` 这类 Phaser 页面首次同步不能只靠 `createOfficeGame(...)` 后立刻 `emit`；场景 `create()` 的监听器可能尚未挂好，初始化后再做一次短延迟回放 `setState/setAgents/setRoomContext`，能稳定避免首屏丢羊。
+- 对挂在后台壳里的 Office 页面做 Playwright 回归时，需要同时 mock `auth/status`、`custom-pages`、`llm-status`、`sessions`、`todolist` 等壳层接口；只 mock `/api/agents` 往往会被鉴权或导航依赖拖离目标页面。
+- agent 办公室展示适合把“房间模式”和“agent 运行态”分开建模：`global` 房间只展示 `running` agent，单 agent 房间则按 `idle/running` 在待命位和工位之间切换，这样既能保留总办公室的单羊待命设定，也能满足单房间状态表达。
+
+失败/风险经验：
+- 如果 e2e 只等待 `window.__phaserGame` 存在就开始断言，极易在 `agentSprites` 尚未同步完成时读到 `0`；这类测试必须等待 `scene.agentSprites.size` 或其他业务就绪信号，而不是只等游戏实例初始化。
+
+### 2026-04-09 CLI agent switch 鉴权补充
+
+成功经验：
+- CLI 同时依赖 WebSocket 和 HTTP 时，不能只保证 WS 自动带 token；`/agent switch` 这类命令会先请求 REST API，HTTP 客户端也必须自动附带 `Authorization: Bearer <token>`。
+- 这类问题最小红绿测试可以直接拦截 `urllib.request.urlopen`，断言 `CLIApp._http()` 发出的请求头；比先搭整套服务更快定位根因。
+
+失败/风险经验：
+- CLI 目前把 `/api/agents/{id}` 的所有错误都提示成“Agent 不存在”，会掩盖真实的 401/403；以后排查类似问题时要先看底层 HTTP 状态，不要只看终端文案。

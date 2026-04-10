@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+import urllib.request
 
 import pytest
 import pytest_asyncio
@@ -508,6 +509,32 @@ class TestSendAndSessionMethods:
         assert len(sent) == 1
         assert sent[0]["type"] == "user_question_answered"
         assert sent[0]["session_id"] == "sess_child"
+
+
+class TestHttpAuth:
+    """HTTP 客户端应自动附带本地 token。"""
+
+    async def test_http_get_attaches_bearer_token_from_local_file(self, monkeypatch):
+        app = CLIApp(host="localhost", port=8000)
+
+        class _Response:
+            def read(self) -> bytes:
+                return b'{"ok": true}'
+
+        def fake_urlopen(req: urllib.request.Request, timeout: int = 10):
+            assert req.full_url == "http://localhost:8000/api/agents/gpt54"
+            assert req.headers.get("Authorization") == "Bearer local-token"
+            return _Response()
+
+        monkeypatch.setattr(
+            "sensenova_claw.app.cli.app.read_token_file",
+            lambda sensenova_claw_home=None: "local-token",
+        )
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+        resp = await app._http_get("/api/agents/gpt54")
+
+        assert resp == {"ok": True}
 
     async def test_receive_loop_turn_completed(self, ws_server):
         """_receive_loop 接收 turn_completed 后设置 _waiting"""
