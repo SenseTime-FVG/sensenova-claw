@@ -27,7 +27,7 @@ from sensenova_claw.capabilities.mcp.runtime import (
     is_mcp_server_enabled_for_agent,
     is_mcp_tool_enabled_for_agent,
 )
-from sensenova_claw.platform.config.mcp import normalize_mcp_servers
+from sensenova_claw.platform.config.mcp import build_mcp_servers_fingerprint, normalize_mcp_servers
 from sensenova_claw.capabilities.tools.registry import _is_tool_config_enabled
 from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
@@ -59,6 +59,20 @@ def _sensenova_claw_home_path(request: Request) -> Path:
 
 def _agent_prompt_path(request: Request, agent_id: str) -> Path:
     return _sensenova_claw_home_path(request) / "agents" / agent_id / SYSTEM_PROMPT_FILENAME
+
+
+async def _get_agent_detail_mcp_runtime(request: Request, servers: dict[str, Any]) -> SessionMcpRuntime:
+    fingerprint = build_mcp_servers_fingerprint(servers)
+    runtime = getattr(request.app.state, "_agent_detail_mcp_runtime", None)
+    current = getattr(request.app.state, "_agent_detail_mcp_fingerprint", None)
+    if runtime is not None and current == fingerprint:
+        return runtime
+    if runtime is not None:
+        await runtime.close()
+    runtime = SessionMcpRuntime(session_id="agent-detail:shared", servers=servers)
+    request.app.state._agent_detail_mcp_runtime = runtime
+    request.app.state._agent_detail_mcp_fingerprint = fingerprint
+    return runtime
 
 
 def _serialize_agent_for_config(agent: AgentConfig) -> dict[str, Any]:
@@ -167,15 +181,13 @@ async def _build_agent_detail(
     mcp_tools_detail: list[dict[str, Any]] = []
     mcp_servers = normalize_mcp_servers(getattr(request.app.state, "config").get("mcp.servers", {}))
     if include_mcp_detail and mcp_servers:
-        runtime = SessionMcpRuntime(session_id=f"agent-detail:{agent_cfg.id}", servers=mcp_servers)
+        runtime = await _get_agent_detail_mcp_runtime(request, mcp_servers)
         try:
             catalog = await runtime.ensure_catalog()
             descriptors = catalog.tools
         except Exception:  # noqa: BLE001
             logger.warning("构建 Agent MCP 详情失败 agent=%s", agent_cfg.id, exc_info=True)
             descriptors = []
-        finally:
-            await runtime.close()
         descriptors_by_server: dict[str, list[Any]] = {}
         for descriptor in descriptors:
             descriptors_by_server.setdefault(descriptor.server_name, []).append(descriptor)

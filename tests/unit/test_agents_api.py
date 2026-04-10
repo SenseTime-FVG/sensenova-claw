@@ -21,6 +21,7 @@ from sensenova_claw.platform.config.config_manager import ConfigManager
 from sensenova_claw.platform.secrets.store import InMemorySecretStore
 from sensenova_claw.kernel.events.bus import PublicEventBus
 from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.capabilities.mcp.runtime import SessionMcpRuntime
 
 
 class _SendMessageTool(Tool):
@@ -199,6 +200,25 @@ def test_get_agent_includes_mcp_details(client):
     tool_names = {item["name"] for item in data["mcpToolsDetail"]}
     assert "docs-search/search_docs" in tool_names
     assert "docs-search/fetch_page" in tool_names
+
+
+def test_get_agent_reuses_cached_mcp_catalog(client, monkeypatch):
+    """同一配置下重复打开 Agent 详情时，不应重复探测 MCP catalog。"""
+    original = SessionMcpRuntime._list_tools_for_server
+    calls = {"count": 0}
+
+    async def counted(self, server_cfg):  # type: ignore[no-untyped-def]
+        calls["count"] += 1
+        return await original(self, server_cfg)
+
+    monkeypatch.setattr(SessionMcpRuntime, "_list_tools_for_server", counted)
+
+    first = client.get("/api/agents/default")
+    second = client.get("/api/agents/default")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls["count"] == 1
 
 
 def test_get_agent_not_found(client):
