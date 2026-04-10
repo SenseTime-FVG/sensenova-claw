@@ -97,12 +97,13 @@ class TestMcpRuntime:
     @pytest.mark.asyncio
     async def test_filter_tools_for_agent_policy(self):
         tool_a = type("ToolA", (), {"safe_name": "mcp__docs__search", "server_name": "docs", "tool_name": "search"})()
+        tool_a2 = type("ToolA2", (), {"safe_name": "mcp__docs__fetch", "server_name": "docs", "tool_name": "fetch"})()
         tool_b = type("ToolB", (), {"safe_name": "mcp__ops__restart", "server_name": "ops", "tool_name": "restart"})()
         agent = AgentConfig(
             id="a",
             name="A",
-            mcp_servers_allow=["docs"],
-            mcp_tools_deny=["docs.search"],
+            mcp_servers=["docs"],
+            mcp_tools=["docs/search"],
         )
-        filtered = filter_mcp_tools_for_agent([tool_a, tool_b], agent)  # type: ignore[arg-type]
-        assert filtered == []
+        filtered = filter_mcp_tools_for_agent([tool_a, tool_a2, tool_b], agent)  # type: ignore[arg-type]
+        assert filtered == [tool_a]

@@ -85,33 +85,32 @@ def _tool_matches_selector(tool: McpToolDescriptor, selector: str) -> bool:
     aliases = {
         tool.safe_name,
         tool.tool_name,
+        f"{tool.server_name}/{tool.tool_name}",
+        f"{sanitize_mcp_name(tool.server_name)}/{sanitize_mcp_name(tool.tool_name)}",
         f"{tool.server_name}.{tool.tool_name}",
         f"{sanitize_mcp_name(tool.server_name)}.{sanitize_mcp_name(tool.tool_name)}",
     }
     return normalized in aliases
 
 
-def filter_mcp_tools_for_agent(tools: list[McpToolDescriptor], agent_config: AgentConfig | None) -> list[McpToolDescriptor]:
+def is_mcp_server_enabled_for_agent(server_name: str, agent_config: AgentConfig | None) -> bool:
     if agent_config is None:
-        return tools
+        return True
+    enabled_servers = {item for item in agent_config.mcp_servers if item}
+    return not enabled_servers or server_name in enabled_servers
 
-    allowed_servers = {item for item in agent_config.mcp_servers_allow if item}
-    denied_servers = {item for item in agent_config.mcp_servers_deny if item}
-    allowed_tools = [item for item in agent_config.mcp_tools_allow if item]
-    denied_tools = [item for item in agent_config.mcp_tools_deny if item]
 
-    filtered: list[McpToolDescriptor] = []
-    for tool in tools:
-        if allowed_servers and tool.server_name not in allowed_servers:
-            continue
-        if tool.server_name in denied_servers:
-            continue
-        if allowed_tools and not any(_tool_matches_selector(tool, selector) for selector in allowed_tools):
-            continue
-        if denied_tools and any(_tool_matches_selector(tool, selector) for selector in denied_tools):
-            continue
-        filtered.append(tool)
-    return filtered
+def is_mcp_tool_enabled_for_agent(tool: McpToolDescriptor, agent_config: AgentConfig | None) -> bool:
+    if not is_mcp_server_enabled_for_agent(tool.server_name, agent_config):
+        return False
+    if agent_config is None:
+        return True
+    enabled_tools = [item for item in agent_config.mcp_tools if item]
+    return not enabled_tools or any(_tool_matches_selector(tool, selector) for selector in enabled_tools)
+
+
+def filter_mcp_tools_for_agent(tools: list[McpToolDescriptor], agent_config: AgentConfig | None) -> list[McpToolDescriptor]:
+    return [tool for tool in tools if is_mcp_tool_enabled_for_agent(tool, agent_config)]
 
 
 class SessionMcpRuntime:

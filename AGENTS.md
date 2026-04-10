@@ -105,6 +105,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前前端 dev server 会自动探测其他后台接口与 `/ws`，即使 MCP 页面测试已经把核心 `fetch` mock 掉，终端仍会出现一批 `ECONNREFUSED localhost:8000` 代理噪音；这类日志不能直接视为 MCP 页面失败，需要看 Playwright 断言结果。
 
+### 2026-04-10 Agent MCP 两层开关补充
+
+成功经验：
+- Agent 级 MCP 配置若采用 `mcp_servers` / `mcp_tools` 两个白名单字段，并约定“空数组 = 默认全部启用”，前端最稳的做法是始终基于完整 catalog 渲染，再在保存时把“全部开启”折叠回空数组，而不是直接把 UI 状态和落盘格式绑定死。
+- agents API 若要返回 MCP 明细，不能直接复用依赖全局 `config` 的 runtime manager；在接口层基于 `request.app.state.config` 临时创建 `SessionMcpRuntime` 更稳，测试环境也不会串到本机真实 MCP 配置。
+- 对“server 开关 + 展开后 tool 开关”的 UI，给 server toggle / expand / tool toggle 全部加 `data-testid`，Playwright 回归会比依赖卡片文本稳定很多。
+
+失败/风险经验：
+- 当 `mcp_servers=[]` 和 `mcp_tools=[]` 被定义成“全部启用”时，前端无法无损表示“所有 server 都关闭”或“所有 tool 都关闭”；实现上必须阻止保存这类不可编码状态，不能假设后端能推断用户意图。
+
 成功经验：
 - QQ 官方网关断线恢复后不一定再次发 `READY`，也可能发 `RESUMED`；如果状态机只在 `READY` 时回写 `connected`，Gateway 页面就会长期显示 `reconnecting`。
 - 这类状态卡死问题最适合在 runtime 层补最小单测：直接构造 `reconnecting -> RESUMED` 的 payload，能快速确认根因在事件处理而不是前端展示。

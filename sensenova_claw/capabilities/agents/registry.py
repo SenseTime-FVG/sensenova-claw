@@ -130,10 +130,8 @@ class AgentRegistry:
             system_prompt=system_prompt,
             tools=list(agent_dict.get("tools", [])),
             skills=list(agent_dict.get("skills", [])),
-            mcp_servers_allow=list(agent_dict.get("mcp_servers_allow", [])),
-            mcp_servers_deny=list(agent_dict.get("mcp_servers_deny", [])),
-            mcp_tools_allow=list(agent_dict.get("mcp_tools_allow", [])),
-            mcp_tools_deny=list(agent_dict.get("mcp_tools_deny", [])),
+            mcp_servers=list(agent_dict.get("mcp_servers", agent_dict.get("mcp_servers_allow", []))),
+            mcp_tools=list(agent_dict.get("mcp_tools", agent_dict.get("mcp_tools_allow", []))),
             workdir=agent_dict.get("workdir", ""),
             can_delegate_to=_parse_delegate_list(agent_dict),
             max_delegation_depth=agent_dict.get(

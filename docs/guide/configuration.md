@@ -369,17 +369,15 @@ Agent 还可以限制自己可见的 MCP 范围：
 agents:
   researcher:
     tools: []
-    mcp_servers_allow: ["docs-search"]
-    mcp_servers_deny: ["browser"]
-    mcp_tools_allow: ["docs-search.search", "mcp__docs_search__fetch"]
-    mcp_tools_deny: ["docs-search.delete_all"]
+    mcp_servers: ["docs-search"]
+    mcp_tools: ["docs-search/search_docs", "docs-search/fetch_page"]
 ```
 
 说明：
 
-- `mcp_servers_allow` 非空时，仅保留这些 server 的工具。
-- `mcp_servers_deny` 会继续剔除对应 server。
-- `mcp_tools_allow` / `mcp_tools_deny` 支持 `server.tool` 和 `mcp__server__tool` 两种写法。
+- `mcp_servers` 非空时，仅启用这些 server；为空表示全部 server 默认启用。
+- `mcp_tools` 非空时，仅启用这些 MCP tool；为空表示全部 tool 默认启用。
+- `mcp_tools` 推荐使用 `server/tool` 写法，例如 `docs-search/search_docs`。
 - 如果 Agent 使用显式 `tools` 白名单，需要把对应的 `mcp__...` 工具名也加入进去。
 
 ### 在 config.yml 中配置

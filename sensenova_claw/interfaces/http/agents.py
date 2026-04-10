@@ -22,6 +22,12 @@ from sensenova_claw.capabilities.agents.preferences import (
     save_preferences,
 )
 from sensenova_claw.capabilities.agents.registry import SYSTEM_PROMPT_FILENAME
+from sensenova_claw.capabilities.mcp.runtime import (
+    SessionMcpRuntime,
+    is_mcp_server_enabled_for_agent,
+    is_mcp_tool_enabled_for_agent,
+)
+from sensenova_claw.platform.config.mcp import normalize_mcp_servers
 from sensenova_claw.capabilities.tools.registry import _is_tool_config_enabled
 from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
@@ -63,6 +69,8 @@ def _serialize_agent_for_config(agent: AgentConfig) -> dict[str, Any]:
         "temperature": agent.temperature,
         "tools": list(agent.tools),
         "skills": list(agent.skills),
+        "mcp_servers": list(agent.mcp_servers),
+        "mcp_tools": list(agent.mcp_tools),
         "workdir": agent.workdir,
         "can_delegate_to": list(agent.can_delegate_to) if agent.can_delegate_to is not None else None,
         "max_delegation_depth": agent.max_delegation_depth,
@@ -105,7 +113,7 @@ def _persist_agent_prompt(request: Request, agent_id: str, system_prompt: str) -
         prompt_path.unlink()
 
 
-def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, Any]:
+async def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, Any]:
     """构建 Agent 的完整描述（含工具和技能详情）"""
     tool_registry = request.app.state.tool_registry
     skill_registry = request.app.state.skill_registry
@@ -150,6 +158,39 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
             "category": category,
         })
 
+    mcp_servers_detail: list[dict[str, Any]] = []
+    mcp_tools_detail: list[dict[str, Any]] = []
+    mcp_servers = normalize_mcp_servers(getattr(request.app.state, "config").get("mcp.servers", {}))
+    if mcp_servers:
+        runtime = SessionMcpRuntime(session_id=f"agent-detail:{agent_cfg.id}", servers=mcp_servers)
+        try:
+            catalog = await runtime.ensure_catalog()
+            descriptors = catalog.tools
+        except Exception:  # noqa: BLE001
+            logger.warning("构建 Agent MCP 详情失败 agent=%s", agent_cfg.id, exc_info=True)
+            descriptors = []
+        finally:
+            await runtime.close()
+        descriptors_by_server: dict[str, list[Any]] = {}
+        for descriptor in descriptors:
+            descriptors_by_server.setdefault(descriptor.server_name, []).append(descriptor)
+            mcp_tools_detail.append({
+                "name": f"{descriptor.server_name}/{descriptor.tool_name}",
+                "serverName": descriptor.server_name,
+                "toolName": descriptor.tool_name,
+                "safeName": descriptor.safe_name,
+                "description": descriptor.description or "",
+                "enabled": is_mcp_tool_enabled_for_agent(descriptor, agent_cfg),
+            })
+        for server_name, server_cfg in sorted(mcp_servers.items()):
+            server_tools = descriptors_by_server.get(server_name, [])
+            mcp_servers_detail.append({
+                "name": server_name,
+                "transport": server_cfg.transport,
+                "enabled": is_mcp_server_enabled_for_agent(server_name, agent_cfg),
+                "toolCount": len(server_tools),
+            })
+
     return {
         "id": agent_cfg.id,
         "name": agent_cfg.name,
@@ -161,10 +202,16 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
         "maxTokens": agent_cfg.max_tokens,
         "toolCount": sum(1 for t in tools_detail if t["enabled"]),
         "skillCount": sum(1 for s in skills_detail if s["enabled"]),
+        "mcpServerCount": sum(1 for s in mcp_servers_detail if s["enabled"]),
+        "mcpToolCount": sum(1 for t in mcp_tools_detail if t["enabled"]),
         "tools": [t["name"] for t in tools_detail if t["enabled"]],
         "skills": [s["name"] for s in skills_detail if s["enabled"]],
+        "mcpServers": [s["name"] for s in mcp_servers_detail if s["enabled"]],
+        "mcpTools": [t["name"] for t in mcp_tools_detail if t["enabled"]],
         "toolsDetail": tools_detail,
         "skillsDetail": skills_detail,
+        "mcpServersDetail": mcp_servers_detail,
+        "mcpToolsDetail": mcp_tools_detail,
         "canDelegateTo": agent_cfg.can_delegate_to,
         "maxDelegationDepth": agent_cfg.max_delegation_depth,
         "createdAt": agent_cfg.created_at,
@@ -189,6 +236,8 @@ class AgentConfigUpdate(BaseModel):
     systemPrompt: str | None = None
     tools: list[str] | None = None
     skills: list[str] | None = None
+    mcp_servers: list[str] | None = None
+    mcp_tools: list[str] | None = None
     can_delegate_to: list[str] | None = None
     max_delegation_depth: int | None = None
 
@@ -203,6 +252,8 @@ class AgentCreate(BaseModel):
     system_prompt: str = ""
     tools: list[str] = []
     skills: list[str] = []
+    mcp_servers: list[str] = []
+    mcp_tools: list[str] = []
     can_delegate_to: list[str] = []
     max_delegation_depth: int = 3
 
@@ -236,7 +287,7 @@ async def list_agents(request: Request):
 
     result = []
     for agent_cfg in registry.list_all():
-        agent = _build_agent_detail(agent_cfg, request)
+        agent = await _build_agent_detail(agent_cfg, request)
 
         # 统计该 Agent 的会话数（兼容 agent_id 列与 meta JSON）
         agent_sessions = [s for s in sessions if _resolve_agent_id(s) == agent_cfg.id]
@@ -270,7 +321,7 @@ async def get_agent(agent_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     services = _get_services(request)
-    agent = _build_agent_detail(agent_cfg, request)
+    agent = await _build_agent_detail(agent_cfg, request)
 
     sessions = await services.repo.list_sessions(limit=9999)
     agent_sessions = [s for s in sessions if _resolve_agent_id(s) == agent_id]
@@ -310,6 +361,8 @@ async def create_agent(body: AgentCreate, request: Request):
         system_prompt=body.system_prompt,
         tools=body.tools,
         skills=body.skills,
+        mcp_servers=body.mcp_servers,
+        mcp_tools=body.mcp_tools,
         can_delegate_to=body.can_delegate_to,
         max_delegation_depth=body.max_delegation_depth,
     )
@@ -321,7 +374,7 @@ async def create_agent(body: AgentCreate, request: Request):
     registry.register(agent)
 
     logger.info("Created agent: %s", agent.id)
-    return _build_agent_detail(agent, request)
+    return await _build_agent_detail(agent, request)
 
 
 @router.put("/{agent_id}/config")
@@ -350,6 +403,10 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
         updates["tools"] = body.tools
     if body.skills is not None:
         updates["skills"] = body.skills
+    if body.mcp_servers is not None:
+        updates["mcp_servers"] = body.mcp_servers
+    if body.mcp_tools is not None:
+        updates["mcp_tools"] = body.mcp_tools
     if "can_delegate_to" in provided_fields:
         updates["can_delegate_to"] = body.can_delegate_to
     if body.max_delegation_depth is not None:
@@ -360,7 +417,7 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
     await _persist_agent_record(request, agent_id, updated)
     registry.register(updated)
     logger.info("Agent config updated: %s -> %s", agent_id, list(updates.keys()))
-    return _build_agent_detail(updated, request)
+    return await _build_agent_detail(updated, request)
 
 
 @router.delete("/{agent_id}")
