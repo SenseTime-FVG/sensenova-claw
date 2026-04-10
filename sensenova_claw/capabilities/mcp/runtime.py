@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 
 _SAFE_NAME_PATTERN = re.compile(r"[^a-zA-Z0-9_]+")
 
+_MCP_RECOVERABLE_ERROR_MARKERS = (
+    "transport closed",
+    "client closed",
+    "connection closed",
+    "broken pipe",
+    "connection reset",
+    "stream closed",
+)
+
 
 def sanitize_mcp_name(value: str) -> str:
     cleaned = _SAFE_NAME_PATTERN.sub("_", value.strip()).strip("_").lower()
@@ -91,6 +100,13 @@ def _tool_matches_selector(tool: McpToolDescriptor, selector: str) -> bool:
         f"{sanitize_mcp_name(tool.server_name)}.{sanitize_mcp_name(tool.tool_name)}",
     }
     return normalized in aliases
+
+
+def _is_recoverable_mcp_transport_error(exc: Exception) -> bool:
+    message = str(exc).strip().lower()
+    if not message:
+        return False
+    return any(marker in message for marker in _MCP_RECOVERABLE_ERROR_MARKERS)
 
 
 def is_mcp_server_enabled_for_agent(server_name: str, agent_config: AgentConfig | None) -> bool:
@@ -291,7 +307,17 @@ class McpSessionManager:
 
     async def call_tool(self, session_id: str, safe_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         runtime = await self._get_or_create_runtime(session_id)
-        return await runtime.call_tool(safe_name, arguments)
+        try:
+            return await runtime.call_tool(safe_name, arguments)
+        except Exception as exc:  # noqa: BLE001
+            if _is_recoverable_mcp_transport_error(exc):
+                logger.warning(
+                    "MCP runtime broken, dropping session runtime session=%s error=%s",
+                    session_id,
+                    str(exc).strip() or type(exc).__name__,
+                )
+                await self.close_session(session_id)
+            raise
 
     def get_cached_tools(self, session_id: str, agent_config: AgentConfig | None = None) -> list[McpToolDescriptor]:
         runtime = self._runtimes.get(session_id)

@@ -118,3 +118,58 @@ class TestMcpRuntime:
 
         enabled_agent = AgentConfig(id="b", name="B", mcp_servers=[], mcp_tools=[])
         assert filter_mcp_tools_for_agent([tool_a, tool_b], enabled_agent) == [tool_a, tool_b]  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_call_tool_discards_broken_runtime_after_transport_closed(self, monkeypatch):
+        original = config.get("mcp.servers", {})
+        config.set("mcp.servers", {"probe": {"command": sys.executable, "args": ["noop.py"]}})
+        manager = McpSessionManager()
+        safe_name = build_safe_tool_name("probe", "echo_probe")
+
+        class _BrokenRuntime:
+            def __init__(self):
+                self.closed = False
+
+            async def call_tool(self, _safe_name, _arguments):
+                raise RuntimeError("Transport closed")
+
+            async def close(self):
+                self.closed = True
+
+        class _HealthyRuntime:
+            def __init__(self):
+                self.closed = False
+
+            async def call_tool(self, _safe_name, arguments):
+                return {"mcp_server": "probe", "mcp_tool": "echo_probe", "content": [{"type": "text", "text": arguments["text"]}], "is_error": False}
+
+            async def close(self):
+                self.closed = True
+
+        broken = _BrokenRuntime()
+        healthy = _HealthyRuntime()
+        runtimes = [broken, healthy]
+
+        async def fake_get_or_create(session_id):  # type: ignore[no-untyped-def]
+            assert session_id == "s1"
+            runtime = manager._runtimes.get(session_id)
+            if runtime is not None:
+                return runtime
+            runtime = runtimes.pop(0)
+            manager._runtimes[session_id] = runtime  # type: ignore[assignment]
+            manager._fingerprints[session_id] = "fp"
+            return runtime
+
+        monkeypatch.setattr(manager, "_get_or_create_runtime", fake_get_or_create)
+        try:
+            with pytest.raises(RuntimeError, match="Transport closed"):
+                await manager.call_tool("s1", safe_name, {"text": "hello"})
+
+            assert broken.closed is True
+            assert "s1" not in manager._runtimes
+            assert "s1" not in manager._fingerprints
+
+            result = await manager.call_tool("s1", safe_name, {"text": "world"})
+            assert result["content"][0]["text"] == "world"
+        finally:
+            config.set("mcp.servers", original)

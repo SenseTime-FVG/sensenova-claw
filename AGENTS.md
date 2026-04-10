@@ -95,6 +95,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `AgentConfigUpdate` 这类 Pydantic 更新模型里，`list[str] | None = None` 不能靠 `if body.field is not None` 区分“未传”和“显式传 null”；必须结合 `model_dump(exclude_unset=True)` 判断字段是否真的被提交。
 
+### 2026-04-10 Browser MCP 会话恢复补充
+
+成功经验：
+- `browsermcp` 这类 `stdio + 浏览器扩展` 型 MCP server 出现 `Transport closed` 后，往往是当前 session 级 MCP runtime 坏了；同一会话内继续重试旧 runtime 基本不会自愈，而新会话能恢复说明应做 runtime 丢弃重建。
+- 在 `McpSessionManager.call_tool()` 层捕获 `Transport closed`、`Client closed`、`connection closed` 这类 transport 错误后，立即 `close_session(session_id)` 并删除 runtime，是最小且有效的恢复点；当前请求继续失败，下一次调用自动重建即可。
+
+失败/风险经验：
+- Browser MCP 在本机可能同时残留多份 `@browsermcp/mcp` / `mcp-server-browsermcp` 进程，容易造成扩展串线或 transport 异常；排查这类问题时先清多实例，再区分“配置问题”和“会话坏状态”。
+
 ### 2026-04-09 MCP 一期接入补充
 
 成功经验：
