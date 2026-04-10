@@ -240,13 +240,11 @@ async def lifespan(app: FastAPI):
     )
     # v1.3: Deep Research 中间件（透明治理层）
     from sensenova_claw.capabilities.deep_research import (
-        CitationManager, StateTracker, DeepResearchMiddleware,
+        CitationManager, DeepResearchMiddleware,
     )
     deep_research_cm = CitationManager()
-    deep_research_st = StateTracker()
     deep_research_mw = DeepResearchMiddleware(
         citation_manager=deep_research_cm,
-        state_tracker=deep_research_st,
         bus=bus,
     )
     agent_message_coordinator.register_on_child_completed_hook(

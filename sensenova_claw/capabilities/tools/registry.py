@@ -32,6 +32,7 @@ from sensenova_claw.capabilities.tools.obsidian_tool import (
     ObsidianSearchTool,
     ObsidianWriteTool,
 )
+from sensenova_claw.capabilities.tools.citation_tool import PrepareReportCitationsTool
 from sensenova_claw.capabilities.tools.orchestration import CreateAgentTool
 from sensenova_claw.capabilities.tools.secret_tools import GetSecretTool, WriteSecretTool
 from sensenova_claw.platform.config.config import config
@@ -82,6 +83,7 @@ class ToolRegistry:
             EditTool(),
             CreateAgentTool(),
             AskUserTool(),
+            PrepareReportCitationsTool(),
         ]:
             self.register(tool)
         # Obsidian 工具：仅在 tools.obsidian.enabled=true 时注册

@@ -182,6 +182,117 @@ class CitationManager:
 
         return merged_text, all_citations
 
+    def _build_global_mapping(
+        self,
+        sub_reports: dict[str, str],
+    ) -> tuple[dict[str, tuple[int, str, str]], dict[str, dict[int, int]]]:
+        """构建全局引用映射：扫描所有子报告，去重并分配全局编号。
+
+        返回:
+            (global_map: norm_url → (global_index, title, url),
+             dimension_local_to_global: dim_id → {local_idx → global_idx})
+        """
+        global_map: dict[str, tuple[int, str, str]] = {}
+        dimension_local_to_global: dict[str, dict[int, int]] = {}
+        global_counter = 0
+
+        for dim_id, report_text in sub_reports.items():
+            entries = _parse_sources_section(report_text)
+            local_map: dict[int, int] = {}
+
+            for local_idx, (title, url) in enumerate(entries, start=1):
+                norm_url = _normalize_url(url)
+
+                if norm_url not in global_map:
+                    global_counter += 1
+                    global_map[norm_url] = (global_counter, title.strip(), url.strip())
+
+                    if norm_url not in self._pool:
+                        self._pool[norm_url] = Citation(
+                            id=str(uuid.uuid4()),
+                            url=url.strip(),
+                            title=title.strip(),
+                            source_category="web",
+                            snippet="",
+                            dimension_id=dim_id,
+                            referenced_in=[dim_id],
+                        )
+                    elif dim_id not in self._pool[norm_url].referenced_in:
+                        self._pool[norm_url].referenced_in.append(dim_id)
+
+                global_idx = global_map[norm_url][0]
+                local_map[local_idx] = global_idx
+
+            dimension_local_to_global[dim_id] = local_map
+
+        return global_map, dimension_local_to_global
+
+    @staticmethod
+    def _replace_citations(report_text: str, local_map: dict[int, int]) -> str:
+        """替换子报告中的局部引用编号为全局编号，移除 Sources 节。"""
+        body = _SOURCES_SECTION_RE.sub("", report_text).rstrip()
+        for local_idx in sorted(local_map.keys(), reverse=True):
+            global_idx = local_map[local_idx]
+            body = body.replace(f"[{local_idx}]", f"[{global_idx}]")
+        return body.strip()
+
+    @staticmethod
+    def _build_global_sources_text(global_map: dict[str, tuple[int, str, str]]) -> str:
+        """生成全局来源列表的 Markdown 文本。"""
+        ref_lines: list[str] = []
+        for _norm_url, (idx, title, url) in sorted(
+            global_map.items(), key=lambda x: x[1][0]
+        ):
+            ref_lines.append(f"{idx}. [{title}]({url})")
+        return "## 全部来源\n\n" + "\n".join(ref_lines)
+
+    def preprocess_individual_reports(
+        self,
+        sub_reports: dict[str, str],
+    ) -> tuple[dict[str, str], str]:
+        """预处理子报告：统一引用编号，各子报告独立返回。
+
+        参数:
+            sub_reports: 维度 ID → 子报告文本 的映射
+
+        返回:
+            (updated_reports: 维度 ID → 更新后的子报告文本, 全局来源列表文本)
+            更新后的子报告中 [N] 已替换为全局编号，Sources 节已移除。
+        """
+        global_map, dim_local_to_global = self._build_global_mapping(sub_reports)
+
+        updated_reports: dict[str, str] = {}
+        for dim_id, report_text in sub_reports.items():
+            local_map = dim_local_to_global.get(dim_id, {})
+            updated_reports[dim_id] = self._replace_citations(report_text, local_map)
+
+        global_sources = self._build_global_sources_text(global_map)
+        return updated_reports, global_sources
+
+    def preprocess_for_report(
+        self,
+        sub_reports: dict[str, str],
+    ) -> tuple[str, str]:
+        """预处理子报告：统一引用编号，合并为单一文本。
+
+        参数:
+            sub_reports: 维度 ID → 子报告文本 的映射
+
+        返回:
+            (合并后的文本, 全局来源列表文本)
+        """
+        global_map, dim_local_to_global = self._build_global_mapping(sub_reports)
+
+        sections: list[str] = []
+        for dim_id, report_text in sub_reports.items():
+            local_map = dim_local_to_global.get(dim_id, {})
+            body = self._replace_citations(report_text, local_map)
+            sections.append(f"## 子报告：{dim_id}\n\n{body}")
+
+        merged_body = "\n\n---\n\n".join(sections)
+        global_sources = self._build_global_sources_text(global_map)
+        return merged_body, global_sources
+
     def export_json(self) -> dict:
         """将引用池导出为 JSON 可序列化字典。
 
