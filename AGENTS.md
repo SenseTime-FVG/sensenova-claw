@@ -104,6 +104,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - Browser MCP 在本机可能同时残留多份 `@browsermcp/mcp` / `mcp-server-browsermcp` 进程，容易造成扩展串线或 transport 异常；排查这类问题时先清多实例，再区分“配置问题”和“会话坏状态”。
 
+### 2026-04-10 共享 stdio MCP server 补充
+
+成功经验：
+- 对 `browsermcp` 这类单活资源型 MCP server，按 `server_name + 配置指纹` 共享同一份 stdio runtime，比“每个 session/agent 各起一份”稳定得多；catalog 和 tool call 都走共享实例后，多 agent 可共用同一个底层 server。
+- 共享 stdio runtime 必须在 server 级别加 `asyncio.Lock` 串行化 `list_tools` / `call_tool`，否则多个 agent 并发进入同一 `ClientSession` 时仍会出现 transport 层异常。
+- `list_tools` 缓存应放在共享 runtime 内，而不是 session runtime 内；这样不同 session 的 `ensure_catalog()` 才不会重复触发同一个 stdio server 的工具发现。
+
+失败/风险经验：
+- 仅做 session 级 catalog 缓存不等于真正“共享同一个 MCP server”；如果底层仍是每次调用临时 `stdio_client()`，多 agent 仍会起多份进程，Browser MCP 这类 server 一样会冲突。
+
 ### 2026-04-09 MCP 一期接入补充
 
 成功经验：

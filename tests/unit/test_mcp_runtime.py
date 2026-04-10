@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -7,7 +8,10 @@ import pytest
 
 from sensenova_claw.capabilities.agents.config import AgentConfig
 from sensenova_claw.capabilities.mcp.runtime import (
+    McpServerRuntimePool,
     McpSessionManager,
+    SessionMcpRuntime,
+    SharedStdioMcpServerRuntime,
     build_safe_tool_name,
     filter_mcp_tools_for_agent,
 )
@@ -173,3 +177,77 @@ class TestMcpRuntime:
             assert result["content"][0]["text"] == "world"
         finally:
             config.set("mcp.servers", original)
+
+    @pytest.mark.asyncio
+    async def test_shared_stdio_runtime_serializes_tool_calls(self, monkeypatch):
+        server_cfg = normalize_mcp_servers({"browsermcp": {"command": sys.executable, "args": ["noop.py"]}})["browsermcp"]
+        runtime = SharedStdioMcpServerRuntime(server_cfg)
+
+        active = 0
+        max_active = 0
+
+        class _FakeSession:
+            async def call_tool(self, _tool_name, arguments):  # type: ignore[no-untyped-def]
+                nonlocal active, max_active
+                active += 1
+                max_active = max(max_active, active)
+                await asyncio.sleep(0.05)
+                active -= 1
+                return type("Result", (), {"content": [type("Text", (), {"type": "text", "text": arguments["text"]})()], "structuredContent": None, "isError": False})()
+
+        async def fake_ensure_connected():  # type: ignore[no-untyped-def]
+            runtime._session = _FakeSession()  # type: ignore[assignment]
+
+        monkeypatch.setattr(runtime, "_ensure_connected", fake_ensure_connected)
+
+        await asyncio.gather(
+            runtime.call_tool("echo_probe", {"text": "a"}),
+            runtime.call_tool("echo_probe", {"text": "b"}),
+        )
+        assert max_active == 1
+
+    @pytest.mark.asyncio
+    async def test_stdio_catalog_is_shared_across_sessions(self, monkeypatch):
+        servers = normalize_mcp_servers({"probe": {"command": sys.executable, "args": ["noop.py"]}})
+        pool = McpServerRuntimePool()
+        runtime_a = SessionMcpRuntime(session_id="s1", servers=servers, shared_pool=pool)
+        runtime_b = SessionMcpRuntime(session_id="s2", servers=servers, shared_pool=pool)
+
+        calls = {"count": 0}
+
+        class _FakeSharedRuntime:
+            def __init__(self):
+                self._cache = None
+
+            async def list_tools(self):  # type: ignore[no-untyped-def]
+                if self._cache is not None:
+                    return list(self._cache)
+                calls["count"] += 1
+                self._cache = [
+                    type(
+                        "Tool",
+                        (),
+                        {
+                            "name": "echo_probe",
+                            "title": None,
+                            "description": "Echo probe",
+                            "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}},
+                        },
+                    )()
+                ]
+                return list(self._cache)
+
+            async def close(self):  # type: ignore[no-untyped-def]
+                return None
+
+        async def fake_create(_server_cfg):  # type: ignore[no-untyped-def]
+            return _FakeSharedRuntime()
+
+        monkeypatch.setattr(pool, "_create_stdio_runtime", fake_create)
+
+        catalog_a = await runtime_a.ensure_catalog()
+        catalog_b = await runtime_b.ensure_catalog()
+
+        assert calls["count"] == 1
+        assert [tool.safe_name for tool in catalog_a.tools] == ["mcp__probe__echo_probe"]
+        assert [tool.safe_name for tool in catalog_b.tools] == ["mcp__probe__echo_probe"]

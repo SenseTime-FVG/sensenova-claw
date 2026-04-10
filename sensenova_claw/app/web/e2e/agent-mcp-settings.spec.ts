@@ -201,3 +201,44 @@ test('agent 详情页应支持将 MCP 全部禁用保存为 null', async ({ page
     mcp_tools: null,
   });
 });
+
+test('agent 详情页应支持一键启用某个 server 下的全部 MCP tools', async ({ page }) => {
+  await page.context().addCookies([
+    {
+      name: 'sensenova_claw_token',
+      value: 'e2e-sensenova-claw-token',
+      url: 'http://127.0.0.1:3000',
+    },
+    {
+      name: 'sensenova_claw_token',
+      value: 'e2e-sensenova-claw-token',
+      url: 'http://localhost:3000',
+    },
+  ]);
+
+  await page.addInitScript(mockAgentMcpPage);
+  await page.goto('/agents/researcher?token=e2e-sensenova-claw-token');
+
+  await page.getByRole('button', { name: 'mcp' }).click();
+  await page.getByTestId('mcp-server-expand-docs-search').click();
+  await page.getByTestId('mcp-tool-toggle-docs-search-fetch_page').click();
+  await page.getByTestId('mcp-tools-enable-all-docs-search').click();
+  await page.getByRole('button', { name: 'Save Preferences' }).click();
+
+  await expect.poll(async () => {
+    return page.evaluate(() => {
+      const calls = (window as Window & { __agentConfigCalls?: Array<{ body?: string }> }).__agentConfigCalls ?? [];
+      return calls.length;
+    });
+  }).toBe(1);
+
+  const payload = await page.evaluate(() => {
+    const calls = (window as Window & { __agentConfigCalls?: Array<{ body?: string }> }).__agentConfigCalls ?? [];
+    return calls[0]?.body ? JSON.parse(calls[0].body) : null;
+  });
+
+  expect(payload).toMatchObject({
+    mcp_servers: [],
+    mcp_tools: [],
+  });
+});

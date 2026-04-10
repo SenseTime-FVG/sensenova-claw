@@ -715,6 +715,7 @@ export default function AgentDetailPage() {
                     const serverEnabled = mcpServerStates[server.name] ?? true;
                     const serverTools = (agent.mcpToolsDetail || []).filter((tool) => tool.serverName === server.name);
                     const expanded = expandedMcpServers[server.name] ?? false;
+                    const allServerToolsEnabled = serverTools.every((tool) => mcpToolStates[tool.name] ?? true);
                     return (
                       <div key={server.name} className={`rounded-2xl border bg-card shadow-sm transition-all ${serverEnabled ? 'border-primary/20' : 'border-border/60 opacity-80'}`}>
                         <div className="flex items-center gap-4 px-6 py-5">
@@ -744,6 +745,28 @@ export default function AgentDetailPage() {
 
                         {expanded && (
                           <div className="border-t border-border/40 px-6 py-5 space-y-3">
+                            {serverTools.length > 0 && (
+                              <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/10 px-4 py-3">
+                                <div>
+                                  <div className="text-sm font-bold text-foreground">Enable all tools</div>
+                                  <div className="text-xs text-muted-foreground mt-1">一键启用当前 MCP server 下的全部工具。</div>
+                                </div>
+                                <ToggleSwitch
+                                  checked={allServerToolsEnabled}
+                                  onChange={(value) => {
+                                    setMcpToolStates((prev) => {
+                                      const next = { ...prev };
+                                      serverTools.forEach((tool) => {
+                                        next[tool.name] = value;
+                                      });
+                                      return next;
+                                    });
+                                  }}
+                                  disabled={!serverEnabled}
+                                  testId={`mcp-tools-enable-all-${server.name}`}
+                                />
+                              </div>
+                            )}
                             {serverTools.map((tool) => {
                               const toolEnabled = (mcpToolStates[tool.name] ?? true) && serverEnabled;
                               return (

@@ -87,6 +87,56 @@ def _normalize_mcp_result(content: list[Any], structured: Any, is_error: bool) -
     return result
 
 
+async def _open_client(server_cfg: McpServerConfig) -> tuple[AsyncExitStack, ClientSession]:
+    stack = AsyncExitStack()
+    try:
+        if server_cfg.transport == "stdio":
+            read_stream, write_stream = await stack.enter_async_context(
+                stdio_client(
+                    StdioServerParameters(
+                        command=server_cfg.command,
+                        args=list(server_cfg.args),
+                        env=dict(server_cfg.env) or None,
+                        cwd=server_cfg.cwd or None,
+                    )
+                )
+            )
+        elif server_cfg.transport == "streamable-http":
+            read_stream, write_stream, _get_session_id = await stack.enter_async_context(
+                streamablehttp_client(
+                    server_cfg.url,
+                    headers=dict(server_cfg.headers) or None,
+                    timeout=server_cfg.timeout,
+                )
+            )
+        else:
+            read_stream, write_stream = await stack.enter_async_context(
+                sse_client(
+                    server_cfg.url,
+                    headers=dict(server_cfg.headers) or None,
+                    timeout=server_cfg.timeout,
+                )
+            )
+        session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+        await session.initialize()
+    except Exception:
+        await stack.aclose()
+        raise
+    return stack, session
+
+
+async def _list_tools(session: ClientSession) -> list[Any]:
+    tools: list[Any] = []
+    cursor: str | None = None
+    while True:
+        result = await session.list_tools(cursor=cursor)
+        tools.extend(list(getattr(result, "tools", []) or []))
+        cursor = getattr(result, "nextCursor", None)
+        if not cursor:
+            break
+    return tools
+
+
 def _tool_matches_selector(tool: McpToolDescriptor, selector: str) -> bool:
     normalized = selector.strip()
     if not normalized:
@@ -133,10 +183,128 @@ def filter_mcp_tools_for_agent(tools: list[McpToolDescriptor], agent_config: Age
     return [tool for tool in tools if is_mcp_tool_enabled_for_agent(tool, agent_config)]
 
 
+class SharedStdioMcpServerRuntime:
+    def __init__(self, server_cfg: McpServerConfig):
+        self.server_cfg = server_cfg
+        self._stack: AsyncExitStack | None = None
+        self._session: ClientSession | Any | None = None
+        self._connection_lock = asyncio.Lock()
+        self._request_lock = asyncio.Lock()
+        self._tools_cache: list[Any] | None = None
+
+    async def _ensure_connected(self) -> None:
+        if self._session is not None:
+            return
+        async with self._connection_lock:
+            if self._session is not None:
+                return
+            stack, session = await _open_client(self.server_cfg)
+            self._stack = stack
+            self._session = session
+
+    async def list_tools(self) -> list[Any]:
+        async with self._request_lock:
+            if self._tools_cache is not None:
+                return list(self._tools_cache)
+            try:
+                await self._ensure_connected()
+                assert self._session is not None
+                tools = await _list_tools(self._session)
+                self._tools_cache = list(tools)
+                return list(tools)
+            except Exception:
+                await self.close()
+                raise
+
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        async with self._request_lock:
+            try:
+                await self._ensure_connected()
+                assert self._session is not None
+                return await self._session.call_tool(tool_name, arguments=arguments)
+            except Exception:
+                await self.close()
+                raise
+
+    async def close(self) -> None:
+        async with self._connection_lock:
+            stack = self._stack
+            self._stack = None
+            self._session = None
+            self._tools_cache = None
+            if stack is not None:
+                await stack.aclose()
+
+
+class McpServerRuntimePool:
+    def __init__(self) -> None:
+        self._stdio_runtimes: dict[str, SharedStdioMcpServerRuntime] = {}
+        self._lock = asyncio.Lock()
+
+    def _build_runtime_key(self, server_cfg: McpServerConfig) -> str:
+        payload = {
+            "name": server_cfg.name,
+            "transport": server_cfg.transport,
+            "timeout": server_cfg.timeout,
+            "command": server_cfg.command,
+            "args": list(server_cfg.args),
+            "env": dict(server_cfg.env),
+            "cwd": server_cfg.cwd,
+        }
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    async def _create_stdio_runtime(self, server_cfg: McpServerConfig) -> SharedStdioMcpServerRuntime:
+        return SharedStdioMcpServerRuntime(server_cfg)
+
+    async def _get_or_create_stdio_runtime(self, server_cfg: McpServerConfig) -> SharedStdioMcpServerRuntime:
+        key = self._build_runtime_key(server_cfg)
+        existing = self._stdio_runtimes.get(key)
+        if existing is not None:
+            return existing
+        async with self._lock:
+            existing = self._stdio_runtimes.get(key)
+            if existing is not None:
+                return existing
+            runtime = await self._create_stdio_runtime(server_cfg)
+            self._stdio_runtimes[key] = runtime
+            return runtime
+
+    async def list_tools(self, server_cfg: McpServerConfig) -> list[Any]:
+        runtime = await self._get_or_create_stdio_runtime(server_cfg)
+        try:
+            return await runtime.list_tools()
+        except Exception as exc:  # noqa: BLE001
+            if _is_recoverable_mcp_transport_error(exc):
+                await self.invalidate(server_cfg)
+            raise
+
+    async def call_tool(self, server_cfg: McpServerConfig, tool_name: str, arguments: dict[str, Any]) -> Any:
+        runtime = await self._get_or_create_stdio_runtime(server_cfg)
+        try:
+            return await runtime.call_tool(tool_name, arguments)
+        except Exception as exc:  # noqa: BLE001
+            if _is_recoverable_mcp_transport_error(exc):
+                await self.invalidate(server_cfg)
+            raise
+
+    async def invalidate(self, server_cfg: McpServerConfig) -> None:
+        key = self._build_runtime_key(server_cfg)
+        async with self._lock:
+            runtime = self._stdio_runtimes.pop(key, None)
+        if runtime is not None:
+            await runtime.close()
+
+
 class SessionMcpRuntime:
-    def __init__(self, session_id: str, servers: dict[str, McpServerConfig]):
+    def __init__(
+        self,
+        session_id: str,
+        servers: dict[str, McpServerConfig],
+        shared_pool: McpServerRuntimePool | None = None,
+    ):
         self.session_id = session_id
         self._servers = servers
+        self._shared_pool = shared_pool
         self._catalog: McpCatalog | None = None
         self._catalog_lock = asyncio.Lock()
 
@@ -210,60 +378,12 @@ class SessionMcpRuntime:
     async def close(self) -> None:
         self._catalog = None
 
-    async def _open_client(self, server_cfg: McpServerConfig) -> tuple[AsyncExitStack, ClientSession]:
-        stack = AsyncExitStack()
-        try:
-            if server_cfg.transport == "stdio":
-                read_stream, write_stream = await stack.enter_async_context(
-                    stdio_client(
-                        StdioServerParameters(
-                            command=server_cfg.command,
-                            args=list(server_cfg.args),
-                            env=dict(server_cfg.env) or None,
-                            cwd=server_cfg.cwd or None,
-                        )
-                    )
-                )
-            elif server_cfg.transport == "streamable-http":
-                read_stream, write_stream, _get_session_id = await stack.enter_async_context(
-                    streamablehttp_client(
-                        server_cfg.url,
-                        headers=dict(server_cfg.headers) or None,
-                        timeout=server_cfg.timeout,
-                    )
-                )
-            else:
-                read_stream, write_stream = await stack.enter_async_context(
-                    sse_client(
-                        server_cfg.url,
-                        headers=dict(server_cfg.headers) or None,
-                        timeout=server_cfg.timeout,
-                    )
-                )
-            session = await stack.enter_async_context(
-                ClientSession(read_stream, write_stream)
-            )
-            await session.initialize()
-        except Exception:
-            await stack.aclose()
-            raise
-        return stack, session
-
-    async def _list_tools(self, session: ClientSession) -> list[Any]:
-        tools: list[Any] = []
-        cursor: str | None = None
-        while True:
-            result = await session.list_tools(cursor=cursor)
-            tools.extend(list(getattr(result, "tools", []) or []))
-            cursor = getattr(result, "nextCursor", None)
-            if not cursor:
-                break
-        return tools
-
     async def _list_tools_for_server(self, server_cfg: McpServerConfig) -> list[Any]:
-        stack, session = await self._open_client(server_cfg)
+        if server_cfg.transport == "stdio" and self._shared_pool is not None:
+            return await self._shared_pool.list_tools(server_cfg)
+        stack, session = await _open_client(server_cfg)
         try:
-            return await self._list_tools(session)
+            return await _list_tools(session)
         finally:
             await stack.aclose()
 
@@ -273,7 +393,9 @@ class SessionMcpRuntime:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> Any:
-        stack, session = await self._open_client(server_cfg)
+        if server_cfg.transport == "stdio" and self._shared_pool is not None:
+            return await self._shared_pool.call_tool(server_cfg, tool_name, arguments)
+        stack, session = await _open_client(server_cfg)
         try:
             return await session.call_tool(tool_name, arguments=arguments)
         finally:
@@ -284,6 +406,7 @@ class McpSessionManager:
     def __init__(self) -> None:
         self._runtimes: dict[str, SessionMcpRuntime] = {}
         self._fingerprints: dict[str, str] = {}
+        self._shared_pool = McpServerRuntimePool()
 
     async def ensure_session(self, session_id: str) -> None:
         runtime = await self._get_or_create_runtime(session_id)
@@ -333,7 +456,7 @@ class McpSessionManager:
             return existing
         if existing is not None:
             await existing.close()
-        runtime = SessionMcpRuntime(session_id=session_id, servers=servers)
+        runtime = SessionMcpRuntime(session_id=session_id, servers=servers, shared_pool=self._shared_pool)
         self._runtimes[session_id] = runtime
         self._fingerprints[session_id] = fingerprint
         return runtime
