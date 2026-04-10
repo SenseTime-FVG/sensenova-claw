@@ -55,6 +55,27 @@ class TestAgentConfig:
         assert b.mcp_servers == ["docs", "browser"]
         assert b.mcp_tools == ["docs/search", "browser/click"]
 
+    def test_tri_state_lists_preserve_none(self):
+        a = AgentConfig.create(
+            id="tri",
+            name="Tri",
+            tools=None,
+            skills=None,
+            mcp_servers=None,
+            mcp_tools=None,
+        )
+        d = a.to_dict()
+        assert d["tools"] is None
+        assert d["skills"] is None
+        assert d["mcp_servers"] is None
+        assert d["mcp_tools"] is None
+
+        b = AgentConfig.from_dict(d)
+        assert b.tools is None
+        assert b.skills is None
+        assert b.mcp_servers is None
+        assert b.mcp_tools is None
+
     def test_create_supports_send_message_aliases(self):
         a = AgentConfig.create(
             id="alias",

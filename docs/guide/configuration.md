@@ -368,9 +368,9 @@ Agent 还可以限制自己可见的 MCP 范围：
 ```yaml
 agents:
   researcher:
-    tools: []
-    mcp_servers: ["docs-search"]
-    mcp_tools: ["docs-search/search_docs", "docs-search/fetch_page"]
+    tools: []  # null = 全部禁用，[] = 全部启用，[...] = 显式白名单
+    mcp_servers: ["docs-search"]  # null = 全部禁用，[] = 全部启用
+    mcp_tools: ["docs-search/search_docs", "docs-search/fetch_page"]  # null = 全部禁用，[] = 全部启用
 ```
 
 说明：

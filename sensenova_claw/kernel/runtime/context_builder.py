@@ -59,12 +59,15 @@ class ContextBuilder:
         if self.tool_registry:
             tools = self.tool_registry.as_llm_tools(session_id=session_id, agent_config=agent_config)
             # 根据 agent_config 过滤工具信息注入 prompt
-            if agent_config and agent_config.tools:
-                allowed = set(agent_config.tools)
-                # 保留 send_message（除非 can_delegate_to 为 None 表示禁止委托）
-                if agent_config.can_delegate_to is not None:
-                    allowed.add("send_message")
-                tools = [t for t in tools if t["name"].startswith("mcp__") or t["name"] in allowed]
+            if agent_config:
+                if agent_config.tools is None:
+                    tools = [t for t in tools if t["name"].startswith("mcp__")]
+                elif agent_config.tools:
+                    allowed = set(agent_config.tools)
+                    # 保留 send_message（除非 can_delegate_to 为 None 表示禁止委托）
+                    if agent_config.can_delegate_to is not None:
+                        allowed.add("send_message")
+                    tools = [t for t in tools if t["name"].startswith("mcp__") or t["name"] in allowed]
             if agent_config and agent_config.can_delegate_to is None:
                 tools = [t for t in tools if t["name"] != "send_message"]
             if agent_config:
@@ -144,9 +147,12 @@ class ContextBuilder:
             return None
         skills = self.skill_registry.get_all()
         # 按 agent_config 过滤 skills
-        if agent_config and agent_config.skills:
-            allowed = set(agent_config.skills)
-            skills = [s for s in skills if s.name in allowed]
+        if agent_config:
+            if agent_config.skills is None:
+                skills = []
+            elif agent_config.skills:
+                allowed = set(agent_config.skills)
+                skills = [s for s in skills if s.name in allowed]
         if not skills:
             return None
         lines = [

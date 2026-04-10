@@ -107,3 +107,14 @@ class TestMcpRuntime:
         )
         filtered = filter_mcp_tools_for_agent([tool_a, tool_a2, tool_b], agent)  # type: ignore[arg-type]
         assert filtered == [tool_a]
+
+    @pytest.mark.asyncio
+    async def test_filter_tools_for_agent_tri_state_policy(self):
+        tool_a = type("ToolA", (), {"safe_name": "mcp__docs__search", "server_name": "docs", "tool_name": "search"})()
+        tool_b = type("ToolB", (), {"safe_name": "mcp__ops__restart", "server_name": "ops", "tool_name": "restart"})()
+
+        disabled_agent = AgentConfig(id="a", name="A", mcp_servers=None, mcp_tools=None)
+        assert filter_mcp_tools_for_agent([tool_a, tool_b], disabled_agent) == []  # type: ignore[arg-type]
+
+        enabled_agent = AgentConfig(id="b", name="B", mcp_servers=[], mcp_tools=[])
+        assert filter_mcp_tools_for_agent([tool_a, tool_b], enabled_agent) == [tool_a, tool_b]  # type: ignore[arg-type]

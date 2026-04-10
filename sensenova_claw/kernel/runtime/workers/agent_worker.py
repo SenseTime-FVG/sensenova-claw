@@ -128,8 +128,12 @@ class AgentSessionWorker(SessionWorker):
             session_id=self.session_id,
             agent_config=self.agent_config,
         )  # 已含 config enabled 过滤
-        if not self.agent_config or not self.agent_config.tools:
+        if not self.agent_config:
             tools = all_tools  # 空列表 = 全部工具
+        elif self.agent_config.tools is None:
+            tools = [t for t in all_tools if t["name"].startswith("mcp__")]
+        elif not self.agent_config.tools:
+            tools = all_tools
         else:
             allowed = set(self.agent_config.tools)
             # 保留 send_message 工具（除非 can_delegate_to 为 None 表示禁止委托）

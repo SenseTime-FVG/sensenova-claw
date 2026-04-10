@@ -337,6 +337,29 @@ def test_update_agent_config_persists_mcp_whitelists(client, app):
     assert written["agents"]["default"]["mcp_tools"] == ["docs-search/search_docs"]
 
 
+def test_update_agent_config_persists_null_as_all_disabled(client, app):
+    """显式传 null 时，tools/skills/MCP 应落盘为 null，并在详情中表现为全禁用。"""
+    resp = client.put("/api/agents/default/config", json={
+        "tools": None,
+        "skills": None,
+        "mcp_servers": None,
+        "mcp_tools": None,
+    })
+    assert resp.status_code == 200
+
+    data = resp.json()
+    assert all(item["enabled"] is False for item in data["toolsDetail"])
+    assert all(item["enabled"] is False for item in data["skillsDetail"])
+    assert all(item["enabled"] is False for item in data["mcpServersDetail"])
+    assert all(item["enabled"] is False for item in data["mcpToolsDetail"])
+
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["agents"]["default"]["tools"] is None
+    assert written["agents"]["default"]["skills"] is None
+    assert written["agents"]["default"]["mcp_servers"] is None
+    assert written["agents"]["default"]["mcp_tools"] is None
+
+
 def test_update_agent_config_can_disable_delegation(client, app):
     """显式传 null 时，应禁用委托并隐藏 send_message。"""
     app.state.tool_registry.register(_SendMessageTool())

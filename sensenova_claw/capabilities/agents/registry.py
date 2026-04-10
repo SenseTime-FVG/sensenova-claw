@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sensenova_claw.capabilities.agents.config import AgentConfig, _parse_delegate_list
+from sensenova_claw.capabilities.agents.config import AgentConfig, _parse_delegate_list, _parse_optional_name_list
 
 if TYPE_CHECKING:
     from sensenova_claw.kernel.events.bus import PublicEventBus
@@ -128,10 +128,10 @@ class AgentRegistry:
             temperature=agent_dict.get("temperature", fallback.get("temperature", 1.0)),
             max_tokens=agent_dict.get("max_tokens"),
             system_prompt=system_prompt,
-            tools=list(agent_dict.get("tools", [])),
-            skills=list(agent_dict.get("skills", [])),
-            mcp_servers=list(agent_dict.get("mcp_servers", agent_dict.get("mcp_servers_allow", []))),
-            mcp_tools=list(agent_dict.get("mcp_tools", agent_dict.get("mcp_tools_allow", []))),
+            tools=_parse_optional_name_list(agent_dict, "tools"),
+            skills=_parse_optional_name_list(agent_dict, "skills"),
+            mcp_servers=_parse_optional_name_list(agent_dict, "mcp_servers", "mcp_servers_allow"),
+            mcp_tools=_parse_optional_name_list(agent_dict, "mcp_tools", "mcp_tools_allow"),
             workdir=agent_dict.get("workdir", ""),
             can_delegate_to=_parse_delegate_list(agent_dict),
             max_delegation_depth=agent_dict.get(

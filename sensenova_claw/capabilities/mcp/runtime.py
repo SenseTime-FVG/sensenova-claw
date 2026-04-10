@@ -96,8 +96,10 @@ def _tool_matches_selector(tool: McpToolDescriptor, selector: str) -> bool:
 def is_mcp_server_enabled_for_agent(server_name: str, agent_config: AgentConfig | None) -> bool:
     if agent_config is None:
         return True
+    if agent_config.mcp_servers is None:
+        return False
     enabled_servers = {item for item in agent_config.mcp_servers if item}
-    return not enabled_servers or server_name in enabled_servers
+    return not agent_config.mcp_servers or server_name in enabled_servers
 
 
 def is_mcp_tool_enabled_for_agent(tool: McpToolDescriptor, agent_config: AgentConfig | None) -> bool:
@@ -105,8 +107,10 @@ def is_mcp_tool_enabled_for_agent(tool: McpToolDescriptor, agent_config: AgentCo
         return False
     if agent_config is None:
         return True
+    if agent_config.mcp_tools is None:
+        return False
     enabled_tools = [item for item in agent_config.mcp_tools if item]
-    return not enabled_tools or any(_tool_matches_selector(tool, selector) for selector in enabled_tools)
+    return not agent_config.mcp_tools or any(_tool_matches_selector(tool, selector) for selector in enabled_tools)
 
 
 def filter_mcp_tools_for_agent(tools: list[McpToolDescriptor], agent_config: AgentConfig | None) -> list[McpToolDescriptor]:

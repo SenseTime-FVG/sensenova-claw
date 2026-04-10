@@ -85,6 +85,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 ### 2026-04-07 QQ Gateway reconnecting 状态修复补充
 
+### 2026-04-10 Agent 三态白名单语义补充
+
+成功经验：
+- Agent 级 `tools/skills/mcp_servers/mcp_tools` 若要同时表达“全开 / 全关 / 部分开”，直接统一成三态最稳：`null = 全部禁用`、`[] = 全部启用`、`[...] = 显式白名单`，不需要额外总开关字段。
+- 这类三态配置必须一并修改 `AgentConfig/Registry`、运行时过滤器、agents 详情接口和前端保存逻辑；只改配置模型或只改前端都会让页面状态和真实运行时漂移。
+- MCP 两层开关里，如果所有 server 都关闭，`mcp_tools` 也必须序列化为 `null`；保留成 `[]` 会被解释成“全部 MCP tools 启用”，和外层 server 全关语义冲突。
+
+失败/风险经验：
+- `AgentConfigUpdate` 这类 Pydantic 更新模型里，`list[str] | None = None` 不能靠 `if body.field is not None` 区分“未传”和“显式传 null”；必须结合 `model_dump(exclude_unset=True)` 判断字段是否真的被提交。
+
 ### 2026-04-09 MCP 一期接入补充
 
 成功经验：

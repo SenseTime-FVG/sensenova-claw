@@ -81,10 +81,10 @@ def _serialize_agent_for_config(agent: AgentConfig) -> dict[str, Any]:
         "description": agent.description,
         "model": agent.model,
         "temperature": agent.temperature,
-        "tools": list(agent.tools),
-        "skills": list(agent.skills),
-        "mcp_servers": list(agent.mcp_servers),
-        "mcp_tools": list(agent.mcp_tools),
+        "tools": list(agent.tools) if agent.tools is not None else None,
+        "skills": list(agent.skills) if agent.skills is not None else None,
+        "mcp_servers": list(agent.mcp_servers) if agent.mcp_servers is not None else None,
+        "mcp_tools": list(agent.mcp_tools) if agent.mcp_tools is not None else None,
         "workdir": agent.workdir,
         "can_delegate_to": list(agent.can_delegate_to) if agent.can_delegate_to is not None else None,
         "max_delegation_depth": agent.max_delegation_depth,
@@ -127,6 +127,30 @@ def _persist_agent_prompt(request: Request, agent_id: str, system_prompt: str) -
         prompt_path.unlink()
 
 
+def _is_agent_builtin_tool_enabled(agent_cfg: AgentConfig, tool_name: str) -> bool:
+    if tool_name == "send_message" and agent_cfg.can_delegate_to is None:
+        return False
+    if agent_cfg.tools is None:
+        return False
+    if not agent_cfg.tools:
+        return True
+    if tool_name == "send_message" and agent_cfg.can_delegate_to is not None:
+        return True
+    return tool_name in agent_cfg.tools
+
+
+def _is_agent_skill_enabled(
+    agent_cfg: AgentConfig,
+    skill_name: str,
+    skill_prefs: dict[str, bool],
+) -> bool:
+    if agent_cfg.skills is None:
+        return False
+    if not agent_cfg.skills:
+        return skill_prefs.get(skill_name, True)
+    return skill_name in agent_cfg.skills
+
+
 async def _build_agent_detail(
     agent_cfg: AgentConfig,
     request: Request,
@@ -144,10 +168,7 @@ async def _build_agent_detail(
     for name, tool in tool_registry._tools.items():
         if name == "send_message" and agent_cfg.can_delegate_to is None:
             continue
-        # 如果 Agent 配置了 tools 列表，过滤展示
-        if agent_cfg.tools and name not in agent_cfg.tools:
-            continue
-        enabled = _is_tool_config_enabled(name)
+        enabled = _is_tool_config_enabled(name) and _is_agent_builtin_tool_enabled(agent_cfg, name)
         tools_detail.append({
             "name": name,
             "description": tool.description or "",
@@ -156,11 +177,7 @@ async def _build_agent_detail(
 
     skills_detail = []
     for skill in skill_registry.get_all():
-        # 显示所有技能，根据 Agent 配置决定 enabled 状态
-        if agent_cfg.skills:
-            enabled = skill.name in agent_cfg.skills
-        else:
-            enabled = skill_prefs.get(skill.name, True)
+        enabled = _is_agent_skill_enabled(agent_cfg, skill.name, skill_prefs)
         # 分类: installed / builtin / workspace
         if skill.install_info:
             category = "installed"
@@ -418,13 +435,13 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
         updates["max_tokens"] = body.max_tokens
     if body.systemPrompt is not None:
         updates["system_prompt"] = body.systemPrompt
-    if body.tools is not None:
+    if "tools" in provided_fields:
         updates["tools"] = body.tools
-    if body.skills is not None:
+    if "skills" in provided_fields:
         updates["skills"] = body.skills
-    if body.mcp_servers is not None:
+    if "mcp_servers" in provided_fields:
         updates["mcp_servers"] = body.mcp_servers
-    if body.mcp_tools is not None:
+    if "mcp_tools" in provided_fields:
         updates["mcp_tools"] = body.mcp_tools
     if "can_delegate_to" in provided_fields:
         updates["can_delegate_to"] = body.can_delegate_to

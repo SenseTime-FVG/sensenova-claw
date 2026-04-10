@@ -203,8 +203,8 @@ agents:
     temperature: 1.0
     tools: []
     skills: []
-    mcp_servers: []   # 空数组 = 默认全部启用
-    mcp_tools: []     # 空数组 = 默认全部启用
+    mcp_servers: []   # null = 全部禁用，[] = 全部启用，[...] = 显式白名单
+    mcp_tools: []     # null = 全部禁用，[] = 全部启用，[...] = 显式白名单
     can_send_message_to: []
     max_send_depth: 2
     max_pingpong_turns: 10

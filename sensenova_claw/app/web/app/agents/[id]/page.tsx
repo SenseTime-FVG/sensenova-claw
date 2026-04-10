@@ -42,6 +42,23 @@ interface AgentDetail {
   sessions: { id: string; status: string; channel: string; messageCount: number }[];
 }
 
+function buildTriStateSelection(
+  states: Record<string, boolean>,
+  names: string[],
+): string[] | null {
+  if (names.length === 0) {
+    return [];
+  }
+  const enabled = names.filter((name) => states[name] ?? true);
+  if (enabled.length === 0) {
+    return null;
+  }
+  if (enabled.length === names.length) {
+    return [];
+  }
+  return enabled;
+}
+
 export default function AgentDetailPage() {
   const params = useParams();
   const agentId = params.id as string;
@@ -235,11 +252,14 @@ export default function AgentDetailPage() {
   const savePreferences = async () => {
     setSaving(true); setSaveMsg('');
     try {
-      const enabledTools = Object.entries(toolStates).filter(([, v]) => v).map(([k]) => k);
-      const enabledSkills = Object.entries(skillStates).filter(([, v]) => v).map(([k]) => k);
+      const toolNames = (agent?.toolsDetail || []).map((tool) => tool.name);
+      const skillNames = (agent?.skillsDetail || []).map((skill) => skill.name);
       const res = await authFetch(`${API_BASE}/api/agents/${agentId}/config`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tools: enabledTools, skills: enabledSkills }),
+        body: JSON.stringify({
+          tools: buildTriStateSelection(toolStates, toolNames),
+          skills: buildTriStateSelection(skillStates, skillNames),
+        }),
       });
       if (res.ok) {
         setSaveMsg('已保存');
@@ -256,26 +276,23 @@ export default function AgentDetailPage() {
     if (!agent) return;
     const allServers = agent.mcpServersDetail || [];
     const enabledServers = allServers.filter((server) => mcpServerStates[server.name] ?? true);
-    if (allServers.length > 0 && enabledServers.length === 0) {
-      setSaveMsg('至少保留一个 MCP server；留空表示全部启用');
-      setTimeout(() => setSaveMsg(''), 2500);
-      return;
-    }
-
     const relevantTools = (agent.mcpToolsDetail || []).filter((tool) => enabledServers.some((server) => server.name === tool.serverName));
-    const enabledTools = relevantTools.filter((tool) => mcpToolStates[tool.name] ?? true);
-    if (relevantTools.length > 0 && enabledTools.length === 0) {
-      setSaveMsg('至少保留一个已启用的 MCP tool');
-      setTimeout(() => setSaveMsg(''), 2500);
-      return;
-    }
 
     setSaving(true);
     setSaveMsg('');
     try {
+      const serializedMcpTools = enabledServers.length === 0
+        ? null
+        : buildTriStateSelection(
+            mcpToolStates,
+            relevantTools.map((tool) => tool.name),
+          );
       const payload = {
-        mcp_servers: enabledServers.length === allServers.length ? [] : enabledServers.map((server) => server.name),
-        mcp_tools: enabledTools.length === relevantTools.length ? [] : enabledTools.map((tool) => tool.name),
+        mcp_servers: buildTriStateSelection(
+          mcpServerStates,
+          allServers.map((server) => server.name),
+        ),
+        mcp_tools: serializedMcpTools,
       };
       const res = await authFetch(`${API_BASE}/api/agents/${agentId}/config`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
