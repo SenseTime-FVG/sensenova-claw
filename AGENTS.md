@@ -93,6 +93,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 扩大到 `tests/unit/test_discord_*.py tests/unit/test_qq_*.py` 时，当前仓库仍有既有失败：`tests/unit/test_qq_channel.py::TestInbound::test_publishes_user_input_for_dm` 期望 session 绑定值为字符串 `"qq"`，实际为集合 `{'qq'}`；不能把这条失败误判成 TLS 修复回归。
 
+### 2026-04-13 Feishu WebSocket TLS 修复补充
+
+成功经验：
+- 飞书“私聊完全没入站”不一定是事件分发逻辑问题，先看日志里是否有 `FeishuChannel started` 但没有 `Feishu message:`；若同时出现 `Lark | client.py | connect failed, err: [SSL: CERTIFICATE_VERIFY_FAILED]`，根因就是 SDK 长连接握手失败而非入站处理代码未触发。
+- `lark_oapi.ws.client.Client` 内部直接调用 `websockets.connect(conn_url)`，且未暴露 SSL 配置；仓库侧最小修复点是在飞书线程启动前 monkeypatch `lark_oapi.ws.client.websockets.connect`，统一 `kwargs.setdefault("ssl", CERTIFI_SSL_CONTEXT)`。
+- 对这类第三方 SDK patch，优先补小而准的行为级单测：断言 patched `connect()` 默认带入 certifi SSL，且显式传入 `ssl=` 时不会被覆盖。
+
+失败/风险经验：
+- 飞书相关全量搜索很容易扫进用户目录下大量 IDE/历史工作区噪音；排查时应优先查 `~/.sensenova-claw/logs/system.log*`，否则信噪比太差。
+
 ### 2026-04-07 QQ Gateway reconnecting 状态修复补充
 
 ### 2026-04-10 Agent 三态白名单语义补充
