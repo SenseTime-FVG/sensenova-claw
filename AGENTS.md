@@ -1913,3 +1913,12 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - `~/.sensenova-claw/config.yml` 若启用了多个外部 channel，`npm run dev` 的报错不一定来自当前仓库根目录配置；先确认实际生效的是用户 home 配置，能避免在错误配置源上兜圈子。
+
+### 2026-04-13 DingTalk 重复入站补充
+
+成功经验：
+- 钉钉 channel 若在 UI 里出现同一条用户气泡重复，优先怀疑上游 callback 重投，而不是前端渲染；当前链路 `DingtalkChannel.handle_incoming_message()` 原本无任何幂等保护，只要被调用两次就会发布两次 `USER_INPUT`。
+- 对这类 IM 重投问题，在 channel 层按 `conversation_id + message_id` 做一个有限容量的最近消息去重缓存，是最小且足够稳的修复点；既能挡住 SDK/网关重试，也不需要改 Agent/runtime 主链路。
+
+失败/风险经验：
+- `tests/unit/test_dingtalk_channel.py` 里部分历史断言已和 `Gateway._session_bindings: dict[str, set[str]]` 的真实结构漂移；修 channel 回归时如果不顺手校正这些夹具，容易把旧测试噪音误判成新 bug。

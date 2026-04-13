@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 
@@ -196,7 +197,7 @@ class TestInbound:
         await asyncio.wait_for(task, timeout=2)
         assert len(gateway._session_bindings) == 1
         session_id = next(iter(gateway._session_bindings))
-        assert gateway._session_bindings[session_id] == "dingtalk"
+        assert gateway._session_bindings[session_id] == {"dingtalk"}
         assert collected[0].payload["content"] == "你好"
         assert collected[0].session_id == session_id
 
@@ -242,6 +243,45 @@ class TestInbound:
 
         await asyncio.wait_for(task, timeout=2)
         assert collected[0].session_id == collected[1].session_id
+
+    @pytest.mark.asyncio
+    async def test_duplicate_message_id_is_ignored(self):
+        channel, _, bus, _ = _make_channel()
+        collected: list[EventEnvelope] = []
+
+        async def collect():
+            async for event in bus.subscribe():
+                collected.append(event)
+                if len(collected) >= 2:
+                    break
+
+        task = asyncio.create_task(collect())
+        await asyncio.sleep(0.05)
+
+        duplicate = DingtalkInboundMessage(
+            text="测试",
+            conversation_id="conv-dup-1",
+            conversation_type="p2p",
+            sender_id="user-1",
+            sender_staff_id="staff-1",
+            sender_nick="alice",
+            message_id="msg-dup-1",
+            session_webhook="https://example.com/hook",
+            mentioned_bot=False,
+        )
+
+        await channel.handle_incoming_message(duplicate)
+        await channel.handle_incoming_message(duplicate)
+        await asyncio.sleep(0.1)
+
+        assert task.done() is False
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        assert len(collected) == 1
+        assert collected[0].type == USER_INPUT
+        assert collected[0].payload["content"] == "测试"
 
     @pytest.mark.asyncio
     async def test_answers_pending_question_before_user_input(self):
