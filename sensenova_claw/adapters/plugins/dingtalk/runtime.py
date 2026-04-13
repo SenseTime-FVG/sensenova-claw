@@ -7,9 +7,18 @@ import contextlib
 import importlib
 import json
 import logging
+import ssl
 from typing import Any, Awaitable, Callable
 
 import httpx
+import websockets
+
+try:
+    import certifi
+
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CONTEXT = ssl.create_default_context()
 
 from .config import DingtalkConfig
 from .models import DingtalkInboundMessage
@@ -19,6 +28,47 @@ logger = logging.getLogger(__name__)
 DingtalkMessageHandler = Callable[[DingtalkInboundMessage], Awaitable[None]]
 
 _DINGTALK_API_BASE = "https://api.dingtalk.com"
+
+
+class _CompatDingTalkStreamClient:
+    """对官方 SDK 做最小兼容封装，补齐 CA 证书并修正异常日志。"""
+
+    def __init__(self, sdk: Any, credential: Any, logger_: logging.Logger):
+        self._client = sdk.DingTalkStreamClient(credential, logger=logger_)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+    async def start(self) -> None:
+        self.pre_start()
+
+        while True:
+            try:
+                connection = self.open_connection()
+
+                if not connection:
+                    self.logger.error("open connection failed")
+                    await asyncio.sleep(10)
+                    continue
+                self.logger.info("endpoint is %s", connection)
+
+                uri = f'{connection["endpoint"]}?ticket={connection["ticket"]}'
+                async with websockets.connect(uri, ssl=_SSL_CONTEXT) as websocket:
+                    self.websocket = websocket
+                    asyncio.create_task(self.keepalive(websocket))
+                    async for raw_message in websocket:
+                        json_message = json.loads(raw_message)
+                        asyncio.create_task(self.background_task(json_message))
+            except KeyboardInterrupt:
+                break
+            except (asyncio.exceptions.CancelledError, websockets.exceptions.ConnectionClosedError) as exc:
+                self.logger.error("[start] network exception, error=%s", exc)
+                await asyncio.sleep(10)
+                continue
+            except Exception as exc:
+                await asyncio.sleep(3)
+                self.logger.exception("unknown exception: %s", exc)
+                continue
 
 
 class DingtalkRuntime:
@@ -51,7 +101,7 @@ class DingtalkRuntime:
 
         self._sdk = sdk
         credential = sdk.Credential(self._config.client_id, self._config.client_secret)
-        self._client = sdk.DingTalkStreamClient(credential, logger=logger)
+        self._client = _CompatDingTalkStreamClient(sdk=sdk, credential=credential, logger_=logger)
         self._client.register_callback_handler(
             sdk.ChatbotMessage.TOPIC,
             _DingtalkChatbotHandler(runtime=self, sdk=sdk),

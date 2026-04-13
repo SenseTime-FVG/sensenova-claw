@@ -1904,3 +1904,12 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - CLI 目前把 `/api/agents/{id}` 的所有错误都提示成“Agent 不存在”，会掩盖真实的 401/403；以后排查类似问题时要先看底层 HTTP 状态，不要只看终端文案。
+
+### 2026-04-13 DingTalk Stream SSL 兼容补充
+
+成功经验：
+- 官方 `dingtalk-stream` SDK 在 macOS/Python 3.12 环境下，`requests` 取 token 可能正常，但 `websockets.connect()` 仍会因系统 CA 链不完整报 `CERTIFICATE_VERIFY_FAILED`；在仓库侧包一层兼容 client，并显式传入 `certifi` 生成的 `ssl.SSLContext`，是最小可控修复。
+- 这类三方 SDK 兼容补丁最适合补“行为级”单测：直接断言 WebSocket 连接拿到了 `ssl` 参数，并断言异常日志格式不会再次触发 `TypeError`，比依赖真实外网复现更稳。
+
+失败/风险经验：
+- `~/.sensenova-claw/config.yml` 若启用了多个外部 channel，`npm run dev` 的报错不一定来自当前仓库根目录配置；先确认实际生效的是用户 home 配置，能避免在错误配置源上兜圈子。
