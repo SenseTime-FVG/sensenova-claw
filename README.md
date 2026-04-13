@@ -73,21 +73,39 @@ ui.user_input → agent.step_started → llm.call_requested → llm.call_complet
 **Linux / macOS:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/install/install.sh | bash
+```
+
+如果GITHUB请求失败（404），使用以下命令:
+
+```bash
+curl -fsSL \
+  -H "Authorization: Bearer <GITHUB_TOKEN>" \
+  -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/SenseTime-FVG/sensenova-claw/contents/install/install.sh?ref=main" | bash
+```
+
+如果安装完成后当前终端提示 `sensenova-claw: command not found`，或提示找不到 `node` / `npm`，执行以下命令  或 重启终端：
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use --lts
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/install/install.ps1 | iex
 ```
 
-安装完成后，运行 `sensenova-claw run` 启动服务，然后打开 http://localhost:3000 进行 LLM 等配置。
+安装完成后，运行 `sensenova-claw run` 启动服务（如果找不到命令，建议重启终端），然后打开 http://localhost:3000 进行 LLM 等配置。
 
 > 详细说明见 [install/README.md](install/README.md)
 >
-> 如需验证某个发布分支或 tag，可在安装前指定 `SENSENOVA_CLAW_APP_BRANCH`，例如:
-> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_APP_BRANCH=v0.5.0 bash`
+> 安装脚本默认拉取 release 维护的 `latest` tag；如需安装指定发布版本，可在安装前指定 `SENSENOVA_CLAW_APP_BRANCH`，例如:
+> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/install/install.sh | SENSENOVA_CLAW_APP_BRANCH=v1.0-beta.1 bash`
 
 ### Option B: 手动安装
 

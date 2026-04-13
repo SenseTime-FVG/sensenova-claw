@@ -17,7 +17,10 @@ export interface SessionLoadedEvent {
 export interface SessionListChangedEvent {
   type: 'session_list_changed';
   session_id?: string;
-  payload: Record<string, never>;
+  payload: {
+    agent_id?: string;
+    reason?: string;
+  };
 }
 
 export interface SessionDeletedEvent {
@@ -29,7 +32,10 @@ export interface SessionDeletedEvent {
 export interface TitleUpdatedEvent {
   type: 'title_updated';
   session_id: string;
-  payload: { title: string };
+  payload: {
+    title?: string;
+    success?: boolean;
+  };
 }
 
 // ── LLM 流式 ──
@@ -37,7 +43,10 @@ export interface TitleUpdatedEvent {
 export interface AgentThinkingEvent {
   type: 'agent_thinking';
   session_id: string;
-  payload: Record<string, never>;
+  payload: {
+    step_type?: string;
+    description?: string;
+  };
 }
 
 export interface LlmDeltaEvent {
@@ -57,6 +66,7 @@ export interface LlmResultEvent {
   payload: {
     turn_id?: string;
     content?: string;
+    tool_calls?: unknown[];
     reasoning_details?: unknown;
   };
 }
@@ -69,6 +79,8 @@ export interface ToolExecutionEvent {
   payload: {
     tool_name: string;
     tool_call_id: string;
+    status?: 'running';
+    turn_id?: string;
     arguments?: Record<string, unknown>;
   };
 }
@@ -96,13 +108,23 @@ export interface ToolConfirmationRequestedEvent {
     risk_level?: string;
     arguments?: Record<string, unknown>;
     timeout?: number;
+    timeout_action?: string;
+    requested_at_ms?: number;
   };
 }
 
 export interface ToolConfirmationResolvedEvent {
   type: 'tool_confirmation_resolved';
   session_id: string;
-  payload: { tool_call_id: string; status: string };
+  payload: {
+    tool_call_id: string;
+    tool_name?: string;
+    approved?: boolean;
+    status?: string;
+    reason?: string;
+    resolved_by?: string;
+    resolved_at_ms?: number;
+  };
 }
 
 export interface UserQuestionAskedEvent {
@@ -122,7 +144,10 @@ export interface UserQuestionAskedEvent {
 export interface UserQuestionAnsweredEvent {
   type: 'user_question_answered_event';
   session_id: string;
-  payload: { question_id: string };
+  payload: {
+    question_id: string;
+    cancelled?: boolean;
+  };
 }
 
 // ── Turn 控制 ──
@@ -136,16 +161,24 @@ export interface TurnCompletedEvent {
 export interface TurnCancelledEvent {
   type: 'turn_cancelled';
   session_id: string;
-  payload: { turn_id?: string };
+  payload: {
+    turn_id?: string;
+    reason?: string;
+    cancelled?: boolean;
+  };
 }
 
 export interface ErrorEvent {
   type: 'error';
   session_id?: string;
   payload: {
+    turn_id?: string;
     user_message?: string;
     message?: string;
     error_type?: string;
+    error_code?: string;
+    raw_message?: string;
+    details?: Record<string, unknown>;
   };
 }
 
@@ -155,16 +188,19 @@ export interface NotificationEvent {
   type: 'notification';
   session_id?: string;
   payload: {
+    id?: string;
     title?: string;
     body?: string;
     text?: string;
     level?: 'info' | 'warning' | 'error' | 'success';
     source?: string;
+    actions?: Array<Record<string, unknown>>;
     created_at_ms?: number;
     metadata?: {
       show_toast?: boolean;
       show_browser?: boolean;
       append_to_chat?: boolean;
+      transport?: string;
     };
   };
 }
@@ -178,6 +214,7 @@ export interface ProactiveResultEvent {
     result: string;
     session_id?: string;
     source_session_id?: string;
+    scratch_session_id?: string;
     recommendation_type?: string;
     items?: Array<{ id: string; title: string; prompt: string; category?: string }>;
   };
@@ -186,7 +223,10 @@ export interface ProactiveResultEvent {
 export interface TodolistUpdatedEvent {
   type: 'todolist_updated';
   session_id?: string;
-  payload: { date?: string };
+  payload: {
+    date?: string;
+    action?: string;
+  };
 }
 
 // ── Union ──
