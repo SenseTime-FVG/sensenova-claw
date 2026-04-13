@@ -27,11 +27,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -g 1000 sandbox && \
     useradd -m -u 1000 -g sandbox sandbox
 
-# 安装 sensenova-claw Python 包
+# 安装 sensenova-claw Python 包（排除前端目录，减小镜像体积）
 WORKDIR /opt/sensenova-claw
 COPY pyproject.toml .
 COPY sensenova_claw/ sensenova_claw/
-RUN pip install --no-cache-dir .
+RUN rm -rf sensenova_claw/app/web && \
+    pip install --no-cache-dir .
 
 # 复制前端构建产物
 COPY --from=frontend-build /build/.next/standalone /opt/sensenova-claw/web
