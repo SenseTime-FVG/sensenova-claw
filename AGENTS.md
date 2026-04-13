@@ -103,6 +103,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 飞书相关全量搜索很容易扫进用户目录下大量 IDE/历史工作区噪音；排查时应优先查 `~/.sensenova-claw/logs/system.log*`，否则信噪比太差。
 
+### 2026-04-13 其他 Channel TLS 加固补充
+
+成功经验：
+- 证书链问题修复不能只盯“入站长连接”是否恢复，必须继续扫出站 HTTP 和其他 mode/runtime；这次剩余风险点就落在 Telegram、QQ OneBot、飞书工具客户端和钉钉出站 HTTP。
+- Telegram 的 `python-telegram-bot` 可以通过 `Bot(request=HTTPXRequest(httpx_kwargs={\"verify\": CERTIFI_SSL_CONTEXT}), get_updates_request=...)` 最小接入共享 CA，不需要改 SDK 内部。
+- 对 `httpx.AsyncClient` / `websockets.connect` 的 TLS 兼容，行为级单测最稳：直接断言 `verify` / `ssl` 参数使用共享 `_SSL_CONTEXT`，比依赖真实外网回归更快、更不脆弱。
+
+失败/风险经验：
+- 给 runtime 增加 `start()` 测试时，若会拉起后台接收循环，测试里必须显式 `stop()` 收尾；否则 pytest 会因为悬挂任务卡住，看起来像“测试没输出”。
+
 ### 2026-04-07 QQ Gateway reconnecting 状态修复补充
 
 ### 2026-04-10 Agent 三态白名单语义补充

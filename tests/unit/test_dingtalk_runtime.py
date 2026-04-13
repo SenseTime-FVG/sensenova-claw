@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import types
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from sensenova_claw.adapters.plugins.dingtalk.config import DingtalkConfig
-from sensenova_claw.adapters.plugins.dingtalk.runtime import DingtalkRuntime, _CompatDingTalkStreamClient
+from sensenova_claw.adapters.plugins.dingtalk.runtime import DingtalkRuntime, _CompatDingTalkStreamClient, _SSL_CONTEXT
 
 
 def _build_compat_client(*, logger):
@@ -198,6 +199,38 @@ async def test_send_text_to_session_webhook_uses_webhook_endpoint(monkeypatch):
     assert sent_calls[0]["url"] == "https://example.com/session-webhook"
     assert sent_calls[0]["data"] == '{"msgtype":"text","text":{"content":"会话回复"}}'
     assert sent_calls[0]["json"] is None
+
+
+@pytest.mark.asyncio
+async def test_send_text_to_user_uses_ssl_context_for_http_client():
+    runtime = DingtalkRuntime(DingtalkConfig(enabled=True, client_id="cid", client_secret="secret"))
+    runtime._client = type("_FakeClient", (), {"get_access_token": lambda self: "token-1"})()
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {"processQueryKey": "outbound-1"}
+    client = AsyncMock()
+    client.post.return_value = response
+
+    with patch("sensenova_claw.adapters.plugins.dingtalk.runtime.httpx.AsyncClient") as client_cls:
+        client_cls.return_value.__aenter__.return_value = client
+        await runtime.send_text("user:staff-1", "你好")
+
+    assert client_cls.call_args.kwargs["verify"] is _SSL_CONTEXT
+
+
+@pytest.mark.asyncio
+async def test_send_text_to_webhook_uses_ssl_context_for_http_client():
+    runtime = DingtalkRuntime(DingtalkConfig(enabled=True, client_id="cid", client_secret="secret"))
+    response = Mock()
+    response.raise_for_status.return_value = None
+    client = AsyncMock()
+    client.post.return_value = response
+
+    with patch("sensenova_claw.adapters.plugins.dingtalk.runtime.httpx.AsyncClient") as client_cls:
+        client_cls.return_value.__aenter__.return_value = client
+        await runtime.send_text("webhook:https://example.com/session-webhook", "会话回复")
+
+    assert client_cls.call_args.kwargs["verify"] is _SSL_CONTEXT
 
 
 @pytest.mark.asyncio

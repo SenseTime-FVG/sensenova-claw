@@ -13,12 +13,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 import websockets
 
-try:
-    import certifi
-
-    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
-except ImportError:
-    _SSL_CONTEXT = ssl.create_default_context()
+from sensenova_claw.platform.security.ssl import CERTIFI_SSL_CONTEXT
 
 from .config import DingtalkConfig
 from .models import DingtalkInboundMessage
@@ -26,6 +21,7 @@ from .models import DingtalkInboundMessage
 logger = logging.getLogger(__name__)
 
 DingtalkMessageHandler = Callable[[DingtalkInboundMessage], Awaitable[None]]
+_SSL_CONTEXT = CERTIFI_SSL_CONTEXT
 
 _DINGTALK_API_BASE = "https://api.dingtalk.com"
 
@@ -139,7 +135,7 @@ class DingtalkRuntime:
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            async with httpx.AsyncClient(timeout=20.0, verify=_SSL_CONTEXT) as client:
                 response = await client.post(
                     webhook_url,
                     headers=headers,
@@ -171,7 +167,7 @@ class DingtalkRuntime:
             "Content-Type": "application/json",
             "x-acs-dingtalk-access-token": access_token,
         }
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, verify=_SSL_CONTEXT) as client:
             response = await client.post(
                 f"{_DINGTALK_API_BASE}/v1.0/robot/oToMessages/batchSend",
                 headers=headers,
