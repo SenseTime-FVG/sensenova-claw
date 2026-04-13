@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_DIR="$HOME/.sensenova-claw"
+CONFIG_FILE="$CONFIG_DIR/config.yml"
+
+# ── 1. 生成最小 config（如不存在）──
+if [ ! -f "$CONFIG_FILE" ]; then
+    mkdir -p "$CONFIG_DIR"
+    cat > "$CONFIG_FILE" <<'YAML'
+server:
+  host: 0.0.0.0
+  port: 8000
+  cors_origins:
+    - http://localhost:3000
+    - http://127.0.0.1:3000
+
+security:
+  auth_enabled: false
+
+delegation:
+  enabled: true
+YAML
+    echo "[sensenova-claw] config.yml generated at $CONFIG_FILE"
+fi
+
+# ── 2. 后台启动 Next.js frontend ──
+cd /opt/sensenova-claw/web
+PORT=3000 HOST=0.0.0.0 node server.js &
+FRONTEND_PID=$!
+echo "[sensenova-claw] frontend started (PID $FRONTEND_PID, port 3000)"
+
+# ── 3. 前台启动 FastAPI backend ──
+echo "[sensenova-claw] starting backend on port 8000..."
+exec sensenova-claw run --no-frontend --port 8000

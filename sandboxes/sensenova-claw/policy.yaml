@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 SenseTime-FVG. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Sensenova-Claw sandbox 策略
+# 宽松网络出站 + 文件系统隔离
+
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /proc, /dev/urandom, /etc, /opt/sensenova-claw]
+  read_write: [/sandbox, /tmp, /dev/null, /home/sandbox/.sensenova-claw]
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  general_outbound:
+    name: permissive-outbound
+    endpoints:
+      - { host: "**", port: 443 }
+      - { host: "**", port: 80 }
