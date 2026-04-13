@@ -83,6 +83,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 每次你执行完成任务之后，需要总结成功和失败的经验，并选择会对后续任务有帮助的内容保存在这里
 
+### 2026-04-13 Discord / QQ TLS 证书链修复补充
+
+成功经验：
+- 这类 `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` 问题，先在本机分别用系统默认 CA 和 `certifi` 做最小握手验证最有效；若默认失败而 `certifi` 成功，基本就能排除业务协议问题，直接收敛到运行时 TLS 配置缺失。
+- 仓库里已有钉钉/企微的 `certifi + ssl context` 兼容模式；给 Discord 注入 `aiohttp.TCPConnector(ssl=...)`，给 QQ 官方 runtime 的 `httpx.AsyncClient(verify=...)` 与 `websockets.connect(ssl=...)` 统一接入同一份上下文，是最小且可测的修复。
+- 这类兼容修复应补行为级单测，而不是依赖真实外网回归：Discord 断言 `connector._ssl`，QQ 断言 `verify` 和 `ssl` 参数，回归最稳。
+
+失败/风险经验：
+- 扩大到 `tests/unit/test_discord_*.py tests/unit/test_qq_*.py` 时，当前仓库仍有既有失败：`tests/unit/test_qq_channel.py::TestInbound::test_publishes_user_input_for_dm` 期望 session 绑定值为字符串 `"qq"`，实际为集合 `{'qq'}`；不能把这条失败误判成 TLS 修复回归。
+
 ### 2026-04-07 QQ Gateway reconnecting 状态修复补充
 
 ### 2026-04-10 Agent 三态白名单语义补充

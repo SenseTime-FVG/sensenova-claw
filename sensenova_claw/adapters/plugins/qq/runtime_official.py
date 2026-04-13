@@ -14,10 +14,14 @@ import httpx
 import websockets
 from websockets.exceptions import ConnectionClosed
 
+from sensenova_claw.platform.security.ssl import CERTIFI_SSL_CONTEXT
+
 from .config import QQConfig
 from .models import QQInboundMessage
 
 logger = logging.getLogger(__name__)
+
+_SSL_CONTEXT = CERTIFI_SSL_CONTEXT
 
 QQMessageHandler = Callable[[QQInboundMessage], Awaitable[None]]
 
@@ -107,7 +111,7 @@ class QQOfficialRuntime:
         if reply_to_message_id:
             payload["msg_id"] = reply_to_message_id
 
-        async with httpx.AsyncClient(base_url=self._api_base_url(), timeout=20) as client:
+        async with httpx.AsyncClient(base_url=self._api_base_url(), timeout=20, verify=_SSL_CONTEXT) as client:
             response = await client.post(path, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
@@ -267,7 +271,7 @@ class QQOfficialRuntime:
         client_secret = self._config.official.client_secret
         if not app_id or not client_secret:
             raise RuntimeError("QQ official app_id and client_secret are required")
-        async with httpx.AsyncClient(base_url=self._token_base_url(), timeout=20) as client:
+        async with httpx.AsyncClient(base_url=self._token_base_url(), timeout=20, verify=_SSL_CONTEXT) as client:
             response = await client.post(
                 "/app/getAppAccessToken",
                 json={"appId": app_id, "clientSecret": client_secret},
@@ -280,7 +284,7 @@ class QQOfficialRuntime:
 
     async def _fetch_gateway(self) -> str:
         headers = await self._build_headers()
-        async with httpx.AsyncClient(base_url=self._api_base_url(), timeout=20) as client:
+        async with httpx.AsyncClient(base_url=self._api_base_url(), timeout=20, verify=_SSL_CONTEXT) as client:
             response = await client.get("/gateway/bot", headers=headers)
             response.raise_for_status()
             data = response.json()
@@ -322,7 +326,7 @@ class QQOfficialRuntime:
 
     async def _open_gateway_connection(self) -> None:
         gateway = await self._fetch_gateway()
-        self._ws = await websockets.connect(gateway)
+        self._ws = await websockets.connect(gateway, ssl=_SSL_CONTEXT)
 
     async def _reconnect_gateway(self, *, prefer_resume: bool) -> None:
         self._sensenova_claw_status = {"status": "reconnecting", "error": None}
