@@ -1,15 +1,12 @@
-"""引用管理器：提取、去重并维护全局引用池。
+"""引用管理器：解析脚注引用，按 URL 去重，分配全局编号。
 
-CitationManager 作为透明中间件运行在 Research Agent 子报告之上，
-解析 ## Sources 节，按 URL 去重，维护跨维度的全局引用池。
+CitationManager 处理使用 [^key] 脚注格式的报告文本，
+将符号引用转换为 [N] 编号引用 + 参考文献列表。
 """
 from __future__ import annotations
 
 import re
-import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
 
@@ -19,305 +16,199 @@ from urllib.parse import urlparse, urlunparse
 class Citation:
     """单条引用记录。"""
 
-    # 唯一标识符
-    id: str
+    # 脚注 key（如 reuters_tesla_q4）
+    key: str
     # 原始 URL
     url: str
-    # 来源标题（来自 Markdown 链接文本）
+    # 来源标题
     title: str
-    # 来源分类（默认 "web"）
-    source_category: str
-    # 摘要片段
-    snippet: str
-    # 首次关联的维度 ID
-    dimension_id: str
-    # 可信度评分（0.0 ~ 1.0）
-    credibility: float = 0.0
-    # 访问时间（可选）
-    access_time: Optional[datetime] = None
-    # 引用此来源的所有维度列表
-    referenced_in: list[str] = field(default_factory=list)
+    # 全局编号（处理后分配）
+    index: int = 0
+    # 引用此来源的所有脚注 key 列表（URL 去重时可能多个 key 指向同一来源）
+    alias_keys: list[str] = field(default_factory=list)
 
 
-# ─── URL 标准化工具函数 ────────────────────────────────────────────────────────
+# ─── URL 标准化 ──────────────────────────────────────────────────────────────
 
 def _normalize_url(url: str) -> str:
-    """标准化 URL：小写协议和主机名，去除尾部斜杠。
-
-    例如:
-        HTTPS://Example.COM/path/ -> https://example.com/path
-        https://example.com/path  -> https://example.com/path
-    """
+    """标准化 URL：小写协议和主机名，去除尾部斜杠。"""
     parsed = urlparse(url.strip())
     scheme = parsed.scheme.lower()
     netloc = parsed.netloc.lower()
-    # 去除路径尾部斜杠（根路径 "/" 保留为空）
     path = parsed.path.rstrip("/") if parsed.path != "/" else ""
     normalized = urlunparse((scheme, netloc, path, parsed.params, parsed.query, ""))
     return normalized
 
 
-# ─── Sources 节解析正则 ────────────────────────────────────────────────────────
+# ─── 脚注解析正则 ────────────────────────────────────────────────────────────
 
-# 匹配 "N. [title](url)" 格式的 Markdown 链接
-_SOURCE_ENTRY_RE = re.compile(
-    r"^\s*\d+\.\s+\[([^\]]+)\]\(([^)]+)\)",
+# 匹配正文中的脚注引用：[^key]（不在行首，非定义）
+_FOOTNOTE_REF_RE = re.compile(r"\[\^([\w-]+)\](?!:)")
+
+# 匹配脚注定义：[^key]: 内容（行首）
+# 内容中可能包含 Markdown 链接 [title](url) 或纯文本 + URL
+_FOOTNOTE_DEF_RE = re.compile(
+    r"^\[\^([\w-]+)\]:\s*(.+)$",
     re.MULTILINE,
 )
 
-# 匹配 "## Sources" 节（大小写不敏感）
-_SOURCES_SECTION_RE = re.compile(
-    r"##\s+Sources\s*\n(.*?)(?=\n##\s|\Z)",
-    re.DOTALL | re.IGNORECASE,
-)
+# 从脚注定义内容中提取 Markdown 链接 [title](url)
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+
+# 从脚注定义内容中提取裸 URL（备用）
+_BARE_URL_RE = re.compile(r"https?://\S+")
 
 
-def _parse_sources_section(report: str) -> list[tuple[str, str]]:
-    """从报告文本中解析 ## Sources 节，返回 (title, url) 元组列表。"""
-    section_match = _SOURCES_SECTION_RE.search(report)
-    if not section_match:
-        return []
+def _parse_footnote_def(content: str) -> tuple[str, str]:
+    """从脚注定义内容解析 (title, url)。
 
-    section_text = section_match.group(1)
-    entries = _SOURCE_ENTRY_RE.findall(section_text)
-    # entries: [(title, url), ...]
-    return entries
+    支持格式：
+    - [title](url)
+    - [title](url) - category
+    - title - url
+    - url
+    """
+    # 优先匹配 Markdown 链接
+    link_match = _MD_LINK_RE.search(content)
+    if link_match:
+        return link_match.group(1).strip(), link_match.group(2).strip()
+
+    # 尝试裸 URL
+    url_match = _BARE_URL_RE.search(content)
+    if url_match:
+        url = url_match.group(0)
+        # 标题取 URL 之前的部分
+        title = content[:url_match.start()].strip().rstrip("-").rstrip()
+        return title or url, url
+
+    # 都没有，整个内容作为标题
+    return content.strip(), ""
 
 
 # ─── CitationManager ──────────────────────────────────────────────────────────
 
 class CitationManager:
-    """全局引用池管理器。
+    """脚注引用处理器。
 
-    - 从 Research Agent 子报告中提取引用
-    - 按标准化 URL 去重
-    - 跨维度追踪引用来源
-    - 生成带全局编号的合并报告
+    处理流程：
+    1. 从子报告收集所有脚注定义（key → title, url）
+    2. 按 URL 去重，合并指向同一来源的不同 key
+    3. 扫描终稿正文中的 [^key] 引用，按首次出现顺序分配全局编号
+    4. 替换 [^key] → [N]，生成参考文献列表
     """
 
     def __init__(self) -> None:
-        # 内部引用池：标准化 URL → Citation
+        # key → (title, url)：所有脚注定义
+        self._definitions: dict[str, tuple[str, str]] = {}
+        # normalized_url → Citation：去重后的引用池
         self._pool: dict[str, Citation] = {}
+        # key → normalized_url：key 到去重 URL 的映射
+        self._key_to_norm_url: dict[str, str] = {}
 
-    @property
-    def pool(self) -> dict[str, Citation]:
-        """返回引用池的只读副本，防止外部意外修改内部状态。"""
-        return dict(self._pool)
+    def collect_definitions(self, text: str) -> None:
+        """从文本中收集所有脚注定义，按 URL 去重。"""
+        for match in _FOOTNOTE_DEF_RE.finditer(text):
+            key = match.group(1)
+            content = match.group(2)
+            title, url = _parse_footnote_def(content)
 
-    def extract_and_register(
-        self,
-        sub_report: str,
-        dimension_id: str,
-    ) -> tuple[str, list[Citation]]:
-        """从子报告中提取引用并注册到全局池。
+            self._definitions[key] = (title, url)
 
-        参数:
-            sub_report:   Research Agent 输出的子报告文本（包含 ## Sources 节）
-            dimension_id: 当前维度标识符（如 "climate", "safety"）
-
-        返回:
-            (原始报告文本不变, 本次新增的 Citation 列表)
-            - 重复 URL 不计入新增，只更新其 referenced_in
-        """
-        entries = _parse_sources_section(sub_report)
-        new_citations: list[Citation] = []
-
-        for title, url in entries:
-            norm_url = _normalize_url(url)
-
-            if norm_url in self._pool:
-                # 已存在：仅更新引用维度列表
-                existing = self._pool[norm_url]
-                if dimension_id not in existing.referenced_in:
-                    existing.referenced_in.append(dimension_id)
-            else:
-                # 新增：创建 Citation 并注册
-                citation = Citation(
-                    id=str(uuid.uuid4()),
-                    url=url.strip(),
-                    title=title.strip(),
-                    source_category="web",
-                    snippet="",
-                    dimension_id=dimension_id,
-                    referenced_in=[dimension_id],
-                )
-                self._pool[norm_url] = citation
-                new_citations.append(citation)
-
-        return sub_report, new_citations
-
-    def build_global_reference(
-        self,
-        sub_reports: dict[str, str],
-    ) -> tuple[str, list[Citation]]:
-        """合并所有子报告，在末尾附加全局引用列表。
-
-        参数:
-            sub_reports: 维度 ID → 子报告文本 的映射
-
-        返回:
-            (合并后的报告文本, 全局引用池中的所有 Citation 列表)
-        """
-        # 合并各维度报告，添加维度标题
-        sections: list[str] = []
-        for dimension_id, report_text in sub_reports.items():
-            header = f"## [{dimension_id}]"
-            sections.append(f"{header}\n\n{report_text.strip()}")
-
-        merged_body = "\n\n---\n\n".join(sections)
-
-        # 构建全局引用节
-        all_citations = list(self._pool.values())
-        ref_lines: list[str] = []
-        for idx, citation in enumerate(all_citations, start=1):
-            dims_str = ", ".join(citation.referenced_in) if citation.referenced_in else "-"
-            ref_lines.append(
-                f"{idx}. [{citation.title}]({citation.url})  "
-                f"_(dimensions: {dims_str})_"
-            )
-
-        global_ref_section = "## Global References\n\n" + "\n".join(ref_lines)
-
-        merged_text = merged_body + "\n\n---\n\n" + global_ref_section
-
-        return merged_text, all_citations
-
-    def _build_global_mapping(
-        self,
-        sub_reports: dict[str, str],
-    ) -> tuple[dict[str, tuple[int, str, str]], dict[str, dict[int, int]]]:
-        """构建全局引用映射：扫描所有子报告，去重并分配全局编号。
-
-        返回:
-            (global_map: norm_url → (global_index, title, url),
-             dimension_local_to_global: dim_id → {local_idx → global_idx})
-        """
-        global_map: dict[str, tuple[int, str, str]] = {}
-        dimension_local_to_global: dict[str, dict[int, int]] = {}
-        global_counter = 0
-
-        for dim_id, report_text in sub_reports.items():
-            entries = _parse_sources_section(report_text)
-            local_map: dict[int, int] = {}
-
-            for local_idx, (title, url) in enumerate(entries, start=1):
+            if url:
                 norm_url = _normalize_url(url)
+                self._key_to_norm_url[key] = norm_url
 
-                if norm_url not in global_map:
-                    global_counter += 1
-                    global_map[norm_url] = (global_counter, title.strip(), url.strip())
+                if norm_url not in self._pool:
+                    self._pool[norm_url] = Citation(
+                        key=key,
+                        url=url,
+                        title=title,
+                        alias_keys=[key],
+                    )
+                else:
+                    existing = self._pool[norm_url]
+                    if key not in existing.alias_keys:
+                        existing.alias_keys.append(key)
 
-                    if norm_url not in self._pool:
-                        self._pool[norm_url] = Citation(
-                            id=str(uuid.uuid4()),
-                            url=url.strip(),
-                            title=title.strip(),
-                            source_category="web",
-                            snippet="",
-                            dimension_id=dim_id,
-                            referenced_in=[dim_id],
-                        )
-                    elif dim_id not in self._pool[norm_url].referenced_in:
-                        self._pool[norm_url].referenced_in.append(dim_id)
+    def process_report(self, report_text: str) -> tuple[str, str]:
+        """处理终稿：替换 [^key] → [N]，生成参考文献列表。
 
-                global_idx = global_map[norm_url][0]
-                local_map[local_idx] = global_idx
+        参数:
+            report_text: 终稿文本（含 [^key] 引用和脚注定义）
 
-            dimension_local_to_global[dim_id] = local_map
+        返回:
+            (处理后的正文, 参考文献 Markdown 文本)
+        """
+        # 扫描正文中的引用，按首次出现顺序分配编号
+        key_to_index: dict[str, int] = {}
+        ordered_citations: list[Citation] = []
+        counter = 0
 
-        return global_map, dimension_local_to_global
+        for match in _FOOTNOTE_REF_RE.finditer(report_text):
+            key = match.group(1)
+            # 通过 URL 去重：不同 key 可能指向同一来源
+            norm_url = self._key_to_norm_url.get(key)
 
-    @staticmethod
-    def _replace_citations(report_text: str, local_map: dict[int, int]) -> str:
-        """替换子报告中的局部引用编号为全局编号，移除 Sources 节。"""
-        body = _SOURCES_SECTION_RE.sub("", report_text).rstrip()
-        for local_idx in sorted(local_map.keys(), reverse=True):
-            global_idx = local_map[local_idx]
-            body = body.replace(f"[{local_idx}]", f"[{global_idx}]")
-        return body.strip()
+            if norm_url and norm_url in self._pool:
+                citation = self._pool[norm_url]
+                # 检查这个来源是否已经分配了编号
+                primary_key = citation.key
+                if primary_key not in key_to_index:
+                    counter += 1
+                    citation.index = counter
+                    key_to_index[primary_key] = counter
+                    ordered_citations.append(citation)
+                # 别名 key 也映射到同一编号
+                if key not in key_to_index:
+                    key_to_index[key] = key_to_index[primary_key]
+            elif key not in key_to_index:
+                # 没有 URL 的脚注，仍然分配编号
+                counter += 1
+                title = self._definitions.get(key, (key, ""))[0]
+                fallback = Citation(key=key, url="", title=title, index=counter, alias_keys=[key])
+                key_to_index[key] = counter
+                ordered_citations.append(fallback)
 
-    @staticmethod
-    def _build_global_sources_text(global_map: dict[str, tuple[int, str, str]]) -> str:
-        """生成全局来源列表的 Markdown 文本。"""
+        # 替换正文中的 [^key] → [N]
+        def replace_ref(m: re.Match) -> str:
+            k = m.group(1)
+            idx = key_to_index.get(k)
+            return f"[{idx}]" if idx else m.group(0)
+
+        processed = _FOOTNOTE_REF_RE.sub(replace_ref, report_text)
+
+        # 移除脚注定义行
+        processed = _FOOTNOTE_DEF_RE.sub("", processed)
+
+        # 清理多余空行（脚注定义移除后可能留下）
+        processed = re.sub(r"\n{3,}", "\n\n", processed).strip()
+
+        # 生成参考文献列表
         ref_lines: list[str] = []
-        for _norm_url, (idx, title, url) in sorted(
-            global_map.items(), key=lambda x: x[1][0]
-        ):
-            ref_lines.append(f"{idx}. [{title}]({url})")
-        return "## 全部来源\n\n" + "\n".join(ref_lines)
+        for citation in ordered_citations:
+            if citation.url:
+                ref_lines.append(f"{citation.index}. [{citation.title}]({citation.url})")
+            else:
+                ref_lines.append(f"{citation.index}. {citation.title}")
 
-    def preprocess_individual_reports(
-        self,
-        sub_reports: dict[str, str],
-    ) -> tuple[dict[str, str], str]:
-        """预处理子报告：统一引用编号，各子报告独立返回。
+        references = "\n".join(ref_lines)
 
-        参数:
-            sub_reports: 维度 ID → 子报告文本 的映射
-
-        返回:
-            (updated_reports: 维度 ID → 更新后的子报告文本, 全局来源列表文本)
-            更新后的子报告中 [N] 已替换为全局编号，Sources 节已移除。
-        """
-        global_map, dim_local_to_global = self._build_global_mapping(sub_reports)
-
-        updated_reports: dict[str, str] = {}
-        for dim_id, report_text in sub_reports.items():
-            local_map = dim_local_to_global.get(dim_id, {})
-            updated_reports[dim_id] = self._replace_citations(report_text, local_map)
-
-        global_sources = self._build_global_sources_text(global_map)
-        return updated_reports, global_sources
-
-    def preprocess_for_report(
-        self,
-        sub_reports: dict[str, str],
-    ) -> tuple[str, str]:
-        """预处理子报告：统一引用编号，合并为单一文本。
-
-        参数:
-            sub_reports: 维度 ID → 子报告文本 的映射
-
-        返回:
-            (合并后的文本, 全局来源列表文本)
-        """
-        global_map, dim_local_to_global = self._build_global_mapping(sub_reports)
-
-        sections: list[str] = []
-        for dim_id, report_text in sub_reports.items():
-            local_map = dim_local_to_global.get(dim_id, {})
-            body = self._replace_citations(report_text, local_map)
-            sections.append(f"## 子报告：{dim_id}\n\n{body}")
-
-        merged_body = "\n\n---\n\n".join(sections)
-        global_sources = self._build_global_sources_text(global_map)
-        return merged_body, global_sources
+        return processed, references
 
     def export_json(self) -> dict:
-        """将引用池导出为 JSON 可序列化字典。
-
-        返回格式：{total_citations: int, citations: [{index, id, url, title, ...}, ...]}
-        """
-        all_citations = list(self._pool.values())
+        """导出引用数据为 JSON 可序列化字典。"""
+        all_citations = [c for c in self._pool.values() if c.index > 0]
+        all_citations.sort(key=lambda c: c.index)
         return {
             "total_citations": len(all_citations),
             "citations": [
                 {
-                    "id": c.id,
-                    "index": i + 1,
+                    "index": c.index,
+                    "key": c.key,
                     "url": c.url,
                     "title": c.title,
-                    "source_category": c.source_category,
-                    "snippet": c.snippet,
-                    "access_time": (
-                        c.access_time.isoformat()
-                        if c.access_time is not None
-                        else None
-                    ),
-                    "dimension_id": c.dimension_id,
-                    "credibility": c.credibility,
-                    "referenced_in": list(c.referenced_in),
+                    "alias_keys": c.alias_keys,
                 }
-                for i, c in enumerate(all_citations)
+                for c in all_citations
             ],
         }

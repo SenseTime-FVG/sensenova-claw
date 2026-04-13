@@ -1,7 +1,7 @@
-"""引用预处理工具：供 deep-research-controller 在生成终稿前调用。
+"""引用预处理工具：供 deep-research-controller 在终稿生成后调用。
 
-读取指定目录下的所有子报告，统一引用编号、去重，
-原地更新子报告文件并生成 global_sources.md。
+读取终稿和指定子报告中的脚注定义，按 URL 去重，
+将终稿中的 [^key] 替换为 [N] 编号，追加参考文献列表。
 """
 from __future__ import annotations
 
@@ -12,24 +12,38 @@ from typing import Any
 from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
 
 
+def _resolve_path(raw: str, agent_workdir: str | None) -> Path:
+    """与 read_file/write_file 保持一致的路径解析。"""
+    p = Path(raw).expanduser()
+    if p.is_absolute():
+        return p.resolve()
+    if agent_workdir:
+        return (Path(agent_workdir) / p).resolve()
+    return p.resolve()
+
+
 class PrepareReportCitationsTool(Tool):
     name = "prepare_report_citations"
     description = (
-        "预处理子报告引用：读取 sub_reports/ 下所有子报告，"
-        "统一引用编号、去重，原地更新各子报告文件中的引用编号，"
-        "生成 global_sources.md 和 citations.json。"
-        "在发送给 report-agent 之前调用。"
+        "处理终稿引用：从指定的子报告文件收集脚注定义（按 URL 去重），"
+        "将终稿中的 [^key] 脚注引用替换为 [N] 编号，"
+        "在终稿末尾追加参考文献列表。在终稿生成后调用。"
     )
     risk_level = ToolRiskLevel.LOW
     parameters = {
         "type": "object",
         "properties": {
-            "report_dir": {
+            "report_path": {
                 "type": "string",
-                "description": "报告目录路径，如 workspace/reports/2026-04-10-ai-chip",
+                "description": "终稿文件的绝对路径，如 /home/user/.sensenova-claw/workdir/.../report.md",
+            },
+            "sub_report_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "所有子报告文件的绝对路径列表",
             },
         },
-        "required": ["report_dir"],
+        "required": ["report_path", "sub_report_paths"],
     }
 
     async def execute(self, **kwargs: Any) -> Any:
@@ -38,48 +52,49 @@ class PrepareReportCitationsTool(Tool):
         )
 
         kwargs.pop("_path_policy", None)
-        kwargs.pop("_agent_workdir", None)
-        report_dir = Path(kwargs["report_dir"])
-        sub_reports_dir = report_dir / "sub_reports"
+        agent_workdir = kwargs.pop("_agent_workdir", None)
 
-        if not sub_reports_dir.exists():
-            return {"success": False, "error": f"子报告目录不存在: {sub_reports_dir}"}
+        report_path = _resolve_path(kwargs["report_path"], agent_workdir)
+        sub_report_paths = [
+            _resolve_path(p, agent_workdir) for p in kwargs["sub_report_paths"]
+        ]
 
-        # 读取所有子报告
-        sub_reports: dict[str, str] = {}
-        for md_file in sorted(sub_reports_dir.glob("*.md")):
-            dim_id = md_file.stem
-            sub_reports[dim_id] = md_file.read_text(encoding="utf-8")
+        if not report_path.exists():
+            return {"success": False, "error": f"终稿不存在: {report_path}"}
 
-        if not sub_reports:
-            return {"success": False, "error": "子报告目录为空"}
-
-        # 预处理引用：统一编号，各子报告独立返回
         cm = CitationManager()
-        updated_reports, global_sources = cm.preprocess_individual_reports(sub_reports)
 
-        # 原地更新各子报告文件
-        for dim_id, updated_text in updated_reports.items():
-            file_path = sub_reports_dir / f"{dim_id}.md"
-            file_path.write_text(updated_text, encoding="utf-8")
+        # Step 1: 从指定的子报告收集脚注定义
+        scanned: list[str] = []
+        for sr_path in sub_report_paths:
+            if not sr_path.exists():
+                continue
+            text = sr_path.read_text(encoding="utf-8")
+            cm.collect_definitions(text)
+            scanned.append(str(sr_path))
 
-        # 写入全局来源列表
-        sources_path = report_dir / "global_sources.md"
-        sources_path.write_text(global_sources, encoding="utf-8")
+        # 也从终稿自身收集（report-agent 可能引入新脚注定义）
+        report_text = report_path.read_text(encoding="utf-8")
+        cm.collect_definitions(report_text)
 
-        # 写入 citations.json
-        citations_path = report_dir / "citations.json"
+        # Step 2: 处理终稿
+        processed_text, references = cm.process_report(report_text)
+
+        # Step 3: 追加参考文献列表并覆写终稿
+        final_text = f"{processed_text}\n\n## 参考文献\n\n{references}\n"
+        report_path.write_text(final_text, encoding="utf-8")
+
+        # Step 4: 写入 citations.json（与终稿同目录）
+        citations_dir = report_path.parent
+        citations_path = citations_dir / "citations.json"
         citations_data = cm.export_json()
         with open(citations_path, "w", encoding="utf-8") as f:
             json.dump(citations_data, f, ensure_ascii=False, indent=2)
 
         return {
             "success": True,
-            "updated_sub_reports": [
-                str(sub_reports_dir / f"{d}.md") for d in updated_reports
-            ],
-            "global_sources_path": str(sources_path),
+            "report_path": str(report_path),
             "citations_path": str(citations_path),
             "total_citations": citations_data["total_citations"],
-            "dimensions_processed": list(sub_reports.keys()),
+            "sub_reports_scanned": scanned,
         }
