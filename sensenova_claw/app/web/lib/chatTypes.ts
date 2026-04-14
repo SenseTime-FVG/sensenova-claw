@@ -158,6 +158,17 @@ export function getTaskId(meta: string): string | null {
   }
 }
 
+export function updateSessionMetaTitle(meta: string, title: string): string {
+  try {
+    const parsed = JSON.parse(meta);
+    const nextMeta = parsed && typeof parsed === 'object' ? parsed : {};
+    nextMeta.title = title;
+    return JSON.stringify(nextMeta);
+  } catch {
+    return JSON.stringify({ title });
+  }
+}
+
 export function timeLabel(ts: number | null | undefined, locale: Locale = detectLocale()): string {
   if (typeof ts !== 'number' || !Number.isFinite(ts)) return '';
   return formatRelativeTime(locale, ts);

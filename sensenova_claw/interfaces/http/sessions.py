@@ -33,6 +33,10 @@ class BulkDeleteRequest(BaseModel):
     filter: SessionFilter | None = None
 
 
+class SessionRenameRequest(BaseModel):
+    title: str = Field(min_length=1)
+
+
 def _normalize_delete_scope(scope: str) -> str:
     value = scope.strip().lower()
     if value in {"", "self"}:
@@ -64,6 +68,14 @@ def _match_session(session: dict, session_filter: SessionFilter) -> bool:
     title = _parse_title(session.get("meta")).lower()
     session_id = str(session.get("session_id", "")).lower()
     return search_term in title or search_term in session_id
+
+
+async def _get_session_or_404(request: Request, session_id: str) -> dict:
+    sessions = await _get_services(request).repo.list_sessions(limit=999999, include_hidden=True)
+    session = next((item for item in sessions if item["session_id"] == session_id), None)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    return session
 
 
 async def _delete_session_record(request: Request, session: dict) -> str:
@@ -109,11 +121,22 @@ async def list_sessions(
 @router.get("/{session_id}")
 async def get_session_detail(session_id: str, request: Request):
     """获取单个会话详情。"""
-    sessions = await _get_services(request).repo.list_sessions(limit=999999, include_hidden=True)
-    session = next((item for item in sessions if item["session_id"] == session_id), None)
-    if session is None:
-        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    session = await _get_session_or_404(request, session_id)
     return JSONResponse(content={"session": session})
+
+
+@router.patch("/{session_id}")
+async def rename_session(session_id: str, body: SessionRenameRequest, request: Request):
+    """更新会话标题。"""
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+
+    await _get_session_or_404(request, session_id)
+    await _get_services(request).gateway.rename_session(session_id, title)
+    updated = await _get_session_or_404(request, session_id)
+    updated["meta"] = await _get_services(request).repo.get_session_meta(session_id) or {}
+    return JSONResponse(content={"ok": True, "session": updated})
 
 
 @router.get("/{session_id}/turns")

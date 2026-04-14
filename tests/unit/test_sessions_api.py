@@ -239,6 +239,46 @@ def test_get_session_detail_missing_returns_404(client):
     assert resp.status_code == 404
 
 
+def test_patch_session_title_updates_meta(client, app):
+    _run(app.state.services.repo.create_session(
+        "sess_rename_1",
+        meta={"title": "旧标题", "agent_id": "helper", "parent_session_id": "root_1"},
+    ))
+
+    resp = client.patch("/api/sessions/sess_rename_1", json={"title": "新标题"})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ok"] is True
+    assert payload["session"]["session_id"] == "sess_rename_1"
+    meta = payload["session"]["meta"]
+    assert meta["title"] == "新标题"
+    assert meta["agent_id"] == "helper"
+    assert meta["parent_session_id"] == "root_1"
+    assert _run(app.state.services.repo.get_session_meta("sess_rename_1")) == {
+        "title": "新标题",
+        "agent_id": "helper",
+        "parent_session_id": "root_1",
+    }
+
+
+def test_patch_session_title_rejects_blank_title(client, app):
+    _run(app.state.services.repo.create_session("sess_rename_blank", meta={"title": "旧标题"}))
+
+    resp = client.patch("/api/sessions/sess_rename_blank", json={"title": "   "})
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "title is required"
+    assert _run(app.state.services.repo.get_session_meta("sess_rename_blank")) == {"title": "旧标题"}
+
+
+def test_patch_session_title_missing_session_returns_404(client):
+    resp = client.patch("/api/sessions/missing_rename", json={"title": "新标题"})
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Session 'missing_rename' not found"
+
+
 def test_bulk_delete_sessions_by_ids(client, app):
     _run(app.state.services.repo.create_session("sess_batch_1", meta={"agent_id": "helper"}))
     _run(app.state.services.repo.create_session("sess_batch_2"))

@@ -2001,3 +2001,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - `/chat` 页面同时有 agent 列表和 session 列表，若 Playwright 直接 `getByText('对话二')`，很容易命中多个元素；这类页面要先收窄到具体面板容器，否则会把选择器歧义误判成功能失败。
+
+### 2026-04-14 会话右键重命名补充
+
+成功经验：
+- 会话标题手动修改需求先全局搜 `update_session_title` / `title_updated` 很关键；这次仓储层其实早已有 `Repository.update_session_title()`，真正缺的是 HTTP API 和前端入口，不需要重做存储。
+- 工作台、深度研究、自动化共用 `WorkbenchShell + LeftNav + SessionContext`，优先在共享组件接入右键菜单能一改覆盖多页；PPT 和消息页再单独补自己的列表实现即可。
+- 原地输入框要统一处理 `Enter` 后紧跟 `blur` 的二次提交问题；把 `skipBlurSubmitRef` 放进通用编辑组件，比在每个页面分别打补丁稳得多。
+- Playwright 测登录保护页时，`?token=...` 比仅设置 cookie 更稳；工作台测试只设 cookie 会停在 Token 输入页。
+
+失败/风险经验：
+- 前端 dev server 会持续代理未 mock 的 `/api/custom-pages`、`/api/todolist`、`/api/skills`、`/api/files/roots`、`/ws` 并打印 `ECONNREFUSED`；这类输出是环境噪音，不能直接判成用例失败，要以断言结果为准。
+- `/chat` 页存在 agent 摘要和 session 列表两处同名标题，`getByText()` 很容易触发 strict mode 冲突；这类页面的回归断言应优先绑定 `data-testid` 到具体会话项。

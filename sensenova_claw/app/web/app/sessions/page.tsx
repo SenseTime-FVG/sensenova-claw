@@ -18,6 +18,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { authFetch, API_BASE } from '@/lib/authFetch';
+import { SessionContextMenu } from '@/components/session/SessionContextMenu';
+import { InlineSessionTitleEditor } from '@/components/session/InlineSessionTitleEditor';
+import { updateSessionMetaTitle } from '@/lib/chatTypes';
 
 interface Session {
   session_id: string;
@@ -83,6 +86,9 @@ export default function SessionsPage() {
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [bulkDeleteError, setBulkDeleteError] = useState('');
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ session: Session; x: number; y: number } | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   const loadSessions = (targetPage: number, targetSearchTerm: string, targetStatus: string) => {
     setLoading(true);
@@ -244,6 +250,39 @@ export default function SessionsPage() {
     : selectionMode === 'page'
       ? `已选中当前页面 ${selectedSessionIds.length} 个会话`
       : `已手动选中 ${selectedSessionIds.length} 个会话`;
+
+  const startRename = () => {
+    if (!contextMenu) return;
+    setEditingSessionId(contextMenu.session.session_id);
+    setRenameValue(parseTitle(contextMenu.session.meta));
+  };
+
+  const cancelRename = () => {
+    setEditingSessionId(null);
+    setRenameValue('');
+  };
+
+  const submitRename = async () => {
+    if (!editingSessionId) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) return;
+    try {
+      const res = await authFetch(`${API_BASE}/api/sessions/${editingSessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      if (!res.ok) return;
+      setSessions((prev) => prev.map((session) => (
+        session.session_id === editingSessionId
+          ? { ...session, meta: updateSessionMetaTitle(session.meta, trimmed) }
+          : session
+      )));
+      cancelRename();
+    } catch {
+      // ignore
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -472,7 +511,28 @@ export default function SessionsPage() {
                                 </Badge>
                               </TableCell>
                               <TableCell className="font-mono text-sm text-foreground/70 font-bold">{session.session_id.slice(0, 8)}...</TableCell>
-                              <TableCell className="font-bold text-lg text-foreground group-hover:text-primary transition-colors">{parseTitle(session.meta)}</TableCell>
+                              <TableCell
+                                className="font-bold text-lg text-foreground group-hover:text-primary transition-colors"
+                                onContextMenu={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setContextMenu({ session, x: event.clientX, y: event.clientY });
+                                }}
+                                data-testid={`sessions-title-cell-${session.session_id}`}
+                              >
+                                {editingSessionId === session.session_id ? (
+                                  <InlineSessionTitleEditor
+                                    value={renameValue}
+                                    onChange={setRenameValue}
+                                    onSubmit={submitRename}
+                                    onCancel={cancelRename}
+                                    testId={`sessions-rename-input-${session.session_id}`}
+                                    className="w-full rounded-lg border border-primary/40 bg-background px-2 py-1 text-base font-bold text-foreground outline-none ring-0"
+                                  />
+                                ) : (
+                                  parseTitle(session.meta)
+                                )}
+                              </TableCell>
                               <TableCell>
                                 {target ? (
                                   <Badge variant="outline" className="gap-2 bg-primary/5 text-primary text-xs px-3 py-1.5 font-bold border-primary/20 rounded-lg">
@@ -580,6 +640,15 @@ export default function SessionsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SessionContextMenu
+        open={!!contextMenu}
+        x={contextMenu?.x ?? 0}
+        y={contextMenu?.y ?? 0}
+        onClose={() => setContextMenu(null)}
+        onRename={startRename}
+        testId="sessions-context-menu"
+      />
 
       <Dialog open={showBulkDeleteConfirm} onOpenChange={(open) => {
         setShowBulkDeleteConfirm(open);
