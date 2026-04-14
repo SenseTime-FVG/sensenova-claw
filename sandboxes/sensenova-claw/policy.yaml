@@ -30,147 +30,20 @@ process:
   run_as_group: sandbox
 
 network_policies:
-  llm-and-tools:
-    name: llm-and-tools
+  allow-all:
+    name: allow-all-outbound
     binaries:
-      - path: /usr/local/bin/python3.12
-      - path: /usr/local/bin/python3
-      - path: /usr/bin/python3
-      - path: /usr/bin/curl
-      - path: /usr/bin/node
+      - path: "/**"
     endpoints:
-      # LLM Providers
-      - host: "*.openai.com"
+      - host: "*.*"
         port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.azure.com"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.anthropic.com"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.googleapis.com"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.minimax.chat"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.aliyuncs.com"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.deepseek.com"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.moonshot.cn"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.zhipuai.cn"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.mistral.ai"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.uniapi.io"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.openrouter.ai"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      # 搜索工具
-      - host: "*.serper.dev"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.brave.com"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.tavily.com"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      - host: "*.baidu.com"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: full
-      # tiktoken 数据
-      - host: "*.blob.core.windows.net"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-  web-access:
-    name: web-access
-    binaries:
-      - path: /usr/local/bin/python3.12
-      - path: /usr/local/bin/python3
-      - path: /usr/bin/curl
-    endpoints:
-      - host: "*.com"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-      - host: "*.org"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-      - host: "*.net"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-      - host: "*.io"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-      - host: "*.dev"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-      - host: "*.ai"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-      - host: "*.cn"
-        port: 443
-        protocol: rest
-        enforcement: enforce
-        access: read-only
-      - host: "*.com"
+      - host: "*.*"
         port: 80
-        protocol: rest
-        enforcement: enforce
-        access: read-only
+      - host: "*.*.*"
+        port: 443
+      - host: "*.*.*"
+        port: 80
+      - host: "*.*.*.*"
+        port: 443
+      - host: "*.*.*.*"
+        port: 80
