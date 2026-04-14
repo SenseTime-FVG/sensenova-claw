@@ -37,13 +37,19 @@ network_policies:
     endpoints:
       - host: "*.*"
         port: 443
+        enforcement: audit
       - host: "*.*"
         port: 80
+        enforcement: audit
       - host: "*.*.*"
         port: 443
+        enforcement: audit
       - host: "*.*.*"
         port: 80
+        enforcement: audit
       - host: "*.*.*.*"
         port: 443
+        enforcement: audit
       - host: "*.*.*.*"
         port: 80
+        enforcement: audit
