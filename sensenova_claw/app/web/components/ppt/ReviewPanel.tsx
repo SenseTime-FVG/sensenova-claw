@@ -3,34 +3,73 @@
 /**
  * 审查报告面板 —— 右栏 Tab
  *
- * 展示 ppt-review 生成的质量审查结果：
- *   - 总体评分与摘要
- *   - 逐页问题列表
- *   - 一键修复按钮
+ * 支持两种审查格式：
+ * - 旧格式: { overall_score, overall_conclusion, page_issues, strengths, recommendations }
+ * - 新格式 (schema_version: "1.0"): { overall_status, review_summary, task_satisfaction,
+ *     style_execution, narrative_consistency, payload_budget_review, page_issues, recommended_actions }
  */
 
 import { cn } from '@/lib/utils';
 import {
   ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
-  Wand2, ArrowRight,
+  Wand2, ArrowRight, PackageCheck, Palette, BookOpen,
+  LayoutGrid, ClipboardCheck,
 } from 'lucide-react';
+
+// ── 旧格式类型 ──
 
 export interface PageIssue {
   page_number: number;
   page_title: string;
   severity: 'info' | 'warning' | 'error';
-  category: string;       // 如 'style_deviation', 'content_missing', 'image_quality'
+  category: string;
   description: string;
-  suggested_skill: string; // 推荐触发的 skill
+  suggested_skill: string;
 }
 
 export interface ReviewReport {
-  overall_score: number;      // 0-100
-  overall_conclusion: string;
-  page_issues: PageIssue[];
-  strengths: string[];
-  recommendations: string[];
+  // 旧格式字段
+  overall_score?: number;
+  overall_conclusion?: string;
+  page_issues?: PageIssue[];
+  strengths?: string[];
+  recommendations?: string[];
+
+  // 新格式字段 (schema_version: "1.0")
+  schema_version?: string;
+  overall_status?: string;
+  review_summary?: {
+    total_pages: number;
+    pages_reviewed: number;
+    issues_found: number;
+    blocking_issues: number;
+    minor_notes: number;
+  };
+  task_satisfaction?: {
+    status: string;
+    checks: Array<{ item: string; expected?: string; actual?: string; passed: boolean }>;
+  };
+  style_execution?: {
+    status: string;
+    checks: Array<{ item: string; detail?: string; passed: boolean }>;
+  };
+  narrative_consistency?: {
+    status: string;
+    checks: Array<{ item: string; page_id?: string; title_match?: boolean; content_match?: boolean }>;
+  };
+  payload_budget_review?: Array<{
+    page_id: string;
+    claim_count: number;
+    structure_block_count?: number;
+    evidence_count?: number;
+    status: string;
+  }>;
+  recommended_actions?: string[];
+  delivery_readiness?: string;
+  next_step?: string;
 }
+
+// ── 工具函数 ──
 
 function severityIcon(severity: PageIssue['severity']) {
   switch (severity) {
@@ -79,7 +118,7 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
-// ── 问题卡片 ──
+// ── 问题卡片（旧格式）──
 
 function IssueCard({
   issue,
@@ -120,6 +159,213 @@ function IssueCard({
   );
 }
 
+// ── 检查项行（新格式）──
+
+function CheckRow({ passed, label, detail }: { passed: boolean; label: string; detail?: string }) {
+  return (
+    <div className="flex items-start gap-2 py-1">
+      {passed
+        ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+        : <XCircle className="w-3.5 h-3.5 text-destructive shrink-0 mt-0.5" />
+      }
+      <div className="flex-1 min-w-0">
+        <span className="text-[11px] text-foreground/80">{label}</span>
+        {detail && <div className="text-[10px] text-muted-foreground/60 mt-0.5 leading-relaxed">{detail}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── 分组标题 ──
+
+function SectionHeader({ icon, title, status }: { icon: React.ReactNode; title: string; status?: string }) {
+  const isOk = status && (status === '符合' || status === '通过' || status === '满足' || status === '一致');
+  return (
+    <div className="flex items-center gap-2 px-3 pt-3 pb-1.5">
+      <span className="text-muted-foreground/50">{icon}</span>
+      <span className="text-[10px] font-bold text-foreground/60 uppercase tracking-wider flex-1">{title}</span>
+      {status && (
+        <span className={cn(
+          'text-[9px] px-1.5 py-0.5 rounded font-medium',
+          isOk ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive'
+        )}>
+          {status}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── 新格式审查面板 ──
+
+function NewFormatReview({ review }: { review: ReviewReport }) {
+  const summary = review.review_summary;
+  const isPass = review.overall_status === '通过' || review.delivery_readiness === 'ready';
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto scrollbar-thin">
+      {/* 总体状态卡 */}
+      <div className="p-3 border-b border-border/40">
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            'w-14 h-14 rounded-full flex items-center justify-center shrink-0 text-lg font-bold',
+            isPass ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive'
+          )}>
+            {isPass ? <ShieldCheck className="w-7 h-7" /> : <XCircle className="w-7 h-7" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-bold text-foreground/80 mb-1">
+              审查结果：{review.overall_status}
+            </div>
+            {summary && (
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                <span className="text-[10px] text-muted-foreground">共 {summary.total_pages} 页</span>
+                {summary.issues_found === 0
+                  ? <span className="text-[10px] text-emerald-500">无问题</span>
+                  : <span className="text-[10px] text-amber-500">{summary.issues_found} 个问题</span>
+                }
+                {summary.blocking_issues > 0 && (
+                  <span className="text-[10px] text-destructive">{summary.blocking_issues} 阻塞</span>
+                )}
+              </div>
+            )}
+            {review.next_step && (
+              <div className="text-[10px] text-muted-foreground/60 mt-1">
+                下一步：{review.next_step}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 任务满足度 */}
+      {review.task_satisfaction && (
+        <div className="border-b border-border/30">
+          <SectionHeader
+            icon={<ClipboardCheck className="w-3.5 h-3.5" />}
+            title="任务满足度"
+            status={review.task_satisfaction.status}
+          />
+          <div className="px-3 pb-2">
+            {review.task_satisfaction.checks.map((c, i) => (
+              <CheckRow
+                key={i}
+                passed={c.passed}
+                label={c.item}
+                detail={c.expected && c.actual ? `期望：${c.expected}　实际：${c.actual}` : undefined}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 风格执行 */}
+      {review.style_execution && (
+        <div className="border-b border-border/30">
+          <SectionHeader
+            icon={<Palette className="w-3.5 h-3.5" />}
+            title="风格执行"
+            status={review.style_execution.status}
+          />
+          <div className="px-3 pb-2">
+            {review.style_execution.checks.map((c, i) => (
+              <CheckRow key={i} passed={c.passed} label={c.item} detail={c.detail} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 叙事一致性 */}
+      {review.narrative_consistency && (
+        <div className="border-b border-border/30">
+          <SectionHeader
+            icon={<BookOpen className="w-3.5 h-3.5" />}
+            title="叙事一致性"
+            status={review.narrative_consistency.status}
+          />
+          <div className="px-3 pb-2">
+            {review.narrative_consistency.checks.map((c, i) => (
+              <CheckRow
+                key={i}
+                passed={!!(c.title_match && c.content_match)}
+                label={c.item}
+                detail={c.page_id}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 内容预算 */}
+      {review.payload_budget_review && review.payload_budget_review.length > 0 && (
+        <div className="border-b border-border/30">
+          <SectionHeader
+            icon={<LayoutGrid className="w-3.5 h-3.5" />}
+            title="各页内容预算"
+          />
+          <div className="px-3 pb-2 space-y-1">
+            {review.payload_budget_review.map((p, i) => {
+              const ok = p.status === '满足';
+              return (
+                <div key={i} className="flex items-center gap-2 py-0.5">
+                  {ok
+                    ? <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                    : <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
+                  }
+                  <span className="text-[10px] font-mono text-muted-foreground/60 w-16 shrink-0">{p.page_id}</span>
+                  <span className="text-[10px] text-foreground/70 flex-1">
+                    {p.claim_count} 核心点
+                    {p.structure_block_count != null && `  ·  ${p.structure_block_count} 结构块`}
+                  </span>
+                  <span className={cn(
+                    'text-[9px] px-1 py-0.5 rounded',
+                    ok ? 'text-emerald-500 bg-emerald-500/10' : 'text-amber-500 bg-amber-500/10'
+                  )}>
+                    {p.status}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 页面级问题（如有） */}
+      {review.page_issues && review.page_issues.length > 0 && (
+        <div className="border-b border-border/30">
+          <SectionHeader
+            icon={<AlertTriangle className="w-3.5 h-3.5" />}
+            title="页面问题"
+          />
+          <div className="px-2 pb-2 space-y-1.5">
+            {review.page_issues.map((issue, idx) => (
+              <IssueCard key={idx} issue={issue} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 建议动作 */}
+      {review.recommended_actions && review.recommended_actions.length > 0 && (
+        <div>
+          <SectionHeader
+            icon={<PackageCheck className="w-3.5 h-3.5" />}
+            title="建议动作"
+          />
+          <div className="px-3 pb-3 space-y-1">
+            {review.recommended_actions.map((a, i) => (
+              <div key={i} className="flex items-start gap-1.5 text-[11px] text-foreground/70">
+                <ArrowRight className="w-3 h-3 text-primary/50 shrink-0 mt-0.5" />
+                <span>{a}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── 主面板 ──
 
 export function ReviewPanel({
@@ -140,6 +386,12 @@ export function ReviewPanel({
     );
   }
 
+  // 检测新格式（有 schema_version 或 overall_status 字段）
+  if (review.schema_version || review.overall_status) {
+    return <NewFormatReview review={review} />;
+  }
+
+  // 旧格式
   const pageIssues = review.page_issues || [];
   const strengths = review.strengths || [];
   const errorCount = pageIssues.filter(i => i.severity === 'error').length;
@@ -150,7 +402,7 @@ export function ReviewPanel({
       {/* 评分卡 */}
       <div className="p-3 border-b border-border/40">
         <div className="flex items-center gap-3">
-          <ScoreRing score={review.overall_score} />
+          <ScoreRing score={review.overall_score ?? 0} />
           <div className="flex-1 min-w-0">
             <div className="text-xs font-bold text-foreground/80 mb-1">整体评分</div>
             <div className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">

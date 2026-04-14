@@ -13,7 +13,7 @@ import { authFetch, API_BASE } from '@/lib/authFetch';
 import type { Storyboard } from '@/components/ppt/StoryboardPanel';
 import type { StyleSpec } from '@/components/ppt/StylePanel';
 import type { ReviewReport } from '@/components/ppt/ReviewPanel';
-import type { SpeakerNote } from '@/components/ppt/SpeakerNotesPanel';
+import type { SpeakerNote, SpeakerNotesDoc } from '@/components/ppt/SpeakerNotesPanel';
 import { type PipelineStage, DEFAULT_STAGES } from '@/components/ppt/PipelineProgress';
 import type { SlideSet } from '@/components/ppt/PPTViewer';
 import type { ChatMessage } from '@/lib/chatTypes';
@@ -53,7 +53,7 @@ export interface DeckData {
   storyboard: Storyboard | null;
   styleSpec: StyleSpec | null;
   review: ReviewReport | null;
-  speakerNotes: SpeakerNote[] | null;
+  speakerNotes: SpeakerNote[] | SpeakerNotesDoc | null;
   slideSet: SlideSet | null;
   assetPlan: AssetPlan | null;
   stages: PipelineStage[];
@@ -207,7 +207,7 @@ export function useDeckData(messages: ChatMessage[]): DeckData {
   const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
   const [styleSpec, setStyleSpec] = useState<StyleSpec | null>(null);
   const [review, setReview] = useState<ReviewReport | null>(null);
-  const [speakerNotes, setSpeakerNotes] = useState<SpeakerNote[] | null>(null);
+  const [speakerNotes, setSpeakerNotes] = useState<SpeakerNote[] | SpeakerNotesDoc | null>(null);
   const [slideSet, setSlideSet] = useState<SlideSet | null>(null);
   const [hasTaskPack, setHasTaskPack] = useState(false);
   const [hasResearch, setHasResearch] = useState(false);
@@ -259,7 +259,14 @@ export function useDeckData(messages: ChatMessage[]): DeckData {
       setStoryboard(sb as Storyboard | null);
       setStyleSpec(ss as StyleSpec | null);
       setReview(rv as ReviewReport | null);
-      setSpeakerNotes(Array.isArray(sn) ? sn as SpeakerNote[] : null);
+      // 兼容新格式（根对象含 schema_version + notes[]）和旧格式（数组）
+      if (Array.isArray(sn)) {
+        setSpeakerNotes(sn as SpeakerNote[]);
+      } else if (sn && typeof sn === 'object' && 'notes' in (sn as object)) {
+        setSpeakerNotes(sn as SpeakerNotesDoc);
+      } else {
+        setSpeakerNotes(null);
+      }
       setSlideSet(slides);
       setHasTaskPack(!!tp);
       setHasResearch(!!rp);
