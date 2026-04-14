@@ -135,7 +135,7 @@ llm:
       provider: minimax
       model_id: MiniMax-M2.7-highspeed
       timeout: 180
-      max_tokens: 204800
+      max_tokens: 196608
       max_output_tokens: 16384
 
     # ── Qwen (通义千问) ──
