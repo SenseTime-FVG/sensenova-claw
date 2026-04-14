@@ -231,7 +231,89 @@ function Setup-Repo {
 function Install-Deps {
     Info "安装项目依赖..."
     Push-Location $APP_DIR
-    npm install
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $hasNativePref = $null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)
+    if ($hasNativePref) {
+        $prevNativeEAP = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
+
+    # 1) Python 依赖
+    Info "安装 Python 依赖..."
+    # 用 cmd /c 包裹避免 PowerShell 将 stderr 进度信息误报为错误
+    cmd /c "uv sync 2>&1" | Select-Object -Last 5
+    if ($LASTEXITCODE -ne 0) { Fail "Python 依赖安装失败（uv sync）" }
+    Log "Python 依赖安装完成"
+
+    # 2) 根目录 npm 依赖（跳过 postinstall，避免重复）
+    Info "安装根目录 npm 依赖..."
+    cmd /c "npm install --ignore-scripts 2>&1" | Select-Object -Last 5
+    if ($LASTEXITCODE -ne 0) { Fail "根目录 npm 依赖安装失败" }
+    Log "根目录 npm 依赖安装完成"
+
+    # 3) 前端依赖
+    Info "安装前端依赖..."
+    Push-Location "$APP_DIR\sensenova_claw\app\web"
+    cmd /c "npm install 2>&1" | Select-Object -Last 5
+    if ($LASTEXITCODE -ne 0) { Fail "前端 npm 依赖安装失败" }
+    Log "前端依赖安装完成"
+
+    # 4) 确保 next.config.mjs 启用 standalone 输出
+    $nextConfig = "$APP_DIR\sensenova_claw\app\web\next.config.mjs"
+    if (Test-Path $nextConfig) {
+        $content = Get-Content $nextConfig -Raw
+        if ($content -notmatch "output:\s*['""]standalone['""]") {
+            Info "为 next.config.mjs 注入 output: 'standalone'..."
+            $content = $content -replace "(const nextConfig\s*=\s*\{)", "`$1`n  output: 'standalone',"
+            Set-Content $nextConfig $content -Encoding UTF8
+        }
+    }
+
+    # 5) 构建前端生产版本（standalone 模式）
+    Info "构建前端生产版本（standalone 模式）..."
+    cmd /c "npm run build 2>&1"
+    if ($LASTEXITCODE -ne 0) { Fail "前端生产构建失败（npm run build）" }
+    Log "前端生产构建完成"
+
+    # 6) 精简前端产物
+    $webDir = "$APP_DIR\sensenova_claw\app\web"
+    $standaloneDir = "$webDir\.next\standalone"
+    if (Test-Path $standaloneDir) {
+        Info "精简前端产物，移除开发依赖..."
+
+        # 将 public/ 和 .next/static/ 复制到 standalone 目录
+        if (Test-Path "$webDir\public") {
+            Copy-Item "$webDir\public" "$standaloneDir\public" -Recurse -ErrorAction SilentlyContinue
+        }
+        New-Item -ItemType Directory -Force -Path "$standaloneDir\.next" | Out-Null
+        Copy-Item "$webDir\.next\static" "$standaloneDir\.next\static" -Recurse
+
+        # 删除 .next/ 下非 standalone 的构建产物（cache/server/trace 等，~400 MB）
+        Get-ChildItem "$webDir\.next" -Directory | Where-Object { $_.Name -ne "standalone" } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem "$webDir\.next" -File | Where-Object { $_.Name -ne "BUILD_ID" } | Remove-Item -Force -ErrorAction SilentlyContinue
+
+        # 删除前端 node_modules（~600 MB）
+        Remove-Item "$webDir\node_modules" -Recurse -Force -ErrorAction SilentlyContinue
+        Log "前端产物已精简（仅保留 standalone + BUILD_ID）"
+    } else {
+        Warn "未生成 standalone 产物，保留 node_modules"
+    }
+
+    Pop-Location
+
+    # 6) 清理插件 node_modules
+    $whatsappModules = "$APP_DIR\sensenova_claw\adapters\plugins\whatsapp\bridge\node_modules"
+    if (Test-Path $whatsappModules) {
+        Remove-Item $whatsappModules -Recurse -Force -ErrorAction SilentlyContinue
+        Log "WhatsApp bridge node_modules 已清理"
+    }
+
+    if ($hasNativePref) {
+        $PSNativeCommandUseErrorActionPreference = $prevNativeEAP
+    }
+    $ErrorActionPreference = $prevEAP
+
     Pop-Location
     Log "项目依赖安装完成"
 }

@@ -342,9 +342,42 @@ install_deps() {
 
   # 4) 构建前端（--dev 模式跳过）
   if [ "$DEV_MODE" != "true" ]; then
-    info "构建前端生产版本..."
+    # 确保 next.config.mjs 启用 standalone 输出
+    local next_config="$APP_DIR/sensenova_claw/app/web/next.config.mjs"
+    if [ -f "$next_config" ] && ! grep -q "output:.*standalone" "$next_config"; then
+      info "为 next.config.mjs 注入 output: 'standalone'..."
+      sed -i "s/const nextConfig = {/const nextConfig = {\n  output: 'standalone',/" "$next_config"
+    fi
+
+    info "构建前端生产版本（standalone 模式）..."
     npm run build 2>&1 | tail -10
     log "前端生产构建完成"
+
+    # 5) 精简前端产物：standalone 模式只需 .next/standalone（含 static + public）
+    info "精简前端产物，移除开发依赖..."
+    local web_dir="$APP_DIR/sensenova_claw/app/web"
+    local standalone_dir="$web_dir/.next/standalone"
+    if [ -d "$standalone_dir" ]; then
+      # 将 public/ 和 .next/static/ 复制到 standalone 目录供 server.js 访问
+      cp -r "$web_dir/public" "$standalone_dir/public" 2>/dev/null || true
+      mkdir -p "$standalone_dir/.next"
+      cp -r "$web_dir/.next/static" "$standalone_dir/.next/static"
+
+      # 删除 .next/ 下非 standalone 的构建产物（cache/server/trace 等，~400 MB）
+      find "$web_dir/.next" -mindepth 1 -maxdepth 1 ! -name standalone ! -name BUILD_ID -exec rm -rf {} +
+
+      # 删除前端 node_modules（~600 MB），standalone 已自包含运行时依赖
+      rm -rf "$web_dir/node_modules"
+      log "前端产物已精简（仅保留 standalone + BUILD_ID）"
+    else
+      warn "未生成 standalone 产物，保留 node_modules"
+    fi
+
+    # 6) 清理插件 node_modules（按需安装时再恢复）
+    if [ -d "$APP_DIR/sensenova_claw/adapters/plugins/whatsapp/bridge/node_modules" ]; then
+      rm -rf "$APP_DIR/sensenova_claw/adapters/plugins/whatsapp/bridge/node_modules"
+      log "WhatsApp bridge node_modules 已清理"
+    fi
   fi
 
   cd "$APP_DIR"
