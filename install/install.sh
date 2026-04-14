@@ -327,17 +327,20 @@ install_deps() {
   # 1) Python 依赖
   info "安装 Python 依赖..."
   uv sync 2>&1 | tail -5
+  if [ $? -ne 0 ]; then fail "Python 依赖安装失败（uv sync）"; fi
   log "Python 依赖安装完成"
 
   # 2) 根目录 npm 依赖（跳过 postinstall，避免重复）
   info "安装根目录 npm 依赖..."
   npm install --ignore-scripts 2>&1 | tail -5
+  if [ $? -ne 0 ]; then fail "根目录 npm 依赖安装失败"; fi
   log "根目录 npm 依赖安装完成"
 
   # 3) 前端依赖
   info "安装前端依赖..."
   cd "$APP_DIR/sensenova_claw/app/web"
   npm install 2>&1 | tail -5
+  if [ $? -ne 0 ]; then fail "前端 npm 依赖安装失败"; fi
   log "前端依赖安装完成"
 
   # 4) 构建前端（--dev 模式跳过）
@@ -349,15 +352,18 @@ install_deps() {
       sed -i "s/const nextConfig = {/const nextConfig = {\n  output: 'standalone',/" "$next_config"
     fi
 
+    # 5) 构建前端生产版本（standalone 模式）
     info "构建前端生产版本（standalone 模式）..."
-    npm run build 2>&1 | tail -10
+    npm run build 2>&1
+    if [ $? -ne 0 ]; then fail "前端生产构建失败（npm run build）"; fi
     log "前端生产构建完成"
 
-    # 5) 精简前端产物：standalone 模式只需 .next/standalone（含 static + public）
-    info "精简前端产物，移除开发依赖..."
+    # 6) 精简前端产物
     local web_dir="$APP_DIR/sensenova_claw/app/web"
     local standalone_dir="$web_dir/.next/standalone"
     if [ -d "$standalone_dir" ]; then
+      info "精简前端产物，移除开发依赖..."
+
       # 将 public/ 和 .next/static/ 复制到 standalone 目录供 server.js 访问
       cp -r "$web_dir/public" "$standalone_dir/public" 2>/dev/null || true
       mkdir -p "$standalone_dir/.next"
@@ -373,7 +379,7 @@ install_deps() {
       warn "未生成 standalone 产物，保留 node_modules"
     fi
 
-    # 6) 清理插件 node_modules（按需安装时再恢复）
+    # 7) 清理插件 node_modules（按需安装时再恢复）
     if [ -d "$APP_DIR/sensenova_claw/adapters/plugins/whatsapp/bridge/node_modules" ]; then
       rm -rf "$APP_DIR/sensenova_claw/adapters/plugins/whatsapp/bridge/node_modules"
       log "WhatsApp bridge node_modules 已清理"
