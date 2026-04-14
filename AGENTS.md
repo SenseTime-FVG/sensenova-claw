@@ -164,6 +164,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 如果只改文案不改数据源，会出现“写着 current filter，实际算的是 current page”的假一致；这类统计类 UI 必须同时核对文案和数据来源。
 
+### 2026-04-14 Session 状态与最新 Turn 对齐补充
+
+成功经验：
+- `sessions.status` 若长期缺少维护，最稳的收口方式不是只修查询或只修写入，而是“两层都做”：列表查询按 `last_turn_status` 推导，turn 状态变更时再同步回写 `sessions.status`，这样历史脏值和未来写入都能一起收敛。
+- `active`/`closed` 这类会话态最好只暴露聚合后的稳定语义，不直接透出 turn 的细粒度状态；当前仓库里把 `started/running/waiting_user/tool_waiting` 统一映射为 `active`，其余终态统一映射为 `closed`，前端最省心。
+
+失败/风险经验：
+- 只看 `sessions.status` 做聚合会把“最新 turn 已 completed，但 session 行还是 active”的脏数据继续算错；修这类问题时必须补“故意把 session 行写脏，但列表仍应按 turn 推导”的单测。
+
 ### 2026-04-09 MCP 一期接入补充
 
 成功经验：

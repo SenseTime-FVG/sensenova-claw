@@ -13,6 +13,8 @@ from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import ERROR_RAISED, PROACTIVE_RESULT, USER_INPUT
 
+ACTIVE_TURN_STATUSES = {"started", "running", "waiting_user", "tool_waiting"}
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT PRIMARY KEY,
@@ -319,6 +321,8 @@ class Repository:
             """,
         ).fetchall()
         sessions = [dict(row) for row in rows]
+        for row in sessions:
+            row["status"] = self._derive_session_status(row)
         child_parent_ids = self._collect_child_parent_ids(sessions)
         for row in sessions:
             row["has_children"] = row.get("session_id") in child_parent_ids
@@ -405,6 +409,30 @@ class Repository:
             return ""
         return str(payload.get("title") or payload.get("name") or "").strip().lower()
 
+    def _derive_session_status(self, session: dict[str, Any]) -> str:
+        last_turn_status = str(session.get("last_turn_status") or "").strip().lower()
+        if not last_turn_status:
+            stored_status = str(session.get("status") or "").strip().lower()
+            return stored_status or "active"
+        if last_turn_status in ACTIVE_TURN_STATUSES:
+            return "active"
+        return "closed"
+
+    def _sync_update_session_status_from_turn(self, conn: sqlite3.Connection, turn_id: str) -> None:
+        row = conn.execute(
+            "SELECT session_id, status FROM turns WHERE turn_id = ?",
+            (turn_id,),
+        ).fetchone()
+        if not row:
+            return
+        session_id = str(row["session_id"])
+        turn_status = str(row["status"] or "").strip().lower()
+        session_status = "active" if turn_status in ACTIVE_TURN_STATUSES else "closed"
+        conn.execute(
+            "UPDATE sessions SET status = ? WHERE session_id = ?",
+            (session_status, session_id),
+        )
+
     async def list_descendant_session_ids(self, session_id: str) -> list[str]:
         """列出某会话的全部后代会话 ID，按从近到远的层级顺序返回。"""
         return await asyncio.to_thread(self._sync_list_descendant_session_ids, session_id)
@@ -441,6 +469,7 @@ class Repository:
             "INSERT INTO turns (turn_id, session_id, status, started_at, user_input) VALUES (?, ?, ?, ?, ?)",
             (turn_id, session_id, "started", time.time(), user_input),
         )
+        conn.execute("UPDATE sessions SET status = ? WHERE session_id = ?", ("active", session_id))
         conn.commit()
 
     async def complete_turn(self, turn_id: str, agent_response: str) -> None:
@@ -452,6 +481,7 @@ class Repository:
             "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
             ("completed", time.time(), agent_response, turn_id),
         )
+        self._sync_update_session_status_from_turn(conn, turn_id)
         conn.commit()
 
     async def update_turn_status(
@@ -469,6 +499,7 @@ class Repository:
             "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
             (status, time.time(), agent_response, turn_id),
         )
+        self._sync_update_session_status_from_turn(conn, turn_id)
         conn.commit()
 
     async def cancel_stale_started_turns(
@@ -499,6 +530,7 @@ class Repository:
                 "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
                 ("cancelled", now, reason, turn_id),
             )
+            self._sync_update_session_status_from_turn(conn, turn_id)
             conn.execute(
                 """INSERT INTO events (event_id, session_id, turn_id, event_type, timestamp, source, trace_id, payload_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
