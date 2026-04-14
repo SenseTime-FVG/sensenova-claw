@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Sensenova-Claw: 事件驱动 AI Agent 平台
-# 启动方式: openshell sandbox create --forward 8000 --forward 3000 --from sensenova-claw -- sensenova-claw-start
+# 启动方式: openshell sandbox create --forward 8000 --from ghcr.io/luojiapeng14/sensenova-claw-sandbox:v0.6 -- sensenova-claw-start
 
 # ── Stage 1: 构建 Next.js 前端 ──
 FROM node:18-slim AS frontend-build
@@ -18,21 +18,26 @@ RUN npm run build
 FROM python:3.12-slim
 
 # OpenShell 必需: iproute2 (网络命名空间), iptables (旁路检测)
-# nodejs: 运行 Next.js standalone server
+# 从 Stage 1 复制 node binary（避免 apt install nodejs 引入 libicu ~37MB）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl iproute2 iptables nodejs \
+        curl iproute2 iptables \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=frontend-build /usr/local/bin/node /usr/local/bin/node
 
 # OpenShell 要求: sandbox 用户 (uid/gid 1000)
 RUN groupadd -g 1000 sandbox && \
     useradd -m -u 1000 -g sandbox sandbox
 
-# 安装 sensenova-claw Python 包（排除前端目录，减小镜像体积）
+# 安装 sensenova-claw Python 包（排除前端目录和不需要的插件）
 WORKDIR /opt/sensenova-claw
 COPY pyproject.toml .
 COPY sensenova_claw/ sensenova_claw/
-RUN rm -rf sensenova_claw/app/web && \
-    pip install --no-cache-dir .
+RUN rm -rf sensenova_claw/app/web \
+           sensenova_claw/app/cli \
+    && pip install --no-cache-dir . \
+    && pip uninstall -y pip setuptools \
+    && rm -rf /usr/local/lib/python3.12/site-packages/lark_oapi/api/*/v* \
+    && find /usr/local/lib/python3.12/site-packages -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 # 复制前端构建产物
 COPY --from=frontend-build /build/.next/standalone /opt/sensenova-claw/web
