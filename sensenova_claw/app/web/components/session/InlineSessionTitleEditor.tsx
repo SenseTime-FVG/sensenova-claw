@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { shouldSubmitInlineRename } from './renameInputGuards';
 
 interface InlineSessionTitleEditorProps {
   value: string;
@@ -42,7 +43,12 @@ export function InlineSessionTitleEditor({
         onSubmit();
       }}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') {
+        if (shouldSubmitInlineRename({
+          key: event.key,
+          isComposing: event.isComposing,
+          nativeIsComposing: (event.nativeEvent as KeyboardEvent).isComposing,
+          keyCode: event.keyCode,
+        })) {
           event.preventDefault();
           skipBlurSubmitRef.current = true;
           onSubmit();

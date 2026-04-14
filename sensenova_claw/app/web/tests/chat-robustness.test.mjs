@@ -108,6 +108,15 @@ test('历史恢复判断 turnActive 时应把 error.raised 视为终结事件', 
   assert.match(source, /type === 'error' \|\|\s*type === 'error\.raised'/s);
 });
 
+test('会话重命名输入框在输入法 composition 阶段按 Enter 不应提交', () => {
+  const source = readSource('components/session/InlineSessionTitleEditor.tsx');
+
+  assert.match(source, /shouldSubmitInlineRename\(\{/);
+  assert.match(source, /isComposing:\s*event\.isComposing/);
+  assert.match(source, /nativeIsComposing:\s*\(event\.nativeEvent as KeyboardEvent\)\.isComposing/);
+  assert.match(source, /keyCode:\s*event\.keyCode/);
+});
+
 test('从历史事件重建消息时应在 error.raised 后收敛仍为 running 的工具状态', () => {
   const source = readSource('lib/chatTypes.ts');
 
