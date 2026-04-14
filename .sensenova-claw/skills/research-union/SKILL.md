@@ -54,7 +54,7 @@ PLAN → DIVERGE → SEARCH → TRIAGE → READ → REASSESS → SYNTHESIZE
 | questions[] | 子问题列表，含 evidence_types 和 dimensions | — |
 | search_budget | min_queries / max_queries / max_iterations / min_sources_per_question | 15 / 40 / 3 / 2 |
 | success_criteria | min_total_sources / min_verified_claims / coverage_target | 8 / 5 / 0.8 |
-| source_plan | primary: serper_search + fetch_url; supplement: union-search-plus（仅主链不足时） | — |
+| source_plan | primary: serper_search + fetch_url; supplement: 补充搜索 skill（仅主链不足时） | — |
 
 向用户展示时用简洁中文概括，只确认：范围、子问题、边界条件。确认后再进入下一阶段。
 
@@ -77,7 +77,7 @@ PLAN → DIVERGE → SEARCH → TRIAGE → READ → REASSESS → SYNTHESIZE
 
 尽可能并发执行所有 query（利用 tool_calls 并发能力）。超过单次并发上限时分 2-3 批，每批打满。
 
-搜索源优先级：`serper_search`（主链） > 内置搜索工具（brave/tavily 等） > `union-search-plus`（仅主链不足时）
+搜索源优先级：`serper_search`（主链） > 内置搜索工具（brave/tavily 等） > `补充搜索 skill`（仅主链不足时）
 
 本阶段目标：收集候选 URL 和摘要，不做深度阅读。
 
@@ -150,7 +150,7 @@ digraph reassess {
 
 **迭代约束**：最多 `max_iterations` 轮（默认 3），补充 query 递减（第2轮 ≤10，第3轮 ≤5），连续 2 轮无新信息则提前终止。
 
-**需要用户确认的情况**：研究范围需明显扩大、需启用 union-search-plus、发现前提假设可能有误。
+**需要用户确认的情况**：研究范围需明显扩大、需启用补充搜索 skill（如 search-code、search-social-cn 等）、发现前提假设可能有误。
 
 ### 7. SYNTHESIZE（综合报告）
 
@@ -167,13 +167,20 @@ digraph reassess {
 
 ---
 
-## 与 union-search-plus 的衔接
+## 与补充搜索 Skill 的衔接
 
-定位：补充来源，不是默认主链。
+定位：补充来源，不是默认主链。主链是 `serper_search` + `fetch_url` + 内置搜索工具（brave/tavily 等）。
 
-启用条件（至少一条）：REASSESS 发现主链覆盖不足（某子问题 0 有效来源）、用户在 PLAN 阶段明确要求、主链对特定领域覆盖差（中文社区、视频平台等）。
+可用的补充搜索 skill：
+- **search-code**：GitHub、Stack Overflow、Hacker News（开发者/技术话题）
+- **search-academic**：ArXiv、Wikipedia（学术/百科）
+- **search-social-cn**：B站、知乎、小红书、微博、抖音（中文社区）
+- **search-social-en**：Reddit、Twitter、YouTube（英文社区）
+- **search-ai**：Exa.ai、Jina（AI 语义搜索）
 
-启用顺序：先 `preferred` 来源 → 必要时升级到 `all`。补充搜索失败不阻塞研究，在报告中说明限制即可。
+启用条件（至少一条）：REASSESS 发现主链覆盖不足（某子问题 0 有效来源）、用户在 PLAN 阶段明确要求、主链对特定领域覆盖差（中文社区、视频平台、学术论文等）。
+
+根据话题选择对应 skill，补充搜索失败不阻塞研究，在报告中说明限制即可。
 
 ---
 
@@ -189,7 +196,7 @@ digraph reassess {
 **禁止：**
 - 简单问题强行走复杂流程
 - PLAN 未确认就大规模搜索
-- union-search-plus 当默认主链
+- 补充搜索 skill 当默认主链
 - 编造来源或伪造引用
 - "搜索到"等同于"已验证"
 - 省略关键结论的来源链接

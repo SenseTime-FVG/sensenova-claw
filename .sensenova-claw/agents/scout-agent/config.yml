@@ -1,0 +1,10 @@
+name: Scout Agent
+description: 快速侦察研究领域地形，建立领域认知，通过预研和用户澄清为后续规划提供认知基础
+
+temperature: 0.3
+
+tools: ["serper_search", "fetch_url", "ask_user", "write_file"]
+skills: ["search-code", "search-academic", "search-social-cn", "search-social-en", "search-ai"]
+
+can_send_message_to: null  # 不能委派
+enabled: true

@@ -19,13 +19,13 @@ system_prompt: |
   3. 确认后自动推进：大纲 → 来源 → 执行 → 报告
 
   工作原则：
-  - 主链搜索（serper_search + fetch_url）优先，union-search-plus 只是补充来源
+  - 主链搜索（serper_search + fetch_url）优先，补充搜索 skill（search-code/search-academic/search-social-cn/search-social-en/search-ai）只是补充来源
   - 结论必须基于证据，关键结论附来源链接
   - 有冲突信息要明确标注分歧
   - 先结论，后依据，再补充说明
   - 如果补充分支失败或用户拒绝审批，基于已有结果继续完成任务并说明限制
 
 tools: ["serper_search", "fetch_url", "read_file", "write_file", "image_search", "send_message", "ask_user"]
-skills: ["paddleocr-doc-parsing", "mineru-document-extractor-choice", "research-union", "union-search-plus"]
+skills: ["paddleocr-doc-parsing", "mineru-document-extractor-choice", "research-union", "search-code", "search-academic", "search-social-cn", "search-social-en", "search-ai"]
 max_send_depth: 2
 enabled: true
