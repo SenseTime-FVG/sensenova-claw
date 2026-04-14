@@ -30,4 +30,5 @@ scripts/
 # 其他
 .sensenova-claw/*
 !.sensenova-claw/agents/
+!.sensenova-claw/skills/
 .claude/

@@ -45,12 +45,15 @@ COPY --from=frontend-build /build/.next/standalone /opt/sensenova-claw/web
 COPY --from=frontend-build /build/.next/static /opt/sensenova-claw/web/.next/static
 COPY --from=frontend-build /build/public /opt/sensenova-claw/web/public
 
-# 启动脚本
+# 启动脚本 + 默认配置
 COPY sandboxes/sensenova-claw/sensenova-claw-start /usr/local/bin/
+COPY sandboxes/sensenova-claw/default-config.yml /opt/sensenova-claw/
 RUN chmod +x /usr/local/bin/sensenova-claw-start
 
-# 内置 Agent 配置 + 数据目录
-COPY .sensenova-claw/agents/ /home/sandbox/.sensenova-claw/agents/
+# 内置 Agent + Skills 模板（启动脚本会复制到实际 $HOME/.sensenova-claw/）
+COPY .sensenova-claw/agents/ /etc/sensenova-claw/agents/
+COPY .sensenova-claw/skills/ /etc/sensenova-claw/skills/
+
 RUN mkdir -p /home/sandbox/.sensenova-claw/data && \
     chown -R sandbox:sandbox /home/sandbox/.sensenova-claw
 

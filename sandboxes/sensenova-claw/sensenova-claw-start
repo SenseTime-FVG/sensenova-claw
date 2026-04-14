@@ -4,50 +4,16 @@ set -euo pipefail
 CONFIG_DIR="$HOME/.sensenova-claw"
 CONFIG_FILE="$CONFIG_DIR/config.yml"
 
-# ── 1. 生成最小 config（如不存在）──
+# ── 1. 初始化 $HOME/.sensenova-claw（如不存在）──
 if [ ! -f "$CONFIG_FILE" ]; then
     mkdir -p "$CONFIG_DIR"
-    cat > "$CONFIG_FILE" <<'YAML'
-server:
-  host: 0.0.0.0
-  port: 8000
-  cors_origins:
-    - http://localhost:3000
-    - http://127.0.0.1:3000
-
-security:
-  auth_enabled: false
-
-delegation:
-  enabled: true
-
-agents:
-  default:
-    enabled: true
-  system-admin:
-    enabled: true
-  office-main:
-    enabled: true
-  search-agent:
-    name: 搜索调研助手
-    description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
-    temperature: 0.2
-    tools: ["serper_search", "fetch_url", "read_file", "write_file", "image_search", "send_message", "ask_user"]
-    max_send_depth: 2
-    enabled: true
-  ppt-agent:
-    enabled: true
-  data-analyst:
-    enabled: true
-  doc-organizer:
-    enabled: true
-  email-agent:
-    enabled: true
-  proactive-agent:
-    enabled: true
-YAML
+    cp /opt/sensenova-claw/default-config.yml "$CONFIG_FILE"
     echo "[sensenova-claw] config.yml generated at $CONFIG_FILE"
 fi
+
+# 复制内置 agents 和 skills（不覆盖已有）
+cp -rn /etc/sensenova-claw/agents/ "$CONFIG_DIR/" 2>/dev/null || true
+cp -rn /etc/sensenova-claw/skills/ "$CONFIG_DIR/" 2>/dev/null || true
 
 # ── 2. 后台启动 Next.js frontend ──
 cd /opt/sensenova-claw/web
