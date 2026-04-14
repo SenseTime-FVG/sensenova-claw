@@ -216,8 +216,8 @@ agents:
     temperature: 1.0
     tools: ["read_file", "write_file", "bash_command", "get_secret", "write_secret"]
     skills: ["system-admin-skill"]
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     max_pingpong_turns: 10
     enabled: true
@@ -228,8 +228,8 @@ agents:
     temperature: 1.0
     tools: []
     skills: []
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     max_pingpong_turns: 10
     enabled: true
@@ -240,8 +240,8 @@ agents:
     temperature: 1.0
     tools: []
     skills: []
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 3
     enabled: true
 
@@ -251,8 +251,8 @@ agents:
     temperature: 1.0
     tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "send_message", "image_search", "ask_user", "memory_search"]
     skills: ["ppt-superpower", "ppt-asset-plan", "ppt-html-gen", "ppt-image-selection", "ppt-page-assets", "ppt-page-html", "ppt-page-plan", "ppt-page-polish", "ppt-research-pack", "ppt-review", "ppt-source-analysis", "ppt-speaker-notes", "ppt-story-refine", "ppt-storyboard", "ppt-style-refine", "ppt-style-spec", "ppt-task-pack", "ppt-template-pack"]
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     enabled: true
 
@@ -262,8 +262,8 @@ agents:
     temperature: 1.0
     tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "ask_user", "memory_search", "get_secret", "write_secret"]
     skills: ["excel-xlsx", "python-dataviz", "pdf", "csv-pipeline", "mineru-document-extractor", "openai-whisper-api"]
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     enabled: true
 
@@ -273,8 +273,8 @@ agents:
     temperature: 1.0
     tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "feishu-drive", "ask_user", "memory_search", "get_secret", "write_secret"]
     skills: ["markdown-converter", "docx-cn", "excel-xlsx", "pdf", "pdf-generator", "mineru-document-extractor", "openai-whisper-api", "feishu-doc", "feishu-wiki", "feishu-drive"]
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     enabled: true
 
@@ -284,8 +284,8 @@ agents:
     temperature: 1.0
     tools: ["bash_command", "read_file", "write_file", "send_message", "send_email", "list_emails", "read_email", "download_attachment", "mark_email", "search_emails", "ask_user", "memory_search"]
     skills: []
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     enabled: true
 
@@ -295,8 +295,8 @@ agents:
     temperature: 1.0
     tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search", "get_secret", "write_secret"]
     skills: ["mineru-document-extractor", "research-union", "union-search-skill"]
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     enabled: true
 
