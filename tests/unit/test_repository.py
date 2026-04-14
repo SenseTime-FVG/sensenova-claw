@@ -59,6 +59,21 @@ class TestRepository:
         assert "child_new" in ids
         assert "parent_old" in ids
 
+    async def test_list_sessions_page_returns_expected_page_metadata(self, test_repo):
+        await test_repo.create_session("page_s1", meta={"title": "Page 1"})
+        await test_repo.create_session("page_s2", meta={"title": "Page 2"})
+        await test_repo.create_session("page_s3", meta={"title": "Page 3"})
+
+        page_1 = await test_repo.list_sessions_page(page=1, page_size=2)
+        page_2 = await test_repo.list_sessions_page(page=2, page_size=2)
+
+        assert page_1["total"] == 3
+        assert page_1["page"] == 1
+        assert page_1["page_size"] == 2
+        assert page_1["total_pages"] == 2
+        assert [item["session_id"] for item in page_1["sessions"]] == ["page_s3", "page_s2"]
+        assert [item["session_id"] for item in page_2["sessions"]] == ["page_s1"]
+
     async def test_create_turn_and_complete(self, test_repo):
         await test_repo.create_session("st")
         await test_repo.create_turn("t1", "st", "hello")

@@ -83,10 +83,23 @@ async def _delete_session_record(request: Request, session: dict) -> str:
 
 
 @router.get("")
-async def list_sessions(request: Request, include_hidden: bool = Query(default=False)):
+async def list_sessions(
+    request: Request,
+    include_hidden: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    search_term: str = Query(default=""),
+    status: str = Query(default="all"),
+):
     """获取会话列表。"""
-    sessions = await _get_services(request).gateway.list_sessions(include_hidden=include_hidden)
-    return JSONResponse(content={"sessions": sessions})
+    payload = await _get_services(request).gateway.list_sessions_page(
+        include_hidden=include_hidden,
+        page=page,
+        page_size=page_size,
+        search_term=search_term,
+        status=status,
+    )
+    return JSONResponse(content=payload)
 
 
 @router.get("/{session_id}")

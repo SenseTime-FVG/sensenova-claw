@@ -249,7 +249,54 @@ class Repository:
     ) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self._sync_list_sessions, limit, include_hidden)
 
+    async def list_sessions_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        include_hidden: bool = False,
+        search_term: str = "",
+        status: str = "all",
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._sync_list_sessions_page,
+            page,
+            page_size,
+            include_hidden,
+            search_term,
+            status,
+        )
+
     def _sync_list_sessions(self, limit: int, include_hidden: bool) -> list[dict[str, Any]]:
+        sessions = self._sync_get_visible_sessions(include_hidden)
+        return self._include_visible_ancestors_within_limit(sessions, limit)
+
+    def _sync_list_sessions_page(
+        self,
+        page: int,
+        page_size: int,
+        include_hidden: bool,
+        search_term: str,
+        status: str,
+    ) -> dict[str, Any]:
+        safe_page = max(1, int(page))
+        safe_page_size = max(1, int(page_size))
+        sessions = self._sync_get_visible_sessions(include_hidden)
+        sessions = self._filter_sessions(sessions, search_term=search_term, status=status)
+        total = len(sessions)
+        total_pages = (total + safe_page_size - 1) // safe_page_size if total else 0
+        start = (safe_page - 1) * safe_page_size
+        end = start + safe_page_size
+        page_sessions = sessions[start:end]
+        return {
+            "sessions": page_sessions,
+            "total": total,
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "total_pages": total_pages,
+        }
+
+    def _sync_get_visible_sessions(self, include_hidden: bool) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             """
@@ -275,7 +322,7 @@ class Repository:
             row["has_children"] = row.get("session_id") in child_parent_ids
         if not include_hidden:
             sessions = [row for row in sessions if not self._is_hidden_session(row.get("meta"))]
-        return self._include_visible_ancestors_within_limit(sessions, limit)
+        return sessions
 
     def _parse_parent_session_id(self, meta: Any) -> str | None:
         if not meta:
@@ -321,6 +368,40 @@ class Repository:
                 current = parent
 
         return [session_map[session_id] for session_id in selected_ids]
+
+    def _filter_sessions(
+        self,
+        sessions: list[dict[str, Any]],
+        *,
+        search_term: str,
+        status: str,
+    ) -> list[dict[str, Any]]:
+        normalized_search = str(search_term or "").strip().lower()
+        normalized_status = str(status or "all").strip().lower()
+        if not normalized_search and normalized_status in {"", "all"}:
+            return sessions
+
+        filtered: list[dict[str, Any]] = []
+        for session in sessions:
+            session_status = str(session.get("status", "")).strip().lower()
+            if normalized_status not in {"", "all"} and session_status != normalized_status:
+                continue
+            if normalized_search:
+                session_id = str(session.get("session_id", "")).lower()
+                title = self._parse_session_title(session.get("meta"))
+                if normalized_search not in session_id and normalized_search not in title:
+                    continue
+            filtered.append(session)
+        return filtered
+
+    def _parse_session_title(self, meta: Any) -> str:
+        if not meta:
+            return ""
+        try:
+            payload = json.loads(meta) if isinstance(meta, str) else dict(meta)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return ""
+        return str(payload.get("title") or payload.get("name") or "").strip().lower()
 
     async def list_descendant_session_ids(self, session_id: str) -> list[str]:
         """列出某会话的全部后代会话 ID，按从近到远的层级顺序返回。"""

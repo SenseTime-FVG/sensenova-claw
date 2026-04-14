@@ -33,6 +33,7 @@ interface Session {
 interface AgentOption { id: string; name: string; description: string; }
 type SelectionMode = 'manual' | 'page' | 'filtered_all';
 type DeleteScope = 'self' | 'self_and_descendants';
+const PAGE_SIZE = 50;
 
 function formatTime(ts: number): string {
   if (!ts) return '-';
@@ -66,6 +67,10 @@ export default function SessionsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(PAGE_SIZE);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
@@ -78,26 +83,41 @@ export default function SessionsPage() {
   const [bulkDeleteError, setBulkDeleteError] = useState('');
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  const loadSessions = () => {
+  const loadSessions = (targetPage: number, targetSearchTerm: string, targetStatus: string) => {
     setLoading(true);
-    authFetch(`${API_BASE}/api/sessions`)
+    const params = new URLSearchParams({
+      page: String(targetPage),
+      page_size: String(pageSize),
+      search_term: targetSearchTerm,
+      status: targetStatus,
+    });
+    authFetch(`${API_BASE}/api/sessions?${params.toString()}`)
       .then(res => res.json())
-      .then(data => setSessions(data.sessions || []))
-      .catch(() => setSessions([]))
+      .then(data => {
+        setSessions(data.sessions || []);
+        setTotal(data.total || 0);
+        setTotalPages(data.total_pages || 0);
+        if ((data.total_pages || 0) > 0 && targetPage > data.total_pages) {
+          setPage(data.total_pages);
+        }
+      })
+      .catch(() => {
+        setSessions([]);
+        setTotal(0);
+        setTotalPages(0);
+      })
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    loadSessions();
-  }, []);
+    loadSessions(page, searchTerm, statusFilter);
+  }, [page, pageSize, searchTerm, statusFilter]);
 
-  const filteredSessions = sessions.filter((s) => {
-    const title = parseTitle(s.meta);
-    const matchesSearch = title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.session_id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || s.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, statusFilter]);
+
+  const filteredSessions = sessions;
 
   const getTargetLabel = (meta: string) => {
     const m = parseMeta(meta);
@@ -127,7 +147,7 @@ export default function SessionsPage() {
         return;
       }
       setSessionToDelete(null);
-      loadSessions();
+      loadSessions(page, searchTerm, statusFilter);
     } catch {
       setDeleteError('删除失败');
     } finally {
@@ -205,7 +225,7 @@ export default function SessionsPage() {
       }
       setShowBulkDeleteConfirm(false);
       exitSelectionMode();
-      loadSessions();
+      loadSessions(page, searchTerm, statusFilter);
     } catch {
       setBulkDeleteError('批量删除失败');
     } finally {
@@ -282,7 +302,7 @@ export default function SessionsPage() {
                   <MessageSquare className="h-5 w-5 text-primary" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-4xl font-black">{sessions.length}</div>
+                  <div className="text-4xl font-black">{total}</div>
                   <p className="text-sm font-medium text-muted-foreground mt-2">Total tracked sessions</p>
                 </CardContent>
               </Card>
@@ -299,7 +319,7 @@ export default function SessionsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-4xl font-black text-green-600 dark:text-green-500">{sessions.filter(s => s.status === 'active').length}</div>
-                  <p className="text-sm font-medium text-muted-foreground mt-2">Currently running processes</p>
+                  <p className="text-sm font-medium text-muted-foreground mt-2">Active on current page</p>
                 </CardContent>
               </Card>
             </div>
@@ -353,6 +373,31 @@ export default function SessionsPage() {
                     </div>
                   </div>
                 )}
+                <div className="mt-6 flex flex-col gap-3 border-t border-border/60 pt-6 md:flex-row md:items-center md:justify-between">
+                  <p data-testid="sessions-pagination-summary" className="text-sm font-semibold text-muted-foreground">
+                    {totalPages > 0 ? `第 ${page} / ${totalPages} 页，共 ${total} 条` : `第 1 / 1 页，共 ${total} 条`}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      data-testid="sessions-pagination-prev"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                      disabled={loading || page <= 1}
+                    >
+                      上一页
+                    </Button>
+                    <Button
+                      data-testid="sessions-pagination-next"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((prev) => prev + 1)}
+                      disabled={loading || totalPages <= 1 || page >= totalPages}
+                    >
+                      下一页
+                    </Button>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="p-0">
                 {loading ? (

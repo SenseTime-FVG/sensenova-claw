@@ -144,6 +144,17 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仅做 session 级 catalog 缓存不等于真正“共享同一个 MCP server”；如果底层仍是每次调用临时 `stdio_client()`，多 agent 仍会起多份进程，Browser MCP 这类 server 一样会冲突。
 
+### 2026-04-14 Session 列表分页补充
+
+成功经验：
+- session 列表从“固定前 50 条”升级为真分页时，最稳的做法是保留原有 `list_sessions()` 给旧调用方，新增 `list_sessions_page()` 给 HTTP 列表接口使用；这样不会误伤现有 websocket 和其他历史逻辑。
+- 这类分页改造不能只改 `page/page_size`，还要同步把搜索和状态过滤也下沉到服务端；否则页面会变成“全量分页 + 当前页过滤”的半成品，语义会漂。
+- Playwright 里这套前端鉴权初始化不仅会打 `/api/auth/status`，还会打 `/api/auth/verify-token`；若只 mock 其中一个，请求根本进不到业务页面。
+
+失败/风险经验：
+- 现有前端 e2e 多处把 `/api/sessions` 写成 `url.endsWith('/api/sessions')`，一旦接口改成带 query 的分页请求就会全部失配；同类回归应统一改成基于 `URL.pathname` 匹配。
+- 前端 dev server 在无后端场景下会持续探测 `/api/custom-pages`、`/api/config/llm-status`、`/api/todolist`、`/ws` 并打印 `ECONNREFUSED`；只要核心断言通过，这类代理噪音不能误判成分页失败。
+
 ### 2026-04-09 MCP 一期接入补充
 
 成功经验：

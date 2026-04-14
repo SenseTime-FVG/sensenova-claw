@@ -170,6 +170,22 @@ def test_list_sessions_marks_has_children(client, app):
     assert sessions["sess_child"]["has_children"] is False
 
 
+def test_list_sessions_returns_pagination_payload(client, app):
+    _run(app.state.services.repo.create_session("sess_page_1", meta={"title": "First"}))
+    _run(app.state.services.repo.create_session("sess_page_2", meta={"title": "Second"}))
+    _run(app.state.services.repo.create_session("sess_page_3", meta={"title": "Third"}))
+
+    resp = client.get("/api/sessions?page=2&page_size=2")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["page"] == 2
+    assert payload["page_size"] == 2
+    assert payload["total"] == 3
+    assert payload["total_pages"] == 2
+    assert [item["session_id"] for item in payload["sessions"]] == ["sess_page_1"]
+
+
 def test_get_session_detail_returns_session_payload(client, app):
     _run(app.state.services.repo.create_session(
         "sess_detail_1",
