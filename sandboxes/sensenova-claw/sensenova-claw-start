@@ -20,6 +20,31 @@ security:
 
 delegation:
   enabled: true
+
+agents:
+  default:
+    enabled: true
+  system-admin:
+    enabled: true
+  office-main:
+    enabled: true
+  search-agent:
+    name: 搜索调研助手
+    description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
+    temperature: 0.2
+    tools: ["serper_search", "fetch_url", "read_file", "write_file", "image_search", "send_message", "ask_user"]
+    max_send_depth: 2
+    enabled: true
+  ppt-agent:
+    enabled: true
+  data-analyst:
+    enabled: true
+  doc-organizer:
+    enabled: true
+  email-agent:
+    enabled: true
+  proactive-agent:
+    enabled: true
 YAML
     echo "[sensenova-claw] config.yml generated at $CONFIG_FILE"
 fi

@@ -49,7 +49,8 @@ COPY --from=frontend-build /build/public /opt/sensenova-claw/web/public
 COPY sandboxes/sensenova-claw/sensenova-claw-start /usr/local/bin/
 RUN chmod +x /usr/local/bin/sensenova-claw-start
 
-# 数据目录
+# 内置 Agent 配置 + 数据目录
+COPY .sensenova-claw/agents/ /home/sandbox/.sensenova-claw/agents/
 RUN mkdir -p /home/sandbox/.sensenova-claw/data && \
     chown -R sandbox:sandbox /home/sandbox/.sensenova-claw
 

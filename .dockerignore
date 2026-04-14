@@ -28,5 +28,6 @@ scripts/
 *.md
 
 # 其他
-.sensenova-claw/
+.sensenova-claw/*
+!.sensenova-claw/agents/
 .claude/
