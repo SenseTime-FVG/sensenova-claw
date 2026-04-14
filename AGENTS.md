@@ -83,6 +83,74 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 每次你执行完成任务之后，需要总结成功和失败的经验，并选择会对后续任务有帮助的内容保存在这里
 
+### 2026-04-07 QQ Gateway reconnecting 状态修复补充
+
+### 2026-04-10 Agent 三态白名单语义补充
+
+成功经验：
+- Agent 级 `tools/skills/mcp_servers/mcp_tools` 若要同时表达“全开 / 全关 / 部分开”，直接统一成三态最稳：`null = 全部禁用`、`[] = 全部启用`、`[...] = 显式白名单`，不需要额外总开关字段。
+- 这类三态配置必须一并修改 `AgentConfig/Registry`、运行时过滤器、agents 详情接口和前端保存逻辑；只改配置模型或只改前端都会让页面状态和真实运行时漂移。
+- MCP 两层开关里，如果所有 server 都关闭，`mcp_tools` 也必须序列化为 `null`；保留成 `[]` 会被解释成“全部 MCP tools 启用”，和外层 server 全关语义冲突。
+
+失败/风险经验：
+- `AgentConfigUpdate` 这类 Pydantic 更新模型里，`list[str] | None = None` 不能靠 `if body.field is not None` 区分“未传”和“显式传 null”；必须结合 `model_dump(exclude_unset=True)` 判断字段是否真的被提交。
+
+### 2026-04-10 Browser MCP 会话恢复补充
+
+成功经验：
+- `browsermcp` 这类 `stdio + 浏览器扩展` 型 MCP server 出现 `Transport closed` 后，往往是当前 session 级 MCP runtime 坏了；同一会话内继续重试旧 runtime 基本不会自愈，而新会话能恢复说明应做 runtime 丢弃重建。
+- 在 `McpSessionManager.call_tool()` 层捕获 `Transport closed`、`Client closed`、`connection closed` 这类 transport 错误后，立即 `close_session(session_id)` 并删除 runtime，是最小且有效的恢复点；当前请求继续失败，下一次调用自动重建即可。
+
+失败/风险经验：
+- Browser MCP 在本机可能同时残留多份 `@browsermcp/mcp` / `mcp-server-browsermcp` 进程，容易造成扩展串线或 transport 异常；排查这类问题时先清多实例，再区分“配置问题”和“会话坏状态”。
+
+### 2026-04-10 共享 stdio MCP server 补充
+
+成功经验：
+- 对 `browsermcp` 这类单活资源型 MCP server，按 `server_name + 配置指纹` 共享同一份 stdio runtime，比“每个 session/agent 各起一份”稳定得多；catalog 和 tool call 都走共享实例后，多 agent 可共用同一个底层 server。
+- 共享 stdio runtime 必须在 server 级别加 `asyncio.Lock` 串行化 `list_tools` / `call_tool`，否则多个 agent 并发进入同一 `ClientSession` 时仍会出现 transport 层异常。
+- `list_tools` 缓存应放在共享 runtime 内，而不是 session runtime 内；这样不同 session 的 `ensure_catalog()` 才不会重复触发同一个 stdio server 的工具发现。
+
+失败/风险经验：
+- 仅做 session 级 catalog 缓存不等于真正“共享同一个 MCP server”；如果底层仍是每次调用临时 `stdio_client()`，多 agent 仍会起多份进程，Browser MCP 这类 server 一样会冲突。
+
+### 2026-04-09 MCP 一期接入补充
+
+成功经验：
+- 在现有 `ToolRegistry -> AgentSessionWorker -> ToolSessionWorker` 架构里接 MCP，最小落点是“把 MCP tool 物化成动态 Tool”，而不是单独平行做一套 agent runtime；这样 LLM tool schema、权限控制、事件流和结果落盘都能直接复用。
+- Python MCP SDK 的 `stdio_client`/`ClientSession` 若跨任务关闭会触发 `Attempted to exit cancel scope in a different task than it was entered in`；第一版用“catalog/listTools 和 callTool 都在同一协程内临时连接并关闭”更稳，先保证功能闭环，再考虑状态复用。
+- 进程内 e2e 要覆盖 MCP 最稳的方式是：`mock provider + 本地 FastMCP stdio 假服务`。这样能稳定验证 `llm -> mcp tool -> 二轮 llm -> step_completed`，不依赖外部网络。
+
+失败/风险经验：
+- `tests/e2e/run_e2e.py` 仍会加载本地 `config.yml`，mock provider 场景可能被用户本机真实 provider 配置污染；涉及 provider 固定行为的 e2e 断言不要依赖某个 mock 固定文案或固定参数值，优先断言事件链和结构化工具结果。
+
+### 2026-04-10 MCP 管理页补充
+
+成功经验：
+- MCP 管理页这类“表单较长 + 动态列表”的后台页面，给关键输入补 `data-testid` 比在 Playwright 里依赖 `getByText/getByDisplayValue` 更稳，尤其是 JSON 导入后会新增同构表单行。
+- 将前端导入能力限定为标准 `mcpServers` JSON，并在页面本地先解析成 draft、用户再手动 `Save All` 落库，能把“导入错误”和“持久化错误”两段问题明显分开，排查更快。
+- 后端单独提供 `/api/mcp/servers` 的列表/保存接口，比让前端直接修改整段 config 更利于做字段校验、格式归一化和后续扩展“连接测试”能力。
+
+失败/风险经验：
+- 当前前端 dev server 会自动探测其他后台接口与 `/ws`，即使 MCP 页面测试已经把核心 `fetch` mock 掉，终端仍会出现一批 `ECONNREFUSED localhost:8000` 代理噪音；这类日志不能直接视为 MCP 页面失败，需要看 Playwright 断言结果。
+
+### 2026-04-10 Agent MCP 两层开关补充
+
+成功经验：
+- Agent 级 MCP 配置若采用 `mcp_servers` / `mcp_tools` 两个白名单字段，并约定“空数组 = 默认全部启用”，前端最稳的做法是始终基于完整 catalog 渲染，再在保存时把“全部开启”折叠回空数组，而不是直接把 UI 状态和落盘格式绑定死。
+- agents API 若要返回 MCP 明细，不能直接复用依赖全局 `config` 的 runtime manager；在接口层基于 `request.app.state.config` 临时创建 `SessionMcpRuntime` 更稳，测试环境也不会串到本机真实 MCP 配置。
+- 对“server 开关 + 展开后 tool 开关”的 UI，给 server toggle / expand / tool toggle 全部加 `data-testid`，Playwright 回归会比依赖卡片文本稳定很多。
+
+失败/风险经验：
+- 当 `mcp_servers=[]` 和 `mcp_tools=[]` 被定义成“全部启用”时，前端无法无损表示“所有 server 都关闭”或“所有 tool 都关闭”；实现上必须阻止保存这类不可编码状态，不能假设后端能推断用户意图。
+
+成功经验：
+- QQ 官方网关断线恢复后不一定再次发 `READY`，也可能发 `RESUMED`；如果状态机只在 `READY` 时回写 `connected`，Gateway 页面就会长期显示 `reconnecting`。
+- 这类状态卡死问题最适合在 runtime 层补最小单测：直接构造 `reconnecting -> RESUMED` 的 payload，能快速确认根因在事件处理而不是前端展示。
+
+失败/风险经验：
+- 当前 `tests/e2e/test_qq_channel_official_e2e.py` 与 `tests/e2e/test_qq_channel_onebot_e2e.py` 断言了 mock LLM 的旧固定文案（`当前没有可用的 LLM`）；现在 mock provider 已返回正常自我介绍，这两条 e2e 会因历史断言漂移失败，不能拿来判断本次 QQ 状态修复是否回归。
+
 ### 2026-03-26 OpenAI 兼容 top_k 修复补充
 
 成功经验：
@@ -401,6 +469,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 成功经验：
 - `/api/sessions/{id}/events` 返回的是仓库落盘后的内核事件名，例如 `user.question_asked`、`user.question_answered`，而不是前端实时 WebSocket 的 `user_question_asked`、`user_question_answered_event`；聊天历史重建必须同时兼容两套命名。
 - 对“切换会话回来 UI 丢状态”这类问题，最有效的 e2e 是直接 mock `/api/sessions/*/events` 返回历史事件，再通过真实的 session 切换操作验证恢复结果；这样能把“实时链路正常但历史恢复失效”单独钉住。
+
+### 2026-04-09 Sessions 子会话删除补充
+
+成功经验：
+- 对“删除当前会话还是删除整棵子树”这类分支行为，最稳的做法是在 `/api/sessions` 列表直接补 `has_children`，让前端只负责弹窗分流，不自己拼树。
+- 会话树删除语义应明确收口到 `DELETE /api/sessions/{id}?scope=self|self_and_descendants`；这样单删路径保持兼容，前端和 Playwright 也能直接断言请求参数。
+- 子会话递归删除建议仅沿 `meta.parent_session_id` 向下找后代，不回溯父会话；相应单测要明确断言“parent 保留、descendants 删除”。
+
+失败/风险经验：
+- 直接跑默认 `playwright.config.ts` 时，若本机已有 3000 端口服务会先被 `webServer` 阻塞；复用现有前端服务做定向回归时，更适合走不带 `webServer` 的 `playwright.gateway.config.ts`。
 
 失败/风险经验：
 - 如果只用实时 WebSocket 事件写回归，`ask_user` 看起来是好的，但一旦用户离开当前会话再回来，依赖历史事件重建的内联卡片仍会消失；这类功能必须区分“实时显示”和“历史恢复”两条路径分别覆盖。
@@ -1807,3 +1885,22 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 只根据视觉相似度把右下角羊误判成 agent idle 精灵，会导致修复落到 `star_idle` 链路但对用户实际看到的对象完全无效；以后 Phaser 场景里有多个相似角色时，必须先做运行时对象级定位再改。
+
+### 2026-04-02 Office agent 状态房间补充
+
+成功经验：
+- `/office/[agentId]` 这类 Phaser 页面首次同步不能只靠 `createOfficeGame(...)` 后立刻 `emit`；场景 `create()` 的监听器可能尚未挂好，初始化后再做一次短延迟回放 `setState/setAgents/setRoomContext`，能稳定避免首屏丢羊。
+- 对挂在后台壳里的 Office 页面做 Playwright 回归时，需要同时 mock `auth/status`、`custom-pages`、`llm-status`、`sessions`、`todolist` 等壳层接口；只 mock `/api/agents` 往往会被鉴权或导航依赖拖离目标页面。
+- agent 办公室展示适合把“房间模式”和“agent 运行态”分开建模：`global` 房间只展示 `running` agent，单 agent 房间则按 `idle/running` 在待命位和工位之间切换，这样既能保留总办公室的单羊待命设定，也能满足单房间状态表达。
+
+失败/风险经验：
+- 如果 e2e 只等待 `window.__phaserGame` 存在就开始断言，极易在 `agentSprites` 尚未同步完成时读到 `0`；这类测试必须等待 `scene.agentSprites.size` 或其他业务就绪信号，而不是只等游戏实例初始化。
+
+### 2026-04-09 CLI agent switch 鉴权补充
+
+成功经验：
+- CLI 同时依赖 WebSocket 和 HTTP 时，不能只保证 WS 自动带 token；`/agent switch` 这类命令会先请求 REST API，HTTP 客户端也必须自动附带 `Authorization: Bearer <token>`。
+- 这类问题最小红绿测试可以直接拦截 `urllib.request.urlopen`，断言 `CLIApp._http()` 发出的请求头；比先搭整套服务更快定位根因。
+
+失败/风险经验：
+- CLI 目前把 `/api/agents/{id}` 的所有错误都提示成“Agent 不存在”，会掩盖真实的 401/403；以后排查类似问题时要先看底层 HTTP 状态，不要只看终端文案。

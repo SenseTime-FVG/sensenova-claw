@@ -33,6 +33,15 @@ class BulkDeleteRequest(BaseModel):
     filter: SessionFilter | None = None
 
 
+def _normalize_delete_scope(scope: str) -> str:
+    value = scope.strip().lower()
+    if value in {"", "self"}:
+        return "self"
+    if value == "self_and_descendants":
+        return value
+    raise HTTPException(status_code=400, detail="invalid delete scope")
+
+
 def _parse_title(meta: str | None) -> str:
     if not meta:
         return ""
@@ -114,14 +123,34 @@ async def list_session_messages(session_id: str, request: Request):
 @router.delete("/{session_id}")
 async def delete_session(session_id: str, request: Request):
     """强制删除会话及其 JSONL 文件。"""
+    scope = _normalize_delete_scope(str(request.query_params.get("scope", "self")))
     sessions = await _get_services(request).repo.list_sessions(limit=9999, include_hidden=True)
-    session = next((item for item in sessions if item["session_id"] == session_id), None)
+    session_map = {str(item["session_id"]): item for item in sessions}
+    session = session_map.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
 
-    await _delete_session_record(request, session)
+    targets = [session]
+    if scope == "self_and_descendants":
+        descendant_ids = await _get_services(request).repo.list_descendant_session_ids(session_id)
+        targets.extend(
+            session_map[descendant_id]
+            for descendant_id in descendant_ids
+            if descendant_id in session_map
+        )
 
-    return {"status": "deleted", "session_id": session_id}
+    deleted_ids: list[str] = []
+    for target in targets:
+        deleted_ids.append(await _delete_session_record(request, target))
+
+    if scope == "self":
+        return {"status": "deleted", "session_id": session_id}
+    return {
+        "status": "deleted",
+        "session_id": session_id,
+        "scope": scope,
+        "deleted_session_ids": deleted_ids,
+    }
 
 
 @router.post("/bulk-delete")

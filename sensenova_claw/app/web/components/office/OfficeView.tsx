@@ -8,6 +8,8 @@ import { useOfficeState } from '@/hooks/useOfficeState';
 import { STATES, type OfficeStateName } from './types';
 import { Button } from '@/components/ui/button';
 
+type AgentRuntimeStatus = 'idle' | 'running' | 'error';
+
 /**
  * Phaser 画布容器 — 独立 memo 组件，避免父组件重渲染导致画布闪烁。
  * 只在 officeState 的 state/detail 值真正变化时才向 Phaser 推送事件。
@@ -16,37 +18,63 @@ const PhaserCanvas = memo(function PhaserCanvas({
   state,
   detail,
   agents,
+  mode,
+  selectedAgentId,
+  agentStatuses,
 }: {
   state: OfficeStateName;
   detail: string;
   agents: { id: string; name: string }[];
+  mode: 'global' | 'agent';
+  selectedAgentId?: string;
+  agentStatuses: Record<string, { status: AgentRuntimeStatus }>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<import('phaser').Game | null>(null);
   const latestStateRef = useRef(state);
   const latestDetailRef = useRef(detail);
   const latestAgentsRef = useRef(agents);
+  const latestModeRef = useRef(mode);
+  const latestSelectedAgentIdRef = useRef(selectedAgentId);
+  const latestAgentStatusesRef = useRef(agentStatuses);
 
   latestStateRef.current = state;
   latestDetailRef.current = detail;
   latestAgentsRef.current = agents;
+  latestModeRef.current = mode;
+  latestSelectedAgentIdRef.current = selectedAgentId;
+  latestAgentStatusesRef.current = agentStatuses;
 
   useEffect(() => {
     let mounted = true;
+    const delayedSyncTimers: number[] = [];
+
+    const syncGameSnapshot = () => {
+      if (!gameRef.current) return;
+      gameRef.current.events.emit('setState', latestStateRef.current, latestDetailRef.current);
+      gameRef.current.events.emit('setAgents', latestAgentsRef.current);
+      gameRef.current.events.emit('setRoomContext', {
+        mode: latestModeRef.current,
+        selectedAgentId: latestSelectedAgentIdRef.current ?? null,
+        agentStatuses: latestAgentStatusesRef.current,
+      });
+    };
 
     async function init() {
       if (!containerRef.current || gameRef.current) return;
       const { createOfficeGame } = await import('./game');
       if (!mounted) return;
       gameRef.current = createOfficeGame(containerRef.current);
-      gameRef.current.events.emit('setState', latestStateRef.current, latestDetailRef.current);
-      gameRef.current.events.emit('setAgents', latestAgentsRef.current);
+      syncGameSnapshot();
+      delayedSyncTimers.push(window.setTimeout(syncGameSnapshot, 0));
+      delayedSyncTimers.push(window.setTimeout(syncGameSnapshot, 80));
     }
 
     init();
 
     return () => {
       mounted = false;
+      delayedSyncTimers.forEach(timerId => window.clearTimeout(timerId));
       if (gameRef.current) {
         gameRef.current.destroy(true);
         gameRef.current = null;
@@ -66,18 +94,32 @@ const PhaserCanvas = memo(function PhaserCanvas({
     }
   }, [agents]);
 
+  useEffect(() => {
+    if (gameRef.current) {
+      gameRef.current.events.emit('setRoomContext', {
+        mode,
+        selectedAgentId: selectedAgentId ?? null,
+        agentStatuses,
+      });
+    }
+  }, [agentStatuses, mode, selectedAgentId]);
+
   return <div ref={containerRef} className="absolute inset-0" />;
 });
 
 export function OfficeView({
   agents,
   mode,
+  selectedAgentId,
+  agentStatuses,
   roomTitle,
   refreshing,
   onRefresh,
 }: {
   agents: { id: string; name: string }[];
   mode: 'global' | 'agent';
+  selectedAgentId?: string;
+  agentStatuses: Record<string, { status: AgentRuntimeStatus }>;
   roomTitle: string;
   refreshing: boolean;
   onRefresh: () => void | Promise<void>;
@@ -112,7 +154,14 @@ export function OfficeView({
             <RefreshCw className={refreshing ? 'animate-spin' : ''} />
           </Button>
         </div>
-        <PhaserCanvas state={officeState.state} detail={officeState.detail} agents={agents} />
+        <PhaserCanvas
+          state={officeState.state}
+          detail={officeState.detail}
+          agents={agents}
+          mode={mode}
+          selectedAgentId={selectedAgentId}
+          agentStatuses={agentStatuses}
+        />
       </div>
       <div className="flex-shrink-0 h-9 flex items-center justify-between px-3 text-sm">
         <div className="flex items-center gap-2 text-muted-foreground">

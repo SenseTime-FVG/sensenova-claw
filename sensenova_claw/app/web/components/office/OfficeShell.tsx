@@ -14,6 +14,10 @@ interface OfficeAgentSummary {
   name: string;
 }
 
+type OfficeAgentRuntimeStatus = 'idle' | 'running' | 'error';
+
+type OfficeAgentStatuses = Record<string, { status: OfficeAgentRuntimeStatus }>;
+
 interface OfficeShellProps {
   selectedAgentId?: string;
 }
@@ -21,6 +25,7 @@ interface OfficeShellProps {
 export function OfficeShell({ selectedAgentId }: OfficeShellProps) {
   const pathname = usePathname();
   const [agents, setAgents] = useState<OfficeAgentSummary[]>([]);
+  const [agentStatuses, setAgentStatuses] = useState<OfficeAgentStatuses>({});
   const [refreshing, setRefreshing] = useState(false);
 
   const loadAgents = useCallback(async () => {
@@ -31,9 +36,20 @@ export function OfficeShell({ selectedAgentId }: OfficeShellProps) {
     return next;
   }, []);
 
+  const loadAgentStatuses = useCallback(async () => {
+    const res = await authFetch(`${API_BASE}/api/office/agent-status`);
+    const data = await res.json();
+    const next = data?.agents && typeof data.agents === 'object'
+      ? data.agents as OfficeAgentStatuses
+      : {};
+    setAgentStatuses(next);
+    return next;
+  }, []);
+
   useEffect(() => {
     loadAgents().catch(() => setAgents([]));
-  }, [loadAgents]);
+    loadAgentStatuses().catch(() => setAgentStatuses({}));
+  }, [loadAgents, loadAgentStatuses]);
 
   const roomTitle = useMemo(() => {
     if (!selectedAgentId) return 'Sensenova-Claw';
@@ -49,11 +65,17 @@ export function OfficeShell({ selectedAgentId }: OfficeShellProps) {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      await loadAgents();
+      await Promise.all([
+        loadAgents(),
+        loadAgentStatuses().catch(() => {
+          setAgentStatuses({});
+          return {};
+        }),
+      ]);
     } finally {
       setRefreshing(false);
     }
-  }, [loadAgents, refreshing]);
+  }, [loadAgents, loadAgentStatuses, refreshing]);
 
   return (
     <div className="flex h-full overflow-hidden bg-[#09090b]">
@@ -65,6 +87,7 @@ export function OfficeShell({ selectedAgentId }: OfficeShellProps) {
               label="Sensenova-Claw"
               active={pathname === '/office'}
               testId="office-entry-global"
+              runtimeStatus={selectedAgentId ? 'idle' : 'running'}
             />
           </div>
           <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.24em] text-[#caa887]">
@@ -78,6 +101,7 @@ export function OfficeShell({ selectedAgentId }: OfficeShellProps) {
                 label={agent.name}
                 active={pathname === `/office/${agent.id}`}
                 testId={`office-entry-${agent.id}`}
+                runtimeStatus={agentStatuses[agent.id]?.status ?? 'idle'}
               />
             ))}
           </div>
@@ -87,6 +111,8 @@ export function OfficeShell({ selectedAgentId }: OfficeShellProps) {
         <OfficeView
           agents={visibleAgents}
           mode={selectedAgentId ? 'agent' : 'global'}
+          selectedAgentId={selectedAgentId}
+          agentStatuses={agentStatuses}
           roomTitle={roomTitle}
           refreshing={refreshing}
           onRefresh={refreshOffice}
@@ -101,11 +127,13 @@ function OfficeEntry({
   label,
   active,
   testId,
+  runtimeStatus,
 }: {
   href: string;
   label: string;
   active: boolean;
   testId: string;
+  runtimeStatus: OfficeAgentRuntimeStatus;
 }) {
   return (
     <Link
@@ -132,6 +160,16 @@ function OfficeEntry({
         />
       </span>
       <span className="line-clamp-2 text-[12px] leading-tight">{label}</span>
+      <span
+        className={cn(
+          'ml-auto size-2.5 rounded-full border',
+          runtimeStatus === 'running'
+            ? 'border-[#ffe5a7] bg-[#f59e0b]'
+            : runtimeStatus === 'error'
+              ? 'border-[#ffc8c8] bg-[#dc2626]'
+              : 'border-[#b7dcb7] bg-[#3f7c3f]'
+        )}
+      />
     </Link>
   );
 }

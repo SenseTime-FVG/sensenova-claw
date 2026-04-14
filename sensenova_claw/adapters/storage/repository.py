@@ -270,9 +270,84 @@ class Repository:
             """,
         ).fetchall()
         sessions = [dict(row) for row in rows]
+        child_parent_ids = self._collect_child_parent_ids(sessions)
+        for row in sessions:
+            row["has_children"] = row.get("session_id") in child_parent_ids
         if not include_hidden:
             sessions = [row for row in sessions if not self._is_hidden_session(row.get("meta"))]
-        return sessions[:limit]
+        return self._include_visible_ancestors_within_limit(sessions, limit)
+
+    def _parse_parent_session_id(self, meta: Any) -> str | None:
+        if not meta:
+            return None
+        try:
+            payload = json.loads(meta) if isinstance(meta, str) else dict(meta)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+        parent_session_id = str(payload.get("parent_session_id") or "").strip()
+        return parent_session_id or None
+
+    def _collect_child_parent_ids(self, sessions: list[dict[str, Any]]) -> set[str]:
+        parent_ids: set[str] = set()
+        for session in sessions:
+            parent_session_id = self._parse_parent_session_id(session.get("meta"))
+            if parent_session_id:
+                parent_ids.add(parent_session_id)
+        return parent_ids
+
+    def _include_visible_ancestors_within_limit(
+        self,
+        sessions: list[dict[str, Any]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or len(sessions) <= limit:
+            return sessions
+
+        session_map = {str(session["session_id"]): session for session in sessions}
+        selected_ids = [str(session["session_id"]) for session in sessions[:limit]]
+        seen_ids = set(selected_ids)
+
+        for session_id in list(selected_ids):
+            current = session_map.get(session_id)
+            while current is not None:
+                parent_session_id = self._parse_parent_session_id(current.get("meta"))
+                if not parent_session_id or parent_session_id in seen_ids:
+                    break
+                parent = session_map.get(parent_session_id)
+                if parent is None:
+                    break
+                seen_ids.add(parent_session_id)
+                selected_ids.append(parent_session_id)
+                current = parent
+
+        return [session_map[session_id] for session_id in selected_ids]
+
+    async def list_descendant_session_ids(self, session_id: str) -> list[str]:
+        """列出某会话的全部后代会话 ID，按从近到远的层级顺序返回。"""
+        return await asyncio.to_thread(self._sync_list_descendant_session_ids, session_id)
+
+    def _sync_list_descendant_session_ids(self, session_id: str) -> list[str]:
+        conn = self._conn()
+        rows = conn.execute("SELECT session_id, meta FROM sessions").fetchall()
+        children_by_parent: dict[str, list[str]] = {}
+        for row in rows:
+            child_session_id = str(row["session_id"])
+            parent_session_id = self._parse_parent_session_id(row["meta"])
+            if not parent_session_id:
+                continue
+            children_by_parent.setdefault(parent_session_id, []).append(child_session_id)
+
+        descendants: list[str] = []
+        queue = list(children_by_parent.get(session_id, []))
+        seen: set[str] = set()
+        while queue:
+            current = queue.pop(0)
+            if current in seen:
+                continue
+            seen.add(current)
+            descendants.append(current)
+            queue.extend(children_by_parent.get(current, []))
+        return descendants
 
     async def create_turn(self, turn_id: str, session_id: str, user_input: str) -> None:
         await asyncio.to_thread(self._sync_create_turn, turn_id, session_id, user_input)

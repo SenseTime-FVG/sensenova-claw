@@ -12,7 +12,7 @@ import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 import { useFilePanel } from '@/contexts/FilePanelContext';
 import { useI18n } from '@/contexts/I18nContext';
-import { type SessionItem, type ContextFileRef, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
+import { type SessionItem, type SessionTreeNode, type ContextFileRef, buildSessionTree, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
 import { MessageArea } from '@/components/chat/MessageArea';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { useSlideSet } from '@/components/ppt/PPTViewer';
@@ -135,16 +135,21 @@ function SessionListItem({
 }) {
   const { locale, t } = useI18n();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const hasChildren = Boolean(session.has_children);
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (hasChildren) {
+      onDelete();
+      return;
+    }
     if (confirmDelete) {
       onDelete();
       setConfirmDelete(false);
-    } else {
-      setConfirmDelete(true);
-      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
     }
+    setConfirmDelete(true);
+    setTimeout(() => setConfirmDelete(false), 3000);
   };
 
   if (isChild) {
@@ -177,7 +182,7 @@ function SessionListItem({
             <div className="truncate text-[11px] font-medium">{getTitle(session.meta, locale)}</div>
             <div className="text-[9px] text-muted-foreground/50 mt-0.5">{timeLabel(session.last_active, locale)}</div>
           </div>
-          <button onClick={handleDelete} className={cn('shrink-0 p-0.5 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive hover:bg-destructive/10' : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive')}>
+          <button data-testid={`chat-delete-session-${session.session_id}`} onClick={handleDelete} className={cn('shrink-0 p-0.5 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive hover:bg-destructive/10' : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive')}>
             <Trash2 className="w-2.5 h-2.5" />
           </button>
         </div>
@@ -199,49 +204,91 @@ function SessionListItem({
         <div className="truncate font-medium text-xs">{getTitle(session.meta, locale)}</div>
         <div className="text-[10px] text-muted-foreground mt-0.5">{timeLabel(session.last_active, locale)}</div>
       </div>
-      <button onClick={handleDelete} className={cn('shrink-0 p-1 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive' : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive')}>
+      <button data-testid={`chat-delete-session-${session.session_id}`} onClick={handleDelete} className={cn('shrink-0 p-1 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive' : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive')}>
         <Trash2 className="w-3.5 h-3.5" />
       </button>
     </div>
   );
 }
 
-function SessionListGroup({
-  session, children: childSessions, currentSessionId, switchSession, deleteSession, index,
+function SessionTreeBranch({
+  children,
+  isChild,
+  isLast,
 }: {
-  session: SessionItem;
-  children: SessionItem[];
+  children: React.ReactNode;
+  isChild?: boolean;
+  isLast?: boolean;
+}) {
+  if (!isChild) return <>{children}</>;
+
+  return (
+    <div className="flex items-stretch">
+      <div className="w-6 shrink-0 flex flex-col items-center">
+        <div className={cn('w-px flex-1 bg-violet-300/40 dark:bg-violet-400/30', isLast && 'max-h-[50%]')} />
+        {isLast && <div className="flex-1" />}
+      </div>
+      <div className="flex items-center -ml-[3px]">
+        <div className="w-3 h-px bg-violet-300/40 dark:bg-violet-400/30" />
+      </div>
+      <div className="flex-1 min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function SessionListGroup({
+  node, currentSessionId, switchSession, deleteSession, index, isChild = false, isLast = false,
+}: {
+  node: SessionTreeNode;
   currentSessionId: string | null;
   switchSession: (sid: string) => void;
   deleteSession: (sid: string) => Promise<void>;
   index: number;
+  isChild?: boolean;
+  isLast?: boolean;
 }) {
   const { t } = useI18n();
-  const hasActiveChild = childSessions.some(c => c.session_id === currentSessionId);
+  const { session, children: childSessions } = node;
+  const hasActiveChild = childSessions.some(child => child.session.session_id === currentSessionId);
   const [expanded, setExpanded] = useState(hasActiveChild);
 
   useEffect(() => {
     if (hasActiveChild && !expanded) setExpanded(true);
-  }, [hasActiveChild]);
+  }, [expanded, hasActiveChild]);
 
   return (
-    <div className={cn('mx-2 rounded-xl transition-colors', expanded && 'bg-violet-50/40 dark:bg-violet-950/20 pb-1.5')}>
-      <SessionListItem session={session} isActive={currentSessionId === session.session_id} onClick={() => switchSession(session.session_id)} onDelete={() => deleteSession(session.session_id)} index={index} noMargin />
-      <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} className={cn('flex items-center gap-1.5 w-full pl-6 pr-3 py-1 text-[10px] font-medium', expanded ? 'text-violet-500' : 'text-muted-foreground/50')}>
+    <SessionTreeBranch isChild={isChild} isLast={isLast}>
+      <div className={cn('rounded-xl transition-colors', expanded && 'bg-violet-50/40 dark:bg-violet-950/20 pb-1.5')}>
+        <SessionListItem session={session} isActive={currentSessionId === session.session_id} onClick={() => switchSession(session.session_id)} onDelete={() => deleteSession(session.session_id)} index={index} noMargin />
+        <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} className={cn('flex items-center gap-1.5 w-full pr-3 py-1 text-[10px] font-medium', 'pl-6', expanded ? 'text-violet-500' : 'text-muted-foreground/50')}>
         <div className="flex items-center gap-1">
           {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           <GitBranch className="w-3 h-3" />
         </div>
         <span>{t('chat.teamSessionsCount', { count: childSessions.length })}</span>
-      </button>
-      {expanded && (
-        <div className="pl-4 pr-1">
-          {childSessions.map((child, childIdx) => (
-            <SessionListItem key={child.session_id} session={child} isActive={currentSessionId === child.session_id} onClick={() => switchSession(child.session_id)} onDelete={() => deleteSession(child.session_id)} index={index + 1 + childIdx} isChild isLast={childIdx === childSessions.length - 1} />
-          ))}
-        </div>
-      )}
-    </div>
+        </button>
+        {expanded && (
+          <div className="pl-4 pr-1">
+            {childSessions.map((child, childIdx) => (
+              child.children.length > 0 ? (
+                <SessionListGroup
+                  key={child.session.session_id}
+                  node={child}
+                  currentSessionId={currentSessionId}
+                  switchSession={switchSession}
+                  deleteSession={deleteSession}
+                  index={index + 1 + childIdx}
+                  isChild
+                  isLast={childIdx === childSessions.length - 1}
+                />
+              ) : (
+                <SessionListItem key={child.session.session_id} session={child.session} isActive={currentSessionId === child.session.session_id} onClick={() => switchSession(child.session.session_id)} onDelete={() => deleteSession(child.session.session_id)} index={index + 1 + childIdx} isChild isLast={childIdx === childSessions.length - 1} />
+              )
+            ))}
+          </div>
+        )}
+      </div>
+    </SessionTreeBranch>
   );
 }
 
@@ -321,19 +368,9 @@ function ChatContent() {
 
   useEffect(() => { if (selectedAgentId) refreshTaskGroups(); }, [selectedAgentId, refreshTaskGroups]);
 
-  const { rootSelectedSessions, selectedChildrenMap } = useMemo(() => {
+  const selectedSessionTree = useMemo(() => {
     const all = selectedAgentId ? (sessionsByAgent[selectedAgentId] || []).sort((a, b) => b.last_active - a.last_active) : [];
-    const idSet = new Set(all.map(s => s.session_id));
-    const cMap: Record<string, SessionItem[]> = {};
-    const roots: SessionItem[] = [];
-    for (const s of all) {
-      const parentId = getParentSessionId(s.meta);
-      if (parentId && idSet.has(parentId)) {
-        if (!cMap[parentId]) cMap[parentId] = [];
-        cMap[parentId].push(s);
-      } else roots.push(s);
-    }
-    return { rootSelectedSessions: roots, selectedChildrenMap: cMap };
+    return buildSessionTree(all);
   }, [sessionsByAgent, selectedAgentId]);
 
   useEffect(() => {
@@ -453,10 +490,9 @@ function ChatContent() {
             <button onClick={handleNewChat} className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold text-primary hover:bg-primary/10 transition-colors"><Plus size={14} /> {t('chat.newChat')}</button>
           </div>
           <div className="flex-1 overflow-y-auto py-2">
-            {rootSelectedSessions.map((session, idx) => {
-              const children = selectedChildrenMap[session.session_id] || [];
-              return children.length > 0 ? <SessionListGroup key={session.session_id} session={session} children={children} currentSessionId={currentSessionId} switchSession={switchSession} deleteSession={deleteSession} index={idx} />
-                : <SessionListItem key={session.session_id} session={session} isActive={currentSessionId === session.session_id} onClick={() => switchSession(session.session_id)} onDelete={() => deleteSession(session.session_id)} index={idx} />;
+            {selectedSessionTree.map((node, idx) => {
+              return node.children.length > 0 ? <SessionListGroup key={node.session.session_id} node={node} currentSessionId={currentSessionId} switchSession={switchSession} deleteSession={deleteSession} index={idx} />
+                : <SessionListItem key={node.session.session_id} session={node.session} isActive={currentSessionId === node.session.session_id} onClick={() => switchSession(node.session.session_id)} onDelete={() => deleteSession(node.session.session_id)} index={idx} />;
             })}
           </div>
         </ResizablePanel>
