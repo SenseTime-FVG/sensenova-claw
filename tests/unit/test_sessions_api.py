@@ -174,6 +174,10 @@ def test_list_sessions_returns_pagination_payload(client, app):
     _run(app.state.services.repo.create_session("sess_page_1", meta={"title": "First"}))
     _run(app.state.services.repo.create_session("sess_page_2", meta={"title": "Second"}))
     _run(app.state.services.repo.create_session("sess_page_3", meta={"title": "Third"}))
+    conn = app.state.services.repo._conn()
+    conn.execute("UPDATE sessions SET status = 'closed' WHERE session_id = 'sess_page_3'")
+    conn.commit()
+    conn.close()
 
     resp = client.get("/api/sessions?page=2&page_size=2")
 
@@ -183,6 +187,7 @@ def test_list_sessions_returns_pagination_payload(client, app):
     assert payload["page_size"] == 2
     assert payload["total"] == 3
     assert payload["total_pages"] == 2
+    assert payload["active_total"] == 2
     assert [item["session_id"] for item in payload["sessions"]] == ["sess_page_1"]
 
 

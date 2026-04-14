@@ -155,6 +155,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 现有前端 e2e 多处把 `/api/sessions` 写成 `url.endsWith('/api/sessions')`，一旦接口改成带 query 的分页请求就会全部失配；同类回归应统一改成基于 `URL.pathname` 匹配。
 - 前端 dev server 在无后端场景下会持续探测 `/api/custom-pages`、`/api/config/llm-status`、`/api/todolist`、`/ws` 并打印 `ECONNREFUSED`；只要核心断言通过，这类代理噪音不能误判成分页失败。
 
+### 2026-04-14 Session active 聚合卡片补充
+
+成功经验：
+- 分页页面上的汇总卡片若要表达“当前筛选结果”的统计，必须由后端直接返回聚合值（如 `active_total`）；前端只拿到当前页数据时，自己统计必然会退化成“当前页统计”。
+- 给聚合卡片补 `data-testid` 比用裸文本数字断言稳定得多；像 `1` 这类短文本在页面里极易和页码、日期、ID 片段冲突。
+
+失败/风险经验：
+- 如果只改文案不改数据源，会出现“写着 current filter，实际算的是 current page”的假一致；这类统计类 UI 必须同时核对文案和数据来源。
+
 ### 2026-04-09 MCP 一期接入补充
 
 成功经验：

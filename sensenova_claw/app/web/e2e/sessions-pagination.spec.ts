@@ -71,6 +71,7 @@ test('sessions 页面应按页请求并支持上一页下一页切换', async ({
           page: Number(currentPage || '1'),
           page_size: Number(currentPageSize || '50'),
           total: 3,
+          active_total: 1,
           total_pages: 2,
         }), {
           status: 200,
@@ -100,6 +101,8 @@ test('sessions 页面应按页请求并支持上一页下一页切换', async ({
 
   await expect(page.getByText('Page One Session A')).toBeVisible({ timeout: 10000 });
   await expect(page.getByTestId('sessions-pagination-summary')).toContainText('第 1 / 2 页');
+  await expect(page.getByTestId('sessions-active-total')).toHaveText('1');
+  await expect(page.getByText('Active on current filter')).toBeVisible();
 
   await page.getByTestId('sessions-pagination-next').click();
   await expect.poll(async () => {

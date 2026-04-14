@@ -70,6 +70,7 @@ export default function SessionsPage() {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(PAGE_SIZE);
   const [total, setTotal] = useState(0);
+  const [activeTotal, setActiveTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
@@ -96,6 +97,7 @@ export default function SessionsPage() {
       .then(data => {
         setSessions(data.sessions || []);
         setTotal(data.total || 0);
+        setActiveTotal(data.active_total || 0);
         setTotalPages(data.total_pages || 0);
         if ((data.total_pages || 0) > 0 && targetPage > data.total_pages) {
           setPage(data.total_pages);
@@ -104,6 +106,7 @@ export default function SessionsPage() {
       .catch(() => {
         setSessions([]);
         setTotal(0);
+        setActiveTotal(0);
         setTotalPages(0);
       })
       .finally(() => setLoading(false));
@@ -318,8 +321,8 @@ export default function SessionsPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-4xl font-black text-green-600 dark:text-green-500">{sessions.filter(s => s.status === 'active').length}</div>
-                  <p className="text-sm font-medium text-muted-foreground mt-2">Active on current page</p>
+                  <div data-testid="sessions-active-total" className="text-4xl font-black text-green-600 dark:text-green-500">{activeTotal}</div>
+                  <p className="text-sm font-medium text-muted-foreground mt-2">Active on current filter</p>
                 </CardContent>
               </Card>
             </div>

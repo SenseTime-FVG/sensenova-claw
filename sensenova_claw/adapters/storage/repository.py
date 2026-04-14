@@ -284,6 +284,7 @@ class Repository:
         sessions = self._sync_get_visible_sessions(include_hidden)
         sessions = self._filter_sessions(sessions, search_term=search_term, status=status)
         total = len(sessions)
+        active_total = sum(1 for session in sessions if str(session.get("status", "")).strip().lower() == "active")
         total_pages = (total + safe_page_size - 1) // safe_page_size if total else 0
         start = (safe_page - 1) * safe_page_size
         end = start + safe_page_size
@@ -291,6 +292,7 @@ class Repository:
         return {
             "sessions": page_sessions,
             "total": total,
+            "active_total": active_total,
             "page": safe_page,
             "page_size": safe_page_size,
             "total_pages": total_pages,
