@@ -90,6 +90,8 @@ async def list_sessions(
     page_size: int = Query(default=50, ge=1, le=200),
     search_term: str = Query(default=""),
     status: str = Query(default="all"),
+    include_ancestors: bool = Query(default=False),
+    all: bool = Query(default=False),
 ):
     """获取会话列表。"""
     payload = await _get_services(request).gateway.list_sessions_page(
@@ -98,6 +100,8 @@ async def list_sessions(
         page_size=page_size,
         search_term=search_term,
         status=status,
+        include_ancestors=include_ancestors,
+        include_all=all,
     )
     return JSONResponse(content=payload)
 

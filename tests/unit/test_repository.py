@@ -84,6 +84,23 @@ class TestRepository:
         assert status_map["page_s1"] == "closed"
         assert status_map["page_s3"] == "closed"
 
+    async def test_list_sessions_page_can_include_visible_ancestors(self, test_repo):
+        await test_repo.create_session("ancestor_parent", meta={"title": "Parent"})
+        await test_repo.create_session(
+            "ancestor_child",
+            meta={"title": "Child", "parent_session_id": "ancestor_parent"},
+        )
+        await test_repo.create_session("ancestor_sibling", meta={"title": "Sibling"})
+
+        await test_repo.update_session_activity("ancestor_child")
+        await test_repo.update_session_activity("ancestor_sibling")
+
+        page = await test_repo.list_sessions_page(page=1, page_size=2, include_ancestors=True)
+        ids = [item["session_id"] for item in page["sessions"]]
+
+        assert "ancestor_child" in ids
+        assert "ancestor_parent" in ids
+
     async def test_list_sessions_derives_status_from_latest_turn_even_if_session_row_is_stale(self, test_repo):
         await test_repo.create_session("status_s1", meta={"title": "Status"})
         await test_repo.create_turn("status_turn_1", "status_s1", "hello")

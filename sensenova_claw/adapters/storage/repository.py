@@ -259,6 +259,8 @@ class Repository:
         include_hidden: bool = False,
         search_term: str = "",
         status: str = "all",
+        include_ancestors: bool = False,
+        include_all: bool = False,
     ) -> dict[str, Any]:
         return await asyncio.to_thread(
             self._sync_list_sessions_page,
@@ -267,6 +269,8 @@ class Repository:
             include_hidden,
             search_term,
             status,
+            include_ancestors,
+            include_all,
         )
 
     def _sync_list_sessions(self, limit: int, include_hidden: bool) -> list[dict[str, Any]]:
@@ -280,6 +284,8 @@ class Repository:
         include_hidden: bool,
         search_term: str,
         status: str,
+        include_ancestors: bool,
+        include_all: bool,
     ) -> dict[str, Any]:
         safe_page = max(1, int(page))
         safe_page_size = max(1, int(page_size))
@@ -287,10 +293,21 @@ class Repository:
         sessions = self._filter_sessions(sessions, search_term=search_term, status=status)
         total = len(sessions)
         active_total = sum(1 for session in sessions if str(session.get("status", "")).strip().lower() == "active")
+        if include_all:
+            return {
+                "sessions": sessions,
+                "total": total,
+                "active_total": active_total,
+                "page": 1,
+                "page_size": total,
+                "total_pages": 1 if total else 0,
+            }
         total_pages = (total + safe_page_size - 1) // safe_page_size if total else 0
         start = (safe_page - 1) * safe_page_size
         end = start + safe_page_size
         page_sessions = sessions[start:end]
+        if include_ancestors:
+            page_sessions = self._include_visible_ancestors_for_page(sessions, page_sessions)
         return {
             "sessions": page_sessions,
             "total": total,
@@ -374,6 +391,32 @@ class Repository:
                 current = parent
 
         return [session_map[session_id] for session_id in selected_ids]
+
+    def _include_visible_ancestors_for_page(
+        self,
+        all_sessions: list[dict[str, Any]],
+        page_sessions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not page_sessions:
+            return []
+        session_map = {str(session["session_id"]): session for session in all_sessions}
+        ordered_ids = [str(session["session_id"]) for session in page_sessions]
+        seen_ids = set(ordered_ids)
+
+        for session_id in list(ordered_ids):
+            current = session_map.get(session_id)
+            while current is not None:
+                parent_session_id = self._parse_parent_session_id(current.get("meta"))
+                if not parent_session_id or parent_session_id in seen_ids:
+                    break
+                parent = session_map.get(parent_session_id)
+                if parent is None:
+                    break
+                seen_ids.add(parent_session_id)
+                ordered_ids.append(parent_session_id)
+                current = parent
+
+        return [session_map[session_id] for session_id in ordered_ids]
 
     def _filter_sessions(
         self,

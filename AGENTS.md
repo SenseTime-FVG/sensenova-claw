@@ -155,6 +155,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 - 现有前端 e2e 多处把 `/api/sessions` 写成 `url.endsWith('/api/sessions')`，一旦接口改成带 query 的分页请求就会全部失配；同类回归应统一改成基于 `URL.pathname` 匹配。
 - 前端 dev server 在无后端场景下会持续探测 `/api/custom-pages`、`/api/config/llm-status`、`/api/todolist`、`/ws` 并打印 `ECONNREFUSED`；只要核心断言通过，这类代理噪音不能误判成分页失败。
 
+### 2026-04-14 工作台会话树补充
+
+成功经验：
+- 工作台左侧会话树不能直接复用 session 管理页的分页接口语义；树结构依赖完整祖先链，最稳的是工作台单独走 `/api/sessions?all=1&include_ancestors=1`，而管理页继续保留分页。
+- `buildSessionTree()` 修好父子关系后，原来“二级会话直接可见”的 e2e 会自然失效，因为真实 UI 会把子会话收进父节点折叠区；这类用例应改成先展开再断言，不要把旧 bug 当成预期。
+- 前端 WebSocket mock 若只拦 `localhost:8000/ws` 会漏掉默认相对路径 `/ws`，导致 `wsConnected` 一直起不来，进而连 session 列表请求都不会发；这类测试应按 `/ws` 路径匹配。
+
+失败/风险经验：
+- 只看“请求有没有发出”不够，工作台树场景还要区分“数据没回来”和“数据回来了但默认折叠没展开”；否则很容易把展示层问题误判成接口问题。
+
 ### 2026-04-14 Session active 聚合卡片补充
 
 成功经验：

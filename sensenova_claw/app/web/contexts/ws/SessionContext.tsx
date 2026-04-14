@@ -79,7 +79,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const loadSessionList = useCallback(async () => {
     setLoadingSessions(true);
     try {
-      const res = await authFetch(`${API_BASE}/api/sessions`);
+      const params = new URLSearchParams({
+        all: '1',
+        include_ancestors: '1',
+      });
+      const res = await authFetch(`${API_BASE}/api/sessions?${params.toString()}`);
       const d = await res.json();
       setSessions(d.sessions || []);
     } catch {

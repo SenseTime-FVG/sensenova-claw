@@ -193,6 +193,32 @@ def test_list_sessions_returns_pagination_payload(client, app):
     assert payload["sessions"][0]["status"] == "closed"
 
 
+def test_list_sessions_all_returns_full_visible_set(client, app):
+    _run(app.state.services.repo.create_session("sess_all_parent", meta={"title": "Parent"}))
+    _run(app.state.services.repo.create_session(
+        "sess_all_child",
+        meta={"title": "Child", "parent_session_id": "sess_all_parent"},
+    ))
+    _run(app.state.services.repo.create_session(
+        "sess_all_hidden",
+        meta={"title": "Hidden", "visibility": "hidden"},
+    ))
+
+    resp = client.get("/api/sessions?all=1&include_ancestors=1&page_size=1")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["page"] == 1
+    assert payload["page_size"] == 2
+    assert payload["total"] == 2
+    assert payload["active_total"] == 2
+    assert payload["total_pages"] == 1
+    assert {item["session_id"] for item in payload["sessions"]} == {
+        "sess_all_parent",
+        "sess_all_child",
+    }
+
+
 def test_get_session_detail_returns_session_payload(client, app):
     _run(app.state.services.repo.create_session(
         "sess_detail_1",
