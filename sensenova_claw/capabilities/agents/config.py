@@ -10,6 +10,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def _parse_optional_name_list(data: dict[str, Any], key: str, fallback_key: str | None = None) -> list[str] | None:
+    """解析三态白名单：None=全部禁用，[]=全部启用，[...]=显式白名单。"""
+    if key in data:
+        raw = data.get(key)
+    elif fallback_key is not None and fallback_key in data:
+        raw = data.get(fallback_key)
+    else:
+        raw = []
+    if raw is None:
+        return None
+    return list(raw)
+
+
 def _parse_delegate_list(data: dict[str, Any]) -> list[str] | None:
     """解析委托白名单：None = 禁止发消息，[] = 全部允许，[...] = 仅限指定。"""
     raw = data.get("can_send_message_to", data.get("can_delegate_to", []))
@@ -34,13 +47,11 @@ class AgentConfig:
 
     # 行为配置
     system_prompt: str = ""                           # 系统提示词
-    tools: list[str] = field(default_factory=list)    # 允许使用的工具列表（空 = 全部）
-    skills: list[str] | None = field(default_factory=list)   # 允许使用的 Skills 列表（空 = 全部，None = 禁止）
+    tools: list[str] | None = field(default_factory=list)    # None = 全部禁用，空 = 全部启用
+    skills: list[str] | None = field(default_factory=list)   # None = 全部禁用，空 = 全部启用
+    mcp_servers: list[str] | None = field(default_factory=list)  # None = 全部禁用，空 = 全部启用
+    mcp_tools: list[str] | None = field(default_factory=list)    # None = 全部禁用，空 = 全部启用
     workdir: str = ""                                 # 工作目录（空=运行时解析为 workspace/workdir/{id}）
-
-    # Prompt 配置
-    exclude_prompt_sections: list[str] = field(default_factory=list)  # 排除的 prompt section（空 = 全部加载）
-    # 可选值: workspace, datetime, runtime, extra, tooling, delegation, skills, context_files, memory
 
     # 委托配置
     can_delegate_to: list[str] | None = field(default_factory=list)   # 可委托的 Agent ID 列表（空 = 全部，None = 禁止）
@@ -63,10 +74,11 @@ class AgentConfig:
             "max_tokens": self.max_tokens,
             "extra_body": dict(self.extra_body),
             "system_prompt": self.system_prompt,
-            "tools": list(self.tools),
+            "tools": list(self.tools) if self.tools is not None else None,
             "skills": list(self.skills) if self.skills is not None else None,
+            "mcp_servers": list(self.mcp_servers) if self.mcp_servers is not None else None,
+            "mcp_tools": list(self.mcp_tools) if self.mcp_tools is not None else None,
             "workdir": self.workdir,
-            "exclude_prompt_sections": list(self.exclude_prompt_sections),
             "can_delegate_to": list(self.can_delegate_to) if self.can_delegate_to is not None else None,
             "max_delegation_depth": self.max_delegation_depth,
             "max_pingpong_turns": self.max_pingpong_turns,
@@ -87,10 +99,11 @@ class AgentConfig:
             max_tokens=data.get("max_tokens"),
             extra_body=dict(data.get("extra_body", {})),
             system_prompt=data.get("system_prompt", ""),
-            tools=list(data.get("tools", [])),
-            skills=None if data.get("skills") is None else list(data.get("skills", [])),
+            tools=_parse_optional_name_list(data, "tools"),
+            skills=_parse_optional_name_list(data, "skills"),
+            mcp_servers=_parse_optional_name_list(data, "mcp_servers", "mcp_servers_allow"),
+            mcp_tools=_parse_optional_name_list(data, "mcp_tools", "mcp_tools_allow"),
             workdir=data.get("workdir", ""),
-            exclude_prompt_sections=list(data.get("exclude_prompt_sections", [])),
             can_delegate_to=_parse_delegate_list(data),
             max_delegation_depth=data.get(
                 "max_send_depth",
