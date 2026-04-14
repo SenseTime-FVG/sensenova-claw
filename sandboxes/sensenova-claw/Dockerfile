@@ -10,6 +10,7 @@ WORKDIR /build
 COPY sensenova_claw/app/web/package*.json ./
 RUN npm ci
 COPY sensenova_claw/app/web/ ./
+ENV NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 RUN npm run build
 # 产物: .next/standalone/ (含 server.js + 最小 node_modules)
 #        .next/static/    (静态资源)
