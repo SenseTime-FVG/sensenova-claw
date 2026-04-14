@@ -29,7 +29,7 @@ function SlotCard({ slot, deckDir }: { slot: AssetSlot; deckDir: string | null }
   const StatusIcon = info.icon;
 
   const localImageUrl = slot.selected_image?.local_path && deckDir
-    ? `${API_BASE}/api/files/workdir/${deckDir}/${slot.selected_image.local_path.replace(/^.*?images\//, 'images/')}`
+    ? `${API_BASE}/api/files/workdir/${deckDir.split('/').map(encodeURIComponent).join('/')}/${slot.selected_image.local_path.replace(/^.*?images\//, 'images/').split('/').map(encodeURIComponent).join('/')}`
     : null;
 
   return (

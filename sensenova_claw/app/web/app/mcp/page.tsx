@@ -109,10 +109,10 @@ function parseImportJson(raw: string): Partial<McpApiServer>[] {
     const transport = String(server.transport || (server.command ? 'stdio' : 'sse')) as TransportType;
     const args = Array.isArray(server.args) ? server.args.map(String) : [];
     const env = server.env && typeof server.env === 'object' && !Array.isArray(server.env)
-      ? Object.entries(server.env as Record<string, unknown>).map(([key, item]) => ({ key, value: String(item ?? '') }))
+      ? Object.entries(server.env as Record<string, unknown>).map(([key, item]) => ({ id: crypto.randomUUID(), key, value: String(item ?? '') }))
       : [];
     const headers = server.headers && typeof server.headers === 'object' && !Array.isArray(server.headers)
-      ? Object.entries(server.headers as Record<string, unknown>).map(([key, item]) => ({ key, value: String(item ?? '') }))
+      ? Object.entries(server.headers as Record<string, unknown>).map(([key, item]) => ({ id: crypto.randomUUID(), key, value: String(item ?? '') }))
       : [];
     return {
       name,
