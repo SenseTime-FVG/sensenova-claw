@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect } from 'react';
+import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect, useMemo } from 'react';
 import { Send, Square, Paperclip, File, FolderOpen } from 'lucide-react';
 import { useDrop } from 'react-dnd';
 import { TargetSelector } from './TargetSelector';
@@ -35,6 +35,20 @@ export interface ChatInputHandle {
   setInput: (text: string) => void;
 }
 
+interface SessionDraftState {
+  text: string;
+  recommendation: RecommendationSendMeta | null;
+}
+
+const EMPTY_DRAFT: SessionDraftState = {
+  text: '',
+  recommendation: null,
+};
+
+function getDraftKey(sessionId: string | null): string {
+  return sessionId ?? '__new__';
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   defaultAgentId,
   selectedAgent,
@@ -51,8 +65,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onReconnect,
 }, ref) {
   const { t } = useI18n();
-  const [inputValue, setInputValue] = useState('');
-  const [draftRecommendation, setDraftRecommendation] = useState<RecommendationSendMeta | null>(null);
+  const [sessionDrafts, setSessionDrafts] = useState<Record<string, SessionDraftState>>({});
   const [showUploadMenu, setShowUploadMenu] = useState(false);
   const {
     currentSessionId,
@@ -67,6 +80,40 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
+  const currentDraftKey = useMemo(() => getDraftKey(currentSessionId), [currentSessionId]);
+  const currentDraft = sessionDrafts[currentDraftKey] ?? EMPTY_DRAFT;
+  const inputValue = currentDraft.text;
+  const draftRecommendation = currentDraft.recommendation;
+
+  const setCurrentDraft = useCallback((updater: (prev: SessionDraftState) => SessionDraftState) => {
+    setSessionDrafts(prev => {
+      const current = prev[currentDraftKey] ?? EMPTY_DRAFT;
+      const nextDraft = updater(current);
+      if (!nextDraft.text && !nextDraft.recommendation) {
+        if (!(currentDraftKey in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[currentDraftKey];
+        return next;
+      }
+      return {
+        ...prev,
+        [currentDraftKey]: nextDraft,
+      };
+    });
+  }, [currentDraftKey]);
+
+  const setCurrentInputValue = useCallback((text: string) => {
+    setCurrentDraft(prev => ({
+      text,
+      recommendation: text.trim() ? prev.recommendation : null,
+    }));
+  }, [setCurrentDraft]);
+
+  const clearCurrentDraft = useCallback(() => {
+    setCurrentDraft(() => EMPTY_DRAFT);
+  }, [setCurrentDraft]);
 
   // 当前轮次结束或 stop 按钮隐藏后，允许再次发送
   useEffect(() => {
@@ -86,8 +133,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   useEffect(() => {
     if (!pendingPrefill) return;
-    setInputValue(pendingPrefill.text);
-    setDraftRecommendation(pendingPrefill.recommendation || null);
+    setCurrentDraft(() => ({
+      text: pendingPrefill.text,
+      recommendation: pendingPrefill.recommendation || null,
+    }));
     clearPendingPrefill();
     setTimeout(() => {
       if (textareaRef.current) {
@@ -96,13 +145,22 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         textareaRef.current.focus();
       }
     });
-  }, [pendingPrefill, clearPendingPrefill]);
+  }, [pendingPrefill, clearPendingPrefill, setCurrentDraft]);
 
   useEffect(() => {
     if (draftRecommendation && currentSessionId && draftRecommendation.sourceSessionId !== currentSessionId) {
-      setDraftRecommendation(null);
+      setCurrentDraft(prev => ({
+        ...prev,
+        recommendation: null,
+      }));
     }
-  }, [currentSessionId, draftRecommendation]);
+  }, [currentSessionId, draftRecommendation, setCurrentDraft]);
+
+  useEffect(() => {
+    if (!textareaRef.current) return;
+    textareaRef.current.style.height = 'auto';
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 96)}px`;
+  }, [currentDraftKey, inputValue]);
 
   const resizeTextarea = useCallback(() => {
     setTimeout(() => {
@@ -115,12 +173,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, []);
 
   const insertAtRef = useCallback((path: string) => {
-    setInputValue(prev => {
-      const prefix = prev === '' || prev.endsWith(' ') || prev.endsWith('\n') ? prev : prev + ' ';
-      return prefix + `@${path} `;
+    setCurrentDraft(prev => {
+      const baseText = prev.text;
+      const prefix = baseText === '' || baseText.endsWith(' ') || baseText.endsWith('\n') ? baseText : baseText + ' ';
+      return {
+        text: prefix + `@${path} `,
+        recommendation: null,
+      };
     });
     resizeTextarea();
-  }, [resizeTextarea]);
+  }, [resizeTextarea, setCurrentDraft]);
 
   const [{ isOver }, dropRef] = useDrop(() => ({
     accept: 'FILE',
@@ -139,13 +201,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   useImperativeHandle(ref, () => ({
     setInput: (text: string) => {
-      setInputValue(text);
+      setCurrentDraft(() => ({
+        text,
+        recommendation: null,
+      }));
       resizeTextarea();
     },
-  }), [resizeTextarea]);
+  }), [resizeTextarea, setCurrentDraft]);
 
   const { showMenu, skills, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmitHook } = useSlashCommand(
-    inputValue, setInputValue, handleSkillInvoke,
+    inputValue, setCurrentInputValue, handleSkillInvoke,
   );
 
   const parseAtRefs = useCallback((content: string): ContextFileRef[] => {
@@ -167,15 +232,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     if (!content || !wsConnected || disabled || isSubmitting || showStopButton) return;
 
     if (handleSlashSubmitHook(content)) {
-      setDraftRecommendation(null);
-      setInputValue('');
+      clearCurrentDraft();
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
 
     if (onSlashSubmit(content)) {
-      setDraftRecommendation(null);
-      setInputValue('');
+      clearCurrentDraft();
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
@@ -183,8 +246,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     const isQuestionReply = Boolean(currentSessionQuestionInteraction);
     if (isQuestionReply) {
       sendCurrentSessionQuestionAnswer(content, false);
-      setDraftRecommendation(null);
-      setInputValue('');
+      clearCurrentDraft();
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
@@ -194,8 +256,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }
     const contextFiles = parseAtRefs(content);
     onSend(content, contextFiles.length > 0 ? contextFiles : undefined, draftRecommendation);
-    setDraftRecommendation(null);
-    setInputValue('');
+    clearCurrentDraft();
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   }, [
     inputValue,
@@ -210,6 +271,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     draftRecommendation,
     currentSessionQuestionInteraction,
     sendCurrentSessionQuestionAnswer,
+    clearCurrentDraft,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -218,10 +280,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputValue(e.target.value);
-    if (!e.target.value.trim()) {
-      setDraftRecommendation(null);
-    }
+    setCurrentInputValue(e.target.value);
     const ta = e.target;
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 96) + 'px';

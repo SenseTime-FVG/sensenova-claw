@@ -1991,3 +1991,13 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - `tests/unit/test_dingtalk_channel.py` 里部分历史断言已和 `Gateway._session_bindings: dict[str, set[str]]` 的真实结构漂移；修 channel 回归时如果不顺手校正这些夹具，容易把旧测试噪音误判成新 bug。
+
+### 2026-04-14 前端会话草稿隔离补充
+
+成功经验：
+- 聊天输入框“切会话后还残留上一个会话文本”这类问题，根因往往不是页面路由，而是共享 `ChatInput` 内部把草稿存在单一 `useState`；把草稿改成 `sessionId -> draft` 映射，是最小且能同时覆盖 `/chat`、`/` 工作台、`/ppt` 的修复。
+- 除了文本本身，和输入框绑定的推荐预填元数据也要一起按会话存；否则文本虽然隔离了，推荐来源 session 仍可能串到别的会话。
+- 这类前端回归最适合补共享层 Playwright 用例：分别覆盖直连 `ChatInput` 的 `/chat`，以及经 `ChatPanel` 复用输入框的 `/`、`/ppt`，能直接验证“切走为空、切回恢复原草稿”。
+
+失败/风险经验：
+- `/chat` 页面同时有 agent 列表和 session 列表，若 Playwright 直接 `getByText('对话二')`，很容易命中多个元素；这类页面要先收窄到具体面板容器，否则会把选择器歧义误判成功能失败。
