@@ -95,6 +95,7 @@ plan-agent 会将计划直接写入指定路径。收到完成确认后，使用
 **已知背景**：{context_from_briefing}
 **建议来源**：{sources 格式化}
 **深度**：{depth}
+**时效特征**：{time_sensitivity}
 
 {如果该维度依赖前置维度（depends_on 不为空）}
 **前置维度研究结论**：
@@ -117,6 +118,7 @@ research-agent 会将子报告直接写入指定路径，返回写入确认。
 **该维度需要回答的问题**：
 {key_questions}
 **要求的研究深度**：{depth}
+**时效特征**：{time_sensitivity}
 
 **子报告文件路径**：{report_dir}/sub_reports/{dimension_id}.md
 请使用 read_file 读取后审查。
@@ -137,6 +139,7 @@ review-agent 返回 VERDICT:
 已知背景：{context_from_briefing}
 建议来源：{sources}
 深度：{depth}
+时效特征：{time_sensitivity}
 
 **原子报告路径**：{report_dir}/sub_reports/{dimension_id}.md
 请使用 read_file 读取。
