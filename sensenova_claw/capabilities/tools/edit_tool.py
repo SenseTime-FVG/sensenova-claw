@@ -8,7 +8,7 @@ from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
 
 
 def _resolve_edit_path(raw_path: str, agent_workdir: str | None) -> Path:
-    """解析 edit 工具路径，保持与现有 workdir 语义一致。"""
+    """解析 edit_file 工具路径，保持与现有 workdir 语义一致。"""
     path = Path(raw_path).expanduser()
     if path.is_absolute():
         return path.resolve()
@@ -56,7 +56,7 @@ def _first_changed_line(old_content: str, new_content: str) -> int | None:
 
 
 class EditTool(Tool):
-    name = "edit"
+    name = "edit_file"
     description = "对文件执行精确文本替换，只允许 oldText 命中一次"
     risk_level = ToolRiskLevel.MEDIUM
     parameters = {

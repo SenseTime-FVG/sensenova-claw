@@ -1,4 +1,4 @@
-"""edit 工具集成测试"""
+"""edit_file 工具集成测试"""
 
 import pytest
 

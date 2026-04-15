@@ -1465,6 +1465,16 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 当前实现虽然兼容了 `old_text/new_text` 与 `old_string/new_string`，但对外主 schema 仍以 `oldText/newText` 为中心；若后续要继续补更多上游兼容别名，需要先核对各 provider 的 tool schema 约束，避免把参数面扩得过宽。
 
+### 2026-04-15 edit_file 工具改名补充
+
+成功经验：
+- 这类“只改对外工具名、不改实现语义”的需求，最稳的做法是保留模块和类结构，仅替换 `Tool.name`、registry 分组开关和直接断言工具名的测试，影响面最小。
+- `/api/tools` 这类 HTTP 接口若要反映当前应用配置，不能偷用全局 `config`；应基于 `request.app.state.config` 读取启用状态，否则单测和多实例语义都会漂。
+- `tests/unit/test_tools_api.py` 这类接口测试夹具应显式挂载 `ConfigManager`，否则启用/禁用类接口即使业务代码正确，也会因为测试装配缺件而假失败。
+
+失败/风险经验：
+- 仓库里与 `edit` 相关的字符串很多来自 UI 的 “edit mode / edit button” 文案，不是工具名；做改名时必须先区分“工具标识”与“普通英文词”，否则很容易误改前端无关逻辑。
+
 ### 2026-03-24 apply_patch 工具移植补充
 
 成功经验：

@@ -43,7 +43,7 @@ from sensenova_claw.platform.config.config import config
 _TOOL_CONFIG_KEY_MAP: dict[str, str] = {
     "read_file": "tools.file_operations.enabled",
     "write_file": "tools.file_operations.enabled",
-    "edit": "tools.file_operations.enabled",
+    "edit_file": "tools.file_operations.enabled",
     "apply_patch": "tools.file_operations.enabled",
 }
 
