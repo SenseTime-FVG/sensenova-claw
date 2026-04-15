@@ -2,7 +2,7 @@
 
 import pytest
 
-from sensenova_claw.capabilities.tools.edit_tool import EditTool
+from sensenova_claw.capabilities.tools.builtin import EditTool
 
 pytestmark = pytest.mark.asyncio
 
@@ -76,7 +76,7 @@ class TestEditTool:
             raise RuntimeError("diff failed")
 
         monkeypatch.setattr(
-            "sensenova_claw.capabilities.tools.edit_tool._generate_unified_diff",
+            "sensenova_claw.capabilities.tools.builtin._generate_unified_diff",
             boom,
         )
 

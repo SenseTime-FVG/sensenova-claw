@@ -1458,7 +1458,7 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-24 edit 工具移植补充
 
 成功经验：
-- 文件精确编辑工具最稳的落点是独立模块，而不是继续扩张 `builtin.py`；这次新增 `sensenova_claw/capabilities/tools/edit_tool.py` 后，路径解析、替换校验、diff 生成和恢复逻辑都能独立测试。
+- 文件精确编辑工具的核心契约必须先被集成测试锁住，再决定实现落点；当前仓库已收敛到 `sensenova_claw/capabilities/tools/builtin.py`，路径解析、替换校验、diff 生成和恢复逻辑都应继续由行为测试覆盖。
 - `edit` 的核心契约必须锁死为“`oldText` 恰好命中一次”；把“未命中 / 多次命中 / `_agent_workdir` 相对路径 / post-write recovery”都放进集成测试后，行为边界会清晰很多。
 - `openclaw` 的 post-write recovery 很值得保留：当文件已经写成功但 diff/格式化阶段报错时，重新读盘并按最终内容恢复成功结果，可以避免误向用户报告假失败。
 
@@ -1475,10 +1475,28 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - 仓库里与 `edit` 相关的字符串很多来自 UI 的 “edit mode / edit button” 文案，不是工具名；做改名时必须先区分“工具标识”与“普通英文词”，否则很容易误改前端无关逻辑。
 
+### 2026-04-15 builtin.py 工具声明收敛补充
+
+成功经验：
+- 对“把工具声明迁到 `builtin.py`，但不想搬动整套实现细节”的需求，最小做法是在 `builtin.py` 声明薄包装子类，再让 registry 和测试统一从 `builtin.py` 导入；这样既满足声明位置收敛，也能避免大规模迁移辅助函数带来的回归。
+- 这类结构调整最值得先锁的回归测试是 `__module__` 断言；它能明确区分“只是重导出别名”与“声明真的落在目标模块”。
+
+失败/风险经验：
+- 若直接一次性把大段实现和辅助函数跨文件搬迁到 `builtin.py`，`apply_patch` 这种长文件很容易因为上下文漂移导致补丁失败；拆成“先迁声明，再视需要迁实现”更稳。
+
+### 2026-04-15 builtin.py 完整实现收敛补充
+
+成功经验：
+- 如果用户明确要求“像 `BashCommandTool` 一样完整写在 `builtin.py`”，判断标准不能只看类的 `__module__`，还要额外断言 `execute.__module__`；否则薄包装子类会产生假通过。
+- 把完整实现搬进 `builtin.py` 后，旧模块最稳的处理方式是保留兼容导出层，只做 `from builtin import ...` 转发；这样现有 import 路径、文档引用和 monkeypatch 点位都可以渐进迁移。
+
+失败/风险经验：
+- `apply_patch` 的 update hunk 解析里，首个 chunk 内非法行和“后续 chunk 缺 @@”是两种不同失败语义；迁实现时如果把“遇到未知行就立刻报 unexpected”写死，会把后者误伤，导致错误文案回归。
+
 ### 2026-03-24 apply_patch 工具移植补充
 
 成功经验：
-- `apply_patch` 这类复杂文件变更能力，适合像 `edit` 一样拆成独立模块；把解析、路径解析、更新替换和 summary 输出都放在 `sensenova_claw/capabilities/tools/apply_patch_tool.py` 后，测试与后续演进都更稳。
+- `apply_patch` 这类复杂文件变更能力，关键不在于是否拆独立模块，而在于解析契约和失败语义要被测试锁住；当前仓库已收敛到 `sensenova_claw/capabilities/tools/builtin.py`，解析、路径解析、更新替换和 summary 输出都应继续由聚焦测试覆盖。
 - 从 `openclaw` 移植时，优先保留补丁格式契约（`*** Begin/End Patch`、`Add/Delete/Update File`、`Move to`、`@@` chunk）而不是生搬硬套它的 sandbox 安全层，能更好地贴合当前仓库的 `_agent_workdir` 工具语义。
 - 对这类工具最有效的测试组合是“一个多 hunk 端到端用例 + 一个 `_agent_workdir` 相对路径用例 + 一个非法边界用例 + 一个 `_path_policy` 拦截用例”，既覆盖 happy path，也锁住关键失败态。
 

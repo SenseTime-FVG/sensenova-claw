@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from sensenova_claw.capabilities.tools.ask_user_tool import AskUserTool
-from sensenova_claw.capabilities.tools.apply_patch_tool import ApplyPatchTool
 from sensenova_claw.capabilities.tools.base import Tool
 from sensenova_claw.capabilities.tools.builtin import (
+    ApplyPatchTool,
     BaiduSearchTool,
     BashCommandTool,
     BraveSearchTool,
+    EditTool,
     FetchUrlTool,
     ImageSearchTool,
     ManageTodolistTool,
@@ -15,7 +16,6 @@ from sensenova_claw.capabilities.tools.builtin import (
     TavilySearchTool,
     WriteFileTool,
 )
-from sensenova_claw.capabilities.tools.edit_tool import EditTool
 from sensenova_claw.capabilities.tools.email import (
     DownloadAttachmentTool,
     ListEmailsTool,
