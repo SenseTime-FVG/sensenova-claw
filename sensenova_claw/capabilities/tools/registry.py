@@ -7,7 +7,7 @@ from sensenova_claw.capabilities.tools.builtin import (
     BaiduSearchTool,
     BashCommandTool,
     BraveSearchTool,
-    EditTool,
+    EditFileTool,
     FetchUrlTool,
     ImageSearchTool,
     ManageTodolistTool,
@@ -81,7 +81,7 @@ class ToolRegistry:
 
             ManageTodolistTool(),
             ApplyPatchTool(),
-            EditTool(),
+            EditFileTool(),
             CreateAgentTool(),
             AskUserTool(),
         ]:

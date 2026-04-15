@@ -1065,7 +1065,7 @@ class FetchUrlTool(Tool):
 
 class ReadFileTool(Tool):
     name = "read_file"
-    description = "读取文本文件"
+    description = "从本地文件系统读取文件"
     parameters = {
         "type": "object",
         "properties": {
@@ -1097,9 +1097,139 @@ class ReadFileTool(Tool):
         return {"file_path": str(file_path), "content": "\n".join(selected)}
 
 
+
+
+class EditFileTool(Tool):
+    name = "edit_file"
+    description = f"""对文件执行精确的字符串替换，只允许 oldText 命中一次。
+
+用法:
+- 在进行编辑操作之前，您必须在对话中至少使用一次您的 `{ReadFileTool.name}` 工具。如果在未读取文件的情况下尝试进行编辑，该工具将会报错。
+- 在编辑来自`{ReadFileTool.name}`工具输出的文本时，请务必保留其精确的缩进（制表符/空格）。切勿在“旧字符串”或“新字符串”中包含任何行号前缀部分。
+- 总是优先编辑代码库中的现有文件。除非明确需要，否则绝不新建文件。
+- 仅在用户明确要求时才使用表情符号。除非被要求，否则不要在文件中添加表情符号。
+- 如果文件中`oldText`不具有唯一性，编辑操作将会失败。你需要提供一个包含更多上下文的更长字符串以使其具有唯一性。"""
+    risk_level = ToolRiskLevel.MEDIUM
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "要编辑的文件路径"},
+            "oldText": {"type": "string", "description": "被替换的旧文本"},
+            "newText": {"type": "string", "description": "替换后的新文本"},
+            "old_text": {"type": "string", "description": "oldText 的 snake_case 别名"},
+            "new_text": {"type": "string", "description": "newText 的 snake_case 别名"},
+            "old_string": {"type": "string", "description": "oldText 的兼容别名"},
+            "new_string": {"type": "string", "description": "newText 的兼容别名"},
+        },
+        "required": ["path"],
+    }
+
+    async def execute(self, **kwargs: Any) -> Any:
+        path_param = str(kwargs.get("path", "")).strip()
+        old_text = self._pick_text(kwargs, primary="oldText", snake="old_text", compat="old_string")
+        new_text = self._pick_text(kwargs, primary="newText", snake="new_text", compat="new_string")
+        agent_workdir = kwargs.get("_agent_workdir")
+
+        if not path_param:
+            return {"success": False, "error": "path 不能为空"}
+        if old_text is None:
+            return {"success": False, "error": "oldText 不能为空"}
+        if new_text is None:
+            return {"success": False, "error": "newText 不能为空"}
+        if old_text == "":
+            return {"success": False, "error": "oldText 不能为空字符串"}
+
+        try:
+            return self._execute_once(path_param=path_param, old_text=old_text, new_text=new_text, agent_workdir=agent_workdir)
+        except Exception as exc:
+            recovered = self._recover_post_write_success(
+                path_param=path_param,
+                old_text=old_text,
+                new_text=new_text,
+                agent_workdir=agent_workdir,
+            )
+            if recovered is not None:
+                return recovered
+            raise exc
+
+    @staticmethod
+    def _pick_text(kwargs: dict[str, Any], *, primary: str, snake: str, compat: str) -> str | None:
+        for key in (primary, snake, compat):
+            value = kwargs.get(key)
+            if value is not None:
+                return str(value)
+        return None
+
+    def _execute_once(
+        self,
+        *,
+        path_param: str,
+        old_text: str,
+        new_text: str,
+        agent_workdir: str | None,
+    ) -> dict[str, Any]:
+        target = _resolve_with_workdir(path_param, agent_workdir)
+        if not target.exists():
+            return {"success": False, "error": f"文件不存在: {path_param}"}
+        if not target.is_file():
+            return {"success": False, "error": f"目标不是普通文件: {path_param}"}
+
+        old_content = _read_text(target)
+        occurrences = _count_occurrences(old_content, old_text)
+        if occurrences == 0:
+            return {"success": False, "error": f"oldText 未命中: {path_param}"}
+        if occurrences > 1:
+            return {"success": False, "error": f"oldText 在文件中出现 multiple matches ({occurrences})，拒绝编辑: {path_param}"}
+
+        new_content = _replace_once(old_content, old_text, new_text)
+        target.write_text(new_content, encoding="utf-8")
+
+        diff_text = _generate_unified_diff(old_content, new_content, path_param)
+        return {
+            "success": True,
+            "message": f"Successfully replaced text in {path_param}.",
+            "path": str(target),
+            "diff": diff_text,
+            "first_changed_line": _first_changed_line(old_content, new_content),
+        }
+
+    def _recover_post_write_success(
+        self,
+        *,
+        path_param: str,
+        old_text: str,
+        new_text: str,
+        agent_workdir: str | None,
+    ) -> dict[str, Any] | None:
+        try:
+            target = _resolve_with_workdir(path_param, agent_workdir)
+            content = _read_text(target)
+        except Exception:
+            return None
+
+        has_new = new_text in content
+        still_has_old = bool(old_text) and old_text in content
+        if has_new and not still_has_old:
+            return {
+                "success": True,
+                "message": f"Successfully replaced text in {path_param}.",
+                "path": str(target),
+                "diff": "",
+                "first_changed_line": None,
+            }
+        return None
+
+
 class WriteFileTool(Tool):
     name = "write_file"
-    description = "写入文本文件，支持全量覆盖、追加、插入、或替换指定行范围"
+    description = f"""将文件写入本地文件系统。
+
+用法：
+- 支持全量覆盖、追加、插入、或替换指定行范围。
+- 如果在指定路径存在现有文件，此工具将会覆盖该文件。
+- 建议使用`{EditFileTool.name}`工具来修改现有文件——它只会发送差异部分。仅使用此工具来创建新文件或进行彻底重写。
+- 仅在用户明确要求的情况下使用表情符号。除非被要求，否则避免在文件中添加表情符号。
+"""
     risk_level = ToolRiskLevel.MEDIUM
     parameters = {
         "type": "object",
@@ -1799,117 +1929,3 @@ def _first_changed_line(old_content: str, new_content: str) -> int | None:
         if old_line != new_line:
             return index + 1
     return None
-
-
-class EditTool(Tool):
-    name = "edit_file"
-    description = "对文件执行精确文本替换，只允许 oldText 命中一次"
-    risk_level = ToolRiskLevel.MEDIUM
-    parameters = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "要编辑的文件路径"},
-            "oldText": {"type": "string", "description": "被替换的旧文本"},
-            "newText": {"type": "string", "description": "替换后的新文本"},
-            "old_text": {"type": "string", "description": "oldText 的 snake_case 别名"},
-            "new_text": {"type": "string", "description": "newText 的 snake_case 别名"},
-            "old_string": {"type": "string", "description": "oldText 的兼容别名"},
-            "new_string": {"type": "string", "description": "newText 的兼容别名"},
-        },
-        "required": ["path"],
-    }
-
-    async def execute(self, **kwargs: Any) -> Any:
-        path_param = str(kwargs.get("path", "")).strip()
-        old_text = self._pick_text(kwargs, primary="oldText", snake="old_text", compat="old_string")
-        new_text = self._pick_text(kwargs, primary="newText", snake="new_text", compat="new_string")
-        agent_workdir = kwargs.get("_agent_workdir")
-
-        if not path_param:
-            return {"success": False, "error": "path 不能为空"}
-        if old_text is None:
-            return {"success": False, "error": "oldText 不能为空"}
-        if new_text is None:
-            return {"success": False, "error": "newText 不能为空"}
-        if old_text == "":
-            return {"success": False, "error": "oldText 不能为空字符串"}
-
-        try:
-            return self._execute_once(path_param=path_param, old_text=old_text, new_text=new_text, agent_workdir=agent_workdir)
-        except Exception as exc:
-            recovered = self._recover_post_write_success(
-                path_param=path_param,
-                old_text=old_text,
-                new_text=new_text,
-                agent_workdir=agent_workdir,
-            )
-            if recovered is not None:
-                return recovered
-            raise exc
-
-    @staticmethod
-    def _pick_text(kwargs: dict[str, Any], *, primary: str, snake: str, compat: str) -> str | None:
-        for key in (primary, snake, compat):
-            value = kwargs.get(key)
-            if value is not None:
-                return str(value)
-        return None
-
-    def _execute_once(
-        self,
-        *,
-        path_param: str,
-        old_text: str,
-        new_text: str,
-        agent_workdir: str | None,
-    ) -> dict[str, Any]:
-        target = _resolve_with_workdir(path_param, agent_workdir)
-        if not target.exists():
-            return {"success": False, "error": f"文件不存在: {path_param}"}
-        if not target.is_file():
-            return {"success": False, "error": f"目标不是普通文件: {path_param}"}
-
-        old_content = _read_text(target)
-        occurrences = _count_occurrences(old_content, old_text)
-        if occurrences == 0:
-            return {"success": False, "error": f"oldText 未命中: {path_param}"}
-        if occurrences > 1:
-            return {"success": False, "error": f"oldText 在文件中出现 multiple matches ({occurrences})，拒绝编辑: {path_param}"}
-
-        new_content = _replace_once(old_content, old_text, new_text)
-        target.write_text(new_content, encoding="utf-8")
-
-        diff_text = _generate_unified_diff(old_content, new_content, path_param)
-        return {
-            "success": True,
-            "message": f"Successfully replaced text in {path_param}.",
-            "path": str(target),
-            "diff": diff_text,
-            "first_changed_line": _first_changed_line(old_content, new_content),
-        }
-
-    def _recover_post_write_success(
-        self,
-        *,
-        path_param: str,
-        old_text: str,
-        new_text: str,
-        agent_workdir: str | None,
-    ) -> dict[str, Any] | None:
-        try:
-            target = _resolve_with_workdir(path_param, agent_workdir)
-            content = _read_text(target)
-        except Exception:
-            return None
-
-        has_new = new_text in content
-        still_has_old = bool(old_text) and old_text in content
-        if has_new and not still_has_old:
-            return {
-                "success": True,
-                "message": f"Successfully replaced text in {path_param}.",
-                "path": str(target),
-                "diff": "",
-                "first_changed_line": None,
-            }
-        return None

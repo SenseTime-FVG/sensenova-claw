@@ -2,7 +2,7 @@
 
 import pytest
 
-from sensenova_claw.capabilities.tools.builtin import EditTool
+from sensenova_claw.capabilities.tools.builtin import EditFileTool
 
 pytestmark = pytest.mark.asyncio
 
@@ -12,7 +12,7 @@ class TestEditTool:
         target = tmp_workspace / "note.txt"
         target.write_text("hello\nworld\n", encoding="utf-8")
 
-        result = await EditTool().execute(
+        result = await EditFileTool().execute(
             path=str(target),
             oldText="world",
             newText="claw",
@@ -29,7 +29,7 @@ class TestEditTool:
         target = tmp_workspace / "missing.txt"
         target.write_text("alpha\nbeta\n", encoding="utf-8")
 
-        result = await EditTool().execute(
+        result = await EditFileTool().execute(
             path=str(target),
             oldText="gamma",
             newText="delta",
@@ -42,7 +42,7 @@ class TestEditTool:
         target = tmp_workspace / "dup.txt"
         target.write_text("same\nsame\n", encoding="utf-8")
 
-        result = await EditTool().execute(
+        result = await EditFileTool().execute(
             path=str(target),
             oldText="same",
             newText="once",
@@ -57,7 +57,7 @@ class TestEditTool:
         target = workdir / "story.txt"
         target.write_text("before after", encoding="utf-8")
 
-        result = await EditTool().execute(
+        result = await EditFileTool().execute(
             path="story.txt",
             oldText="before",
             newText="after",
@@ -70,7 +70,7 @@ class TestEditTool:
     async def test_edit_recovers_when_post_write_step_fails(self, tmp_workspace, monkeypatch):
         target = tmp_workspace / "recover.txt"
         target.write_text("hello old text", encoding="utf-8")
-        tool = EditTool()
+        tool = EditFileTool()
 
         def boom(*args, **kwargs):
             raise RuntimeError("diff failed")
