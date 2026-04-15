@@ -1493,6 +1493,15 @@ python的运行先conda activate base, 再uv run python xxx.py
 失败/风险经验：
 - `apply_patch` 的 update hunk 解析里，首个 chunk 内非法行和“后续 chunk 缺 @@”是两种不同失败语义；迁实现时如果把“遇到未知行就立刻报 unexpected”写死，会把后者误伤，导致错误文案回归。
 
+### 2026-04-15 全局 AGENTS.md 条件模板补充
+
+成功经验：
+- 当全局 `AGENTS.md` 需要按工具集条件注入规则时，最稳的做法是在 `ContextBuilder` 层仅对全局 `AGENTS.md` 做模板渲染，并只注入 `tool_names`；这样既能拿到当前 agent 真实可用工具，又不会误伤 per-agent `AGENTS.md`。
+- 若用户希望使用 `{%- if 'tool' in tool_names %}` 这类可嵌套语法，不要继续用单层正则替换，直接接入 Jinja2 更稳；嵌套 `if`、空白控制和未来扩展都会自然成立。
+
+失败/风险经验：
+- 写嵌套条件测试时，不能只把 `ToolRegistry._tools` 的字典 key 写成目标工具名；最终注入的 `tool_names` 取的是工具对象自己的 `name`，两者不一致会造成“看起来工具存在、实际条件不命中”的假失败。
+
 ### 2026-03-24 apply_patch 工具移植补充
 
 成功经验：

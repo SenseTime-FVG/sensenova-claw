@@ -1101,7 +1101,7 @@ class ReadFileTool(Tool):
 
 class EditFileTool(Tool):
     name = "edit_file"
-    description = f"""对文件执行精确的字符串替换，只允许 oldText 命中一次。
+    description = f"""对文件执行精确的字符串替换，只允许 `oldText` 命中一次。
 
 用法:
 - 在进行编辑操作之前，您必须在对话中至少使用一次您的 `{ReadFileTool.name}` 工具。如果在未读取文件的情况下尝试进行编辑，该工具将会报错。
