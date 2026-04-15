@@ -148,6 +148,7 @@ class BusRouter:
                     continue
 
             # 使用 deliver（不回流），防止 Public → Private → Public 无限循环
+            self._last_active[event.session_id] = time.time()
             await bus.deliver(event)
 
     async def _gc_loop(self) -> None:

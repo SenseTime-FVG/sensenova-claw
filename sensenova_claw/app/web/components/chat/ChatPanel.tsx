@@ -39,6 +39,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     messages,
     isTyping,
     turnActive,
+    turnCancelling,
     activeInteraction,
     currentSessionQuestionInteraction,
     interactionSubmitting,
@@ -159,8 +160,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
 
   const showReturnToMain =
     Boolean(returnToMainLabel) && (Boolean(currentSessionId) || messages.length > 0);
-  const isCurrentSessionQuestionInteraction = Boolean(currentSessionQuestionInteraction);
-
   return (
     <div className="flex flex-col h-full min-w-0">
       {showReturnToMain && (
@@ -200,8 +199,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         onSend={handleSend}
         onSlashSubmit={() => false}
         onStop={cancelTurn}
-        disabled={activeInteraction?.kind === 'confirmation'}
-        showStopButton={turnActive && !isCurrentSessionQuestionInteraction}
+        disabled={Boolean(activeInteraction?.kind === 'confirmation') || turnCancelling}
+        showStopButton={turnActive}
+        stopPending={turnCancelling}
         wsConnected={wsConnected}
         handleSkillInvoke={handleSkillInvoke}
         hideAgentSelector={hideAgentSelector}

@@ -59,6 +59,7 @@ export interface ChatSessionContextValue {
   messages: ChatMessage[];
   isTyping: boolean;
   turnActive: boolean;
+  turnCancelling: boolean;
   sendMessage: (
     content: string,
     contextFiles?: ContextFileRef[],
@@ -173,6 +174,7 @@ export function useChatSession(): ChatSessionContextValue {
     messages: msg.messages,
     isTyping: msg.isTyping,
     turnActive: msg.turnActive,
+    turnCancelling: msg.turnCancelling,
     sendMessage: msg.sendMessage,
     steps: msg.steps,
     taskProgress: msg.taskProgress,

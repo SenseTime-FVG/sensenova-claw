@@ -88,6 +88,8 @@ export interface MessageContextValue {
    *  与 isTyping 的区别：isTyping 在 user_question_asked 时会变 false（允许显示输入 UI），
    *  但 turnActive 始终为 true 直到 turn 真正结束。用于控制停止按钮与重复提交。 */
   turnActive: boolean;
+  /** 已发送终止请求，等待后端确认终态。 */
+  turnCancelling: boolean;
   steps: StepItem[];
   taskProgress: TaskProgressItem[];
   proactiveResults: ProactiveResultItem[];
@@ -143,6 +145,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const [isTyping, setIsTyping] = useState(false);
   // turnActive: 从发送消息起为 true，仅在 turn_completed/turn_cancelled/error 时才变 false
   const [turnActive, setTurnActive] = useState(false);
+  const [turnCancelling, setTurnCancelling] = useState(false);
 
   // 步骤/进度
   const [rightSteps, setRightSteps] = useState<StepItem[]>([]);
@@ -227,6 +230,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       setMessages([]);
       setIsTyping(false);
       setTurnActive(false);
+      setTurnCancelling(false);
       resetTurnTracking();
       toolCallMapRef.current.clear();
       setRightSteps([]);
@@ -255,6 +259,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           const stillActive = isTurnStillActive(events);
           setIsTyping(stillActive);
           setTurnActive(stillActive);
+          setTurnCancelling(false);
         }
         pendingSessionBootstrapIdRef.current = null;
       } catch {
@@ -279,6 +284,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           const stillActive = isTurnStillActive(events);
           setIsTyping(stillActive);
           setTurnActive(stillActive);
+          setTurnCancelling(false);
           pendingSessionBootstrapIdRef.current = null;
           break;
         }
@@ -406,6 +412,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           });
           setIsTyping(false);
           setTurnActive(false);
+          setTurnCancelling(false);
           pendingSessionBootstrapIdRef.current = null;
           break;
         }
@@ -421,6 +428,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           }));
           setIsTyping(false);
           setTurnActive(false);
+          setTurnCancelling(false);
           pendingSessionBootstrapIdRef.current = null;
           break;
         }
@@ -432,6 +440,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
           addMsg('system', event.payload.user_message || event.payload.message || event.payload.error_type || 'Unknown Error');
           setIsTyping(false);
           setTurnActive(false);
+          setTurnCancelling(false);
           pendingSessionBootstrapIdRef.current = null;
           break;
         // 交互事件的 typing 状态（仅当前 session，重构前在单体 handler 中 isCurrentSession 守卫内处理）
@@ -658,6 +667,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     }
     setIsTyping(true);
     setTurnActive(true);
+    setTurnCancelling(false);
   }, [getCurrentSessionAgentId, resetTurnTracking, startNewChat, wsSend, sessionIdRef, emptySessionIdRef, markFrontendCreate]);
 
   // 合并从 REST API 恢复的推荐数据（去重合并，不覆盖实时推送）
@@ -702,6 +712,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       }
       setIsTyping(true);
       setTurnActive(true);
+      setTurnCancelling(false);
     } catch (err) {
       pushToast({
         kind: 'info',
@@ -721,11 +732,13 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       pendingSessionBootstrapIdRef.current = null;
       setIsTyping(false);
       setTurnActive(false);
+      setTurnCancelling(false);
       return;
     }
     if (lastStreamingTurnIdRef.current) {
       cancelledTurnIdsRef.current.add(lastStreamingTurnIdRef.current);
     }
+    setTurnCancelling(true);
     wsSend({
       type: 'cancel_turn',
       session_id: sessionIdRef.current,
@@ -742,6 +755,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     messages,
     isTyping,
     turnActive,
+    turnCancelling,
     steps: rightSteps,
     taskProgress: rightTaskProgress,
     proactiveResults,

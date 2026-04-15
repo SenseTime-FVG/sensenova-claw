@@ -24,6 +24,7 @@ interface ChatInputProps {
   onStop?: () => void;
   disabled: boolean;
   showStopButton?: boolean;
+  stopPending?: boolean;
   wsConnected: boolean;
   handleSkillInvoke: (skillName: string, args: string) => void;
   hideAgentSelector?: boolean;
@@ -44,6 +45,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onStop,
   disabled,
   showStopButton,
+  stopPending = false,
   wsConnected,
   handleSkillInvoke,
   hideAgentSelector,
@@ -164,7 +166,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const handleSend = useCallback(() => {
     const content = inputValue.trim();
-    if (!content || !wsConnected || disabled || isSubmitting || showStopButton) return;
+    const isQuestionReply = Boolean(currentSessionQuestionInteraction);
+    if (!content || !wsConnected || disabled || isSubmitting || (!isQuestionReply && showStopButton)) return;
 
     if (handleSlashSubmitHook(content)) {
       setDraftRecommendation(null);
@@ -180,7 +183,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       return;
     }
 
-    const isQuestionReply = Boolean(currentSessionQuestionInteraction);
     if (isQuestionReply) {
       sendCurrentSessionQuestionAnswer(content, false);
       setDraftRecommendation(null);
@@ -227,6 +229,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     ta.style.height = Math.min(ta.scrollHeight, 96) + 'px';
   };
 
+  const isQuestionReply = Boolean(currentSessionQuestionInteraction);
+  const inputDisabled = !wsConnected || disabled || (showStopButton && !isQuestionReply);
+  const showInlineSendButton = !showStopButton || isQuestionReply;
+  const stopTitle = stopPending ? '终止中' : t('chat.stopGeneration');
+
   return (
     <div className="border-t bg-card/50 backdrop-blur-sm px-4 pt-2.5 pb-2 shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
       <div className="max-w-4xl mx-auto">
@@ -264,7 +271,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           <div className="relative mb-1 ml-0.5 shrink-0" ref={uploadMenuRef}>
             <button
               onClick={() => setShowUploadMenu(v => !v)}
-              disabled={!wsConnected || disabled}
+              disabled={inputDisabled}
               className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title={t('chat.addFileReference')}
             >
@@ -306,26 +313,29 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   ? t('chat.inputPlaceholder')
                   : t('chat.waitingConnection')
               }
-              disabled={!wsConnected || disabled}
+              disabled={inputDisabled}
               rows={1}
               className="w-full bg-transparent border-none px-4 py-2.5 text-[15px] text-foreground placeholder-muted-foreground/50 focus:outline-none focus:ring-0 resize-none disabled:opacity-50 disabled:cursor-not-allowed leading-relaxed"
               style={{ minHeight: '40px', maxHeight: '240px' }}
             />
           </div>
-          {showStopButton && onStop ? (
+          {showStopButton && onStop && (
             <button
               data-testid="stop-button"
               onClick={onStop}
-              className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-red-500 text-white hover:bg-red-600 flex items-center justify-center shrink-0 transition-all active:scale-90 shadow-md shadow-red-500/20"
-              title={t('chat.stopGeneration')}
+              disabled={stopPending}
+              aria-label={stopTitle}
+              className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-red-500 text-white hover:bg-red-600 flex items-center justify-center shrink-0 transition-all active:scale-90 shadow-md shadow-red-500/20 disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100"
+              title={stopTitle}
             >
               <Square size={16} fill="currentColor" />
             </button>
-          ) : (
+          )}
+          {showInlineSendButton && (
             <button
               data-testid="send-button"
               onClick={handleSend}
-              disabled={!inputValue.trim() || !wsConnected || disabled || isSubmitting}
+              disabled={!inputValue.trim() || inputDisabled || isSubmitting || stopPending}
               title={t('chat.sendMessage')}
               aria-label={t('chat.sendMessage')}
               className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-md shadow-primary/20"

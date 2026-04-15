@@ -257,6 +257,71 @@ async def test_bus_router_worker_factory_called_on_first_event():
     await router.stop()
 
 
+@pytest.mark.asyncio
+async def test_bus_router_refreshes_last_active_when_routing_existing_private_bus():
+    """已有 private bus 收到事件时也应刷新活跃时间，避免被 GC 误清理。"""
+    public = PublicEventBus()
+    router = BusRouter(public_bus=public, ttl_seconds=3600, gc_interval=60)
+    session_id = "sess_keepalive"
+
+    router.get_or_create(session_id)
+    previous_last_active = router._last_active[session_id]
+
+    await router.start()
+    await asyncio.sleep(0.05)
+
+    await public.publish(EventEnvelope(
+        type=LLM_CALL_REQUESTED,
+        session_id=session_id,
+        source="agent",
+        payload={"messages": []},
+    ))
+    await asyncio.sleep(0.1)
+
+    assert router._last_active[session_id] > previous_last_active
+
+    await router.stop()
+
+
+@pytest.mark.asyncio
+async def test_bus_router_does_not_gc_session_with_ongoing_events():
+    """持续有事件流入的 session 不应因 TTL 过短而被误 GC。"""
+    public = PublicEventBus()
+    router = BusRouter(public_bus=public, ttl_seconds=0.05, gc_interval=0.01)
+    session_id = "sess_gc_guard"
+    destroyed_sessions: list[str] = []
+
+    async def on_destroy(sid: str):
+        destroyed_sessions.append(sid)
+
+    router.on_destroy(on_destroy)
+    router.get_or_create(session_id)
+
+    await router.start()
+    await asyncio.sleep(0.02)
+
+    await public.publish(EventEnvelope(
+        type=LLM_CALL_REQUESTED,
+        session_id=session_id,
+        source="agent",
+        payload={"messages": ["first"]},
+    ))
+    await asyncio.sleep(0.03)
+
+    await public.publish(EventEnvelope(
+        type=LLM_CALL_REQUESTED,
+        session_id=session_id,
+        source="agent",
+        payload={"messages": ["second"]},
+    ))
+    await asyncio.sleep(0.02)
+
+    assert router.get(session_id) is not None
+    assert session_id not in destroyed_sessions
+
+    await router.stop()
+
+
 # ---------- 会话隔离 ----------
 
 

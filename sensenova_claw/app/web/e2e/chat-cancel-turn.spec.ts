@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 function mockAuthAndWebSocket() {
   localStorage.setItem('access_token', 'e2e-access-token');
   localStorage.setItem('refresh_token', 'e2e-refresh-token');
+  (window as Window & { __mockWsSent?: Array<Record<string, unknown>> }).__mockWsSent = [];
 
   class MockWebSocket {
     static readonly CONNECTING = 0;
@@ -23,7 +24,15 @@ function mockAuthAndWebSocket() {
       }, 0);
     }
 
-    send(_data: string) {}
+    send(data: string) {
+      try {
+        const parsed = JSON.parse(data) as Record<string, unknown>;
+        const sent = (window as Window & { __mockWsSent?: Array<Record<string, unknown>> }).__mockWsSent;
+        sent?.push(parsed);
+      } catch {
+        // noop
+      }
+    }
 
     close() {
       this.readyState = MockWebSocket.CLOSED;
@@ -167,4 +176,62 @@ test('首条消息创建会话时在首个 token 前也应显示停止按钮', a
   });
 
   await expect(page.getByTestId('stop-button')).toBeVisible();
+});
+
+test('当前会话 ask_user 期间仍应允许终止，并立即进入终止中状态', async ({ page }) => {
+  await page.goto('/chat');
+
+  const input = page.getByTestId('chat-input');
+  await expect(input).toBeVisible({ timeout: 10000 });
+
+  await input.fill('请开始研究');
+  await page.getByTestId('send-button').click();
+  await expect(page.getByTestId('stop-button')).toBeVisible();
+
+  await page.evaluate(() => {
+    (window as any).__mockWs.emit({
+      type: 'session_created',
+      session_id: 'sess_question_stop',
+      payload: {},
+      timestamp: Date.now() / 1000,
+    });
+    (window as any).__mockWs.emit({
+      type: 'user_question_asked',
+      session_id: 'sess_question_stop',
+      payload: {
+        question_id: 'q_stop_1',
+        question: '请选择部署环境',
+        source_agent_id: 'research-agent',
+        source_agent_name: 'Research Agent',
+        options: ['staging', 'prod'],
+        multi_select: false,
+        timeout: 300,
+      },
+      timestamp: Date.now() / 1000,
+    });
+  });
+
+  const stopButton = page.getByTestId('stop-button');
+  await expect(stopButton).toBeVisible();
+  await stopButton.click();
+
+  await expect(stopButton).toBeDisabled();
+  await expect(stopButton).toHaveAttribute('title', '终止中');
+
+  const sentMessages = await page.evaluate(() => (window as any).__mockWsSent ?? []);
+  expect(sentMessages.some((msg: Record<string, unknown>) => msg.type === 'cancel_turn' && msg.session_id === 'sess_question_stop')).toBeTruthy();
+
+  await page.evaluate(() => {
+    (window as any).__mockWs.emit({
+      type: 'turn_cancelled',
+      session_id: 'sess_question_stop',
+      payload: {
+        turn_id: 'turn_question_stop',
+        reason: 'user_cancel',
+      },
+      timestamp: Date.now() / 1000,
+    });
+  });
+
+  await expect(stopButton).toBeHidden();
 });

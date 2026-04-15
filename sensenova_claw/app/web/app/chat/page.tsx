@@ -295,7 +295,7 @@ function SessionListGroup({
 function ChatContent() {
   const { locale, t } = useI18n();
   const {
-    wsConnected, currentSessionId, sessions, messages, isTyping, turnActive, activeInteraction, currentSessionQuestionInteraction, interactionSubmitting,
+    wsConnected, currentSessionId, sessions, messages, isTyping, turnActive, turnCancelling, activeInteraction, currentSessionQuestionInteraction, interactionSubmitting,
     sendMessage, sendCurrentSessionQuestionAnswer, switchSession, createSession, deleteSession, startNewChat,
     refreshTaskGroups, loadingSessions, handleSkillInvoke, cancelTurn, cleanupEmptySession,
   } = useChatSession();
@@ -456,8 +456,6 @@ function ChatContent() {
       </p>
     </div>
   ), [agents, selectedAgentId, t]);
-  const isCurrentSessionQuestionInteraction = Boolean(currentSessionQuestionInteraction);
-
   return (
     <ResizablePanelGroup orientation="horizontal" className="h-full overflow-hidden gap-3 bg-slate-50/50 dark:bg-slate-900/20">
       {/* Agent List */}
@@ -532,8 +530,9 @@ function ChatContent() {
               onSend={handleSend}
               onSlashSubmit={() => false}
               onStop={cancelTurn}
-              disabled={activeInteraction?.kind === 'confirmation'}
-              showStopButton={turnActive && !isCurrentSessionQuestionInteraction}
+              disabled={Boolean(activeInteraction?.kind === 'confirmation') || turnCancelling}
+              showStopButton={turnActive}
+              stopPending={turnCancelling}
               wsConnected={wsConnected}
               handleSkillInvoke={handleSkillInvoke}
               hideAgentSelector
