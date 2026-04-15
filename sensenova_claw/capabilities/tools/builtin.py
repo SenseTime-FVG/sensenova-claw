@@ -1097,8 +1097,6 @@ class ReadFileTool(Tool):
         return {"file_path": str(file_path), "content": "\n".join(selected)}
 
 
-
-
 class EditFileTool(Tool):
     name = "edit_file"
     description = f"""对文件执行精确的字符串替换，只允许 `oldText` 命中一次。
@@ -1222,13 +1220,13 @@ class EditFileTool(Tool):
 
 class WriteFileTool(Tool):
     name = "write_file"
-    description = f"""将文件写入本地文件系统。
+    description = f"""将文件写入本地文件系统。修改操作请优先使用 `{EditFileTool.name}` 工具。
 
-用法：
-- 支持全量覆盖、追加、插入、或替换指定行范围。
+用法：  
 - 如果在指定路径存在现有文件，此工具将会覆盖该文件。
 - 建议使用 `{EditFileTool.name}` 工具来修改现有文件——它只会发送差异部分。仅使用此工具来创建新文件或进行彻底重写。
 - 仅在用户明确要求的情况下使用表情符号。除非被要求，否则避免在文件中添加表情符号。
+- 支持全量覆盖、追加、插入、或替换指定行范围。仅在 `{EditFileTool.name}` 工具不可用的情况下，才可以使用该工具进行追加、插入、替换。
 """
     risk_level = ToolRiskLevel.MEDIUM
     parameters = {
