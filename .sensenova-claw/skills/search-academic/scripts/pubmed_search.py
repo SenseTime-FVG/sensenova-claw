@@ -109,12 +109,16 @@ def search(query: str, limit: int, api_key: str | None = None) -> list[dict]:
         # 页码
         pages = article_data.findtext(".//MedlinePgn", "")
 
-        # DOI
+        # DOI 和 PMC ID（从 ArticleIdList 提取）
         doi = None
+        pmc_id = None
         for id_elem in article.findall(".//ArticleId"):
-            if id_elem.get("IdType") == "doi":
+            id_type = id_elem.get("IdType", "")
+            if id_type == "doi":
                 doi = id_elem.text
-                break
+            elif id_type == "pmc" and id_elem.text:
+                # 规范化：去掉 "PMC" 前缀，只保留数字
+                pmc_id = id_elem.text.lstrip("PMCpmc").strip() or id_elem.text
 
         # MeSH 关键词
         keywords = [kw.text for kw in medline.findall(".//Keyword") if kw.text]
@@ -123,6 +127,7 @@ def search(query: str, limit: int, api_key: str | None = None) -> list[dict]:
         pub_types = [pt.text for pt in article_data.findall(".//PublicationType") if pt.text]
 
         url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+        pmc_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/" if pmc_id else None
 
         items.append(make_item(
             title=title,
@@ -130,6 +135,8 @@ def search(query: str, limit: int, api_key: str | None = None) -> list[dict]:
             snippet=abstract,
             authors=authors,
             pmid=pmid,
+            pmc_id=f"PMC{pmc_id}" if pmc_id else None,
+            pmc_url=pmc_url,
             journal=journal_name if journal_name else None,
             pub_date=pub_date if pub_date else None,
             volume=volume if volume else None,
