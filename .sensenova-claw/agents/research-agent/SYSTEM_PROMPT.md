@@ -91,6 +91,32 @@
 
 如果搜到的内容引用了原始报告、数据源或关键人物，用 fetch_url 追溯原始来源，不要停留在二手转述。
 
+### 引用追溯（学术研究维度）
+
+当来源类别包含 `academic` 时，关键词搜索之外还应利用引用图深化发现。使用 search-academic skill 的 `semantic_scholar_refs.py` 脚本：
+
+**何时触发**：
+- 找到一篇高度相关的论文（直接回答了某个 key_question）→ 查它的 **references**（backward），找到它所依赖的奠基工作
+- 找到领域奠基论文（高引用、被多篇结果共同引用）→ 查它的 **citations**（forward），找到最新跟进工作
+- 关键词搜索信息不足，但已有 1-2 篇相关论文 → 通过引用图展开，发现关键词覆盖不到的相关工作（如使用不同术语的早期研究）
+
+**何时不触发**：
+- 关键词搜索已充分满足证据标准 → 不必为追溯而追溯
+- 非学术类来源（新闻、社交媒体、官方文档）→ 引用追溯仅对学术论文有效
+
+**操作模式**：
+```bash
+# 从高相关论文找奠基工作
+python3 scripts/semantic_scholar_refs.py <paper_id> references --min-citations 50 --limit 10
+
+# 从奠基论文找最新进展
+python3 scripts/semantic_scholar_refs.py <paper_id> citations --year-min 2024 --limit 10
+
+# Citation chain：从种子论文 backward 找到关键参考 B，再从 B forward 找到更多相关工作
+```
+
+**与关键词搜索的关系**：引用追溯是关键词搜索的**补充**，不是替代。先用关键词搜索建立基础，找到种子论文后再通过引用图深化。两者发现的论文可能有重叠，去重即可。
+
 ### 适时停止
 
 根据 depth 定义的证据标准判断是否可以停止，而非机械计算搜索轮次：

@@ -25,7 +25,8 @@
 ```
 {report_dir}/                  # 绝对路径，如 /home/user/.sensenova-claw/workdir/deep-research-controller/reports/2026-04-13-ai-chip/
 ├── briefing.md              # scout-agent 输出的 Research Briefing
-├── plan.json                # plan-agent 输出的研究计划
+├── blueprint.json           # plan-agent Phase 0 输出的报告格式规范（不可变）
+├── plan.json                # plan-agent Phase 1+ 输出的研究计划（波间回顾可变）
 ├── sub_reports/
 │   ├── d1.md                # 维度 1 子报告（脚注格式引用）
 │   ├── d2.md                # 维度 2 子报告（脚注格式引用）
@@ -61,15 +62,16 @@ scout-agent 会进行预研搜索并与用户交互澄清，完成后将 Researc
 ## Research Briefing
 请使用 read_file 读取：{report_dir}/briefing.md
 
-**输出路径**：完成后请使用 write_file 将研究计划（JSON）写入 {report_dir}/plan.json
+**输出路径**：
+- 报告格式规范（Phase 0）：请使用 write_file 写入 {report_dir}/blueprint.json
+- 研究计划（Phase 1+）：请使用 write_file 写入 {report_dir}/plan.json
 ```
 
-plan-agent 返回结构化研究计划（JSON），包含：
-- 拆解策略（主维度、辅助维度、理由）
-- 维度拆解（每个维度含 key_questions、focus、context_from_briefing、sources、depth）
-- 分波执行顺序（wave 1, 2, ...）
+plan-agent 会执行两个阶段：
+- **Phase 0（格式发现）**：搜索权威源发现报告格式标准，输出 `blueprint.json`
+- **Phase 1+（维度规划）**：基于 blueprint 和 briefing 拆解维度，输出 `plan.json`
 
-plan-agent 会将计划直接写入指定路径。收到完成确认后，使用 read_file 读取 `{report_dir}/plan.json` 以获取维度列表。
+plan-agent 会将两个文件直接写入指定路径。收到完成确认后，使用 read_file 读取 `{report_dir}/plan.json` 以获取维度列表。
 
 ### 3. 用户确认（如果配置要求）
 
@@ -219,10 +221,13 @@ research-agent 修订后直接覆写同一文件路径，再次发给 review-age
 
 研究材料在以下路径，请使用 read_file 逐一读取：
 - Research Briefing（问题画像、视角、深度期望）：{report_dir}/briefing.md
+- 报告格式规范：{report_dir}/blueprint.json
 - 子报告（使用 [^key] 脚注格式引用）：
   - {report_dir}/sub_reports/d1.md
   - {report_dir}/sub_reports/d2.md
   - ...（列出所有维度的文件路径）
+
+**报告结构**：请先读取 blueprint.json。如果 fallback_used 为 false，以 blueprint 的 sections 为主结构骨架撰写终稿；如果 fallback_used 为 true，使用 research-report skill 的通用模板。
 
 撰写时沿用子报告中的 [^key] 脚注格式引用，不要转换为编号。将实际引用的脚注定义集中放在文末。
 

@@ -4,7 +4,7 @@ description: 分析研究需求，拆解维度，规划数据源和执行顺序
 temperature: 0.3
 
 tools: ["serper_search", "fetch_url", "read_file", "write_file"]
-skills: ["search-code", "search-academic", "search-social-cn", "search-social-en", "search-ai"]
+skills: ["search-code", "search-academic", "search-social-cn", "search-social-en", "search-ai", "report-format-discovery"]
 
 can_send_message_to: null  # 不能委派
 enabled: true

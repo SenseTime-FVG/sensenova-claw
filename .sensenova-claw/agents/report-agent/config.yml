@@ -4,7 +4,7 @@ description: 综合子报告生成结构化研究终稿
 temperature: 0.3
 
 tools: ["read_file", "write_file"]
-skills: []
+skills: ["research-report"]
 
 can_send_message_to: null
 enabled: true
