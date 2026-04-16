@@ -83,6 +83,36 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 每次你执行完成任务之后，需要总结成功和失败的经验，并选择会对后续任务有帮助的内容保存在这里
 
+### 2026-04-13 Discord / QQ TLS 证书链修复补充
+
+成功经验：
+- 这类 `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` 问题，先在本机分别用系统默认 CA 和 `certifi` 做最小握手验证最有效；若默认失败而 `certifi` 成功，基本就能排除业务协议问题，直接收敛到运行时 TLS 配置缺失。
+- 仓库里已有钉钉/企微的 `certifi + ssl context` 兼容模式；给 Discord 注入 `aiohttp.TCPConnector(ssl=...)`，给 QQ 官方 runtime 的 `httpx.AsyncClient(verify=...)` 与 `websockets.connect(ssl=...)` 统一接入同一份上下文，是最小且可测的修复。
+- 这类兼容修复应补行为级单测，而不是依赖真实外网回归：Discord 断言 `connector._ssl`，QQ 断言 `verify` 和 `ssl` 参数，回归最稳。
+
+失败/风险经验：
+- 扩大到 `tests/unit/test_discord_*.py tests/unit/test_qq_*.py` 时，当前仓库仍有既有失败：`tests/unit/test_qq_channel.py::TestInbound::test_publishes_user_input_for_dm` 期望 session 绑定值为字符串 `"qq"`，实际为集合 `{'qq'}`；不能把这条失败误判成 TLS 修复回归。
+
+### 2026-04-13 Feishu WebSocket TLS 修复补充
+
+成功经验：
+- 飞书“私聊完全没入站”不一定是事件分发逻辑问题，先看日志里是否有 `FeishuChannel started` 但没有 `Feishu message:`；若同时出现 `Lark | client.py | connect failed, err: [SSL: CERTIFICATE_VERIFY_FAILED]`，根因就是 SDK 长连接握手失败而非入站处理代码未触发。
+- `lark_oapi.ws.client.Client` 内部直接调用 `websockets.connect(conn_url)`，且未暴露 SSL 配置；仓库侧最小修复点是在飞书线程启动前 monkeypatch `lark_oapi.ws.client.websockets.connect`，统一 `kwargs.setdefault("ssl", CERTIFI_SSL_CONTEXT)`。
+- 对这类第三方 SDK patch，优先补小而准的行为级单测：断言 patched `connect()` 默认带入 certifi SSL，且显式传入 `ssl=` 时不会被覆盖。
+
+失败/风险经验：
+- 飞书相关全量搜索很容易扫进用户目录下大量 IDE/历史工作区噪音；排查时应优先查 `~/.sensenova-claw/logs/system.log*`，否则信噪比太差。
+
+### 2026-04-13 其他 Channel TLS 加固补充
+
+成功经验：
+- 证书链问题修复不能只盯“入站长连接”是否恢复，必须继续扫出站 HTTP 和其他 mode/runtime；这次剩余风险点就落在 Telegram、QQ OneBot、飞书工具客户端和钉钉出站 HTTP。
+- Telegram 的 `python-telegram-bot` 可以通过 `Bot(request=HTTPXRequest(httpx_kwargs={\"verify\": CERTIFI_SSL_CONTEXT}), get_updates_request=...)` 最小接入共享 CA，不需要改 SDK 内部。
+- 对 `httpx.AsyncClient` / `websockets.connect` 的 TLS 兼容，行为级单测最稳：直接断言 `verify` / `ssl` 参数使用共享 `_SSL_CONTEXT`，比依赖真实外网回归更快、更不脆弱。
+
+失败/风险经验：
+- 给 runtime 增加 `start()` 测试时，若会拉起后台接收循环，测试里必须显式 `stop()` 收尾；否则 pytest 会因为悬挂任务卡住，看起来像“测试没输出”。
+
 ### 2026-04-07 QQ Gateway reconnecting 状态修复补充
 
 ### 2026-04-10 Agent 三态白名单语义补充
@@ -113,6 +143,45 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - 仅做 session 级 catalog 缓存不等于真正“共享同一个 MCP server”；如果底层仍是每次调用临时 `stdio_client()`，多 agent 仍会起多份进程，Browser MCP 这类 server 一样会冲突。
+
+### 2026-04-14 Session 列表分页补充
+
+成功经验：
+- session 列表从“固定前 50 条”升级为真分页时，最稳的做法是保留原有 `list_sessions()` 给旧调用方，新增 `list_sessions_page()` 给 HTTP 列表接口使用；这样不会误伤现有 websocket 和其他历史逻辑。
+- 这类分页改造不能只改 `page/page_size`，还要同步把搜索和状态过滤也下沉到服务端；否则页面会变成“全量分页 + 当前页过滤”的半成品，语义会漂。
+- Playwright 里这套前端鉴权初始化不仅会打 `/api/auth/status`，还会打 `/api/auth/verify-token`；若只 mock 其中一个，请求根本进不到业务页面。
+
+失败/风险经验：
+- 现有前端 e2e 多处把 `/api/sessions` 写成 `url.endsWith('/api/sessions')`，一旦接口改成带 query 的分页请求就会全部失配；同类回归应统一改成基于 `URL.pathname` 匹配。
+- 前端 dev server 在无后端场景下会持续探测 `/api/custom-pages`、`/api/config/llm-status`、`/api/todolist`、`/ws` 并打印 `ECONNREFUSED`；只要核心断言通过，这类代理噪音不能误判成分页失败。
+
+### 2026-04-14 工作台会话树补充
+
+成功经验：
+- 工作台左侧会话树不能直接复用 session 管理页的分页接口语义；树结构依赖完整祖先链，最稳的是工作台单独走 `/api/sessions?all=1&include_ancestors=1`，而管理页继续保留分页。
+- `buildSessionTree()` 修好父子关系后，原来“二级会话直接可见”的 e2e 会自然失效，因为真实 UI 会把子会话收进父节点折叠区；这类用例应改成先展开再断言，不要把旧 bug 当成预期。
+- 前端 WebSocket mock 若只拦 `localhost:8000/ws` 会漏掉默认相对路径 `/ws`，导致 `wsConnected` 一直起不来，进而连 session 列表请求都不会发；这类测试应按 `/ws` 路径匹配。
+
+失败/风险经验：
+- 只看“请求有没有发出”不够，工作台树场景还要区分“数据没回来”和“数据回来了但默认折叠没展开”；否则很容易把展示层问题误判成接口问题。
+
+### 2026-04-14 Session active 聚合卡片补充
+
+成功经验：
+- 分页页面上的汇总卡片若要表达“当前筛选结果”的统计，必须由后端直接返回聚合值（如 `active_total`）；前端只拿到当前页数据时，自己统计必然会退化成“当前页统计”。
+- 给聚合卡片补 `data-testid` 比用裸文本数字断言稳定得多；像 `1` 这类短文本在页面里极易和页码、日期、ID 片段冲突。
+
+失败/风险经验：
+- 如果只改文案不改数据源，会出现“写着 current filter，实际算的是 current page”的假一致；这类统计类 UI 必须同时核对文案和数据来源。
+
+### 2026-04-14 Session 状态与最新 Turn 对齐补充
+
+成功经验：
+- `sessions.status` 若长期缺少维护，最稳的收口方式不是只修查询或只修写入，而是“两层都做”：列表查询按 `last_turn_status` 推导，turn 状态变更时再同步回写 `sessions.status`，这样历史脏值和未来写入都能一起收敛。
+- `active`/`closed` 这类会话态最好只暴露聚合后的稳定语义，不直接透出 turn 的细粒度状态；当前仓库里把 `started/running/waiting_user/tool_waiting` 统一映射为 `active`，其余终态统一映射为 `closed`，前端最省心。
+
+失败/风险经验：
+- 只看 `sessions.status` 做聚合会把“最新 turn 已 completed，但 session 行还是 active”的脏数据继续算错；修这类问题时必须补“故意把 session 行写脏，但列表仍应按 turn 推导”的单测。
 
 ### 2026-04-09 MCP 一期接入补充
 
@@ -1389,17 +1458,54 @@ python的运行先conda activate base, 再uv run python xxx.py
 ### 2026-03-24 edit 工具移植补充
 
 成功经验：
-- 文件精确编辑工具最稳的落点是独立模块，而不是继续扩张 `builtin.py`；这次新增 `sensenova_claw/capabilities/tools/edit_tool.py` 后，路径解析、替换校验、diff 生成和恢复逻辑都能独立测试。
+- 文件精确编辑工具的核心契约必须先被集成测试锁住，再决定实现落点；当前仓库已收敛到 `sensenova_claw/capabilities/tools/builtin.py`，路径解析、替换校验、diff 生成和恢复逻辑都应继续由行为测试覆盖。
 - `edit` 的核心契约必须锁死为“`oldText` 恰好命中一次”；把“未命中 / 多次命中 / `_agent_workdir` 相对路径 / post-write recovery”都放进集成测试后，行为边界会清晰很多。
 - `openclaw` 的 post-write recovery 很值得保留：当文件已经写成功但 diff/格式化阶段报错时，重新读盘并按最终内容恢复成功结果，可以避免误向用户报告假失败。
 
 失败/风险经验：
 - 当前实现虽然兼容了 `old_text/new_text` 与 `old_string/new_string`，但对外主 schema 仍以 `oldText/newText` 为中心；若后续要继续补更多上游兼容别名，需要先核对各 provider 的 tool schema 约束，避免把参数面扩得过宽。
 
+### 2026-04-15 edit_file 工具改名补充
+
+成功经验：
+- 这类“只改对外工具名、不改实现语义”的需求，最稳的做法是保留模块和类结构，仅替换 `Tool.name`、registry 分组开关和直接断言工具名的测试，影响面最小。
+- `/api/tools` 这类 HTTP 接口若要反映当前应用配置，不能偷用全局 `config`；应基于 `request.app.state.config` 读取启用状态，否则单测和多实例语义都会漂。
+- `tests/unit/test_tools_api.py` 这类接口测试夹具应显式挂载 `ConfigManager`，否则启用/禁用类接口即使业务代码正确，也会因为测试装配缺件而假失败。
+
+失败/风险经验：
+- 仓库里与 `edit` 相关的字符串很多来自 UI 的 “edit mode / edit button” 文案，不是工具名；做改名时必须先区分“工具标识”与“普通英文词”，否则很容易误改前端无关逻辑。
+
+### 2026-04-15 builtin.py 工具声明收敛补充
+
+成功经验：
+- 对“把工具声明迁到 `builtin.py`，但不想搬动整套实现细节”的需求，最小做法是在 `builtin.py` 声明薄包装子类，再让 registry 和测试统一从 `builtin.py` 导入；这样既满足声明位置收敛，也能避免大规模迁移辅助函数带来的回归。
+- 这类结构调整最值得先锁的回归测试是 `__module__` 断言；它能明确区分“只是重导出别名”与“声明真的落在目标模块”。
+
+失败/风险经验：
+- 若直接一次性把大段实现和辅助函数跨文件搬迁到 `builtin.py`，`apply_patch` 这种长文件很容易因为上下文漂移导致补丁失败；拆成“先迁声明，再视需要迁实现”更稳。
+
+### 2026-04-15 builtin.py 完整实现收敛补充
+
+成功经验：
+- 如果用户明确要求“像 `BashCommandTool` 一样完整写在 `builtin.py`”，判断标准不能只看类的 `__module__`，还要额外断言 `execute.__module__`；否则薄包装子类会产生假通过。
+- 把完整实现搬进 `builtin.py` 后，旧模块最稳的处理方式是保留兼容导出层，只做 `from builtin import ...` 转发；这样现有 import 路径、文档引用和 monkeypatch 点位都可以渐进迁移。
+
+失败/风险经验：
+- `apply_patch` 的 update hunk 解析里，首个 chunk 内非法行和“后续 chunk 缺 @@”是两种不同失败语义；迁实现时如果把“遇到未知行就立刻报 unexpected”写死，会把后者误伤，导致错误文案回归。
+
+### 2026-04-15 全局 AGENTS.md 条件模板补充
+
+成功经验：
+- 当全局 `AGENTS.md` 需要按工具集条件注入规则时，最稳的做法是在 `ContextBuilder` 层仅对全局 `AGENTS.md` 做模板渲染，并只注入 `tool_names`；这样既能拿到当前 agent 真实可用工具，又不会误伤 per-agent `AGENTS.md`。
+- 若用户希望使用 `{%- if 'tool' in tool_names %}` 这类可嵌套语法，不要继续用单层正则替换，直接接入 Jinja2 更稳；嵌套 `if`、空白控制和未来扩展都会自然成立。
+
+失败/风险经验：
+- 写嵌套条件测试时，不能只把 `ToolRegistry._tools` 的字典 key 写成目标工具名；最终注入的 `tool_names` 取的是工具对象自己的 `name`，两者不一致会造成“看起来工具存在、实际条件不命中”的假失败。
+
 ### 2026-03-24 apply_patch 工具移植补充
 
 成功经验：
-- `apply_patch` 这类复杂文件变更能力，适合像 `edit` 一样拆成独立模块；把解析、路径解析、更新替换和 summary 输出都放在 `sensenova_claw/capabilities/tools/apply_patch_tool.py` 后，测试与后续演进都更稳。
+- `apply_patch` 这类复杂文件变更能力，关键不在于是否拆独立模块，而在于解析契约和失败语义要被测试锁住；当前仓库已收敛到 `sensenova_claw/capabilities/tools/builtin.py`，解析、路径解析、更新替换和 summary 输出都应继续由聚焦测试覆盖。
 - 从 `openclaw` 移植时，优先保留补丁格式契约（`*** Begin/End Patch`、`Add/Delete/Update File`、`Move to`、`@@` chunk）而不是生搬硬套它的 sandbox 安全层，能更好地贴合当前仓库的 `_agent_workdir` 工具语义。
 - 对这类工具最有效的测试组合是“一个多 hunk 端到端用例 + 一个 `_agent_workdir` 相对路径用例 + 一个非法边界用例 + 一个 `_path_policy` 拦截用例”，既覆盖 happy path，也锁住关键失败态。
 
@@ -1904,3 +2010,43 @@ python的运行先conda activate base, 再uv run python xxx.py
 
 失败/风险经验：
 - CLI 目前把 `/api/agents/{id}` 的所有错误都提示成“Agent 不存在”，会掩盖真实的 401/403；以后排查类似问题时要先看底层 HTTP 状态，不要只看终端文案。
+
+### 2026-04-13 DingTalk Stream SSL 兼容补充
+
+成功经验：
+- 官方 `dingtalk-stream` SDK 在 macOS/Python 3.12 环境下，`requests` 取 token 可能正常，但 `websockets.connect()` 仍会因系统 CA 链不完整报 `CERTIFICATE_VERIFY_FAILED`；在仓库侧包一层兼容 client，并显式传入 `certifi` 生成的 `ssl.SSLContext`，是最小可控修复。
+- 这类三方 SDK 兼容补丁最适合补“行为级”单测：直接断言 WebSocket 连接拿到了 `ssl` 参数，并断言异常日志格式不会再次触发 `TypeError`，比依赖真实外网复现更稳。
+
+失败/风险经验：
+- `~/.sensenova-claw/config.yml` 若启用了多个外部 channel，`npm run dev` 的报错不一定来自当前仓库根目录配置；先确认实际生效的是用户 home 配置，能避免在错误配置源上兜圈子。
+
+### 2026-04-13 DingTalk 重复入站补充
+
+成功经验：
+- 钉钉 channel 若在 UI 里出现同一条用户气泡重复，优先怀疑上游 callback 重投，而不是前端渲染；当前链路 `DingtalkChannel.handle_incoming_message()` 原本无任何幂等保护，只要被调用两次就会发布两次 `USER_INPUT`。
+- 对这类 IM 重投问题，在 channel 层按 `conversation_id + message_id` 做一个有限容量的最近消息去重缓存，是最小且足够稳的修复点；既能挡住 SDK/网关重试，也不需要改 Agent/runtime 主链路。
+
+失败/风险经验：
+- `tests/unit/test_dingtalk_channel.py` 里部分历史断言已和 `Gateway._session_bindings: dict[str, set[str]]` 的真实结构漂移；修 channel 回归时如果不顺手校正这些夹具，容易把旧测试噪音误判成新 bug。
+
+### 2026-04-14 前端会话草稿隔离补充
+
+成功经验：
+- 聊天输入框“切会话后还残留上一个会话文本”这类问题，根因往往不是页面路由，而是共享 `ChatInput` 内部把草稿存在单一 `useState`；把草稿改成 `sessionId -> draft` 映射，是最小且能同时覆盖 `/chat`、`/` 工作台、`/ppt` 的修复。
+- 除了文本本身，和输入框绑定的推荐预填元数据也要一起按会话存；否则文本虽然隔离了，推荐来源 session 仍可能串到别的会话。
+- 这类前端回归最适合补共享层 Playwright 用例：分别覆盖直连 `ChatInput` 的 `/chat`，以及经 `ChatPanel` 复用输入框的 `/`、`/ppt`，能直接验证“切走为空、切回恢复原草稿”。
+
+失败/风险经验：
+- `/chat` 页面同时有 agent 列表和 session 列表，若 Playwright 直接 `getByText('对话二')`，很容易命中多个元素；这类页面要先收窄到具体面板容器，否则会把选择器歧义误判成功能失败。
+
+### 2026-04-14 会话右键重命名补充
+
+成功经验：
+- 会话标题手动修改需求先全局搜 `update_session_title` / `title_updated` 很关键；这次仓储层其实早已有 `Repository.update_session_title()`，真正缺的是 HTTP API 和前端入口，不需要重做存储。
+- 工作台、深度研究、自动化共用 `WorkbenchShell + LeftNav + SessionContext`，优先在共享组件接入右键菜单能一改覆盖多页；PPT 和消息页再单独补自己的列表实现即可。
+- 原地输入框要统一处理 `Enter` 后紧跟 `blur` 的二次提交问题；把 `skipBlurSubmitRef` 放进通用编辑组件，比在每个页面分别打补丁稳得多。
+- Playwright 测登录保护页时，`?token=...` 比仅设置 cookie 更稳；工作台测试只设 cookie 会停在 Token 输入页。
+
+失败/风险经验：
+- 前端 dev server 会持续代理未 mock 的 `/api/custom-pages`、`/api/todolist`、`/api/skills`、`/api/files/roots`、`/ws` 并打印 `ECONNREFUSED`；这类输出是环境噪音，不能直接判成用例失败，要以断言结果为准。
+- `/chat` 页存在 agent 摘要和 session 列表两处同名标题，`getByText()` 很容易触发 strict mode 冲突；这类页面的回归断言应优先绑定 `data-testid` 到具体会话项。

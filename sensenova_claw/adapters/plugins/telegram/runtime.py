@@ -10,7 +10,10 @@ import inspect
 from fastapi import FastAPI, Header, HTTPException, Request
 from telegram import Bot, Message, Update
 from telegram.error import Conflict
+from telegram.request import HTTPXRequest
 import uvicorn
+
+from sensenova_claw.platform.security.ssl import CERTIFI_SSL_CONTEXT
 
 from .config import TelegramConfig
 from .models import TelegramInboundMessage
@@ -18,6 +21,7 @@ from .models import TelegramInboundMessage
 logger = logging.getLogger(__name__)
 
 MessageHandler = Callable[[TelegramInboundMessage], Awaitable[None]]
+_SSL_CONTEXT = CERTIFI_SSL_CONTEXT
 
 
 class TelegramRuntime:
@@ -25,7 +29,9 @@ class TelegramRuntime:
 
     def __init__(self, config: TelegramConfig):
         self._config = config
-        self._bot = Bot(token=config.bot_token)
+        request = HTTPXRequest(httpx_kwargs={"verify": _SSL_CONTEXT})
+        get_updates_request = HTTPXRequest(httpx_kwargs={"verify": _SSL_CONTEXT})
+        self._bot = Bot(token=config.bot_token, request=request, get_updates_request=get_updates_request)
         self._message_handler: MessageHandler | None = None
         self._bot_username: str | None = None
         self._poll_task: asyncio.Task | None = None

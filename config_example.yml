@@ -214,10 +214,10 @@ agents:
     name: 系统运维管理员
     description: 系统运维管理员，负责 Sensenova-Claw 平台的配置管理、Agent 管理、工具管理、Skill/Plugin 安装等运维操作
     temperature: 1.0
-    tools: ["read_file", "write_file", "bash_command", "get_secret", "write_secret"]
+    tools: ["read_file", "write_file", "edit_file", "bash_command", "get_secret", "write_secret"]
     skills: ["system-admin-skill"]
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     max_pingpong_turns: 10
     enabled: true
@@ -228,8 +228,8 @@ agents:
     temperature: 1.0
     tools: []
     skills: []
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     max_pingpong_turns: 10
     enabled: true
@@ -240,8 +240,8 @@ agents:
     temperature: 1.0
     tools: []
     skills: []
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 3
     enabled: true
 
@@ -249,10 +249,10 @@ agents:
     name: PPT 生成助手
     description: 生成 PPT 演示文稿，支持一句话生成
     temperature: 1.0
-    tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "send_message", "image_search", "ask_user", "memory_search"]
+    tools: ["serper_search", "fetch_url", "read_file", "write_file", "edit_file", "bash_command", "send_message", "image_search", "ask_user", "memory_search"]
     skills: ["ppt-superpower", "ppt-asset-plan", "ppt-html-gen", "ppt-image-selection", "ppt-page-assets", "ppt-page-html", "ppt-page-plan", "ppt-page-polish", "ppt-research-pack", "ppt-review", "ppt-source-analysis", "ppt-speaker-notes", "ppt-story-refine", "ppt-storyboard", "ppt-style-refine", "ppt-style-spec", "ppt-task-pack", "ppt-template-pack"]
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     enabled: true
 
@@ -260,10 +260,10 @@ agents:
     name: 数据分析助手
     description: 数据分析、可视化和报告生成
     temperature: 1.0
-    tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "ask_user", "memory_search", "get_secret", "write_secret"]
+    tools: ["read_file", "write_file", "edit_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "ask_user", "memory_search", "get_secret", "write_secret"]
     skills: ["excel-xlsx", "python-dataviz", "pdf", "csv-pipeline", "mineru-document-extractor", "openai-whisper-api"]
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     enabled: true
 
@@ -271,10 +271,10 @@ agents:
     name: 文档整理助手
     description: 处理多种来源的文档，支持格式转换和整理
     temperature: 1.0
-    tools: ["read_file", "write_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "feishu-drive", "ask_user", "memory_search", "get_secret", "write_secret"]
+    tools: ["read_file", "write_file", "edit_file", "bash_command", "send_message", "feishu_doc", "feishu-wiki", "feishu-drive", "ask_user", "memory_search", "get_secret", "write_secret"]
     skills: ["markdown-converter", "docx-cn", "excel-xlsx", "pdf", "pdf-generator", "mineru-document-extractor", "openai-whisper-api", "feishu-doc", "feishu-wiki", "feishu-drive"]
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     enabled: true
 
@@ -282,10 +282,10 @@ agents:
     name: 邮件助手
     description: 邮件收发、管理和定时提醒
     temperature: 1.0
-    tools: ["bash_command", "read_file", "write_file", "send_message", "send_email", "list_emails", "read_email", "download_attachment", "mark_email", "search_emails", "ask_user", "memory_search"]
+    tools: ["bash_command", "read_file", "write_file", "edit_file", "send_message", "send_email", "list_emails", "read_email", "download_attachment", "mark_email", "search_emails", "ask_user", "memory_search"]
     skills: []
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     enabled: true
 
@@ -293,10 +293,10 @@ agents:
     name: 搜索调研助手
     description: 深度调研特定主题，多轮搜索+内容抓取+生成报告
     temperature: 1.0
-    tools: ["serper_search", "fetch_url", "read_file", "write_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search", "get_secret", "write_secret"]
+    tools: ["serper_search", "fetch_url", "read_file", "write_file", "edit_file", "bash_command", "image_search", "send_message", "ask_user", "memory_search", "get_secret", "write_secret"]
     skills: ["mineru-document-extractor", "research-union", "union-search-skill"]
-    mcp_servers: []
-    mcp_tools: []
+    mcp_servers: null
+    mcp_tools: null
     max_send_depth: 2
     enabled: true
 

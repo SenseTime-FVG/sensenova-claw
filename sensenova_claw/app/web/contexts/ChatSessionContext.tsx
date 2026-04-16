@@ -52,6 +52,7 @@ export interface ChatSessionContextValue {
   createSession: (agentId: string, taskId?: string) => void;
   startNewChat: () => void;
   deleteSession: (sessionId: string) => Promise<void>;
+  renameSession: (sessionId: string, title: string) => Promise<boolean>;
   resetIfNeeded: () => void;
   cleanupEmptySession: () => void;
 
@@ -162,6 +163,7 @@ export function useChatSession(): ChatSessionContextValue {
     createSession: session.createSession,
     startNewChat: session.startNewChat,
     deleteSession: session.deleteSession,
+    renameSession: session.renameSession,
     resetIfNeeded: session.resetIfNeeded,
     cleanupEmptySession: session.cleanupEmptySession,
     sessions: session.sessions,
