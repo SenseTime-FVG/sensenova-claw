@@ -41,6 +41,24 @@ class TestRepository:
         assert "visible_s" in ids
         assert "hidden_s" in ids
 
+    async def test_list_sessions_includes_visible_ancestors_beyond_limit(self, test_repo):
+        await test_repo.create_session("parent_old", meta={"title": "Parent"})
+        await test_repo.create_session(
+            "child_new",
+            meta={"title": "Child", "parent_session_id": "parent_old"},
+        )
+        await test_repo.create_session("sibling_newer", meta={"title": "Sibling"})
+
+        # 让 parent 排在 limit 之外，但 child 仍在最近列表里
+        await test_repo.update_session_activity("child_new")
+        await test_repo.update_session_activity("sibling_newer")
+
+        sessions = await test_repo.list_sessions(limit=2)
+        ids = {s["session_id"] for s in sessions}
+
+        assert "child_new" in ids
+        assert "parent_old" in ids
+
     async def test_create_turn_and_complete(self, test_repo):
         await test_repo.create_session("st")
         await test_repo.create_turn("t1", "st", "hello")

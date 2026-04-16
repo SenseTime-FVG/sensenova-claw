@@ -22,7 +22,7 @@ const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
 // ── 常量 ──
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || '/ws';
 const WS_RECONNECT_INTERVAL_MS = 1000;
 const WS_MAX_RECONNECT_ATTEMPTS = 50;
 const COOKIE_NAME = 'sensenova_claw_token';

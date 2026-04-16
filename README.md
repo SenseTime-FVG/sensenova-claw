@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/badge/license-MIT-brightgreen" alt="License">
   </p>
   <p>
-    支持 Web、CLI、TUI、飞书、WhatsApp 多种接入方式 · 多 LLM Provider · 多 Agent 编排 · Skills 市场 · 记忆系统
+    支持 Web、CLI、TUI、飞书、WhatsApp 多种接入方式 · 多 LLM Provider · 多 Agent 编排 · MCP 集成 · Skills 市场 · 记忆系统
   </p>
 </div>
 
@@ -21,6 +21,7 @@
 - **事件驱动架构** — 所有模块通过 PublicEventBus 解耦通信，支持会话级隔离
 - **多 Provider 支持** — OpenAI / Anthropic / Gemini / 自定义，一键切换
 - **多 Agent 编排** — 动态创建子 Agent，支持委托调用和配置继承
+- **MCP 集成** — 支持接入外部 MCP Server，并按 Agent 细粒度控制 server / tool 可见性
 - **Skills 市场** — 声明式任务编排，支持从 ClawHub 安装/更新/卸载
 - **多渠道接入** — Web (Next.js) / CLI / TUI / 飞书 / WhatsApp，统一 Gateway 架构
 - **工具系统** — 内置 bash / 搜索 / 文件读写 / URL 抓取，支持权限管理
@@ -57,6 +58,7 @@ ui.user_input → agent.step_started → llm.call_requested → llm.call_complet
 - [Configuration](#️-configuration)
 - [Chat Channels](#-chat-channels)
 - [LLM Providers](#-llm-providers)
+- [MCP](#-mcp)
 - [Tools](#-tools)
 - [Skills](#-skills)
 - [CLI Reference](#-cli-reference)
@@ -73,7 +75,7 @@ ui.user_input → agent.step_started → llm.call_requested → llm.call_complet
 **Linux / macOS:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/install/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.sh | bash
 ```
 
 如果GITHUB请求失败（404），使用以下命令:
@@ -82,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/i
 curl -fsSL \
   -H "Authorization: Bearer <GITHUB_TOKEN>" \
   -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/SenseTime-FVG/sensenova-claw/contents/install/install.sh?ref=main" | bash
+  "https://api.github.com/repos/SenseTime-FVG/sensenova-claw/contents/install/install.sh?ref=dev" | bash
 ```
 
 如果安装完成后当前终端提示 `sensenova-claw: command not found`，或提示找不到 `node` / `npm`，执行以下命令  或 重启终端：
@@ -97,15 +99,15 @@ nvm use --lts
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.ps1 | iex
 ```
 
 安装完成后，运行 `sensenova-claw run` 启动服务（如果找不到命令，建议重启终端），然后打开 http://localhost:3000 进行 LLM 等配置。
 
 > 详细说明见 [install/README.md](install/README.md)
 >
-> 安装脚本默认拉取 release 维护的 `latest` tag；如需安装指定发布版本，可在安装前指定 `SENSENOVA_CLAW_APP_BRANCH`，例如:
-> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/main/install/install.sh | SENSENOVA_CLAW_APP_BRANCH=v1.0-beta.1 bash`
+> 如需验证某个发布分支或 tag，可在安装前指定 `SENSENOVA_CLAW_APP_BRANCH`，例如:
+> `curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.sh | SENSENOVA_CLAW_APP_BRANCH=v0.5.0 bash`
 
 ### Option B: 手动安装
 
@@ -196,6 +198,24 @@ tools:
   tavily_search:
     api_key: xxx              # Tavily API Key
     max_results: 5
+
+# MCP 配置
+mcp:
+  servers:
+    browsermcp:
+      transport: stdio
+      command: npx
+      args:
+        - "@browsermcp/mcp"
+
+agents:
+  gpt54:
+    model: gpt-5.4
+    tools: []                 # null = 全禁用，[] = 全启用，[...] = 白名单
+    skills: []
+    mcp_servers:
+      - browsermcp            # 仅启用这个 MCP server
+    mcp_tools: []             # null = 全禁用，[] = 该 server 下全部 tool 启用
 ```
 
 **配置加载优先级**: 环境变量 > `.sensenova-claw/config.yaml` > `config.yml` > 默认值
@@ -439,6 +459,82 @@ agent:
 4. 在 `config.yml` 的 `llm_providers` 中添加配置
 
 </details>
+
+## 🔌 MCP
+
+Sensenova-Claw 支持把外部 MCP Server 动态接入到现有工具系统中，模型可直接看到物化后的 MCP tools，命名格式为：
+
+```text
+mcp__<server_name>__<tool_name>
+```
+
+当前支持：
+
+- `stdio`
+- `sse`
+- `streamable-http`
+
+内置 MCP：
+
+- `browsermcp`
+  - 用于浏览器自动化、页面快照、点击、输入、截图等操作
+  - 推荐通过 `npx @browsermcp/mcp` 以 `stdio` 方式接入
+  - 适合给专门的浏览器 Agent 使用
+  - 需要安装[chrome extension](https://docs.browsermcp.io/setup-extension)
+
+推荐配置方式：
+
+- 在全局 `mcp.servers` 里声明 MCP Server
+- 在每个 Agent 里通过 `mcp_servers` / `mcp_tools` 控制可用范围
+
+Agent 级三态语义：
+
+- `null`：全部禁用
+- `[]`：全部启用
+- `[...]`：显式白名单
+
+示例：
+
+```yaml
+mcp:
+  servers:
+    browsermcp:
+      transport: stdio
+      command: npx
+      args:
+        - "@browsermcp/mcp"
+    docs-search:
+      transport: streamable-http
+      url: https://example.com/mcp
+      headers:
+        Authorization: Bearer ${DOCS_MCP_TOKEN}
+
+agents:
+  gpt54:
+    model: gpt-5.4
+    mcp_servers:
+      - browsermcp
+    mcp_tools: []
+
+  search-agent:
+    model: gemini-pro
+    mcp_servers:
+      - docs-search
+    mcp_tools:
+      - docs-search/search_docs
+      - docs-search/fetch_page
+```
+
+Web 管理界面支持：
+
+- 全局 MCP Server 管理页：`/mcp`
+- Agent 详情页按 server / tool 配置 MCP 开关
+
+对 `browsermcp` 这类单活资源型 stdio MCP，当前实现会：
+
+- 多个 Agent / session 共享同一个底层 stdio runtime
+- 对同一 server 的工具调用串行执行，降低冲突概率
+
 
 ## 🔧 Tools
 

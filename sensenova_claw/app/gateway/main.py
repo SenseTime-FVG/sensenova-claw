@@ -48,7 +48,7 @@ from sensenova_claw.platform.config.workspace import (
     resolve_sensenova_claw_home,
 )
 from sensenova_claw.platform.secrets.store import build_default_secret_store, describe_secret_store_status
-from sensenova_claw.interfaces.http import agents, tools, gateway, skills, workspace, config_api, sessions
+from sensenova_claw.interfaces.http import agents, tools, gateway, skills, workspace, config_api, sessions, office_api, mcp
 from sensenova_claw.interfaces.http import cron_api, notification_api, proactive_api
 
 # Token 认证模块（Jupyter-lab 风格）
@@ -448,6 +448,7 @@ app.include_router(workspace.router)
 from sensenova_claw.interfaces.http import files
 app.include_router(files.router)
 app.include_router(config_api.router)
+app.include_router(mcp.router)
 app.include_router(cron_api.router)
 app.include_router(notification_api.router)
 from sensenova_claw.interfaces.http import proactive_api
@@ -455,6 +456,7 @@ app.include_router(proactive_api.router)
 from sensenova_claw.interfaces.http import todolist_api
 app.include_router(todolist_api.router)
 app.include_router(sessions.router)
+app.include_router(office_api.router)
 from sensenova_claw.interfaces.http import custom_pages
 app.include_router(custom_pages.router)
 
