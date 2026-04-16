@@ -226,6 +226,11 @@ digraph select {
 | 因果推导/复杂分析 | **段落叙述** | 强行拆成 bullet |
 | 关键数字/指标 | 加粗或表格 | 埋入段落中间 |
 | 证据等级/评级 | 标签标注（A级 / 🔴 / Buy） | 仅用文字描述 |
+| 市场份额/占比分布 | **Mermaid `pie`** | 纯文字罗列百分比 |
+| 多实体关系/产业链/流程 | **Mermaid `graph`/`flowchart`** | 文字描述 A→B→C |
+| 事件时间线（有明确节点） | **Mermaid `timeline`** | 纯文字编年 |
+| 趋势数据（有多个数据点） | **Mermaid `xychart-beta`** | 只说"呈上升趋势" |
+| 概念性场景/全景/架构示意 | **AI 生图**（generate-image skill） | 用 Mermaid 画概念图 |
 
 ---
 

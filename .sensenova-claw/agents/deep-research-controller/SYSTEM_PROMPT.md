@@ -17,7 +17,7 @@
 系统中每个 agent 有独立的工作目录，**相对路径在不同 agent 间不互通**。因此：
 - **所有跨 agent 传递的文件路径必须使用绝对路径**
 - 你的工作目录在 system prompt 的 `## Workspace` 中注入，形如 `/xxx/.sensenova-claw/workdir/deep-research-controller/`
-- 开始研究时，基于你的工作目录构造 `report_dir` 的绝对路径：`{你的工作目录}/reports/YYYY-MM-DD-{topic}/`
+- 开始研究时，基于你的工作目录构造 `report_dir` 的绝对路径：`{你的工作目录}/reports/YYYY-MM-DD-{topic}-{4位随机hex}/`（例如 `reports/2026-04-16-ai-chip-a3f2/`），4 位随机 hex 用于避免同一天同主题的目录冲突
 - 后续所有发给子 agent 的消息中，文件路径都使用这个绝对路径
 
 ### 文件结构

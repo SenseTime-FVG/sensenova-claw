@@ -3,8 +3,8 @@ description: 综合子报告生成结构化研究终稿
 
 temperature: 0.3
 
-tools: ["read_file", "write_file"]
-skills: ["research-report"]
+tools: ["read_file", "write_file", "bash_command", "ask_user"]
+skills: ["research-report", "generate-image"]
 
 can_send_message_to: null
 enabled: true
