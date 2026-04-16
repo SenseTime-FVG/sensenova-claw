@@ -24,7 +24,6 @@ description: 将 deck_dir 中的 HTML 页面导出为可编辑的 PPTX 文件，
 
 - `deck_dir`：必须已存在，且 `pages/` 目录下至少有一个 `page_*.html` 文件。
 - `review.json`：必须存在；如果 review 标记为阻塞，或根本没有 review 工件，不得继续导出。
-- 必须先确认 `review.json` 存在。
 - `style-spec.json`（可选）：全局配色和字体，用于增强输出质量。
 - `storyboard.json`（可选）：PPT 标题，用于增强输出质量。
 
