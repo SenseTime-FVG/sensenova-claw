@@ -35,7 +35,9 @@ function Info { param($msg) Write-Host "[i] $msg" -ForegroundColor Cyan }
 function Fail {
     param($msg)
     Err $msg
-    exit 1
+    Write-Host ""
+    Write-Host "安装中断，请根据以上错误信息排查后重试。" -ForegroundColor Yellow
+    throw $msg
 }
 
 function Command-Exists {
@@ -105,7 +107,8 @@ function Install-Uv {
     }
 
     Info "安装 uv..."
-    irm https://astral.sh/uv/install.ps1 | iex
+    # 在子进程中执行 uv 安装脚本，防止其内部 exit 终止宿主 PowerShell
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
 
     # 刷新 PATH
     $env:PATH = "$env:USERPROFILE\.local\bin;$env:USERPROFILE\.cargo\bin;$env:PATH"
@@ -147,8 +150,8 @@ function Install-Fnm {
     if (Command-Exists winget) {
         winget install Schniz.fnm --accept-package-agreements --accept-source-agreements 2>$null
     } else {
-        # 降级：PowerShell 安装
-        irm https://fnm.vercel.app/install.ps1 | iex
+        # 降级：PowerShell 安装（子进程执行，防止 exit 终止宿主）
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://fnm.vercel.app/install.ps1 | iex"
     }
 
     # 刷新 PATH
