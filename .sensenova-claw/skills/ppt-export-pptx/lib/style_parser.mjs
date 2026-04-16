@@ -106,16 +106,28 @@ export function cssColorToHex(cssColor) {
 }
 
 // ---------------------------------------------------------------------------
-// pxToInch — 像素转英寸（基准：1280px = 10 英寸）
+// pxToInch — 像素转英寸（基准：canvasWidth px = 10 英寸）
 // ---------------------------------------------------------------------------
+
+// 画布宽度（px），默认 1280。每页提取时通过 setCanvasWidth 更新。
+let _canvasWidth = 1280;
+
+/**
+ * 设置当前页面的画布宽度（px），用于坐标换算。
+ * @param {number} w
+ */
+export function setCanvasWidth(w) {
+  if (w > 0) _canvasWidth = w;
+}
+
 /**
  * 将像素值转换为英寸。
- * 换算比例：1px = 10/1280 inch
+ * 换算比例：1px = 10/canvasWidth inch
  * @param {number} px
  * @returns {number}
  */
 export function pxToInch(px) {
-  return px * (10 / 1280);
+  return px * (10 / _canvasWidth);
 }
 
 // ---------------------------------------------------------------------------
@@ -175,27 +187,30 @@ export function parseLinearGradient(cssValue) {
     stopParts = parts.slice(1);
   }
 
-  // 解析颜色停止点
+  // 解析颜色停止点（保留 transparent / rgba alpha=0 的 stop，用于 SVG 渲染）
   const stops = [];
   for (const part of stopParts) {
     const p = part.trim();
     if (!p) continue;
 
-    // 尝试匹配 "<color> <position>%" 或 "<color>"
-    // color 可能是 rgb()/rgba()/hex/#xxx/named
     const stopMatch = p.match(/^(.*?)\s+([\d.]+)%\s*$/);
     if (stopMatch) {
       const rawColor = stopMatch[1].trim();
       const colorHex = cssColorToHex(rawColor);
-      if (colorHex !== null) {
-        stops.push({ position: parseFloat(stopMatch[2]), color: colorHex, rawColor });
-      }
+      // 保留 transparent stop：hex 为 null 时用 '000000' 占位，alpha 为 0
+      stops.push({
+        position: parseFloat(stopMatch[2]),
+        color: colorHex || '000000',
+        rawColor,
+        isTransparent: colorHex === null,
+      });
     } else {
-      // 无位置的 stop
       const colorHex = cssColorToHex(p);
-      if (colorHex !== null) {
-        stops.push({ color: colorHex, rawColor: p });
-      }
+      stops.push({
+        color: colorHex || '000000',
+        rawColor: p,
+        isTransparent: colorHex === null,
+      });
     }
   }
 
@@ -241,7 +256,7 @@ export function parseRadialGradient(cssValue) {
     stopParts = parts.slice(1);
   }
 
-  // 解析颜色停止点（与 parseLinearGradient 相同逻辑）
+  // 解析颜色停止点（保留 transparent stop）
   const stops = [];
   for (const part of stopParts) {
     const p = part.trim();
@@ -249,15 +264,21 @@ export function parseRadialGradient(cssValue) {
 
     const stopMatch = p.match(/^(.*?)\s+([\d.]+)%\s*$/);
     if (stopMatch) {
-      const colorHex = cssColorToHex(stopMatch[1].trim());
-      if (colorHex !== null) {
-        stops.push({ position: parseFloat(stopMatch[2]), color: colorHex });
-      }
+      const rawColor = stopMatch[1].trim();
+      const colorHex = cssColorToHex(rawColor);
+      stops.push({
+        position: parseFloat(stopMatch[2]),
+        color: colorHex || '000000',
+        rawColor,
+        isTransparent: colorHex === null,
+      });
     } else {
       const colorHex = cssColorToHex(p);
-      if (colorHex !== null) {
-        stops.push({ color: colorHex });
-      }
+      stops.push({
+        color: colorHex || '000000',
+        rawColor: p,
+        isTransparent: colorHex === null,
+      });
     }
   }
 
