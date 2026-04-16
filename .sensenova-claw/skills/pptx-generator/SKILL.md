@@ -245,5 +245,5 @@ slide.addText("03", {
 ## Dependencies
 
 - `pip install "markitdown[pptx]"` — text extraction
-- `npm install -g pptxgenjs` — creating from scratch
-- `npm install -g react-icons react react-dom sharp` — icons (optional)
+- `npm install pptxgenjs` — creating from scratch（在项目目录下本地安装）
+- `npm install react-icons react react-dom sharp` — icons (optional)
