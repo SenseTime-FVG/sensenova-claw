@@ -1,44 +1,16 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plus, RefreshCw,
   MessageSquare, Bot, Clock, Loader2, Trash2, Sparkles,
-  ChevronDown, ChevronRight, GitBranch,
+  ChevronDown, ChevronRight, GitBranch, Pencil,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { authFetch, authGet, API_BASE } from '@/lib/authFetch';
-import { useEventDispatcher, useSession } from '@/contexts/ws';
-import { type SessionItem, type SessionTreeNode, buildSessionTree, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
+import { useSession } from '@/contexts/ws';
+import { type SessionItem, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
 import type { CronJob } from '@/hooks/useDashboardData';
-
-function getSessionRunState(session: SessionItem, workingSessionIds: Set<string>): 'running' | 'idle' {
-  if (workingSessionIds.has(session.session_id)) return 'running';
-  return session.last_turn_status === 'started' ? 'running' : 'idle';
-}
-
-function SessionStatusDot({
-  session,
-  sizeClass,
-  workingSessionIds,
-}: {
-  session: SessionItem;
-  sizeClass: string;
-  workingSessionIds: Set<string>;
-}) {
-  const runState = getSessionRunState(session, workingSessionIds);
-  return (
-    <span
-      data-testid={`workbench-session-status-${session.session_id}`}
-      data-status={runState}
-      className={cn(
-        'rounded-full border border-background/80 shadow-sm',
-        sizeClass,
-        runState === 'running' ? 'bg-amber-400' : 'bg-emerald-400',
-      )}
-    />
-  );
-}
 
 // ── 最近对话列表项 ──
 
@@ -48,7 +20,7 @@ function RecentChatItem({
   isActive,
   onClick,
   onDelete,
-  workingSessionIds,
+  onRename,
   isChild,
   isLast,
 }: {
@@ -57,27 +29,44 @@ function RecentChatItem({
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
-  workingSessionIds: Set<string>;
+  onRename?: (newTitle: string) => void;
   isChild?: boolean;
   isLast?: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const title = getTitle(session.meta);
-  const hasChildren = Boolean(session.has_children);
+  const [editValue, setEditValue] = useState(title);
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  const handleStartEdit = () => {
+    setEditValue(title);
+    setIsEditing(true);
+    setTimeout(() => editInputRef.current?.select(), 0);
+  };
+
+  const handleSubmitEdit = () => {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== title && onRename) {
+      onRename(trimmed);
+    }
+    setIsEditing(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditValue(title);
+    setIsEditing(false);
+  };
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (hasChildren) {
-      onDelete();
-      return;
-    }
     if (confirmDelete) {
       onDelete();
       setConfirmDelete(false);
-      return;
+    } else {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
     }
-    setConfirmDelete(true);
-    setTimeout(() => setConfirmDelete(false), 3000);
   };
 
   if (isChild) {
@@ -103,15 +92,28 @@ function RecentChatItem({
               : 'hover:bg-indigo-50/60 text-foreground/70 dark:hover:bg-indigo-800/20 dark:text-foreground/80',
           )}
         >
-          <div className="shrink-0 w-3 flex flex-col items-center gap-1">
-            <div className={cn(
-              'w-1.5 h-1.5 rounded-full',
-              isActive ? 'bg-indigo-500 dark:bg-indigo-400' : 'bg-indigo-300/60 dark:bg-indigo-400/50',
-            )} />
-            <SessionStatusDot session={session} sizeClass="w-2 h-2" workingSessionIds={workingSessionIds} />
-          </div>
+          <div className={cn(
+            'w-1.5 h-1.5 rounded-full shrink-0',
+            isActive ? 'bg-indigo-500 dark:bg-indigo-400' : 'bg-indigo-300/60 dark:bg-indigo-400/50',
+          )} />
           <div className="flex-1 min-w-0">
-            <div className="truncate text-[11px] font-medium">{title}</div>
+            {isEditing ? (
+              <input
+                ref={editInputRef}
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { e.preventDefault(); handleSubmitEdit(); }
+                  if (e.key === 'Escape') handleCancelEdit();
+                }}
+                onBlur={handleCancelEdit}
+                onClick={e => e.stopPropagation()}
+                className="w-full text-[11px] font-medium bg-background border border-primary rounded px-1 py-0.5 outline-none"
+                autoFocus
+              />
+            ) : (
+              <div className="truncate text-[11px] font-medium" onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(); }}>{title}</div>
+            )}
             <div className="flex items-center gap-1 mt-0.5">
               <span className="text-[9px] text-muted-foreground/60 dark:text-muted-foreground/70 truncate">{agentName}</span>
               <span className="text-[9px] text-muted-foreground/30 dark:text-muted-foreground/40">·</span>
@@ -120,14 +122,13 @@ function RecentChatItem({
           </div>
           <button
             onClick={handleDelete}
-            data-testid={`workbench-delete-session-${session.session_id}`}
             className={cn(
               'shrink-0 p-0.5 rounded transition-colors',
               confirmDelete
                 ? 'opacity-100 text-destructive hover:bg-destructive/10'
                 : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10',
             )}
-            title={hasChildren ? '删除会话' : confirmDelete ? '确认删除' : '删除会话'}
+            title={confirmDelete ? '确认删除' : '删除会话'}
           >
             <Trash2 className="w-2.5 h-2.5" />
           </button>
@@ -146,15 +147,28 @@ function RecentChatItem({
           : 'hover:bg-muted/60 text-foreground/80 border border-transparent dark:text-foreground/90',
       )}
     >
-      <div className="shrink-0 w-4 flex flex-col items-center gap-1">
-        <MessageSquare className={cn(
-          'w-3.5 h-3.5 mt-0.5',
-          isActive ? 'text-primary' : 'text-muted-foreground',
-        )} />
-        <SessionStatusDot session={session} sizeClass="w-2 h-2" workingSessionIds={workingSessionIds} />
-      </div>
+      <MessageSquare className={cn(
+        'w-3.5 h-3.5 shrink-0 mt-0.5',
+        isActive ? 'text-primary' : 'text-muted-foreground',
+      )} />
       <div className="flex-1 min-w-0">
-        <div className="truncate font-medium text-xs">{title}</div>
+        {isEditing ? (
+          <input
+            ref={editInputRef}
+            value={editValue}
+            onChange={e => setEditValue(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); handleSubmitEdit(); }
+              if (e.key === 'Escape') handleCancelEdit();
+            }}
+            onBlur={handleCancelEdit}
+            onClick={e => e.stopPropagation()}
+            className="w-full text-xs font-medium bg-background border border-primary rounded px-1 py-0.5 outline-none"
+            autoFocus
+          />
+        ) : (
+          <div className="truncate font-medium text-xs" onDoubleClick={(e) => { e.stopPropagation(); handleStartEdit(); }}>{title}</div>
+        )}
         <div className="flex items-center gap-1.5 mt-0.5">
           <Bot className="w-2.5 h-2.5 text-muted-foreground/60 shrink-0" />
           <span className="text-[10px] text-muted-foreground truncate">{agentName}</span>
@@ -164,14 +178,13 @@ function RecentChatItem({
       </div>
       <button
         onClick={handleDelete}
-        data-testid={`workbench-delete-session-${session.session_id}`}
         className={cn(
           'shrink-0 p-1 rounded-lg transition-colors mt-0.5',
           confirmDelete
             ? 'opacity-100 text-destructive hover:bg-destructive/10'
             : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10',
         )}
-        title={hasChildren ? '删除会话' : confirmDelete ? '确认删除' : '删除会话'}
+        title={confirmDelete ? '确认删除' : '删除会话'}
       >
         <Trash2 className="w-3 h-3" />
       </button>
@@ -179,67 +192,38 @@ function RecentChatItem({
   );
 }
 
-function ChildSessionBranch({
-  children,
-  isLast,
-}: {
-  children: React.ReactNode;
-  isLast?: boolean;
-}) {
-  return (
-    <div className="flex items-stretch">
-      <div className="w-6 shrink-0 flex flex-col items-center">
-        <div className={cn(
-          'w-px flex-1 bg-indigo-300/40 dark:bg-indigo-400/30',
-          isLast && 'max-h-[50%]',
-        )} />
-        {isLast && <div className="flex-1" />}
-      </div>
-      <div className="flex items-center -ml-[3px]">
-        <div className="w-3 h-px bg-indigo-300/40 dark:bg-indigo-400/30" />
-      </div>
-      <div className="flex-1 min-w-0">
-        {children}
-      </div>
-    </div>
-  );
-}
-
 // ── 可展开的主会话项（包含子会话下拉） ──
 
 function ParentSessionGroup({
-  node,
+  session,
+  children: childSessions,
   agentMap,
   currentSessionId,
   switchSession,
   deleteSession,
-  workingSessionIds,
-  isChild = false,
-  isLast = false,
+  onRename,
 }: {
-  node: SessionTreeNode;
+  session: SessionItem;
+  children: SessionItem[];
   agentMap: Record<string, string>;
   currentSessionId: string | null;
   switchSession: (sid: string) => void;
   deleteSession: (sid: string) => Promise<void>;
-  workingSessionIds: Set<string>;
-  isChild?: boolean;
-  isLast?: boolean;
+  onRename: (sid: string, newTitle: string) => void;
 }) {
-  const { session, children: childSessions } = node;
-  const hasActiveChild = childSessions.some(child => child.session.session_id === currentSessionId);
+  const hasActiveChild = childSessions.some(c => c.session_id === currentSessionId);
   const [expanded, setExpanded] = useState(hasActiveChild);
 
   useEffect(() => {
     if (hasActiveChild && !expanded) setExpanded(true);
-  }, [expanded, hasActiveChild]);
+  }, [hasActiveChild]);
 
   const toggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
     setExpanded(prev => !prev);
   };
 
-  const content = (
+  return (
     <div className={cn(
       'rounded-xl transition-colors',
       expanded && 'bg-indigo-50/40 dark:bg-indigo-900/25 pb-1.5',
@@ -251,15 +235,14 @@ function ParentSessionGroup({
         isActive={currentSessionId === session.session_id}
         onClick={() => switchSession(session.session_id)}
         onDelete={() => deleteSession(session.session_id)}
-        workingSessionIds={workingSessionIds}
+        onRename={(newTitle) => onRename(session.session_id, newTitle)}
       />
 
       {/* 展开/收起按钮 */}
       <button
         onClick={toggleExpand}
         className={cn(
-          'flex items-center gap-1.5 w-full pr-3 py-1 transition-colors',
-          'pl-6',
+          'flex items-center gap-1.5 w-full pl-6 pr-3 py-1 transition-colors',
           'text-[10px] font-medium',
           expanded
             ? 'text-indigo-600 dark:text-indigo-300'
@@ -281,43 +264,21 @@ function ParentSessionGroup({
       {expanded && (
         <div className="pl-4 pr-1">
           {childSessions.map((child, idx) => (
-            child.children.length > 0 ? (
-              <ParentSessionGroup
-                key={child.session.session_id}
-                node={child}
-                agentMap={agentMap}
-                currentSessionId={currentSessionId}
-                switchSession={switchSession}
-                deleteSession={deleteSession}
-                workingSessionIds={workingSessionIds}
-                isChild
-                isLast={idx === childSessions.length - 1}
-              />
-            ) : (
-              <RecentChatItem
-                key={child.session.session_id}
-                session={child.session}
-                agentName={agentMap[getAgentId(child.session.meta)] || getAgentId(child.session.meta)}
-                isActive={currentSessionId === child.session.session_id}
-                onClick={() => switchSession(child.session.session_id)}
-                onDelete={() => deleteSession(child.session.session_id)}
-                workingSessionIds={workingSessionIds}
-                isChild
-                isLast={idx === childSessions.length - 1}
-              />
-            )
+            <RecentChatItem
+              key={child.session_id}
+              session={child}
+              agentName={agentMap[getAgentId(child.meta)] || getAgentId(child.meta)}
+              isActive={currentSessionId === child.session_id}
+              onClick={() => switchSession(child.session_id)}
+              onDelete={() => deleteSession(child.session_id)}
+              onRename={(newTitle) => onRename(child.session_id, newTitle)}
+              isChild
+              isLast={idx === childSessions.length - 1}
+            />
           ))}
         </div>
       )}
     </div>
-  );
-
-  if (!isChild) return content;
-
-  return (
-    <ChildSessionBranch isLast={isLast}>
-      {content}
-    </ChildSessionBranch>
   );
 }
 
@@ -333,7 +294,6 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
     refreshTaskGroups,
     loadingSessions,
   } = useSession();
-  const { globalActivity } = useEventDispatcher();
 
   const [agentMap, setAgentMap] = useState<Record<string, string>>({});
   const [loadingAgents, setLoadingAgents] = useState(true);
@@ -357,11 +317,27 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
 
   useEffect(() => { loadAgents(); }, [loadAgents]);
 
-  const sessionTree = (() => {
+  // 将 sessions 按父子关系分组
+  const { rootSessions, childrenMap } = (() => {
     const filtered = [...sessions]
       .filter(s => !agentFilter || getAgentId(s.meta) === agentFilter)
       .sort((a, b) => b.last_active - a.last_active);
-    return buildSessionTree(filtered);
+
+    const sessionIdSet = new Set(filtered.map(s => s.session_id));
+    const cMap: Record<string, SessionItem[]> = {};
+    const roots: SessionItem[] = [];
+
+    for (const s of filtered) {
+      const parentId = getParentSessionId(s.meta);
+      if (parentId && sessionIdSet.has(parentId)) {
+        if (!cMap[parentId]) cMap[parentId] = [];
+        cMap[parentId].push(s);
+      } else {
+        roots.push(s);
+      }
+    }
+
+    return { rootSessions: roots, childrenMap: cMap };
   })();
 
   const handleNewChat = () => {
@@ -372,6 +348,18 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
     loadAgents();
     refreshTaskGroups();
   };
+
+  // 重命名会话标题
+  const handleRename = useCallback(async (sessionId: string, newTitle: string) => {
+    try {
+      await authFetch(`${API_BASE}/api/sessions/${sessionId}/title`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle }),
+      });
+      refreshTaskGroups();
+    } catch { /* ignore */ }
+  }, [refreshTaskGroups]);
 
   return (
     <div className="flex flex-col h-full">
@@ -401,9 +389,9 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-2.5 py-2.5 space-y-1">
-        {loadingSessions && sessionTree.length === 0 ? (
+        {loadingSessions && rootSessions.length === 0 ? (
           <p className="text-xs text-muted-foreground/50 px-1 py-8 text-center">加载中...</p>
-        ) : sessionTree.length === 0 ? (
+        ) : rootSessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <Clock className="w-8 h-8 text-muted-foreground/20 mb-2" />
             <p className="text-xs text-muted-foreground/50 mb-2">暂无对话记录</p>
@@ -415,30 +403,33 @@ function RecentChatsPanel({ agentFilter }: { agentFilter?: string }) {
             </button>
           </div>
         ) : (
-          sessionTree.map(node => {
-            if (node.children.length === 0) {
+          rootSessions.map(session => {
+            const children = childrenMap[session.session_id] || [];
+            if (children.length === 0) {
               return (
                 <RecentChatItem
-                  key={node.session.session_id}
-                  session={node.session}
-                  agentName={agentMap[getAgentId(node.session.meta)] || getAgentId(node.session.meta)}
-                  isActive={currentSessionId === node.session.session_id}
-                  onClick={() => switchSession(node.session.session_id)}
-                  onDelete={() => deleteSession(node.session.session_id)}
-                  workingSessionIds={globalActivity.workingSessionIds}
+                  key={session.session_id}
+                  session={session}
+                  agentName={agentMap[getAgentId(session.meta)] || getAgentId(session.meta)}
+                  isActive={currentSessionId === session.session_id}
+                  onClick={() => switchSession(session.session_id)}
+                  onDelete={() => deleteSession(session.session_id)}
+                  onRename={(newTitle) => handleRename(session.session_id, newTitle)}
                 />
               );
             }
             return (
               <ParentSessionGroup
-                key={node.session.session_id}
-                node={node}
+                key={session.session_id}
+                session={session}
                 agentMap={agentMap}
                 currentSessionId={currentSessionId}
                 switchSession={switchSession}
                 deleteSession={deleteSession}
-                workingSessionIds={globalActivity.workingSessionIds}
-              />
+                onRename={handleRename}
+              >
+                {children}
+              </ParentSessionGroup>
             );
           })
         )}
