@@ -33,7 +33,7 @@ Create professional charts, graphs, and statistical visualizations using Python'
 ### Setup Environment
 
 ```bash
-cd skills/python-dataviz
+cd .sensenova-claw/skills/python-dataviz
 python3 -m venv .venv
 source .venv/bin/activate
 pip install .
@@ -87,7 +87,7 @@ plt.savefig('output.svg', bbox_inches='tight')
 
 **Interactive:**
 - Any plotly chart → `plotly.express` or `plotly.graph_objects`
-- See references/plotly-examples.md
+- See `scripts/interactive.py` for examples
 
 ## Best Practices
 
@@ -149,8 +149,6 @@ See references/ for detailed guides:
 
 - **Color theory & palettes**: references/colors.md
 - **Statistical plots**: references/statistical.md
-- **Plotly interactive charts**: references/plotly-examples.md
-- **Multi-panel layouts**: references/layouts.md
 
 ## Example Scripts
 
@@ -209,9 +207,9 @@ plt.savefig('output.png', dpi=300)
 
 **"No module named matplotlib"**
 ```bash
-cd skills/python-dataviz
+cd .sensenova-claw/skills/python-dataviz
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install .
 ```
 
 **Blank output / "Figure is empty"**
@@ -235,7 +233,7 @@ plt.savefig('output.png', dpi=300)  # Not 72 or 100
 The skill includes a venv with all dependencies. Always activate before use:
 
 ```bash
-cd /home/matt/.openclaw/workspace/skills/python-dataviz
+cd .sensenova-claw/skills/python-dataviz
 source .venv/bin/activate
 ```
 

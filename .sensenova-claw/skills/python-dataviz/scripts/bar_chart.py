@@ -4,10 +4,17 @@ Bar Chart Examples - matplotlib and seaborn
 Usage: python bar_chart.py
 """
 
+import os
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
+
+# 输出目录
+OUTPUT_DIR = Path(__file__).parent.parent / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Set style
 sns.set_theme(style="whitegrid")
@@ -23,7 +30,7 @@ def simple_bar():
     plt.ylabel('Sales (units)', fontsize=12)
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
-    plt.savefig('bar_simple.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'bar_simple.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: bar_simple.png")
 
 # Example 2: Grouped bar chart
@@ -41,7 +48,7 @@ def grouped_bar():
     plt.ylabel('Sales (units)', fontsize=12)
     plt.legend(title='Quarter', frameon=True, shadow=True)
     plt.tight_layout()
-    plt.savefig('bar_grouped.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'bar_grouped.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: bar_grouped.png")
 
 # Example 3: Horizontal bar chart
@@ -60,7 +67,7 @@ def horizontal_bar():
     plt.xlabel('Demand Score', fontsize=12)
     plt.grid(axis='x', alpha=0.3)
     plt.tight_layout()
-    plt.savefig('bar_horizontal.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'bar_horizontal.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: bar_horizontal.png")
 
 # Example 4: Stacked bar chart
@@ -82,7 +89,7 @@ def stacked_bar():
     plt.legend(frameon=True, shadow=True)
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
-    plt.savefig('bar_stacked.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'bar_stacked.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: bar_stacked.png")
 
 if __name__ == '__main__':
