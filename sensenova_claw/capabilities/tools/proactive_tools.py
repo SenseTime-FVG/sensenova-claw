@@ -35,6 +35,7 @@ def _parse_trigger(trigger_dict: dict) -> TimeTrigger | EventTrigger:
             event_type=trigger_dict.get("event_type", ""),
             filter=trigger_dict.get("filter"),
             debounce_ms=trigger_dict.get("debounce_ms", 5000),
+            exclude_payload=trigger_dict.get("exclude_payload"),
         )
     raise ValueError(f"未知 trigger kind: {kind!r}")
 
@@ -64,10 +65,14 @@ class CreateProactiveJobTool(Tool):
             "agent_id": {"type": "string", "description": "执行任务的 agent id，默认 proactive-agent"},
             "safety": {
                 "type": "object",
-                "description": "安全限制配置，支持 max_llm_calls(int) 和 max_duration_ms(int)",
+                "description": "安全限制配置",
                 "properties": {
                     "max_llm_calls": {"type": "integer", "description": "最大 LLM 调用次数"},
                     "max_duration_ms": {"type": "integer", "description": "最大执行时长（毫秒）"},
+                    "max_tool_calls": {"type": "integer", "description": "最大工具调用次数"},
+                    "allowed_tools": {"type": "array", "items": {"type": "string"}, "description": "允许使用的工具白名单"},
+                    "blocked_tools": {"type": "array", "items": {"type": "string"}, "description": "禁止使用的工具黑名单"},
+                    "auto_disable_after_errors": {"type": "integer", "description": "连续失败多少次后自动禁用"},
                 },
             },
         },
@@ -99,10 +104,12 @@ class CreateProactiveJobTool(Tool):
 
         # 从 safety 参数构建 SafetyConfig，未指定的字段使用默认值
         safety_kwargs: dict[str, Any] = {}
-        if "max_llm_calls" in safety_dict:
-            safety_kwargs["max_llm_calls"] = int(safety_dict["max_llm_calls"])
-        if "max_duration_ms" in safety_dict:
-            safety_kwargs["max_duration_ms"] = int(safety_dict["max_duration_ms"])
+        for int_key in ("max_llm_calls", "max_duration_ms", "max_tool_calls", "auto_disable_after_errors"):
+            if int_key in safety_dict:
+                safety_kwargs[int_key] = int(safety_dict[int_key])
+        for list_key in ("allowed_tools", "blocked_tools"):
+            if list_key in safety_dict:
+                safety_kwargs[list_key] = safety_dict[list_key]
 
         job = ProactiveJob(
             id=f"pj-{uuid.uuid4().hex[:8]}",

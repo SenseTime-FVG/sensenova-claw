@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ssl
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -11,7 +12,7 @@ from websockets.exceptions import ConnectionClosedError
 from websockets.frames import Close
 
 from sensenova_claw.adapters.plugins.qq.config import QQConfig, QQOfficialConfig, QQOneBotConfig
-from sensenova_claw.adapters.plugins.qq.runtime_official import QQOfficialRuntime
+from sensenova_claw.adapters.plugins.qq.runtime_official import QQOfficialRuntime, _SSL_CONTEXT
 
 
 def _make_config() -> QQConfig:
@@ -188,7 +189,9 @@ async def test_refresh_access_token_uses_bots_domain():
     assert runtime._access_token == "token-2"
     client_cls.assert_called_once()
     assert client_cls.call_args.kwargs["base_url"] == "https://bots.qq.com"
+    assert client_cls.call_args.kwargs["verify"] is _SSL_CONTEXT
     assert client.post.await_args.args[0] == "/app/getAppAccessToken"
+    assert isinstance(_SSL_CONTEXT, ssl.SSLContext)
 
 
 @pytest.mark.asyncio
@@ -208,6 +211,7 @@ async def test_fetch_gateway_uses_gateway_bot_endpoint():
 
     assert gateway == "wss://example.qq/gateway"
     assert client_cls.call_args.kwargs["base_url"] == "https://api.sgroup.qq.com"
+    assert client_cls.call_args.kwargs["verify"] is _SSL_CONTEXT
     assert client.get.await_args.args[0] == "/gateway/bot"
 
 
@@ -346,3 +350,16 @@ async def test_recv_loop_reconnects_and_resumes_after_session_timeout():
             "seq": 42,
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_open_gateway_connection_uses_ssl_context():
+    runtime = QQOfficialRuntime(config=_make_config())
+
+    with patch.object(runtime, "_fetch_gateway", AsyncMock(return_value="wss://example.qq/gateway")), patch(
+        "sensenova_claw.adapters.plugins.qq.runtime_official.websockets.connect",
+        AsyncMock(return_value=object()),
+    ) as connect_mock:
+        await runtime._open_gateway_connection()
+
+    connect_mock.assert_awaited_once_with("wss://example.qq/gateway", ssl=_SSL_CONTEXT)

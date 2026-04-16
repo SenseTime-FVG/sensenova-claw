@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from sensenova_claw.capabilities.tools.ask_user_tool import AskUserTool
-from sensenova_claw.capabilities.tools.apply_patch_tool import ApplyPatchTool
 from sensenova_claw.capabilities.tools.base import Tool
 from sensenova_claw.capabilities.tools.builtin import (
+    ApplyPatchTool,
     BaiduSearchTool,
     BashCommandTool,
     BraveSearchTool,
+    EditFileTool,
     FetchUrlTool,
     ImageSearchTool,
     ManageTodolistTool,
@@ -15,7 +16,6 @@ from sensenova_claw.capabilities.tools.builtin import (
     TavilySearchTool,
     WriteFileTool,
 )
-from sensenova_claw.capabilities.tools.edit_tool import EditTool
 from sensenova_claw.capabilities.tools.email import (
     DownloadAttachmentTool,
     ListEmailsTool,
@@ -43,7 +43,7 @@ from sensenova_claw.platform.config.config import config
 _TOOL_CONFIG_KEY_MAP: dict[str, str] = {
     "read_file": "tools.file_operations.enabled",
     "write_file": "tools.file_operations.enabled",
-    "edit": "tools.file_operations.enabled",
+    "edit_file": "tools.file_operations.enabled",
     "apply_patch": "tools.file_operations.enabled",
 }
 
@@ -81,7 +81,7 @@ class ToolRegistry:
 
             ManageTodolistTool(),
             ApplyPatchTool(),
-            EditTool(),
+            EditFileTool(),
             CreateAgentTool(),
             AskUserTool(),
         ]:

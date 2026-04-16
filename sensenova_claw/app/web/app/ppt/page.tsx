@@ -45,6 +45,8 @@ import { cn } from '@/lib/utils';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { type SessionItem, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
+import { SessionContextMenu } from '@/components/session/SessionContextMenu';
+import { InlineSessionTitleEditor } from '@/components/session/InlineSessionTitleEditor';
 
 // ── 左栏 Tab 定义 ──
 
@@ -93,6 +95,7 @@ function PPTWorkspace() {
     switchSession,
     createSession,
     deleteSession,
+    renameSession,
     startNewChat,
     loadingSessions,
   } = useChatSession();
@@ -138,6 +141,9 @@ function PPTWorkspace() {
   const [leftTab, setLeftTab] = useState<LeftTab>('outline');
   const [previewPptx, setPreviewPptx] = useState<DroppedFile | null>(null);
   const [loadingDrop, setLoadingDrop] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ session: SessionItem; x: number; y: number } | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const dropContainerRef = useRef<HTMLDivElement>(null);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
 
@@ -201,6 +207,25 @@ function PPTWorkspace() {
 
   const hasDeck = !!deckData.slideSet || !!deckData.storyboard;
   const stages = hasDeck ? deckData.stages : DEFAULT_STAGES;
+
+  const startRename = () => {
+    if (!contextMenu) return;
+    setEditingSessionId(contextMenu.session.session_id);
+    setRenameValue(getTitle(contextMenu.session.meta));
+  };
+
+  const cancelRename = () => {
+    setEditingSessionId(null);
+    setRenameValue('');
+  };
+
+  const submitRename = async () => {
+    if (!editingSessionId) return;
+    const success = await renameSession(editingSessionId, renameValue);
+    if (success) {
+      cancelRename();
+    }
+  };
 
   // ── 工作台模式（三栏布局） ──
   return (
@@ -387,6 +412,12 @@ function PPTWorkspace() {
                           key={session.session_id}
                           type="button"
                           onClick={() => switchSession(session.session_id)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setContextMenu({ session, x: event.clientX, y: event.clientY });
+                          }}
+                          data-testid={`ppt-session-item-${session.session_id}`}
                           className={cn(
                             'w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-all text-[11px] group',
                             isActive
@@ -395,7 +426,18 @@ function PPTWorkspace() {
                           )}
                         >
                           <MessageSquare className={cn('w-3 h-3 shrink-0', isActive ? 'text-primary' : 'text-muted-foreground/40')} />
-                          <span className="flex-1 truncate font-medium">{title}</span>
+                          {editingSessionId === session.session_id ? (
+                            <InlineSessionTitleEditor
+                              value={renameValue}
+                              onChange={setRenameValue}
+                              onSubmit={submitRename}
+                              onCancel={cancelRename}
+                              testId={`ppt-rename-input-${session.session_id}`}
+                              className="flex-1 rounded border border-primary/40 bg-background px-1.5 py-0.5 text-[11px] font-medium text-foreground outline-none ring-0"
+                            />
+                          ) : (
+                            <span className="flex-1 truncate font-medium">{title}</span>
+                          )}
                           <span className="text-[9px] text-muted-foreground/40 shrink-0">{timeLabel(session.last_active)}</span>
                           <button
                             type="button"
@@ -425,6 +467,15 @@ function PPTWorkspace() {
           </ResizablePanelGroup>
         </ResizablePanel>
       </ResizablePanelGroup>
+
+      <SessionContextMenu
+        open={!!contextMenu}
+        x={contextMenu?.x ?? 0}
+        y={contextMenu?.y ?? 0}
+        onClose={() => setContextMenu(null)}
+        onRename={startRename}
+        testId="ppt-session-context-menu"
+      />
 
       {/* ── 底栏：模板条 ── */}
       <div className="shrink-0 border-t border-border/40 bg-muted/10">

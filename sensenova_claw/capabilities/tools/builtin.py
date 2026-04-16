@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import mimetypes
+from dataclasses import dataclass
+import difflib
 import json
+import mimetypes
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Literal
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -1063,7 +1065,7 @@ class FetchUrlTool(Tool):
 
 class ReadFileTool(Tool):
     name = "read_file"
-    description = "读取文本文件"
+    description = "从本地文件系统读取文件"
     parameters = {
         "type": "object",
         "properties": {
@@ -1095,9 +1097,137 @@ class ReadFileTool(Tool):
         return {"file_path": str(file_path), "content": "\n".join(selected)}
 
 
+class EditFileTool(Tool):
+    name = "edit_file"
+    description = f"""对文件执行精确的字符串替换，只允许 `oldText` 命中一次。
+
+用法:
+- 在进行编辑操作之前，您必须在对话中至少使用一次您的 `{ReadFileTool.name}` 工具。如果在未读取文件的情况下尝试进行编辑，该工具将会报错。
+- 在编辑来自 `{ReadFileTool.name}` 工具输出的文本时，请务必保留其精确的缩进（制表符/空格）。切勿在“旧字符串”或“新字符串”中包含任何行号前缀部分。
+- 总是优先编辑代码库中的现有文件。除非明确需要，否则绝不新建文件。
+- 仅在用户明确要求时才使用表情符号。除非被要求，否则不要在文件中添加表情符号。
+- 如果文件中 `oldText` 不具有唯一性，编辑操作将会失败。你需要提供一个包含更多上下文的更长字符串以使其具有唯一性。"""
+    risk_level = ToolRiskLevel.MEDIUM
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "要编辑的文件路径"},
+            "oldText": {"type": "string", "description": "被替换的旧文本"},
+            "newText": {"type": "string", "description": "替换后的新文本"},
+            "old_text": {"type": "string", "description": "oldText 的 snake_case 别名"},
+            "new_text": {"type": "string", "description": "newText 的 snake_case 别名"},
+            "old_string": {"type": "string", "description": "oldText 的兼容别名"},
+            "new_string": {"type": "string", "description": "newText 的兼容别名"},
+        },
+        "required": ["path"],
+    }
+
+    async def execute(self, **kwargs: Any) -> Any:
+        path_param = str(kwargs.get("path", "")).strip()
+        old_text = self._pick_text(kwargs, primary="oldText", snake="old_text", compat="old_string")
+        new_text = self._pick_text(kwargs, primary="newText", snake="new_text", compat="new_string")
+        agent_workdir = kwargs.get("_agent_workdir")
+
+        if not path_param:
+            return {"success": False, "error": "path 不能为空"}
+        if old_text is None:
+            return {"success": False, "error": "oldText 不能为空"}
+        if new_text is None:
+            return {"success": False, "error": "newText 不能为空"}
+        if old_text == "":
+            return {"success": False, "error": "oldText 不能为空字符串"}
+
+        try:
+            return self._execute_once(path_param=path_param, old_text=old_text, new_text=new_text, agent_workdir=agent_workdir)
+        except Exception as exc:
+            recovered = self._recover_post_write_success(
+                path_param=path_param,
+                old_text=old_text,
+                new_text=new_text,
+                agent_workdir=agent_workdir,
+            )
+            if recovered is not None:
+                return recovered
+            raise exc
+
+    @staticmethod
+    def _pick_text(kwargs: dict[str, Any], *, primary: str, snake: str, compat: str) -> str | None:
+        for key in (primary, snake, compat):
+            value = kwargs.get(key)
+            if value is not None:
+                return str(value)
+        return None
+
+    def _execute_once(
+        self,
+        *,
+        path_param: str,
+        old_text: str,
+        new_text: str,
+        agent_workdir: str | None,
+    ) -> dict[str, Any]:
+        target = _resolve_with_workdir(path_param, agent_workdir)
+        if not target.exists():
+            return {"success": False, "error": f"文件不存在: {path_param}"}
+        if not target.is_file():
+            return {"success": False, "error": f"目标不是普通文件: {path_param}"}
+
+        old_content = _read_text(target)
+        occurrences = _count_occurrences(old_content, old_text)
+        if occurrences == 0:
+            return {"success": False, "error": f"oldText 未命中: {path_param}"}
+        if occurrences > 1:
+            return {"success": False, "error": f"oldText 在文件中出现 multiple matches ({occurrences})，拒绝编辑: {path_param}"}
+
+        new_content = _replace_once(old_content, old_text, new_text)
+        target.write_text(new_content, encoding="utf-8")
+
+        diff_text = _generate_unified_diff(old_content, new_content, path_param)
+        return {
+            "success": True,
+            "message": f"Successfully replaced text in {path_param}.",
+            "path": str(target),
+            "diff": diff_text,
+            "first_changed_line": _first_changed_line(old_content, new_content),
+        }
+
+    def _recover_post_write_success(
+        self,
+        *,
+        path_param: str,
+        old_text: str,
+        new_text: str,
+        agent_workdir: str | None,
+    ) -> dict[str, Any] | None:
+        try:
+            target = _resolve_with_workdir(path_param, agent_workdir)
+            content = _read_text(target)
+        except Exception:
+            return None
+
+        has_new = new_text in content
+        still_has_old = bool(old_text) and old_text in content
+        if has_new and not still_has_old:
+            return {
+                "success": True,
+                "message": f"Successfully replaced text in {path_param}.",
+                "path": str(target),
+                "diff": "",
+                "first_changed_line": None,
+            }
+        return None
+
+
 class WriteFileTool(Tool):
     name = "write_file"
-    description = "写入文本文件，支持全量覆盖、追加、插入、或替换指定行范围"
+    description = f"""将文件写入本地文件系统。修改操作请优先使用 `{EditFileTool.name}` 工具。
+
+用法：  
+- 如果在指定路径存在现有文件，此工具将会覆盖该文件。
+- 建议使用 `{EditFileTool.name}` 工具来修改现有文件——它只会发送差异部分。仅使用此工具来创建新文件或进行彻底重写。
+- 仅在用户明确要求的情况下使用表情符号。除非被要求，否则避免在文件中添加表情符号。
+- 支持全量覆盖、追加、插入、或替换指定行范围。仅在 `{EditFileTool.name}` 工具不可用的情况下，才可以使用该工具进行追加、插入、替换。
+"""
     risk_level = ToolRiskLevel.MEDIUM
     parameters = {
         "type": "object",
@@ -1377,3 +1507,423 @@ class ManageTodolistTool(Tool):
             return {"success": True, "deleted": item_id}
 
         return {"success": False, "error": f"未知操作: {action}"}
+
+
+BEGIN_PATCH_MARKER = "*** Begin Patch"
+END_PATCH_MARKER = "*** End Patch"
+ADD_FILE_MARKER = "*** Add File: "
+DELETE_FILE_MARKER = "*** Delete File: "
+UPDATE_FILE_MARKER = "*** Update File: "
+MOVE_TO_MARKER = "*** Move to: "
+EOF_MARKER = "*** End of File"
+CHANGE_CONTEXT_MARKER = "@@ "
+EMPTY_CHANGE_CONTEXT_MARKER = "@@"
+
+
+@dataclass
+class AddFileHunk:
+    kind: Literal["add"]
+    path: str
+    contents: str
+
+
+@dataclass
+class DeleteFileHunk:
+    kind: Literal["delete"]
+    path: str
+
+
+@dataclass
+class UpdateFileChunk:
+    change_context: str | None
+    old_lines: list[str]
+    new_lines: list[str]
+    is_end_of_file: bool
+
+
+@dataclass
+class UpdateFileHunk:
+    kind: Literal["update"]
+    path: str
+    move_path: str | None
+    chunks: list[UpdateFileChunk]
+
+
+Hunk = AddFileHunk | DeleteFileHunk | UpdateFileHunk
+
+
+class ApplyPatchTool(Tool):
+    name = "apply_patch"
+    description = (
+        "Apply a patch to one or more files using the apply_patch format. "
+        "The input should include *** Begin Patch and *** End Patch markers."
+    )
+    risk_level = ToolRiskLevel.MEDIUM
+    parameters = {
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "string",
+                "description": (
+                    "Patch content using the *** Begin Patch/End Patch format. "
+                    "Use *** Add File:, *** Delete File:, or *** Update File: as hunk headers. "
+                    "Within an update hunk, @@ starts a chunk; use plain @@ for no explicit context, "
+                    "or @@ <context> to anchor the chunk on an existing line. "
+                    "Use *** Move to: inside *** Update File: to rename a file, and *** End of File "
+                    "for EOF-only inserts. "
+                    "Example:\n"
+                    "*** Begin Patch\n"
+                    "*** Add File: path/to/file.txt\n"
+                    "+line 1\n"
+                    "+line 2\n"
+                    "*** Update File: src/app.py\n"
+                    "@@\n"
+                    "-old line\n"
+                    "+new line\n"
+                    "*** Delete File: obsolete.txt\n"
+                    "*** End Patch"
+                ),
+            },
+        },
+        "required": ["input"],
+    }
+
+    async def execute(self, **kwargs: Any) -> Any:
+        agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
+        path_policy = kwargs.pop("_path_policy", None)
+        patch_input = str(kwargs.get("input", ""))
+
+        try:
+            result = apply_patch_text(
+                patch_input,
+                agent_workdir=agent_workdir,
+                path_policy=path_policy,
+            )
+        except Exception as exc:
+            return {"success": False, "error": str(exc).strip() or type(exc).__name__}
+
+        return {
+            "success": True,
+            "summary": result["summary"],
+            "message": result["message"],
+        }
+
+
+def apply_patch_text(
+    patch_input: str,
+    *,
+    agent_workdir: str | None,
+    path_policy: Any = None,
+) -> dict[str, Any]:
+    hunks = parse_patch_text(patch_input)
+    if not hunks:
+        raise ValueError("No files were modified.")
+
+    summary = {"added": [], "modified": [], "deleted": []}
+    seen = {"added": set(), "modified": set(), "deleted": set()}
+
+    for hunk in hunks:
+        if isinstance(hunk, AddFileHunk):
+            target_path, display_path = resolve_patch_path(
+                hunk.path,
+                agent_workdir=agent_workdir,
+                path_policy=path_policy,
+            )
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(hunk.contents, encoding="utf-8")
+            record_summary(summary, seen, "added", display_path)
+            continue
+
+        if isinstance(hunk, DeleteFileHunk):
+            target_path, display_path = resolve_patch_path(
+                hunk.path,
+                agent_workdir=agent_workdir,
+                path_policy=path_policy,
+            )
+            if not target_path.exists():
+                raise FileNotFoundError(f"文件不存在: {display_path}")
+            target_path.unlink()
+            record_summary(summary, seen, "deleted", display_path)
+            continue
+
+        target_path, _ = resolve_patch_path(
+            hunk.path,
+            agent_workdir=agent_workdir,
+            path_policy=path_policy,
+        )
+        applied = apply_update_hunks(target_path, hunk.chunks)
+
+        if hunk.move_path:
+            move_path, move_display = resolve_patch_path(
+                hunk.move_path,
+                agent_workdir=agent_workdir,
+                path_policy=path_policy,
+            )
+            move_path.parent.mkdir(parents=True, exist_ok=True)
+            move_path.write_text(applied, encoding="utf-8")
+            target_path.unlink()
+            record_summary(summary, seen, "modified", move_display)
+        else:
+            target_path.write_text(applied, encoding="utf-8")
+            record_summary(summary, seen, "modified", to_display_path(target_path, agent_workdir))
+
+    return {
+        "summary": summary,
+        "message": format_summary(summary),
+    }
+
+
+def record_summary(
+    summary: dict[str, list[str]],
+    seen: dict[str, set[str]],
+    bucket: Literal["added", "modified", "deleted"],
+    value: str,
+) -> None:
+    if value in seen[bucket]:
+        return
+    seen[bucket].add(value)
+    summary[bucket].append(value)
+
+
+def format_summary(summary: dict[str, list[str]]) -> str:
+    lines = ["Success. Updated the following files:"]
+    for file_path in summary["added"]:
+        lines.append(f"A {file_path}")
+    for file_path in summary["modified"]:
+        lines.append(f"M {file_path}")
+    for file_path in summary["deleted"]:
+        lines.append(f"D {file_path}")
+    return "\n".join(lines)
+
+
+def resolve_patch_path(
+    raw_path: str,
+    *,
+    agent_workdir: str | None,
+    path_policy: Any = None,
+) -> tuple[Path, str]:
+    resolved = _resolve_with_workdir(raw_path, agent_workdir)
+    if path_policy:
+        verdict = path_policy.check_write(str(resolved))
+        verdict_name = getattr(verdict, "value", str(verdict))
+        if verdict_name == "deny":
+            raise PermissionError(f"系统目录禁止写入: {raw_path}")
+        if verdict_name == "need_grant":
+            raise PermissionError(f"该路径未授权，请先获得用户许可: {raw_path}")
+    return resolved, to_display_path(resolved, agent_workdir)
+
+
+def to_display_path(path: Path, agent_workdir: str | None) -> str:
+    if not agent_workdir:
+        return str(path)
+    workdir = Path(agent_workdir).expanduser().resolve()
+    try:
+        return str(path.relative_to(workdir))
+    except ValueError:
+        return str(path)
+
+
+def _strip_heredoc_boundary(text: str) -> str:
+    lines = text.strip().splitlines()
+    if len(lines) >= 3 and lines[0].startswith("<<") and lines[-1] == lines[0][2:]:
+        return "\n".join(lines[1:-1])
+    return text
+
+
+def parse_patch_text(patch_input: str) -> list[Hunk]:
+    lines = _strip_heredoc_boundary(patch_input).splitlines()
+    if not lines:
+        raise ValueError("Patch input is empty.")
+    if lines[0] != BEGIN_PATCH_MARKER:
+        raise ValueError(f"Patch must start with '{BEGIN_PATCH_MARKER}'")
+    if lines[-1] != END_PATCH_MARKER:
+        raise ValueError(f"Patch must end with '{END_PATCH_MARKER}'")
+
+    hunks: list[Hunk] = []
+    index = 1
+    while index < len(lines) - 1:
+        line = lines[index]
+        if line.startswith(ADD_FILE_MARKER):
+            path = line[len(ADD_FILE_MARKER):]
+            index += 1
+            content_lines: list[str] = []
+            while index < len(lines) - 1 and not _is_hunk_header(lines[index]):
+                current = lines[index]
+                if not current.startswith("+"):
+                    raise ValueError(
+                        f"Invalid patch hunk at line {index + 1}: "
+                        f"Unexpected line found in add hunk: '{current}'. "
+                        "Every line should start with '+'"
+                    )
+                content_lines.append(current[1:])
+                index += 1
+            hunks.append(AddFileHunk(kind="add", path=path, contents="\n".join(content_lines) + ("\n" if content_lines else "")))
+            continue
+
+        if line.startswith(DELETE_FILE_MARKER):
+            hunks.append(DeleteFileHunk(kind="delete", path=line[len(DELETE_FILE_MARKER):]))
+            index += 1
+            continue
+
+        if line.startswith(UPDATE_FILE_MARKER):
+            hunk, index = _parse_update_hunk(lines, index)
+            hunks.append(hunk)
+            continue
+
+        raise ValueError(
+            f"Invalid patch hunk at line {index + 1}: '{line}' is not a valid hunk header. "
+            "Valid hunk headers: '*** Add File: {path}', '*** Delete File: {path}', "
+            "'*** Update File: {path}'"
+        )
+    return hunks
+
+
+def _is_hunk_header(line: str) -> bool:
+    return (
+        line.startswith(ADD_FILE_MARKER)
+        or line.startswith(DELETE_FILE_MARKER)
+        or line.startswith(UPDATE_FILE_MARKER)
+        or line == END_PATCH_MARKER
+    )
+
+
+def _parse_update_hunk(lines: list[str], start_index: int) -> tuple[UpdateFileHunk, int]:
+    path = lines[start_index][len(UPDATE_FILE_MARKER):]
+    index = start_index + 1
+    move_path: str | None = None
+    if index < len(lines) - 1 and lines[index].startswith(MOVE_TO_MARKER):
+        move_path = lines[index][len(MOVE_TO_MARKER):]
+        index += 1
+
+    chunks: list[UpdateFileChunk] = []
+    allow_missing_context = True
+    while index < len(lines) - 1 and not _is_hunk_header(lines[index]):
+        line = lines[index]
+        if line == EMPTY_CHANGE_CONTEXT_MARKER:
+            change_context = None
+            index += 1
+        elif line.startswith(CHANGE_CONTEXT_MARKER):
+            change_context = line[len(CHANGE_CONTEXT_MARKER):]
+            index += 1
+        elif allow_missing_context:
+            change_context = None
+        else:
+            raise ValueError(
+                f"Invalid patch hunk at line {index + 1}: Expected update hunk to start with a @@ "
+                f"context marker, got: '{line}'"
+            )
+
+        old_lines: list[str] = []
+        new_lines: list[str] = []
+        is_end_of_file = False
+
+        while index < len(lines) - 1 and not _is_hunk_header(lines[index]):
+            current = lines[index]
+            if current == EOF_MARKER:
+                is_end_of_file = True
+                index += 1
+                break
+            if current.startswith(" "):
+                old_lines.append(current[1:])
+                new_lines.append(current[1:])
+            elif current.startswith("-"):
+                old_lines.append(current[1:])
+            elif current.startswith("+"):
+                new_lines.append(current[1:])
+            else:
+                if old_lines or new_lines:
+                    break
+                raise ValueError(
+                    f"Invalid patch hunk at line {index + 1}: Unexpected line found in update hunk: '{current}'. "
+                    "Every line should start with ' ' (context line), '+' (added line), or '-' "
+                    "(removed line)"
+                )
+            index += 1
+
+        chunks.append(
+            UpdateFileChunk(
+                change_context=change_context,
+                old_lines=old_lines,
+                new_lines=new_lines,
+                is_end_of_file=is_end_of_file,
+            )
+        )
+        allow_missing_context = False
+
+    return UpdateFileHunk(kind="update", path=path, move_path=move_path, chunks=chunks), index
+
+
+def apply_update_hunks(path: Path, chunks: list[UpdateFileChunk]) -> str:
+    if not path.exists():
+        raise FileNotFoundError(f"文件不存在: {path}")
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    cursor = 0
+
+    for chunk in chunks:
+        cursor = _find_chunk_start(lines, chunk, cursor, path)
+        end = cursor + len(chunk.old_lines)
+        lines[cursor:end] = chunk.new_lines
+        cursor += len(chunk.new_lines)
+
+    return "\n".join(lines) + "\n"
+
+
+def _find_chunk_start(
+    lines: list[str],
+    chunk: UpdateFileChunk,
+    cursor: int,
+    path: Path,
+) -> int:
+    if chunk.is_end_of_file:
+        expected_start = len(lines) - len(chunk.old_lines)
+        if expected_start < 0 or lines[expected_start:] != chunk.old_lines:
+            raise ValueError(f"EOF chunk does not match target file: {path}")
+        return expected_start
+
+    candidates = range(cursor, len(lines) - len(chunk.old_lines) + 1)
+    if chunk.change_context is not None:
+        candidates = [i for i in candidates if i < len(lines) and lines[i] == chunk.change_context]
+
+    for start in candidates:
+        if lines[start:start + len(chunk.old_lines)] == chunk.old_lines:
+            return start
+    raise ValueError(f"Update chunk does not match target file: {path}")
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _count_occurrences(content: str, needle: str) -> int:
+    if needle == "":
+        return 0
+    return content.count(needle)
+
+
+def _replace_once(content: str, old_text: str, new_text: str) -> str:
+    return content.replace(old_text, new_text, 1)
+
+
+def _generate_unified_diff(old_content: str, new_content: str, path_label: str) -> str:
+    return "\n".join(
+        difflib.unified_diff(
+            old_content.splitlines(),
+            new_content.splitlines(),
+            fromfile=path_label,
+            tofile=path_label,
+            lineterm="",
+        )
+    )
+
+
+def _first_changed_line(old_content: str, new_content: str) -> int | None:
+    old_lines = old_content.splitlines()
+    new_lines = new_content.splitlines()
+    max_len = max(len(old_lines), len(new_lines))
+    for index in range(max_len):
+        old_line = old_lines[index] if index < len(old_lines) else None
+        new_line = new_lines[index] if index < len(new_lines) else None
+        if old_line != new_line:
+            return index + 1
+    return None
