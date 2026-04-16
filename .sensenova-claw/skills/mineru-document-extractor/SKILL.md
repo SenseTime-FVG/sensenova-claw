@@ -1,6 +1,6 @@
 ---
 name: mineru-document-extractor
-description: 当需要解析 PDF 或文档图片并转换为 Markdown 时使用。此技能基于 MinerU 提取文档中的结构化内容，支持扫描件 OCR，并可按需导出为 Markdown、HTML、LaTeX 或 DOCX。适用于 PDF 转 Markdown、提取 PDF 正文、识别扫描版 PDF、提取表格或公式、批量解析文档等任务。
+description: 解析 PDF、文档图片等非文本文件，提取其中的文本内容。支持转换为 Markdown、HTML、LaTeX、DOCX 等格式，支持本地文件和 URL，支持扫描件 OCR、表格和公式识别。适用于：阅读 PDF 内容、提取文档正文、识别扫描件、提取表格或公式、格式转换。
 ---
 
 # MinerU 渠道选择型文档解析

@@ -183,7 +183,7 @@ def _truncate_fetch_text(text: str) -> str:
     """限制 fetch_url 返回的文本大小，避免单工具结果过大。"""
     max_size = int(config.get("tools.fetch_url.max_response_mb", 10) * 1024 * 1024)
     if len(text) > max_size:
-        return text[:max_size]
+        return text[:max_size] + "\n\n[内容已截断] 原始内容过大，仅返回前部分。如需获取完整内容，请阅读剩余文件内容。"
     return text
 
 
@@ -1048,9 +1048,12 @@ class FetchUrlTool(Tool):
             session_id=str(kwargs.get("_session_id", "")).strip(),
             agent_id=str(kwargs.get("_source_agent_id", "")).strip() or None,
         )
+        hint = ""
+        if content_type == "application/pdf" or download_name.lower().endswith(".pdf"):
+            hint = "\n提示: 该文件是 PDF 文档，fetch_url 无法提取其文本内容。如需阅读 PDF 内容，请将其转换为文本后阅读。"
         summary = (
             f"已下载非文本内容: {content_type}, 文件名: {download_name}, "
-            f"大小: {len(body)} bytes, 保存路径: {download_path}"
+            f"大小: {len(body)} bytes, 保存路径: {download_path}{hint}"
         )
         result.update({
             "download_path": str(download_path),

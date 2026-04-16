@@ -25,26 +25,30 @@
 3. 利用 context_from_briefing 中的实体和术语作为搜索**起点**——但要有意识地探索 scout 未覆盖的区域：
    - 搜索过程中发现的新实体、新术语、新视角同样重要，甚至可能比 scout 的发现更有价值
    - 如果搜索结果指向 context_from_briefing 中没有提到的方向，**主动追踪**而非忽略
-4. 根据 sources 中建议的来源类别选择搜索工具和策略（见下方"搜索工具与专业来源选择"）
+4. **为每个子问题选择正确的检索模式**：根据 sources 中的来源类别和子问题的信息类型选择工具（见下方"选择正确的检索模式"），不要默认所有子问题都用通用搜索
 5. **时效感知**：如果任务包含 time_sensitivity 描述，识别哪些子问题需要最新信息、哪些不需要（见下方"时效感知搜索策略"）
 
-### 搜索工具与专业来源选择
+### 选择正确的检索模式
 
-通用搜索工具（serper_search、brave_search、tavily_search）适合大多数场景，但对于特定来源类别，**专业搜索 skill 能获取通用搜索覆盖不到的信息**：
+不同的子问题需要不同的检索模式。根据你要找的信息类型选择工具，而非默认用通用搜索再补充。
 
-| 来源类别 | 优先使用 | 补充来源（skill） |
-|----------|----------|-------------------|
-| 官方文档、新闻报道 | serper_search / brave_search | — |
-| 学术论文、预印本 | serper_search（概览） | **search-academic** skill（ArXiv / Semantic Scholar / PubMed 精确搜索，支持按领域、引用数、日期排序） |
-| 开源项目、代码、技术问答 | serper_search（概览） | **search-code** skill（GitHub 仓库/Issue、Stack Overflow、HuggingFace 模型搜索） |
-| 中文社交媒体、用户评价 | serper_search（概览） | **search-social-cn** skill（知乎、小红书、微博、B站真实用户讨论） |
-| 英文社区、社交讨论 | serper_search（概览） | **search-social-en** skill（Reddit、Twitter/X、YouTube 社区讨论） |
-| AI 模型、技术评测 | serper_search（概览） | **search-ai** skill（专业 AI 领域搜索） |
+**通用搜索**（serper_search / brave_search / tavily_search）：
+- 适合：新闻报道、官方公告、公开网页、跨领域发现
+- 本质：Google 索引 + PageRank 排序，返回标题和摘要片段
 
-**使用原则：**
-- 当 sources 中包含 `academic`、`github`、`social_media`、`forum`、`review` 等类别时，主动考虑对应的专业 skill
-- 通用搜索和专业 skill 是**互补关系**：先用通用搜索建立概览，再用专业 skill 深挖特定来源
-- 不需要每次都用 skill——如果通用搜索已经找到了该来源类别的高质量信息，不必重复搜索
+**专业搜索 skill** 提供通用搜索**做不到**的能力：
+
+| skill | 独有能力 | 适用场景 |
+|-------|----------|----------|
+| **search-academic** | 按引用数/日期排序、引用图遍历（forward/backward）、论文章节级全文阅读、开放获取检测 | sources 含 `academic`：找高引论文、追溯研究脉络、读方法论细节 |
+| **search-code** | GitHub 仓库/Issue/代码搜索、HuggingFace 模型/数据集搜索、Stack Overflow 按投票排序 | sources 含 `github`：评估项目活跃度、找技术实现、查已知问题 |
+| **search-social-cn** | 知乎、小红书、B站、微博、抖音平台内搜索（Google 仅索引冰山一角） | sources 含 `social_media` / `review`（中文）：获取真实用户评价和讨论 |
+| **search-social-en** | Reddit subreddit 定向搜索、Twitter/X 实时推文、YouTube 视频搜索 | sources 含 `social_media` / `forum`（英文）：社区讨论、实时舆情 |
+
+**选择原则：**
+- **按子问题的信息类型选工具**：找论文用 search-academic，找代码用 search-code，找用户评价用 social skill——不要先用 serper 搜一遍再用 skill 重复搜索
+- **通用搜索用于没有对应 skill 的场景**：新闻、官方文档、行业报告等仍用 serper
+- **同一轮搜索可混合使用**：一个子问题可能同时需要 serper（找新闻报道）和 search-academic（找原始论文）
 
 ### 时效感知搜索策略
 
@@ -89,33 +93,14 @@
 
 ### 追踪线索
 
-如果搜到的内容引用了原始报告、数据源或关键人物，用 fetch_url 追溯原始来源，不要停留在二手转述。
+搜索结果中发现的线索应主动追踪，而非停留在摘要层面：
 
-### 引用追溯（学术研究维度）
-
-当来源类别包含 `academic` 时，关键词搜索之外还应利用引用图深化发现。使用 search-academic skill 的 `semantic_scholar_refs.py` 脚本：
-
-**何时触发**：
-- 找到一篇高度相关的论文（直接回答了某个 key_question）→ 查它的 **references**（backward），找到它所依赖的奠基工作
-- 找到领域奠基论文（高引用、被多篇结果共同引用）→ 查它的 **citations**（forward），找到最新跟进工作
-- 关键词搜索信息不足，但已有 1-2 篇相关论文 → 通过引用图展开，发现关键词覆盖不到的相关工作（如使用不同术语的早期研究）
-
-**何时不触发**：
-- 关键词搜索已充分满足证据标准 → 不必为追溯而追溯
-- 非学术类来源（新闻、社交媒体、官方文档）→ 引用追溯仅对学术论文有效
-
-**操作模式**：
-```bash
-# 从高相关论文找奠基工作
-python3 scripts/semantic_scholar_refs.py <paper_id> references --min-citations 50 --limit 10
-
-# 从奠基论文找最新进展
-python3 scripts/semantic_scholar_refs.py <paper_id> citations --year-min 2024 --limit 10
-
-# Citation chain：从种子论文 backward 找到关键参考 B，再从 B forward 找到更多相关工作
-```
-
-**与关键词搜索的关系**：引用追溯是关键词搜索的**补充**，不是替代。先用关键词搜索建立基础，找到种子论文后再通过引用图深化。两者发现的论文可能有重叠，去重即可。
+- **追溯原始来源**：搜到的内容引用了原始报告、数据源或关键人物 → 用 fetch_url 获取一手来源
+- **引用图遍历**（仅学术维度）：找到高度相关的论文后，用 search-academic skill 沿引用图展开——这是关键词搜索**做不到**的检索模式：
+  - 从高相关论文 **backward**（references）→ 找到它依赖的奠基工作
+  - 从奠基论文 **forward**（citations）→ 找到最新跟进工作
+  - 关键词搜索信息不足时 → 通过引用图发现使用不同术语的相关工作
+  - 关键词搜索已满足证据标准时无需追溯
 
 ### 适时停止
 
