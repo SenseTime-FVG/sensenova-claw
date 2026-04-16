@@ -374,19 +374,44 @@ const BROWSER_EXTRACT_FN = () => {
     return node;
   }
 
+  function buildSyntheticBackground(rootEl, wrapperRect) {
+    const styles = extractStyles(rootEl);
+    const hasBackgroundColor = styles.backgroundColor
+      && styles.backgroundColor !== 'rgba(0, 0, 0, 0)'
+      && styles.backgroundColor !== 'transparent';
+    const hasBackgroundImage = styles.backgroundImage && styles.backgroundImage !== 'none';
+    if (!hasBackgroundColor && !hasBackgroundImage) {
+      return null;
+    }
+    return {
+      tag: 'DIV',
+      id: 'bg',
+      classList: ['synthetic-body-bg'],
+      styles,
+      bounds: {
+        x: 0,
+        y: 0,
+        w: wrapperRect.width,
+        h: wrapperRect.height,
+      },
+      children: [],
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // 主提取逻辑
   // ---------------------------------------------------------------------------
   const wrapper = document.querySelector('.wrapper');
-  if (!wrapper) {
-    return { error: 'No .wrapper element found' };
+  const root = wrapper || document.body;
+  if (!root) {
+    return { error: 'No slide root element found' };
   }
 
-  const wrapperRect = wrapper.getBoundingClientRect();
+  const wrapperRect = root.getBoundingClientRect();
 
   // 提取背景 (#bg)
   const bgEl = document.getElementById('bg');
-  const bg = bgEl ? extractNode(bgEl, wrapperRect) : null;
+  const bg = bgEl ? extractNode(bgEl, wrapperRect) : buildSyntheticBackground(root, wrapperRect);
 
   // 提取页头 (#header)
   const headerEl = document.getElementById('header');
@@ -404,7 +429,7 @@ const BROWSER_EXTRACT_FN = () => {
   const overlays = [];
   // 提取 rest 层（.wrapper 中非已知 ID 的非绝对定位子元素，如 .header 等浮动区域）
   const rest = [];
-  for (const child of wrapper.children) {
+  for (const child of root.children) {
     if (child === bgEl || child === headerEl || child === ctEl || child === footerEl) continue;
     const cs = window.getComputedStyle(child);
     if (cs.getPropertyValue('display') === 'none') continue;
@@ -421,8 +446,23 @@ const BROWSER_EXTRACT_FN = () => {
 
   // 提取 body 背景色（用于 opacity < 1 的 #bg 底色填充）
   const bodyBgColor = window.getComputedStyle(document.body).getPropertyValue('background-color');
+  // body 的 background-image（用于 gradient 背景）
+  const bodyBgImage = window.getComputedStyle(document.body).getPropertyValue('background-image');
 
-  return { bg, header, ct, footer, overlays, rest, bodyBgColor };
+  // 提取 .wrapper 背景（当 #bg 为透明时的 fallback）
+  let wrapperBgColor = null;
+  let wrapperBgImage = null;
+  if (wrapper) {
+    const wcs = window.getComputedStyle(wrapper);
+    wrapperBgColor = wcs.getPropertyValue('background-color');
+    wrapperBgImage = wcs.getPropertyValue('background-image');
+  }
+
+  // 检测画布尺寸（可能不是 1280x720）
+  const canvasWidth = wrapperRect.width;
+  const canvasHeight = wrapperRect.height;
+
+  return { bg, header, ct, footer, overlays, rest, bodyBgColor, bodyBgImage, wrapperBgColor, wrapperBgImage, canvasWidth, canvasHeight };
 };
 
 // ---------------------------------------------------------------------------
@@ -436,17 +476,29 @@ const BROWSER_EXTRACT_FN = () => {
  * @returns {Promise<{bg:Object|null, ct:Object|null, footer:Object|null}>}
  */
 export async function extractPage(page, htmlPath) {
-  // 转换为 file:// URL
   const fileUrl = htmlPath.startsWith('file://')
     ? htmlPath
     : `file://${path.resolve(htmlPath)}`;
 
+  // 先用较大 viewport 加载，以便检测实际画布尺寸
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(fileUrl, { waitUntil: 'load' });
+  await page.waitForTimeout(200);
 
-  // 等待 300ms 让动态样式完全计算完成
-  await page.waitForTimeout(300);
+  // 检测 HTML 实际画布尺寸（.wrapper / .slide / body）
+  const canvasSize = await page.evaluate(() => {
+    const wrapper = document.querySelector('.wrapper') || document.querySelector('.slide');
+    if (wrapper) {
+      const r = wrapper.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return { w: Math.round(r.width), h: Math.round(r.height) };
+    }
+    return { w: 1280, h: 720 };
+  });
 
-  // 在浏览器中执行提取脚本
+  // 用实际尺寸设置 viewport 并重新渲染
+  await page.setViewportSize({ width: canvasSize.w, height: canvasSize.h });
+  await page.waitForTimeout(200);
+
   const ir = await page.evaluate(BROWSER_EXTRACT_FN);
 
   return ir;
@@ -468,7 +520,6 @@ export async function extractPages(htmlPaths) {
 
   try {
     const page = await browser.newPage();
-    await page.setViewportSize({ width: 1280, height: 720 });
 
     for (const htmlPath of htmlPaths) {
       try {
