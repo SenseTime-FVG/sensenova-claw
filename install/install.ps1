@@ -206,27 +206,145 @@ function Install-Node {
     }
 }
 
+# ── 步骤 3.5: 安装 Git ──
+
+function Install-Git {
+    if (Command-Exists git) {
+        Log "Git 已安装: $(git --version)"
+        return
+    }
+
+    # 方式 1: 尝试 winget
+    if (Command-Exists winget) {
+        Info "通过 winget 安装 Git..."
+        winget install Git.Git --accept-package-agreements --accept-source-agreements 2>$null
+        # 刷新 PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        if (Command-Exists git) {
+            Log "Git 安装成功: $(git --version)"
+            return
+        }
+        Warn "winget 安装 Git 失败，尝试下载 MinGit"
+    }
+
+    # 方式 2: 下载 MinGit 到用户目录（便携版 Git，标准 zip，约 45MB）
+    Info "从 GitHub 获取 MinGit 最新版本..."
+    try {
+        $release = Invoke-RestMethod "https://api.github.com/repos/git-for-windows/git/releases/latest" -Headers @{ "User-Agent" = "sensenova-claw-installer" } -TimeoutSec 15
+        $asset = $release.assets | Where-Object { $_.name -match "^MinGit-.*-64-bit\.zip$" } | Select-Object -First 1
+        if (-not $asset) {
+            Fail "未找到 MinGit 下载地址，请手动安装 Git: https://git-scm.com/download/win"
+        }
+        $tag = $release.tag_name
+        $assetName = $asset.name
+        $githubUrl = $asset.browser_download_url
+        $primaryUrl = if ($IS_CN) {
+            "https://registry.npmmirror.com/-/binary/git-for-windows/$tag/$assetName"
+        } else {
+            $githubUrl
+        }
+    } catch {
+        Fail "获取 Git 下载地址失败: $_。请手动安装 Git: https://git-scm.com/download/win"
+    }
+
+    $gitDir = "$SENSENOVA_CLAW_HOME\git"
+    $gitZip = "$env:TEMP\$assetName"
+    $prevProgressPref = $ProgressPreference
+    $ProgressPreference = "SilentlyContinue"
+
+    Info "下载 MinGit: $primaryUrl"
+    $downloaded = $false
+    try {
+        Invoke-WebRequest -Uri $primaryUrl -OutFile $gitZip -UseBasicParsing
+        $downloaded = $true
+    } catch {
+        Warn "下载失败: $_"
+    }
+    if ((-not $downloaded) -and $IS_CN -and ($primaryUrl -ne $githubUrl)) {
+        Warn "国内镜像不可用，回退到 GitHub 直链..."
+        try {
+            Invoke-WebRequest -Uri $githubUrl -OutFile $gitZip -UseBasicParsing
+            $downloaded = $true
+        } catch {
+            Warn "GitHub 下载也失败: $_"
+        }
+    }
+    $ProgressPreference = $prevProgressPref
+
+    if (-not $downloaded) {
+        Fail "MinGit 下载失败，请手动安装 Git: https://git-scm.com/download/win"
+    }
+
+    New-Item -ItemType Directory -Force -Path $gitDir | Out-Null
+    Expand-Archive -Path $gitZip -DestinationPath $gitDir -Force
+    Remove-Item $gitZip -ErrorAction SilentlyContinue
+
+    # 添加到 PATH（当前进程）
+    $env:PATH = "$gitDir\cmd;$env:PATH"
+
+    if (Command-Exists git) {
+        Log "Git (MinGit) 安装成功: $(git --version)"
+    } else {
+        Fail "Git 安装失败，请手动安装: https://git-scm.com/download/win"
+    }
+}
+
 # ── 步骤 4: 克隆/更新仓库 ──
 
+# 返回用于 clone/fetch 的 URL 列表：原始 URL 优先，失败后用 GitHub 代理镜像兜底
+function Resolve-RepoUrls {
+    $urls = @($REPO_URL)
+    # 仅 github.com 的 URL 才能套公共代理
+    if ($REPO_URL -match '^https?://github\.com/') {
+        foreach ($proxy in @("https://gh-proxy.com/", "https://ghfast.top/", "https://mirror.ghproxy.com/")) {
+            $urls += "$proxy$REPO_URL"
+        }
+    }
+    return $urls
+}
+
 function Setup-Repo {
+    $urls = Resolve-RepoUrls
+
     if (Test-Path "$APP_DIR\.git") {
         Info "更新 Sensenova-Claw ($REPO_REF)..."
         Push-Location $APP_DIR
         try {
-            # 强制刷新 tags 和分支，确保 force-push 的 tag 也能更新
-            git fetch origin --tags --force --depth 1 --quiet 2>$null
-            git fetch origin $REPO_REF --depth 1 --quiet 2>$null
-            $remoteBranchRef = "refs/remotes/origin/$REPO_REF"
-            git show-ref --verify --quiet $remoteBranchRef 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                git checkout $REPO_REF --quiet 2>$null
-                if ($LASTEXITCODE -ne 0) {
-                    git checkout -B $REPO_REF "origin/$REPO_REF" --quiet 2>$null
+            $fetched = $false
+            foreach ($url in $urls) {
+                if ($url -ne $REPO_URL) {
+                    Warn "直连 GitHub 失败，尝试代理: $url"
                 }
-                git reset --hard "origin/$REPO_REF" --quiet 2>$null
+                # 临时将 origin 切到当前候选源后拉取
+                git remote set-url origin $url 2>$null
+                # 强制刷新 tags 和分支，确保 force-push 的 tag 也能更新
+                git fetch origin --tags --force --depth 1 --quiet 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    git fetch origin $REPO_REF --depth 1 --quiet 2>$null
+                    if ($LASTEXITCODE -eq 0) {
+                        $fetched = $true
+                        break
+                    }
+                }
+            }
+            # 无论成败都恢复 origin 为原始 URL，避免污染用户本地 remote
+            git remote set-url origin $REPO_URL 2>$null
+
+            if (-not $fetched) {
+                Warn "所有源均无法拉取更新，跳过更新"
             } else {
-                # tag 或 detached ref
-                git checkout --detach FETCH_HEAD --quiet 2>$null
+                $remoteBranchRef = "refs/remotes/origin/$REPO_REF"
+                git show-ref --verify --quiet $remoteBranchRef 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    git checkout $REPO_REF --quiet 2>$null
+                    if ($LASTEXITCODE -ne 0) {
+                        git checkout -B $REPO_REF "origin/$REPO_REF" --quiet 2>$null
+                    }
+                    git reset --hard "origin/$REPO_REF" --quiet 2>$null
+                } else {
+                    # tag 或 detached ref
+                    git checkout --detach FETCH_HEAD --quiet 2>$null
+                }
             }
         } catch {
             Warn "git 更新 $REPO_REF 失败，跳过更新"
@@ -237,7 +355,35 @@ function Setup-Repo {
         Info "克隆 Sensenova-Claw 仓库 ($REPO_REF)..."
         $parent = Split-Path $APP_DIR -Parent
         New-Item -ItemType Directory -Force -Path $parent | Out-Null
-        git clone --branch $REPO_REF --depth 1 $REPO_URL $APP_DIR
+
+        $cloned = $false
+        $usedUrl = $null
+        foreach ($url in $urls) {
+            if ($url -eq $REPO_URL) {
+                Info "使用源: $url"
+            } else {
+                Warn "直连 GitHub 失败，尝试代理: $url"
+            }
+            git clone --branch $REPO_REF --depth 1 $url $APP_DIR
+            if ($LASTEXITCODE -eq 0) {
+                $cloned = $true
+                $usedUrl = $url
+                break
+            }
+            # 清理 clone 失败可能残留的部分文件
+            if (Test-Path $APP_DIR) {
+                Remove-Item $APP_DIR -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if (-not $cloned) {
+            Fail "无法克隆仓库，请检查网络，或设置 SENSENOVA_CLAW_REPO_URL 指向可访问的镜像"
+        }
+        # 若通过代理完成克隆，恢复 origin 为原始 URL 便于后续手动操作
+        if ($usedUrl -ne $REPO_URL) {
+            Push-Location $APP_DIR
+            git remote set-url origin $REPO_URL 2>$null
+            Pop-Location
+        }
         Log "Sensenova-Claw 克隆完成"
     }
 }
@@ -482,6 +628,7 @@ function Main {
     Install-Uv
     Install-Python
     Install-Node
+    Install-Git
     Setup-Repo
     Install-Deps
     Setup-HomeDir
