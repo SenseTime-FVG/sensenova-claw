@@ -15,7 +15,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 $SENSENOVA_CLAW_HOME = if ($env:SENSENOVA_CLAW_HOME) { $env:SENSENOVA_CLAW_HOME } else { "$env:USERPROFILE\.sensenova-claw" }
 $APP_DIR = "$SENSENOVA_CLAW_HOME\app"
 $REPO_URL = if ($env:SENSENOVA_CLAW_REPO_URL) { $env:SENSENOVA_CLAW_REPO_URL } else { "https://github.com/SenseTime-FVG/sensenova-claw.git" }
-$REPO_REF = if ($env:SENSENOVA_CLAW_APP_BRANCH) { $env:SENSENOVA_CLAW_APP_BRANCH } elseif ($env:SENSENOVA_CLAW_REPO_REF) { $env:SENSENOVA_CLAW_REPO_REF } elseif ($env:SENSENOVA_CLAW_REPO_BRANCH) { $env:SENSENOVA_CLAW_REPO_BRANCH } else { "latest" }
+$REPO_REF = if ($env:SENSENOVA_CLAW_APP_BRANCH) { $env:SENSENOVA_CLAW_APP_BRANCH } elseif ($env:SENSENOVA_CLAW_REPO_REF) { $env:SENSENOVA_CLAW_REPO_REF } elseif ($env:SENSENOVA_CLAW_REPO_BRANCH) { $env:SENSENOVA_CLAW_REPO_BRANCH } else { "dev" }
 $REQUIRED_PYTHON = "3.12"
 $REQUIRED_NODE = 18
 
