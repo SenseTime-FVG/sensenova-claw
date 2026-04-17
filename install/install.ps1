@@ -1,4 +1,4 @@
-﻿# Sensenova-Claw 一键安装脚本（Windows PowerShell）
+# Sensenova-Claw 一键安装脚本（Windows PowerShell）
 #
 # 用法:
 #   irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
