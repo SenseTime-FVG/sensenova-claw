@@ -182,7 +182,10 @@ function Install-Node {
 
     $nodeZip = "$env:TEMP\node-$ltsVersion-win-x64.zip"
     $nodeMirror = if ($IS_CN) { $CN_NODE_MIRROR } else { "https://nodejs.org/dist" }
+    $prevProgressPref = $ProgressPreference
+    $ProgressPreference = "SilentlyContinue"
     Invoke-WebRequest -Uri "$nodeMirror/$ltsVersion/node-$ltsVersion-win-x64.zip" -OutFile $nodeZip -UseBasicParsing
+    $ProgressPreference = $prevProgressPref
 
     # 解压到用户目录
     New-Item -ItemType Directory -Force -Path $nodeDir | Out-Null
