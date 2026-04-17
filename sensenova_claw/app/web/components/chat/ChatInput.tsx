@@ -8,6 +8,7 @@ import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
 import { type ContextFileRef } from '@/lib/chatTypes';
 import { UploadProgress } from './UploadProgress';
 import { useFileUpload } from '@/hooks/useFileUpload';
+import { singleFileFlow } from '@/lib/fileUpload';
 import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 import { useI18n } from '@/contexts/I18nContext';
 
@@ -286,6 +287,31 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     ta.style.height = Math.min(ta.scrollHeight, 96) + 'px';
   };
 
+  // 截图粘贴：检测剪贴板中的图片并上传
+  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageItems: DataTransferItem[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        imageItems.push(items[i]);
+      }
+    }
+    if (imageItems.length === 0) return;
+    // 有图片时阻止默认粘贴行为
+    e.preventDefault();
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      try {
+        const result = await singleFileFlow(file, selectedAgent);
+        insertAtRef(result.path);
+      } catch {
+        // 上传失败静默忽略
+      }
+    }
+  }, [selectedAgent, insertAtRef]);
+
   return (
     <div className="border-t bg-card/50 backdrop-blur-sm px-4 pt-2.5 pb-2 shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
       <div className="max-w-4xl mx-auto">
@@ -358,6 +384,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               value={inputValue}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               onCompositionStart={() => { isComposingRef.current = true; }}
               onCompositionEnd={() => { isComposingRef.current = false; }}
               placeholder={

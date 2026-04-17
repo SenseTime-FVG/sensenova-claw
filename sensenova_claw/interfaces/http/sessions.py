@@ -46,6 +46,10 @@ def _normalize_delete_scope(scope: str) -> str:
     raise HTTPException(status_code=400, detail="invalid delete scope")
 
 
+class RenameSessionRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
 def _parse_title(meta: str | None) -> str:
     if not meta:
         return ""
@@ -158,6 +162,19 @@ async def list_session_messages(session_id: str, request: Request):
     """获取会话的所有消息。"""
     messages = await _get_services(request).gateway.get_messages(session_id)
     return JSONResponse(content={"messages": messages})
+
+
+@router.patch("/{session_id}/title")
+async def rename_session(session_id: str, body: RenameSessionRequest, request: Request):
+    """重命名会话标题。"""
+    services = _get_services(request)
+    sessions = await services.repo.list_sessions(limit=999999, include_hidden=True)
+    session = next((item for item in sessions if item["session_id"] == session_id), None)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+
+    await services.repo.update_session_title(session_id, body.title)
+    return {"status": "updated", "session_id": session_id, "title": body.title}
 
 
 @router.delete("/{session_id}")
