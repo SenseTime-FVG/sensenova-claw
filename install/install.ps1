@@ -1,4 +1,4 @@
-﻿# Sensenova-Claw 一键安装脚本（Windows PowerShell）
+# Sensenova-Claw 一键安装脚本（Windows PowerShell）
 #
 # 用法:
 #   irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
@@ -8,6 +8,7 @@
 #
 
 $ErrorActionPreference = "Stop"
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
 # ── 配置 ──
 
@@ -21,7 +22,7 @@ $REQUIRED_NODE = 18
 # 国内镜像
 $CN_NPM_REGISTRY = "https://registry.npmmirror.com"
 $CN_PIP_INDEX = "https://mirrors.aliyun.com/pypi/simple/"
-$CN_FNM_MIRROR = "https://npmmirror.com/mirrors/node"
+$CN_NODE_MIRROR = "https://npmmirror.com/mirrors/node"
 
 $IS_CN = $false
 
@@ -35,7 +36,17 @@ function Info { param($msg) Write-Host "[i] $msg" -ForegroundColor Cyan }
 function Fail {
     param($msg)
     Err $msg
-    exit 1
+    Write-Host ""
+    Write-Host "安装中断，请根据以上错误信息排查后重试。" -ForegroundColor Yellow
+    throw $msg
+}
+
+# 安全执行远程安装脚本：下载内容后替换 exit 为 return，防止终止宿主进程
+function Invoke-RemoteInstall {
+    param($url)
+    $scriptContent = Invoke-RestMethod $url
+    $safeScript = $scriptContent -replace '\bexit\b', 'return'
+    Invoke-Expression $safeScript
 }
 
 function Command-Exists {
@@ -105,7 +116,7 @@ function Install-Uv {
     }
 
     Info "安装 uv..."
-    irm https://astral.sh/uv/install.ps1 | iex
+    Invoke-RemoteInstall "https://astral.sh/uv/install.ps1"
 
     # 刷新 PATH
     $env:PATH = "$env:USERPROFILE\.local\bin;$env:USERPROFILE\.cargo\bin;$env:PATH"
@@ -133,35 +144,7 @@ function Install-Python {
     Log "Python $REQUIRED_PYTHON 安装成功"
 }
 
-# ── 步骤 3: 安装 fnm + Node.js ──
-
-function Install-Fnm {
-    if (Command-Exists fnm) {
-        Log "fnm 已安装"
-        return
-    }
-
-    Info "安装 fnm (Node.js 版本管理器)..."
-
-    # 尝试 winget
-    if (Command-Exists winget) {
-        winget install Schniz.fnm --accept-package-agreements --accept-source-agreements 2>$null
-    } else {
-        # 降级：PowerShell 安装
-        irm https://fnm.vercel.app/install.ps1 | iex
-    }
-
-    # 刷新 PATH
-    $env:PATH = "$env:APPDATA\fnm;$env:LOCALAPPDATA\fnm;$env:PATH"
-
-    if (Command-Exists fnm) {
-        Log "fnm 安装成功"
-        # 初始化 fnm 环境
-        fnm env --use-on-cd | Out-String | Invoke-Expression
-    } else {
-        Fail "fnm 安装失败，请手动安装: https://github.com/Schniz/fnm#installation"
-    }
-}
+# ── 步骤 3: 安装 Node.js ──
 
 function Install-Node {
     if (Command-Exists node) {
@@ -173,15 +156,45 @@ function Install-Node {
         Warn "Node.js 版本 $(node -v) 低于要求的 v$REQUIRED_NODE"
     }
 
-    Info "通过 fnm 安装 Node.js LTS..."
-
-    if ($IS_CN) {
-        $env:FNM_NODE_DIST_MIRROR = $CN_FNM_MIRROR
+    # 方式 1: 尝试 winget
+    if (Command-Exists winget) {
+        Info "通过 winget 安装 Node.js LTS..."
+        winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements 2>$null
+        # winget 安装后刷新 PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        if (Command-Exists node) {
+            Log "Node.js 安装成功: $(node -v)"
+            return
+        }
+        Warn "winget 安装 Node.js 失败，尝试直接下载"
     }
 
-    fnm install --lts
-    fnm use --lts
-    fnm env --use-on-cd | Out-String | Invoke-Expression
+    # 方式 2: 直接从 nodejs.org 下载 zip 到用户目录
+    Info "从 nodejs.org 下载 Node.js..."
+    $nodeDir = "$SENSENOVA_CLAW_HOME\node"
+
+    # 获取最新 LTS 版本号
+    $nodeVersions = Invoke-RestMethod "https://nodejs.org/dist/index.json"
+    $ltsVersion = ($nodeVersions | Where-Object { $_.lts } | Select-Object -First 1).version
+    if (-not $ltsVersion) {
+        Fail "无法获取 Node.js LTS 版本信息"
+    }
+    Info "最新 LTS 版本: $ltsVersion"
+
+    $nodeZip = "$env:TEMP\node-$ltsVersion-win-x64.zip"
+    $nodeMirror = if ($IS_CN) { $CN_NODE_MIRROR } else { "https://nodejs.org/dist" }
+    $prevProgressPref = $ProgressPreference
+    $ProgressPreference = "SilentlyContinue"
+    Invoke-WebRequest -Uri "$nodeMirror/$ltsVersion/node-$ltsVersion-win-x64.zip" -OutFile $nodeZip -UseBasicParsing
+    $ProgressPreference = $prevProgressPref
+
+    # 解压到用户目录
+    New-Item -ItemType Directory -Force -Path $nodeDir | Out-Null
+    Expand-Archive -Path $nodeZip -DestinationPath $nodeDir -Force
+    Remove-Item $nodeZip -ErrorAction SilentlyContinue
+
+    # 添加到 PATH
+    $env:PATH = "$nodeDir\node-$ltsVersion-win-x64;$env:PATH"
 
     if ((Command-Exists node) -and (Command-Exists npm)) {
         Log "Node.js 安装成功: $(node -v)"
@@ -465,7 +478,6 @@ function Main {
     Configure-CN-Mirrors
     Install-Uv
     Install-Python
-    Install-Fnm
     Install-Node
     Setup-Repo
     Install-Deps
