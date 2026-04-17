@@ -8,6 +8,7 @@
 #
 
 $ErrorActionPreference = "Stop"
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
 # ── 配置 ──
 
