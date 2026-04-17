@@ -25,9 +25,6 @@ $CN_FNM_MIRROR = "https://npmmirror.com/mirrors/node"
 
 $IS_CN = $false
 
-# 当前 PowerShell 可执行路径（兼容 powershell.exe 和 pwsh.exe）
-$PS_EXE = (Get-Process -Id $PID).Path
-
 # ── 工具函数 ──
 
 function Log { param($msg) Write-Host "[+] $msg" -ForegroundColor Green }
@@ -41,6 +38,14 @@ function Fail {
     Write-Host ""
     Write-Host "安装中断，请根据以上错误信息排查后重试。" -ForegroundColor Yellow
     throw $msg
+}
+
+# 安全执行远程安装脚本：下载内容后替换 exit 为 return，防止终止宿主进程
+function Invoke-RemoteInstall {
+    param($url)
+    $scriptContent = Invoke-RestMethod $url
+    $safeScript = $scriptContent -replace '\bexit\b', 'return'
+    Invoke-Expression $safeScript
 }
 
 function Command-Exists {
@@ -110,8 +115,7 @@ function Install-Uv {
     }
 
     Info "安装 uv..."
-    # 在子进程中执行 uv 安装脚本，防止其内部 exit 终止宿主 PowerShell
-    & $PS_EXE -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+    Invoke-RemoteInstall "https://astral.sh/uv/install.ps1"
 
     # 刷新 PATH
     $env:PATH = "$env:USERPROFILE\.local\bin;$env:USERPROFILE\.cargo\bin;$env:PATH"
@@ -153,8 +157,14 @@ function Install-Fnm {
     if (Command-Exists winget) {
         winget install Schniz.fnm --accept-package-agreements --accept-source-agreements 2>$null
     } else {
-        # 降级：PowerShell 安装（子进程执行，防止 exit 终止宿主）
-        & $PS_EXE -NoProfile -ExecutionPolicy Bypass -Command "irm https://fnm.vercel.app/install.ps1 | iex"
+        # 降级：从 GitHub Releases 直接下载 fnm 二进制
+        Info "从 GitHub 下载 fnm..."
+        $fnmZip = "$env:TEMP\fnm-windows.zip"
+        $fnmDir = "$env:LOCALAPPDATA\fnm"
+        Invoke-WebRequest -Uri "https://github.com/Schniz/fnm/releases/latest/download/fnm-windows.zip" -OutFile $fnmZip -UseBasicParsing
+        New-Item -ItemType Directory -Force -Path $fnmDir | Out-Null
+        Expand-Archive -Path $fnmZip -DestinationPath $fnmDir -Force
+        Remove-Item $fnmZip -ErrorAction SilentlyContinue
     }
 
     # 刷新 PATH
