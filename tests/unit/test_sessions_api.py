@@ -170,6 +170,55 @@ def test_list_sessions_marks_has_children(client, app):
     assert sessions["sess_child"]["has_children"] is False
 
 
+def test_list_sessions_returns_pagination_payload(client, app):
+    _run(app.state.services.repo.create_session("sess_page_1", meta={"title": "First"}))
+    _run(app.state.services.repo.create_session("sess_page_2", meta={"title": "Second"}))
+    _run(app.state.services.repo.create_session("sess_page_3", meta={"title": "Third"}))
+    _run(app.state.services.repo.create_turn("turn_page_1", "sess_page_1", "hello"))
+    _run(app.state.services.repo.complete_turn("turn_page_1", "done"))
+    _run(app.state.services.repo.create_turn("turn_page_2", "sess_page_2", "hello"))
+    _run(app.state.services.repo.create_turn("turn_page_3", "sess_page_3", "hello"))
+    _run(app.state.services.repo.complete_turn("turn_page_3", "done"))
+
+    resp = client.get("/api/sessions?page=2&page_size=2")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["page"] == 2
+    assert payload["page_size"] == 2
+    assert payload["total"] == 3
+    assert payload["total_pages"] == 2
+    assert payload["active_total"] == 1
+    assert [item["session_id"] for item in payload["sessions"]] == ["sess_page_1"]
+    assert payload["sessions"][0]["status"] == "closed"
+
+
+def test_list_sessions_all_returns_full_visible_set(client, app):
+    _run(app.state.services.repo.create_session("sess_all_parent", meta={"title": "Parent"}))
+    _run(app.state.services.repo.create_session(
+        "sess_all_child",
+        meta={"title": "Child", "parent_session_id": "sess_all_parent"},
+    ))
+    _run(app.state.services.repo.create_session(
+        "sess_all_hidden",
+        meta={"title": "Hidden", "visibility": "hidden"},
+    ))
+
+    resp = client.get("/api/sessions?all=1&include_ancestors=1&page_size=1")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["page"] == 1
+    assert payload["page_size"] == 2
+    assert payload["total"] == 2
+    assert payload["active_total"] == 2
+    assert payload["total_pages"] == 1
+    assert {item["session_id"] for item in payload["sessions"]} == {
+        "sess_all_parent",
+        "sess_all_child",
+    }
+
+
 def test_get_session_detail_returns_session_payload(client, app):
     _run(app.state.services.repo.create_session(
         "sess_detail_1",
@@ -188,6 +237,46 @@ def test_get_session_detail_missing_returns_404(client):
     resp = client.get("/api/sessions/missing_session")
 
     assert resp.status_code == 404
+
+
+def test_patch_session_title_updates_meta(client, app):
+    _run(app.state.services.repo.create_session(
+        "sess_rename_1",
+        meta={"title": "旧标题", "agent_id": "helper", "parent_session_id": "root_1"},
+    ))
+
+    resp = client.patch("/api/sessions/sess_rename_1", json={"title": "新标题"})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ok"] is True
+    assert payload["session"]["session_id"] == "sess_rename_1"
+    meta = payload["session"]["meta"]
+    assert meta["title"] == "新标题"
+    assert meta["agent_id"] == "helper"
+    assert meta["parent_session_id"] == "root_1"
+    assert _run(app.state.services.repo.get_session_meta("sess_rename_1")) == {
+        "title": "新标题",
+        "agent_id": "helper",
+        "parent_session_id": "root_1",
+    }
+
+
+def test_patch_session_title_rejects_blank_title(client, app):
+    _run(app.state.services.repo.create_session("sess_rename_blank", meta={"title": "旧标题"}))
+
+    resp = client.patch("/api/sessions/sess_rename_blank", json={"title": "   "})
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "title is required"
+    assert _run(app.state.services.repo.get_session_meta("sess_rename_blank")) == {"title": "旧标题"}
+
+
+def test_patch_session_title_missing_session_returns_404(client):
+    resp = client.patch("/api/sessions/missing_rename", json={"title": "新标题"})
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Session 'missing_rename' not found"
 
 
 def test_bulk_delete_sessions_by_ids(client, app):

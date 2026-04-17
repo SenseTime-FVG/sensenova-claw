@@ -1,7 +1,7 @@
 """ProactiveJob 模型单元测试。"""
 import json
 import pytest
-from agentos.kernel.proactive.models import (
+from sensenova_claw.kernel.proactive.models import (
     TimeTrigger,
     EventTrigger,
     ProactiveTask,

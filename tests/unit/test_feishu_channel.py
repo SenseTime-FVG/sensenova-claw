@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -33,7 +34,12 @@ from sensenova_claw.kernel.events.types import (
 from sensenova_claw.kernel.runtime.publisher import EventPublisher
 from sensenova_claw.interfaces.ws.gateway import Gateway
 from sensenova_claw.adapters.plugins.feishu.config import FeishuConfig
-from sensenova_claw.adapters.plugins.feishu.channel import FeishuChannel, FeishuSessionMeta
+from sensenova_claw.adapters.plugins.feishu.channel import (
+    FeishuChannel,
+    FeishuSessionMeta,
+    _SSL_CONTEXT,
+    _patch_lark_ws_ssl_context,
+)
 
 
 # ---- 辅助：轻量 PluginApi 替代品（不使用 mock） ----
@@ -486,6 +492,43 @@ class TestHandleMessageEvent:
 
         assert calls["scheduled"] == 1
         assert calls["result_called"] == 0
+
+
+class TestLarkWsCompat:
+    async def test_patch_lark_ws_ssl_context_injects_certifi_ssl(self):
+        captured: dict[str, Any] = {}
+
+        async def original_connect(url: str, **kwargs):
+            captured["url"] = url
+            captured["kwargs"] = kwargs
+            return "ok"
+
+        class _FakeWsModule:
+            websockets = SimpleNamespace(connect=original_connect)
+
+        _patch_lark_ws_ssl_context(_FakeWsModule)
+        result = await _FakeWsModule.websockets.connect("wss://example.feishu/ws")
+
+        assert result == "ok"
+        assert captured["url"] == "wss://example.feishu/ws"
+        assert captured["kwargs"]["ssl"] is _SSL_CONTEXT
+
+    async def test_patch_lark_ws_ssl_context_preserves_explicit_ssl(self):
+        captured: dict[str, Any] = {}
+
+        async def original_connect(url: str, **kwargs):
+            captured["kwargs"] = kwargs
+            return "ok"
+
+        explicit_ssl = object()
+
+        class _FakeWsModule:
+            websockets = SimpleNamespace(connect=original_connect)
+
+        _patch_lark_ws_ssl_context(_FakeWsModule)
+        await _FakeWsModule.websockets.connect("wss://example.feishu/ws", ssl=explicit_ssl)
+
+        assert captured["kwargs"]["ssl"] is explicit_ssl
 
 
 # ---- _build_content 测试 ----
