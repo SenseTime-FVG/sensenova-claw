@@ -167,6 +167,10 @@ function Install-Fnm {
         Remove-Item $fnmZip -ErrorAction SilentlyContinue
     }
 
+    # 设置 fnm 数据目录到用户可写路径，避免权限问题
+    $env:FNM_DIR = "$env:LOCALAPPDATA\fnm\node-versions"
+    New-Item -ItemType Directory -Force -Path $env:FNM_DIR | Out-Null
+
     # 刷新 PATH
     $env:PATH = "$env:APPDATA\fnm;$env:LOCALAPPDATA\fnm;$env:PATH"
 
@@ -196,7 +200,7 @@ function Install-Node {
     }
 
     fnm install --lts
-    fnm use --lts
+    fnm use lts-latest
     fnm env --use-on-cd | Out-String | Invoke-Expression
 
     if ((Command-Exists node) -and (Command-Exists npm)) {
