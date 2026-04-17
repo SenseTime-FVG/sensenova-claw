@@ -154,10 +154,10 @@ const BROWSER_EXTRACT_FN = () => {
 
     function walk(node) {
       if (node.nodeType === 3) {
-        // 纯文本节点：折叠空白（与浏览器行为一致），跳过纯空白节点
-        const text = node.textContent.replace(/\s+/g, ' ').trim();
+        // 纯文本节点：折叠空白（与浏览器行为一致）
+        const raw = node.textContent.replace(/\s+/g, ' ');
+        const text = raw.trim();
         if (text) {
-          // 获取父元素的样式作为该文本节点的样式
           const parent = node.parentElement || el;
           const cs = window.getComputedStyle(parent);
           runs.push({
@@ -169,17 +169,22 @@ const BROWSER_EXTRACT_FN = () => {
             fontFamily: cs.getPropertyValue('font-family'),
             underline: cs.getPropertyValue('text-decoration').includes('underline'),
           });
+        } else if (raw.includes(' ') && runs.length > 0) {
+          // 纯空白文本节点（如 <span>def</span> <span>func</span> 之间的空格）
+          // 在前一个 run 末尾追加空格，避免相邻单词粘连
+          const lastRun = runs[runs.length - 1];
+          if (lastRun && !lastRun.text.endsWith(' ') && !lastRun.isBlock) {
+            lastRun.text += ' ';
+          }
         }
       } else if (node.nodeType === 1) {
         const cs = window.getComputedStyle(node);
         const display = cs.getPropertyValue('display');
-        // 跳过 display:none 的元素
         if (display === 'none') return;
 
         const text = node.innerText || '';
         if (!text) return;
 
-        // 块级元素（display: block/flex/grid 等）后需要换行
         const isBlock = ['block', 'flex', 'grid', 'table', 'list-item'].includes(display);
 
         runs.push({
@@ -229,8 +234,9 @@ const BROWSER_EXTRACT_FN = () => {
       try {
         const cs = window.getComputedStyle(el, pseudo);
         const content = cs.getPropertyValue('content');
-        // 跳过无 content 或 content: none 的伪元素
-        if (!content || content === 'none' || content === 'normal') continue;
+        // 跳过 content: none / normal 的伪元素
+        // 注意：content: '' (空字符串，computed 值为 '""') 是合法的，不跳过
+        if (content === 'none' || content === 'normal') continue;
 
         const display = cs.getPropertyValue('display');
         if (display === 'none') continue;
@@ -347,6 +353,12 @@ const BROWSER_EXTRACT_FN = () => {
       return node;
     }
 
+    // 提取 ::before / ::after 伪元素（必须在叶子节点早期返回之前）
+    const pseudoNodes = extractPseudoElements(el, wrapperRect);
+    for (const pn of pseudoNodes) {
+      node.children.push(pn);
+    }
+
     // 叶子文本节点
     const childElements = Array.from(el.childNodes).filter(n => n.nodeType === 1);
     if (childElements.length === 0) {
@@ -363,12 +375,6 @@ const BROWSER_EXTRACT_FN = () => {
       if (childNode !== null) {
         node.children.push(childNode);
       }
-    }
-
-    // 提取 ::before / ::after 伪元素（作为合成子节点追加）
-    const pseudoNodes = extractPseudoElements(el, wrapperRect);
-    for (const pn of pseudoNodes) {
-      node.children.push(pn);
     }
 
     return node;

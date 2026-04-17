@@ -282,6 +282,18 @@ function buildMaskOverlaySvg(maskGrad, bgColor, w, h) {
  * @param {number} [borderRadius] - 圆角 (CSS px)
  * @returns {string} base64 SVG data URI
  */
+/**
+ * 将渐变渲染为 PNG data URI（避免 SVG，因为 pptxgenjs 的 svgBlip 在 PowerPoint 中会损坏）。
+ * 生成一个小尺寸 PNG（宽度 256px 等比缩放），pptxgenjs 拉伸到目标尺寸。
+ */
+function buildGradientPng(gradient, wPx, hPx, opacity = 1) {
+  // 生成 SVG 然后在外部渲染为 PNG 不可行（无 canvas），
+  // 退而求其次：用 pptxgenjs 的 slide background path 模式不需要 PNG，
+  // 但 addImage 需要。这里仍用 SVG data URI 但标记为 PNG 场景。
+  // 实际解法：在 buildBackground 中直接用 slide.background = { fill } 而非 addImage。
+  return null;
+}
+
 function buildGradientSvg(gradient, wPx, hPx, opacity = 1, borderRadius = 0) {
   const w = Math.round(wPx);
   const h = Math.round(hPx);
@@ -470,26 +482,30 @@ export function buildBackground(bgIR, bodyBgColor, deckDir) {
   }
 
   // --- 情况 3：仅 gradient（无图片 url）---
-  // pptxgenjs v3.x 不支持 gradient fill，使用 SVG 图片渲染渐变
+  // pptxgenjs 不支持 gradient fill，SVG addImage 会产生 svgBlip 导致 PowerPoint 损坏。
+  // 用多层 solid fill shape 近似渐变（取首尾两个可见 stop）。
   if (backgroundImage && backgroundImage !== 'none') {
     const linearGrad = parseLinearGradient(backgroundImage);
-    if (linearGrad && linearGrad.stops.length >= 2) {
-      result.slideBackground = { fill: linearGrad.stops[0].color };
-      const svgUri = buildGradientSvg(linearGrad, 1280, 720, bgOpacity < 1 ? bgOpacity : 1);
-      result.bgElements.push({
-        type: 'image',
-        data: { data: svgUri, x: 0, y: 0, w: 10, h: 5.625 },
-      });
-      return result;
-    }
-    const radialGrad = parseRadialGradient(backgroundImage);
-    if (radialGrad && radialGrad.stops.length >= 2) {
-      result.slideBackground = { fill: radialGrad.stops[0].color };
-      const svgUri = buildRadialGradientSvg(radialGrad, 1280, 720, bgOpacity < 1 ? bgOpacity : 1);
-      result.bgElements.push({
-        type: 'image',
-        data: { data: svgUri, x: 0, y: 0, w: 10, h: 5.625 },
-      });
+    const radialGrad = !linearGrad ? parseRadialGradient(backgroundImage) : null;
+    const grad = linearGrad || radialGrad;
+    if (grad && grad.stops.length >= 2) {
+      const visibleStops = grad.stops.filter(st => !st.isTransparent);
+      if (visibleStops.length > 0) {
+        // 底色：第一个可见 stop
+        result.slideBackground = { fill: visibleStops[0].color };
+        // 如果有第二个不同颜色的 stop，叠加一个半透明层模拟渐变过渡
+        if (visibleStops.length >= 2 && visibleStops[visibleStops.length - 1].color !== visibleStops[0].color) {
+          const lastStop = visibleStops[visibleStops.length - 1];
+          const lastAlpha = lastStop.rawColor ? extractCssAlpha(lastStop.rawColor) : 1;
+          result.bgElements.push({
+            type: 'shape',
+            data: {
+              x: 0, y: 0, w: 10, h: 5.625,
+              fill: { color: lastStop.color, transparency: Math.round((1 - lastAlpha * 0.5) * 100) },
+            }
+          });
+        }
+      }
       return result;
     }
     // single-stop gradient or other type → degrade to first color
@@ -541,18 +557,47 @@ export function buildBackground(bgIR, bodyBgColor, deckDir) {
  * 获取文本颜色。处理渐变文字效果（-webkit-background-clip: text）：
  * 当 text-fill-color 为 transparent 时，从 backgroundImage gradient 提取首个颜色。
  */
+/**
+ * 返回 { color, alpha }。alpha < 1 时调用方应设置 transparency。
+ */
 function getTextColor(s) {
-  // 检测渐变文字：-webkit-text-fill-color: transparent + backgroundImage gradient
   const fillColor = s.WebkitTextFillColor || s.webkitTextFillColor || '';
   if (fillColor === 'transparent' || fillColor === 'rgba(0, 0, 0, 0)') {
     if (s.backgroundImage && s.backgroundImage.includes('gradient')) {
       const grad = parseLinearGradient(s.backgroundImage) || parseRadialGradient(s.backgroundImage);
       if (grad && grad.stops.length > 0) {
-        return grad.stops[0].color;
+        // 取最饱和/最亮的 stop 而非总取第一个
+        const bestStop = pickMostVibrantStop(grad.stops);
+        return { color: bestStop.color, alpha: 1 };
       }
     }
   }
-  return cssColorToHex(s.color) || '000000';
+  const hex = cssColorToHex(s.color) || '000000';
+  const alpha = s.color ? extractCssAlpha(s.color) : 1;
+  // 元素 opacity 也要合并
+  const elOpacity = s.opacity !== undefined ? parseFloat(s.opacity) : 1;
+  return { color: hex, alpha: alpha * (isNaN(elOpacity) ? 1 : elOpacity) };
+}
+
+/**
+ * 从渐变 stops 中挑选视觉上最突出的颜色（最高饱和度/亮度）。
+ */
+function pickMostVibrantStop(stops) {
+  let best = stops[0];
+  let bestScore = 0;
+  for (const s of stops) {
+    if (s.isTransparent) continue;
+    // 简单启发式：hex 颜色各通道离 128 越远越"鲜艳"
+    const r = parseInt(s.color.substring(0, 2), 16);
+    const g = parseInt(s.color.substring(2, 4), 16);
+    const b = parseInt(s.color.substring(4, 6), 16);
+    const score = Math.abs(r - 128) + Math.abs(g - 128) + Math.abs(b - 128) + Math.max(r, g, b);
+    if (score > bestScore) {
+      bestScore = score;
+      best = s;
+    }
+  }
+  return best;
 }
 
 /**
@@ -584,7 +629,7 @@ export function buildTextElement(node) {
     h: pxToInch(b.h),
     fontSize: pxToPt(parseFloat(s.fontSize) || 16),
     fontFace: parseFontFamily(s.fontFamily),
-    color: getTextColor(s),
+    color: getTextColor(s).color,
     bold: parseInt(s.fontWeight) >= 700,
     italic: s.fontStyle === 'italic',
     underline: s.textDecoration?.includes('underline') ? { style: 'sng' } : undefined,
@@ -644,18 +689,16 @@ export function buildTextElement(node) {
   if (textRuns && textRuns.length > 0) {
     // 父节点级别的渐变文字检测：-webkit-background-clip: text 时，
     // run.color 是 CSS color（通常 black），实际可见颜色来自 gradient
-    const parentGradientColor = isGradientText(node) ? getTextColor(s) : null;
+    const parentGradient = isGradientText(node) ? getTextColor(s) : null;
 
     const runs = textRuns.map(run => {
-      // 检测 run 自身是否也是渐变文字（通过 color 透明度判断）
       let runColor = cssColorToHex(run.color) || '000000';
-      if (parentGradientColor && (runColor === '000000' || runColor === 'FFFFFF')) {
-        // 父元素是渐变文字且 run 颜色是默认黑/白 → 用渐变色替代
-        runColor = parentGradientColor;
+      let runAlpha = run.color ? extractCssAlpha(run.color) : 1;
+      if (parentGradient && (runColor === '000000' || runColor === 'FFFFFF')) {
+        runColor = parentGradient.color;
+        runAlpha = parentGradient.alpha;
       }
-      return {
-        text: run.text,
-        options: {
+      const runOpts = {
           fontSize: pxToPt(run.fontSize || 16),
           fontFace: parseFontFamily(run.fontFamily),
           color: runColor,
@@ -663,10 +706,21 @@ export function buildTextElement(node) {
           italic: run.italic,
           underline: run.underline ? { style: 'sng' } : undefined,
           breakLine: run.isBlock ? true : undefined,
-        }
       };
+      // 文本透明度：alpha < 1 时（如 rgba(255,255,255,0.03) 水印）
+      if (runAlpha < 0.95) {
+        runOpts.transparency = Math.round((1 - runAlpha) * 100);
+      }
+      return { text: run.text, options: runOpts };
     });
     return { text: runs, options };
+  }
+
+  // 单文本节点也处理 alpha
+  const textColorInfo = getTextColor(s);
+  options.color = textColorInfo.color;
+  if (textColorInfo.alpha < 0.95) {
+    options.transparency = Math.round((1 - textColorInfo.alpha) * 100);
   }
 
   return { text, options };
@@ -775,10 +829,16 @@ export function buildShapeElement(node) {
     }
   }
 
-  // 圆角
+  // 圆角 / 圆形检测
   const radius = parseFloat(s.borderRadius);
   if (radius > 0) {
-    shape.rectRadius = pxToInch(radius);
+    // border-radius >= 50% 且宽高近似相等 → 圆形（用 ellipse）
+    const radiusPercent = s.borderRadius?.includes('%') ? parseFloat(s.borderRadius) : (radius / Math.min(node.bounds.w, node.bounds.h)) * 100;
+    if (radiusPercent >= 50 && Math.abs(node.bounds.w - node.bounds.h) < Math.max(node.bounds.w, node.bounds.h) * 0.1) {
+      shape._isEllipse = true;
+    } else {
+      shape.rectRadius = pxToInch(radius);
+    }
   }
 
   // 边框
@@ -806,6 +866,27 @@ export function buildShapeElement(node) {
       color: shadow.color,
       opacity: shadow.opacity,
     };
+  }
+
+  // CSS filter: blur() → pptxgenjs glow 效果模拟
+  // filter: blur(80px) 的元素是扩散光晕，用大半径 shadow 模拟
+  if (s.filter && s.filter.includes('blur')) {
+    const blurMatch = s.filter.match(/blur\(\s*([\d.]+)px\s*\)/);
+    if (blurMatch) {
+      const blurPx = parseFloat(blurMatch[1]);
+      const fillColor = shape.fill?.color || '000000';
+      shape.shadow = {
+        type: 'outer',
+        blur: pxToPt(blurPx),
+        offset: 0,
+        color: fillColor,
+        opacity: 0.6,
+      };
+      // blur 元素本身应该接近不可见，只保留发光效果
+      if (shape.fill) {
+        shape.fill.transparency = Math.max(shape.fill.transparency || 0, 50);
+      }
+    }
   }
 
   // transform: rotate()
@@ -1077,30 +1158,8 @@ export function flattenIRToElements(node, deckDir, parentBorderRadius = 0, paren
   // 容器装饰 → 形状（IMG 不需要容器形状）
   if (hasVisualDecoration(node) && tag !== 'IMG') {
     const shape = buildShapeElement(node);
-    if (shape) elements.push({ type: 'shape', data: shape });
 
-    // 渐变背景 → SVG 图片叠加（pptxgenjs 不支持 gradient fill）
     if (s.backgroundImage && s.backgroundImage !== 'none' && !isGradientText(node)) {
-      const linearGrad = parseLinearGradient(s.backgroundImage);
-      const radialGrad = !linearGrad ? parseRadialGradient(s.backgroundImage) : null;
-      const grad = linearGrad || radialGrad;
-      if (grad && grad.stops.length >= 2) {
-        const elOpacity = s.opacity !== undefined ? parseFloat(s.opacity) : 1;
-        const radius = parseFloat(s.borderRadius) || 0;
-        const svgUri = linearGrad
-          ? buildGradientSvg(grad, node.bounds.w, node.bounds.h, isNaN(elOpacity) ? 1 : elOpacity, radius)
-          : buildRadialGradientSvg(grad, node.bounds.w, node.bounds.h, isNaN(elOpacity) ? 1 : elOpacity, radius);
-        elements.push({
-          type: 'image',
-          data: {
-            data: svgUri,
-            x: pxToInch(node.bounds.x),
-            y: pxToInch(node.bounds.y),
-            w: pxToInch(node.bounds.w),
-            h: pxToInch(node.bounds.h),
-          }
-        });
-      }
 
       // backgroundImage 含 url() → 提取图片元素
       const bgUrlMatch = s.backgroundImage.match(/url\(["']?([^"')]+)["']?\)/);
@@ -1142,6 +1201,10 @@ export function flattenIRToElements(node, deckDir, parentBorderRadius = 0, paren
       }
     }
 
+    if (shape) {
+      elements.push({ type: 'shape', data: shape });
+    }
+
     // 非对称边框 → 独立线条
     const borderLines = buildBorderLines(node);
     elements.push(...borderLines);
@@ -1153,8 +1216,8 @@ export function flattenIRToElements(node, deckDir, parentBorderRadius = 0, paren
     if (textEl) elements.push({ type: 'text', data: textEl });
   }
 
-  // 图片
-  if (tag === 'IMG') {
+  // 图片（跳过 0 尺寸——被 flex/overflow 压缩到不可见的图片）
+  if (tag === 'IMG' && node.bounds.w > 0 && node.bounds.h > 0) {
     const imgEl = buildImageElement(node, deckDir);
     if (imgEl) {
       // 父容器有 overflow:hidden + borderRadius → 图片圆角（使用 patched pptxgenjs 的 roundRect）
@@ -1288,10 +1351,6 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
       if (grad && grad.stops.length >= 2) {
         const firstVisible = grad.stops.find(st => !st.isTransparent);
         slide.background = { fill: firstVisible?.color || fallbackBgHex };
-        const svgUri = linearGrad
-          ? buildGradientSvg(grad, cw, ch)
-          : buildRadialGradientSvg(grad, cw, ch);
-        slide.addImage({ data: svgUri, x: 0, y: 0, w: 10, h: 5.625 });
         bgApplied = true;
       }
     }
@@ -1307,7 +1366,7 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
         for (const el of bgChildElements) {
           switch (el.type) {
             case 'shape': {
-              const shapeType = el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
+              const shapeType = el.data._isEllipse ? pptx.ShapeType.ellipse : el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
               slide.addShape(shapeType, el.data);
               break;
             }
@@ -1332,7 +1391,7 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
       for (const el of overlayElements) {
         switch (el.type) {
           case 'shape': {
-            const shapeType = el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
+            const shapeType = el.data._isEllipse ? pptx.ShapeType.ellipse : el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
             slide.addShape(shapeType, el.data);
             break;
           }
@@ -1354,7 +1413,7 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
       for (const el of restElements) {
         switch (el.type) {
           case 'shape': {
-            const shapeType = el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
+            const shapeType = el.data._isEllipse ? pptx.ShapeType.ellipse : el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
             slide.addShape(shapeType, el.data);
             break;
           }
@@ -1390,7 +1449,7 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
           slide.addText(el.data.text, el.data.options);
           break;
         case 'shape': {
-          const shapeType = el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
+          const shapeType = el.data._isEllipse ? pptx.ShapeType.ellipse : el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
           slide.addShape(shapeType, el.data);
           break;
         }
@@ -1416,7 +1475,7 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
           slide.addImage(el.data);
           break;
         case 'shape': {
-          const shapeType = el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
+          const shapeType = el.data._isEllipse ? pptx.ShapeType.ellipse : el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
           slide.addShape(shapeType, el.data);
           break;
         }
@@ -1446,7 +1505,7 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
             slide.addText(el.data.text, el.data.options);
             break;
           case 'shape': {
-            const shapeType = el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
+            const shapeType = el.data._isEllipse ? pptx.ShapeType.ellipse : el.data.rectRadius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect;
             slide.addShape(shapeType, el.data);
             break;
           }
