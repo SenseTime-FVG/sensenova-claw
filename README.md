@@ -30,13 +30,7 @@
 
 ## 🏗️ Architecture
 
-[todo: architecture_diagram]
-
-**事件流**:
-```
-ui.user_input → agent.step_started → llm.call_requested → llm.call_completed
-  → tool.call_requested → tool.call_completed → agent.step_completed
-```
+<img src="assets/architecture.jpg" alt="Architecture" width="600">
 
 **核心模块**:
 
@@ -127,7 +121,7 @@ cp config_example.yml config.yml
 
 ## 🚀 Quick Start
 
-**1. 一键启动**
+**1. 启动服务**
 
 ```bash
 # 一键安装方式
@@ -137,26 +131,34 @@ sensenova-claw run
 npm run dev
 ```
 
-- Web 前端: http://localhost:3000
-- API 后端: http://localhost:8000
+启动后终端会输出带 Token 的访问地址：
 
-**2. 单独启动**
-
-```bash
-# 启动 API 服务
-npm run dev:server
-
-# 启动 Web 前端
-npm run dev:web
-
-# 启动 CLI 客户端（需后端已运行）
-sensenova-claw cli
-# 或: python3 -m sensenova-claw.app.cli.cli_client --port 8000
+```
+访问地址: http://localhost:3000/?token=<your-token>
 ```
 
-**3. 发送第一条消息**
+> Token 首次启动时自动生成并持久化到 `~/.sensenova-claw/token`，重启后自动复用。
 
-打开 http://localhost:3000，在对话框中输入消息即可开始对话。
+**2. 打开 Web 界面**
+
+在浏览器中打开终端输出的地址（含 Token 参数）即可进入对话界面。也可以手动拼接：
+
+```
+http://localhost:3000/?token=<your-token>
+```
+
+**3. 其他启动方式**
+
+```bash
+# 仅启动后端 API（http://localhost:8000）
+npm run dev:server
+
+# 仅启动 Web 前端
+npm run dev:web
+
+# CLI 客户端（需后端已运行）
+sensenova-claw cli
+```
 
 ## ⚙️ Configuration
 
