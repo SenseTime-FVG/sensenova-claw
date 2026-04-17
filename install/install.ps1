@@ -25,6 +25,9 @@ $CN_FNM_MIRROR = "https://npmmirror.com/mirrors/node"
 
 $IS_CN = $false
 
+# 当前 PowerShell 可执行路径（兼容 powershell.exe 和 pwsh.exe）
+$PS_EXE = (Get-Process -Id $PID).Path
+
 # ── 工具函数 ──
 
 function Log { param($msg) Write-Host "[+] $msg" -ForegroundColor Green }
@@ -108,7 +111,7 @@ function Install-Uv {
 
     Info "安装 uv..."
     # 在子进程中执行 uv 安装脚本，防止其内部 exit 终止宿主 PowerShell
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+    & $PS_EXE -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
 
     # 刷新 PATH
     $env:PATH = "$env:USERPROFILE\.local\bin;$env:USERPROFILE\.cargo\bin;$env:PATH"
@@ -151,7 +154,7 @@ function Install-Fnm {
         winget install Schniz.fnm --accept-package-agreements --accept-source-agreements 2>$null
     } else {
         # 降级：PowerShell 安装（子进程执行，防止 exit 终止宿主）
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://fnm.vercel.app/install.ps1 | iex"
+        & $PS_EXE -NoProfile -ExecutionPolicy Bypass -Command "irm https://fnm.vercel.app/install.ps1 | iex"
     }
 
     # 刷新 PATH
