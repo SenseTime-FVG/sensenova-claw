@@ -213,7 +213,9 @@ function Setup-Repo {
         Info "更新 Sensenova-Claw ($REPO_REF)..."
         Push-Location $APP_DIR
         try {
-            git fetch origin $REPO_REF --quiet 2>$null
+            # 强制刷新 tags 和分支，确保 force-push 的 tag 也能更新
+            git fetch origin --tags --force --depth 1 --quiet 2>$null
+            git fetch origin $REPO_REF --depth 1 --quiet 2>$null
             $remoteBranchRef = "refs/remotes/origin/$REPO_REF"
             git show-ref --verify --quiet $remoteBranchRef 2>$null
             if ($LASTEXITCODE -eq 0) {
@@ -221,8 +223,9 @@ function Setup-Repo {
                 if ($LASTEXITCODE -ne 0) {
                     git checkout -B $REPO_REF "origin/$REPO_REF" --quiet 2>$null
                 }
-                git pull origin $REPO_REF --ff-only --quiet 2>$null
+                git reset --hard "origin/$REPO_REF" --quiet 2>$null
             } else {
+                # tag 或 detached ref
                 git checkout --detach FETCH_HEAD --quiet 2>$null
             }
         } catch {

@@ -45,7 +45,7 @@ export function InlineSessionTitleEditor({
       onKeyDown={(event) => {
         if (shouldSubmitInlineRename({
           key: event.key,
-          isComposing: event.isComposing,
+          isComposing: (event.nativeEvent as KeyboardEvent).isComposing,
           nativeIsComposing: (event.nativeEvent as KeyboardEvent).isComposing,
           keyCode: event.keyCode,
         })) {
