@@ -313,7 +313,7 @@ class AgentMessageCoordinator:
         if not record or record.status in self.FINAL_STATUSES:
             return
         if record.status == "retrying":
-            logger.info(
+            logger.debug(
                 "ignore child completion while retrying record=%s session=%s event_turn=%s",
                 record.id,
                 event.session_id,
@@ -321,7 +321,7 @@ class AgentMessageCoordinator:
             )
             return
         if record.active_turn_id and event.turn_id and event.turn_id != record.active_turn_id:
-            logger.info(
+            logger.debug(
                 "ignore stale child completion record=%s session=%s event_turn=%s active_turn=%s",
                 record.id,
                 event.session_id,
@@ -366,7 +366,7 @@ class AgentMessageCoordinator:
         if not record or record.status in self.FINAL_STATUSES:
             return
         if record.status == "retrying":
-            logger.info(
+            logger.debug(
                 "ignore child failure while retrying record=%s session=%s event_turn=%s",
                 record.id,
                 event.session_id,
@@ -374,7 +374,7 @@ class AgentMessageCoordinator:
             )
             return
         if record.active_turn_id and event.turn_id and event.turn_id != record.active_turn_id:
-            logger.info(
+            logger.debug(
                 "ignore stale child failure record=%s session=%s event_turn=%s active_turn=%s",
                 record.id,
                 event.session_id,
