@@ -61,6 +61,37 @@ def _agent_prompt_path(request: Request, agent_id: str) -> Path:
     return _sensenova_claw_home_path(request) / "agents" / agent_id / SYSTEM_PROMPT_FILENAME
 
 
+def _remove_dedicated_miniapp_pages(request: Request, agent_id: str) -> None:
+    custom_pages_path = _sensenova_claw_home_path(request) / "custom_pages.json"
+    if not custom_pages_path.exists():
+        return
+
+    try:
+        raw_pages = json.loads(custom_pages_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("读取 custom_pages.json 失败，跳过 mini-app 清理", exc_info=True)
+        return
+
+    if not isinstance(raw_pages, list):
+        return
+
+    filtered_pages = [
+        page for page in raw_pages
+        if not (
+            isinstance(page, dict)
+            and str(page.get("agent_id") or "") == agent_id
+            and bool(page.get("create_dedicated_agent", False))
+        )
+    ]
+    if len(filtered_pages) == len(raw_pages):
+        return
+
+    custom_pages_path.write_text(
+        json.dumps(filtered_pages, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 async def _get_agent_detail_mcp_runtime(request: Request, servers: dict[str, Any]) -> SessionMcpRuntime:
     fingerprint = build_mcp_servers_fingerprint(servers)
     runtime = getattr(request.app.state, "_agent_detail_mcp_runtime", None)
@@ -466,6 +497,7 @@ async def delete_agent(agent_id: str, request: Request):
     if not registry.get(agent_id):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
+    _remove_dedicated_miniapp_pages(request, agent_id)
     await _persist_agent_record(request, agent_id, None)
     _persist_agent_prompt(request, agent_id, "")
     registry.delete(agent_id)

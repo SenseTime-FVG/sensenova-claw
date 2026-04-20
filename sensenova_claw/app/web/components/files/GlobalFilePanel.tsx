@@ -152,7 +152,7 @@ function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu, onFileClic
         ) : (
           <File className={cn('w-4 h-4 shrink-0', isTarget ? 'text-primary' : 'text-muted-foreground')} />
         )}
-        <span className={cn('truncate text-xs', isTarget ? 'text-primary' : 'text-foreground/80')}>
+        <span className={cn('whitespace-nowrap text-xs', isTarget ? 'text-primary' : 'text-foreground/80')}>
           {item.name}
         </span>
         {loading && <Loader2 className="w-3 h-3 text-muted-foreground ml-auto animate-spin" />}
@@ -594,8 +594,8 @@ export function GlobalFilePanel() {
               </div>
             </div>
           )}
-          <div className="flex-1 overflow-y-auto py-1">
-            <div className="space-y-0.5 px-1" key={localTreeKey}>
+          <div className="flex-1 overflow-auto py-1">
+            <div className="space-y-0.5 px-1 min-w-max" key={localTreeKey}>
               {roots.map(r => (
                 <FileTreeItem
                   key={r.path}

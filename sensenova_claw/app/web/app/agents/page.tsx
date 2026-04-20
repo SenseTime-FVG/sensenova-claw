@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
+import { useCustomPages } from '@/hooks/useCustomPages';
 
 interface Agent {
   id: string;
@@ -24,6 +25,7 @@ interface Agent {
 }
 
 export default function OrchestrationPage() {
+  const { refresh: refreshCustomPages } = useCustomPages();
   const [searchTerm, setSearchTerm] = useState('');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
@@ -67,6 +69,7 @@ export default function OrchestrationPage() {
         return;
       }
       setAgentToDelete(null);
+      await refreshCustomPages();
       loadAgents();
     } catch {
       setDeleteError('删除失败');

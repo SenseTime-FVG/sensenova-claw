@@ -267,6 +267,87 @@ async def test_compat_client_uses_ssl_context_for_websocket(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_compat_client_supports_coroutine_websocket_connect(monkeypatch):
+    events: list[str] = []
+
+    class _FakeWebSocket:
+        async def recv(self):
+            events.append("recv")
+            raise KeyboardInterrupt()
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+        async def close(self):
+            events.append("close")
+
+    async def _fake_connect(uri, *, ssl=None):
+        events.append(f"connect:{uri}")
+        assert ssl is _SSL_CONTEXT
+        return _FakeWebSocket()
+
+    monkeypatch.setattr("sensenova_claw.adapters.plugins.dingtalk.runtime.websockets.connect", _fake_connect)
+
+    client = _build_compat_client(logger=logging.getLogger("test"))
+    client.open_connection = lambda: {"endpoint": "wss://example.com/stream", "ticket": "ticket-1"}
+
+    await client.start()
+
+    assert events == [
+        "connect:wss://example.com/stream?ticket=ticket-1",
+        "recv",
+        "close",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_compat_client_supports_coroutine_open_connection(monkeypatch):
+    events: list[str] = []
+
+    class _FakeWebSocket:
+        async def __aenter__(self):
+            events.append("enter")
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            events.append("exit")
+            return False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise KeyboardInterrupt()
+
+    def _fake_connect(uri, *, ssl=None):
+        events.append(f"connect:{uri}")
+        assert ssl is _SSL_CONTEXT
+        return _FakeWebSocket()
+
+    monkeypatch.setattr("sensenova_claw.adapters.plugins.dingtalk.runtime.websockets.connect", _fake_connect)
+
+    client = _build_compat_client(logger=logging.getLogger("test"))
+
+    async def _open_connection():
+        events.append("open_connection")
+        return {"endpoint": "wss://example.com/stream", "ticket": "ticket-2"}
+
+    client.open_connection = _open_connection
+
+    await client.start()
+
+    assert events == [
+        "open_connection",
+        "connect:wss://example.com/stream?ticket=ticket-2",
+        "enter",
+        "exit",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_compat_client_logs_unexpected_exception_without_format_error(monkeypatch):
     records: list[tuple[str, object]] = []
 

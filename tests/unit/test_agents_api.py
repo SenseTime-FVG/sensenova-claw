@@ -412,6 +412,33 @@ def test_delete_agent_persists_to_config(client, app):
     assert "research" not in written.get("agents", {})
 
 
+def test_delete_agent_removes_dedicated_miniapp_page(client, app):
+    """删除专属 mini-app agent 时，应同步清理对应的功能页记录。"""
+    home = Path(app.state.sensenova_claw_home)
+    home.mkdir(parents=True, exist_ok=True)
+    custom_pages_path = home / "custom_pages.json"
+    custom_pages_path.write_text(
+        json.dumps([
+            {
+                "id": "page-issue217",
+                "slug": "issue217-test",
+                "name": "issue217-test",
+                "type": "miniapp",
+                "agent_id": "research",
+                "base_agent_id": "default",
+                "create_dedicated_agent": True,
+            }
+        ], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    resp = client.delete("/api/agents/research")
+    assert resp.status_code == 200
+
+    pages = json.loads(custom_pages_path.read_text(encoding="utf-8"))
+    assert pages == []
+
+
 def test_delete_default_agent(client):
     """不允许删除 default Agent"""
     resp = client.delete("/api/agents/default")
