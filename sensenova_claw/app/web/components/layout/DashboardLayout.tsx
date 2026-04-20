@@ -3,9 +3,11 @@
 import { ReactNode, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import {
   DashboardNav,
   NavIcon,
+  type FeatureNavItem,
   type SubNavGroup,
 } from './DashboardNav';
 import { Search } from 'lucide-react';
@@ -20,6 +22,8 @@ import { NotificationDropdown } from '@/components/notification/NotificationDrop
 import { UserDropdown } from './UserDropdown';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useNavigation } from '@/hooks/useNavigation';
+import { ContextMenu } from '@/components/files/ContextMenu';
+import { FeatureDeleteDialog } from '@/components/features/FeatureDeleteDialog';
 
 const GlobalFilePanel = dynamic(() => import('@/components/files/GlobalFilePanel').then(mod => mod.GlobalFilePanel), {
   loading: () => <div className="h-full bg-muted/10 animate-pulse" />,
@@ -33,7 +37,10 @@ interface DashboardLayoutProps {
 const ADMIN_PATHS = ['/agents', '/sessions', '/llms', '/gateway', '/tools', '/skills', '/mcp', '/settings', '/acp', '/office'];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
+  const router = useRouter();
   const [manualGroup, setManualGroup] = useState<SubNavGroup>(null);
+  const [featureContextMenu, setFeatureContextMenu] = useState<{ item: FeatureNavItem; x: number; y: number } | null>(null);
+  const [featureToDelete, setFeatureToDelete] = useState<FeatureNavItem | null>(null);
   const { startNewChat } = useSession();
   const { t } = useI18n();
 
@@ -50,6 +57,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
   const handleGroupToggle = useCallback((group: SubNavGroup) => {
     setManualGroup(group);
+  }, []);
+
+  const openFeatureContextMenu = useCallback((event: React.MouseEvent, item: FeatureNavItem) => {
+    if (item.kind !== 'custom') return;
+    event.preventDefault();
+    setFeatureContextMenu({ item, x: event.clientX, y: event.clientY });
   }, []);
 
   return (
@@ -116,7 +129,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               <Link
                 key={item.path}
                 href={item.path}
+                data-testid={'kind' in item && item.kind === 'custom' ? `feature-nav-item-${item.pageId}` : undefined}
                 onClick={() => { if (pathname?.startsWith(item.path)) startNewChat(); }}
+                onContextMenu={'kind' in item ? (event) => openFeatureContextMenu(event, item as FeatureNavItem) : undefined}
                 className={cn(
                   'px-3 py-1 text-[13px] rounded-lg transition-all duration-150 flex items-center gap-1.5',
                   pathname?.startsWith(item.path)
@@ -168,6 +183,35 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           </ResizablePanelGroup>
         )}
       </DndProvider>
+      {featureContextMenu ? (
+        <ContextMenu
+          x={featureContextMenu.x}
+          y={featureContextMenu.y}
+          onClose={() => setFeatureContextMenu(null)}
+          testId="feature-context-menu"
+          items={[{
+            label: '删除功能',
+            onClick: () => setFeatureToDelete(featureContextMenu.item),
+            testId: 'feature-context-menu-delete',
+          }]}
+        />
+      ) : null}
+      <FeatureDeleteDialog
+        open={!!featureToDelete}
+        featureId={featureToDelete?.pageId || ''}
+        featureName={featureToDelete?.label || ''}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFeatureToDelete(null);
+          }
+        }}
+        onDeleted={() => {
+          if (featureToDelete && pathname?.startsWith(`/features/${featureToDelete.pageId}`)) {
+            router.replace('/create-feature');
+          }
+          setFeatureToDelete(null);
+        }}
+      />
     </div>
   );
 }
