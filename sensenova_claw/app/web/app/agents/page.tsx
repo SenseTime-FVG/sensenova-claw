@@ -102,9 +102,12 @@ export default function OrchestrationPage() {
               <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent bg-primary text-primary-foreground shadow-lg shadow-primary/20">
                 <Bot className="h-5 w-5" /> Agents
               </button>
-              <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground opacity-60">
+              <Link
+                href="/agents/analytics"
+                className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
                 <Activity className="h-5 w-5" /> Analytics
-              </button>
+              </Link>
             </nav>
           </aside>
 
