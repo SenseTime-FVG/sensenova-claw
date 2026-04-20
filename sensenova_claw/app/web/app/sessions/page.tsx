@@ -313,9 +313,6 @@ export default function SessionsPage() {
               <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent bg-primary text-primary-foreground shadow-lg shadow-primary/20">
                 <MessageSquare className="h-5 w-5" /> Recent History
               </button>
-              <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground opacity-60">
-                <span className="h-5 w-5 bg-muted rounded-full flex items-center justify-center text-[10px]">★</span> Bookmarked
-              </button>
               <div className="h-px bg-border/40 my-4 mx-4" />
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70 mb-2 px-4">Filters</p>
               <div className="px-4 py-2 space-y-4">

@@ -639,6 +639,74 @@ class Repository:
         rows = conn.execute("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp", (session_id,)).fetchall()
         return [dict(row) for row in rows]
 
+    async def get_agent_analytics(self, since_ts: float) -> dict[str, dict[str, Any]]:
+        """按 agent_id 聚合会话/轮次/LLM/工具调用数（timestamp >= since_ts 的增量）。
+
+        返回 {agent_id: {sessions, turns, llm_calls, tool_calls, last_active}}。
+        sessions 与 last_active 统计的是全量，其他统计受 since_ts 过滤。
+        """
+        return await asyncio.to_thread(self._sync_get_agent_analytics, since_ts)
+
+    def _sync_get_agent_analytics(self, since_ts: float) -> dict[str, dict[str, Any]]:
+        conn = self._conn()
+        session_rows = conn.execute(
+            "SELECT session_id, agent_id, meta, last_active FROM sessions"
+        ).fetchall()
+        session_to_agent: dict[str, str] = {}
+        by_agent: dict[str, dict[str, Any]] = {}
+        for row in session_rows:
+            aid = row["agent_id"] or "default"
+            # 回退逻辑与 _resolve_agent_id 保持一致：列为 default 时再查 meta JSON
+            if aid == "default" and row["meta"]:
+                try:
+                    meta = json.loads(row["meta"])
+                    meta_aid = meta.get("agent_id") if isinstance(meta, dict) else None
+                    if meta_aid:
+                        aid = meta_aid
+                except (json.JSONDecodeError, TypeError, AttributeError):
+                    pass
+            session_to_agent[row["session_id"]] = aid
+            info = by_agent.setdefault(
+                aid,
+                {"sessions": 0, "turns": 0, "llm_calls": 0, "tool_calls": 0, "last_active": 0.0},
+            )
+            info["sessions"] += 1
+            info["last_active"] = max(info["last_active"], row["last_active"] or 0.0)
+
+        turn_rows = conn.execute(
+            "SELECT session_id, COUNT(*) AS cnt FROM turns WHERE started_at >= ? GROUP BY session_id",
+            (since_ts,),
+        ).fetchall()
+        for row in turn_rows:
+            aid = session_to_agent.get(row["session_id"])
+            if aid is None:
+                continue
+            by_agent.setdefault(
+                aid,
+                {"sessions": 0, "turns": 0, "llm_calls": 0, "tool_calls": 0, "last_active": 0.0},
+            )["turns"] += row["cnt"]
+
+        event_rows = conn.execute(
+            "SELECT session_id, event_type, COUNT(*) AS cnt FROM events "
+            "WHERE timestamp >= ? AND event_type IN (?, ?) "
+            "GROUP BY session_id, event_type",
+            (since_ts, "llm.call_completed", "tool.call_completed"),
+        ).fetchall()
+        for row in event_rows:
+            aid = session_to_agent.get(row["session_id"])
+            if aid is None:
+                continue
+            info = by_agent.setdefault(
+                aid,
+                {"sessions": 0, "turns": 0, "llm_calls": 0, "tool_calls": 0, "last_active": 0.0},
+            )
+            if row["event_type"] == "llm.call_completed":
+                info["llm_calls"] += row["cnt"]
+            else:
+                info["tool_calls"] += row["cnt"]
+
+        return by_agent
+
     def _parse_payload_json(self, raw: str | bytes | None) -> dict[str, Any]:
         """解析 events.payload_json，失败时回退为空 dict。"""
         if not raw:

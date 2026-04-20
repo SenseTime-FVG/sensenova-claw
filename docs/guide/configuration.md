@@ -40,7 +40,7 @@ system:
   database_path: var/data/sensenova-claw.db
 
   # 日志级别: DEBUG / INFO / WARNING / ERROR
-  log_level: DEBUG
+  log_level: INFO
 
   # 授权路径列表，工具只能访问这些路径下的文件
   granted_paths:
@@ -52,7 +52,7 @@ system:
 |--------|------|--------|------|
 | `workspace_dir` | string | `workspace` | 工作区目录路径 |
 | `database_path` | string | `var/data/sensenova-claw.db` | SQLite 数据库文件路径 |
-| `log_level` | string | `DEBUG` | 日志输出级别 |
+| `log_level` | string | `INFO` | 日志输出级别 |
 | `granted_paths` | list | `[]` | 授权访问的文件系统路径列表 |
 
 ### agent 段 — Agent 配置
@@ -354,7 +354,7 @@ export ANTHROPIC_API_KEY=sk-ant-your-key
 export SERPER_API_KEY=your-serper-key
 
 # 系统配置
-export LOG_LEVEL=DEBUG
+export LOG_LEVEL=INFO
 ```
 
 环境变量命名规则：大写字母 + 下划线分隔，与 `config.yml` 中的顶层键名对应。
@@ -456,7 +456,7 @@ SERPER_API_KEY: your-serper-api-key
 system:
   workspace_dir: workspace
   database_path: var/data/sensenova-claw.db
-  log_level: DEBUG
+  log_level: INFO
   granted_paths:
     - /home/user/projects
 
