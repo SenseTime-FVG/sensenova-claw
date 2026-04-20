@@ -141,7 +141,7 @@ class WebSocketChannel(Channel):
             })
             return
 
-        logger.info("Received WS message: %s", msg_type)
+        logger.debug("Received WS message: %s", msg_type)
 
         if msg_type == "create_session":
             agent_id = payload.get("agent_id", "default")
