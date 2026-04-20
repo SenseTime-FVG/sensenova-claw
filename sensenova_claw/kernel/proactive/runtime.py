@@ -182,11 +182,11 @@ class ProactiveRuntime:
         return True
 
     async def _run_and_deliver(self, job: ProactiveJob, trigger_event: EventEnvelope | None = None) -> None:
-        logger.info("[DEBUG-REC] _run_and_deliver called: job=%s, has_trigger=%s", job.id, trigger_event is not None)
+        logger.debug("_run_and_deliver: job=%s, has_trigger=%s", job.id, trigger_event is not None)
         session_id, result = await self._executor.execute_job(job, trigger_event)
-        logger.info("[DEBUG-REC] executor result: session_id=%s, result_len=%s, last_status=%s", session_id, len(result) if result else 0, job.state.last_status)
+        logger.debug("executor result: session_id=%s, result_len=%s, last_status=%s", session_id, len(result) if result else 0, job.state.last_status)
         if not (self._delivery and job.state.last_status == "ok" and result):
-            logger.info("[DEBUG-REC] skipping delivery: has_delivery=%s, status=%s, has_result=%s", self._delivery is not None, job.state.last_status, result is not None)
+            logger.debug("skipping delivery: has_delivery=%s, status=%s, has_result=%s", self._delivery is not None, job.state.last_status, result is not None)
             return
 
         source_session_id = trigger_event.session_id if trigger_event else None
@@ -194,12 +194,11 @@ class ProactiveRuntime:
         items = None
 
         if job.delivery.recommendation_type:
-            logger.info("[DEBUG-REC] parsing recommendation JSON, result[:500]=%s", result[:500])
             items = self._parse_recommendation_json(result)
             if items is None:
-                logger.warning("[DEBUG-REC] 推荐 JSON 解析失败，跳过投递: job=%s, result[:200]=%s", job.id, result[:200])
+                logger.warning("推荐 JSON 解析失败，跳过投递: job=%s, result[:200]=%s", job.id, result[:200])
                 return
-            logger.info("[DEBUG-REC] parsed %d recommendation items", len(items))
+            logger.debug("parsed %d recommendation items", len(items))
             if source_session_id:
                 delivery_session_id = source_session_id
 
@@ -211,7 +210,7 @@ class ProactiveRuntime:
             deliver_kwargs["scratch_session_id"] = session_id
 
         await self._delivery.deliver(job, delivery_session_id, result, **deliver_kwargs)
-        logger.info("[DEBUG-REC] delivery done")
+        logger.debug("delivery done: job=%s", job.id)
 
     @staticmethod
     def _parse_recommendation_json(text: str) -> list[dict] | None:

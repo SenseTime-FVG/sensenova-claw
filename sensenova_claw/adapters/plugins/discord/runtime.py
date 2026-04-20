@@ -8,10 +8,16 @@ import importlib
 import logging
 from typing import Any, Awaitable, Callable, Sequence
 
+import aiohttp
+
+from sensenova_claw.platform.security.ssl import CERTIFI_SSL_CONTEXT
+
 from .config import DiscordConfig
 from .models import DiscordFeatureHooks, DiscordInboundMessage
 
 logger = logging.getLogger(__name__)
+
+_SSL_CONTEXT = CERTIFI_SSL_CONTEXT
 
 DiscordMessageHandler = Callable[[DiscordInboundMessage], Awaitable[None]]
 
@@ -86,7 +92,8 @@ class DiscordRuntime:
                 if runtime._message_handler is not None:
                     await runtime._message_handler(normalized)
 
-        self._client = _SensenovaClawDiscordClient(intents=intents)
+        connector = aiohttp.TCPConnector(limit=0, ssl=_SSL_CONTEXT)
+        self._client = _SensenovaClawDiscordClient(intents=intents, connector=connector)
         self._sensenova_claw_status = {"status": "connecting"}
         try:
             await self._client.login(self._config.bot_token)

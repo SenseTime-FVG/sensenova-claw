@@ -30,7 +30,7 @@ interface DashboardLayoutProps {
   children: ReactNode;
 }
 
-const ADMIN_PATHS = ['/agents', '/sessions', '/llms', '/gateway', '/tools', '/skills', '/settings', '/acp', '/office'];
+const ADMIN_PATHS = ['/agents', '/sessions', '/llms', '/gateway', '/tools', '/skills', '/mcp', '/settings', '/acp', '/office'];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [manualGroup, setManualGroup] = useState<SubNavGroup>(null);

@@ -64,7 +64,7 @@ sns.countplot(data=df, x='category', order=df['category'].value_counts().index)
 ### Point Plot (Mean + CI)
 ```python
 # Shows mean with confidence interval
-sns.pointplot(data=df, x='category', y='value', ci=95)
+sns.pointplot(data=df, x='category', y='value', errorbar=('ci', 95))
 ```
 
 ### Strip Plot + Box Plot

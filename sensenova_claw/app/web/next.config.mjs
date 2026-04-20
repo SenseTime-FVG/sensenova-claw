@@ -3,6 +3,7 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const nextConfig = {
+  output: 'standalone',
   reactStrictMode: true,
   async redirects() {
     return [
@@ -19,6 +20,10 @@ const nextConfig = {
       {
         source: '/api/:path*',
         destination: `${API_URL}/api/:path*`,
+      },
+      {
+        source: '/ws',
+        destination: `${API_URL}/ws`,
       },
       {
         source: '/health',

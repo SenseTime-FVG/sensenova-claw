@@ -732,6 +732,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       timestamp: Date.now() / 1000,
     });
     setIsTyping(false);
+    setTurnActive(false);
   }, [wsSend, sessionIdRef]);
 
   const updateMessages = useCallback((updater: (prev: ChatMessage[]) => ChatMessage[]) => {

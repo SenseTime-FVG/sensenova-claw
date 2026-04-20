@@ -31,6 +31,20 @@ test('WebSocketContext 手动重连应强制重跑连接 effect', () => {
   assert.match(source, /\}, \[enabled, connectionNonce\]\);/);
 });
 
+test('WebSocketContext 默认应优先走同源 /ws 代理', () => {
+  const source = readSource('contexts/ws/WebSocketContext.tsx');
+
+  assert.match(source, /const WS_URL = process\.env\.NEXT_PUBLIC_WS_URL \|\| '\/ws';/);
+  assert.doesNotMatch(source, /ws:\/\/localhost:8000\/ws/);
+});
+
+test('Next.js rewrites 应代理 /ws 到后端', () => {
+  const source = readSource('next.config.mjs');
+
+  assert.match(source, /source: '\/ws'/);
+  assert.match(source, /destination: `\$\{API_URL\}\/ws`/);
+});
+
 test('前端 node 测试脚本应指向实际存在的测试文件集合', () => {
   const pkg = JSON.parse(readSource('package.json'));
 
@@ -92,6 +106,15 @@ test('历史恢复判断 turnActive 时应把 error.raised 视为终结事件', 
   const source = readSource('contexts/ws/MessageContext.tsx');
 
   assert.match(source, /type === 'error' \|\|\s*type === 'error\.raised'/s);
+});
+
+test('会话重命名输入框在输入法 composition 阶段按 Enter 不应提交', () => {
+  const source = readSource('components/session/InlineSessionTitleEditor.tsx');
+
+  assert.match(source, /shouldSubmitInlineRename\(\{/);
+  assert.match(source, /isComposing:\s*event\.isComposing/);
+  assert.match(source, /nativeIsComposing:\s*\(event\.nativeEvent as KeyboardEvent\)\.isComposing/);
+  assert.match(source, /keyCode:\s*event\.keyCode/);
 });
 
 test('从历史事件重建消息时应在 error.raised 后收敛仍为 running 的工具状态', () => {

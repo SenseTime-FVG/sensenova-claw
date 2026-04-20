@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import platform
 import sys
 from datetime import datetime
 from typing import Any, TYPE_CHECKING
+from jinja2 import Environment
 
 from sensenova_claw.capabilities.agents.preferences import (
     load_preferences,
@@ -23,6 +25,33 @@ if TYPE_CHECKING:
     from sensenova_claw.capabilities.agents.registry import AgentRegistry
     from sensenova_claw.capabilities.skills.registry import SkillRegistry
     from sensenova_claw.capabilities.tools.registry import ToolRegistry
+
+
+logger = logging.getLogger(__name__)
+_GLOBAL_AGENTS_TEMPLATE_ENV = Environment(
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+
+
+def _render_global_agents_md_template(content: str, tool_names: list[str]) -> str:
+    """渲染全局 AGENTS.md 模板，仅注入 tool_names。"""
+    try:
+        template = _GLOBAL_AGENTS_TEMPLATE_ENV.from_string(content)
+        return template.render(tool_names=tool_names)
+    except Exception:
+        logger.warning("Failed to render global AGENTS.md template", exc_info=True)
+        return content
+
+
+def _render_global_context_files(context_files: list[ContextFile], tool_names: list[str]) -> list[ContextFile]:
+    rendered: list[ContextFile] = []
+    for cf in context_files:
+        if cf.name == "AGENTS.md":
+            rendered.append(ContextFile(name=cf.name, content=_render_global_agents_md_template(cf.content, tool_names)))
+        else:
+            rendered.append(cf)
+    return rendered
 
 
 class ContextBuilder:
@@ -46,6 +75,7 @@ class ContextBuilder:
         memory_context: str | None = None,
         context_files: list[ContextFile] | None = None,
         agent_config: AgentConfig | None = None,
+        session_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """构建 LLM 调用的完整消息列表"""
         # 收集工具信息（根据 agent_config 过滤）
@@ -56,14 +86,17 @@ class ContextBuilder:
         if agent_config:
             prefs = load_preferences(home)
         if self.tool_registry:
-            tools = self.tool_registry.as_llm_tools()
+            tools = self.tool_registry.as_llm_tools(session_id=session_id, agent_config=agent_config)
             # 根据 agent_config 过滤工具信息注入 prompt
-            if agent_config and agent_config.tools:
-                allowed = set(agent_config.tools)
-                # 保留 send_message（除非 can_delegate_to 为 None 表示禁止委托）
-                if agent_config.can_delegate_to is not None:
-                    allowed.add("send_message")
-                tools = [t for t in tools if t["name"] in allowed]
+            if agent_config:
+                if agent_config.tools is None:
+                    tools = [t for t in tools if t["name"].startswith("mcp__")]
+                elif agent_config.tools:
+                    allowed = set(agent_config.tools)
+                    # 保留 send_message（除非 can_delegate_to 为 None 表示禁止委托）
+                    if agent_config.can_delegate_to is not None:
+                        allowed.add("send_message")
+                    tools = [t for t in tools if t["name"].startswith("mcp__") or t["name"] in allowed]
             if agent_config and agent_config.can_delegate_to is None:
                 tools = [t for t in tools if t["name"] != "send_message"]
             if agent_config:
@@ -74,6 +107,8 @@ class ContextBuilder:
             for t in tools:
                 tool_names.append(t["name"])
                 tool_summaries[t["name"]] = t.get("description", "")
+
+        rendered_context_files = _render_global_context_files(context_files or [], tool_names)
 
         # 根据 agent_config 选择 system prompt
         base_prompt = (
@@ -99,7 +134,7 @@ class ContextBuilder:
             skills_prompt=self._build_skills_section(agent_config),
             delegation_prompt=delegation_prompt,
             memory_context=memory_context,
-            context_files=context_files or [],
+            context_files=rendered_context_files,
             extra_system_prompt=extra,
             runtime_info=self._collect_runtime_info(agent_config),
             workspace_dir=effective_workdir,
@@ -143,9 +178,12 @@ class ContextBuilder:
             return None
         skills = self.skill_registry.get_all()
         # 按 agent_config 过滤 skills
-        if agent_config and agent_config.skills:
-            allowed = set(agent_config.skills)
-            skills = [s for s in skills if s.name in allowed]
+        if agent_config:
+            if agent_config.skills is None:
+                skills = []
+            elif agent_config.skills:
+                allowed = set(agent_config.skills)
+                skills = [s for s in skills if s.name in allowed]
         if not skills:
             return None
         lines = [

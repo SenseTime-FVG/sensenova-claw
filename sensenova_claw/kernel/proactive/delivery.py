@@ -18,6 +18,7 @@ class ProactiveDelivery:
     def __init__(self, bus, notification_service):
         self._bus = bus
         self._notification_service = notification_service
+        self._llm_factory = LLMFactory()
 
     async def deliver(
         self, job: ProactiveJob, session_id: str, result: str,
@@ -74,7 +75,7 @@ class ProactiveDelivery:
 
         try:
             from sensenova_claw.platform.config.config import config as _cfg
-            provider = LLMFactory().get_provider()
+            provider = self._llm_factory.get_provider()
             _, model = _cfg.resolve_model()
             messages = [
                 {"role": "system", "content": summary_prompt},

@@ -5,6 +5,16 @@ import { STATES, BUBBLE_TEXTS, type OfficeStateName } from './types';
 
 const BUBBLE_INTERVAL = 8000;
 const CAT_BUBBLE_INTERVAL = 18000;
+const BREATHING_FRAME_RANGE = { start: 0, end: 7 } as const;
+
+const STATE_BREATHING_ANIMATION_KEYS: Record<OfficeStateName, string> = {
+  idle: 'star_idle',
+  writing: 'star_writing_breath',
+  researching: 'star_researching_breath',
+  executing: 'star_executing_breath',
+  syncing: 'star_syncing_breath',
+  error: 'star_error_breath',
+};
 
 export class OfficeScene extends Phaser.Scene {
   // 多 agent 角色管理
@@ -24,6 +34,9 @@ export class OfficeScene extends Phaser.Scene {
   private catSprite!: Phaser.GameObjects.Sprite;
 
   private currentState: OfficeStateName = 'idle';
+  private roomMode: 'global' | 'agent' = 'global';
+  private selectedAgentId: string | null = null;
+  private agentStatuses: Record<string, { status: 'idle' | 'running' | 'error' }> = {};
   private bubble: Phaser.GameObjects.Container | null = null;
   private catBubble: Phaser.GameObjects.Container | null = null;
   private lastBubble = 0;
@@ -51,7 +64,27 @@ export class OfficeScene extends Phaser.Scene {
     this.load.spritesheet('error_bug', `${base}/error-bug-spritesheet-grid.webp`, { frameWidth: 180, frameHeight: 180 });
     this.load.spritesheet('cats', `${base}/cats-spritesheet.webp`, { frameWidth: 160, frameHeight: 160 });
     this.load.spritesheet('sync_anim', `${base}/star-idle-sheep-grid.png`, { frameWidth: 128, frameHeight: 128 });
-    this.load.spritesheet('flowers', `${base}/flowers-bloom-v2.webp`, { frameWidth: 65, frameHeight: 65 });
+    this.load.spritesheet('flowers', `${base}/flowers-bloom-v2.webp`, { frameWidth: 128, frameHeight: 128 });
+  }
+
+  private createBreathingAnimation(key: string, textureKey: string = 'star_idle') {
+    this.anims.create({
+      key,
+      // 当前各状态先保持与 idle 完全相同的呼吸节奏，后续可独立调整
+      frames: this.anims.generateFrameNumbers(textureKey, BREATHING_FRAME_RANGE),
+      frameRate: 4,
+      repeat: -1,
+    });
+  }
+
+  private getBreathingAnimationKeyForAgentStatus(status: 'idle' | 'running' | 'error'): string {
+    if (status === 'idle') return STATE_BREATHING_ANIMATION_KEYS.idle;
+    if (status === 'error') return STATE_BREATHING_ANIMATION_KEYS.error;
+    return this.currentState === 'idle' ? 'star_working_breath' : this.getCurrentWorkingAnimationKey();
+  }
+
+  private getCurrentWorkingAnimationKey(): string {
+    return STATE_BREATHING_ANIMATION_KEYS[this.currentState] ?? STATE_BREATHING_ANIMATION_KEYS.idle;
   }
 
   create() {
@@ -64,17 +97,13 @@ export class OfficeScene extends Phaser.Scene {
       .setOrigin(sf.origin.x, sf.origin.y).setDepth(sf.depth);
 
     // 主角动画定义（多 agent 复用）
-    this.anims.create({
-      key: 'star_idle',
-      // 8 帧更明显的呼吸、摆动和眨眼，让待机状态更有生命感
-      frames: this.anims.generateFrameNumbers('star_idle', { start: 0, end: 7 }),
-      frameRate: 4, repeat: -1,
-    });
-    this.anims.create({
-      key: 'star_working',
-      frames: this.anims.generateFrameNumbers('star_working', { start: 0, end: 0 }),
-      frameRate: 1, repeat: -1,
-    });
+    this.createBreathingAnimation('star_idle');
+    this.createBreathingAnimation('star_working_breath');
+    this.createBreathingAnimation('star_writing_breath');
+    this.createBreathingAnimation('star_researching_breath');
+    this.createBreathingAnimation('star_executing_breath');
+    this.createBreathingAnimation('star_syncing_breath');
+    this.createBreathingAnimation('star_error_breath');
 
     // 办公桌
     const dk = LAYOUT.furniture.desk;
@@ -132,7 +161,7 @@ export class OfficeScene extends Phaser.Scene {
     this.anims.create({
       key: 'sync_sheep_idle',
       // 右下角展示羊使用同一套 8 帧待机动画
-      frames: this.anims.generateFrameNumbers('sync_anim', { start: 0, end: 7 }),
+      frames: this.anims.generateFrameNumbers('sync_anim', BREATHING_FRAME_RANGE),
       frameRate: 4, repeat: -1,
     });
     const sa = LAYOUT.furniture.syncAnim;
@@ -167,6 +196,20 @@ export class OfficeScene extends Phaser.Scene {
     this.game.events.on('setAgents', (agents: { id: string; name: string }[]) => {
       this.handleAgentsUpdate(agents);
     });
+
+    this.game.events.on('setRoomContext', (
+      context: {
+        mode: 'global' | 'agent';
+        selectedAgentId: string | null;
+        agentStatuses: Record<string, { status: 'idle' | 'running' | 'error' }>;
+      },
+    ) => {
+      this.roomMode = context.mode;
+      this.selectedAgentId = context.selectedAgentId;
+      this.agentStatuses = context.agentStatuses || {};
+      this.syncAnimSprite.setVisible(this.roomMode === 'global');
+      this.applyStateToAllAgents();
+    });
   }
 
   update(time: number) {
@@ -193,8 +236,8 @@ export class OfficeScene extends Phaser.Scene {
       this.errorBug.setVisible(false);
     }
 
-    // 右下角羊保持待机动画，避免在 idle 下退回静态首帧
-    if (!this.syncAnimSprite.anims.isPlaying) {
+    // 右下角羊只在总办公室展示，避免单 agent 房间出现第二只羊
+    if (this.roomMode === 'global' && !this.syncAnimSprite.anims.isPlaying) {
       this.syncAnimSprite.play('sync_sheep_idle');
     }
 
@@ -255,19 +298,33 @@ export class OfficeScene extends Phaser.Scene {
 
   private applyStateToAllAgents() {
     const slots = LAYOUT.agentSlots;
-    for (const [, group] of this.agentSprites) {
+    for (const [agentId, group] of this.agentSprites) {
       const idx = group.slotIndex;
-      if (this.currentState === 'idle') {
+
+      const agentStatus = this.agentStatuses[agentId]?.status ?? 'idle';
+      if (this.roomMode === 'agent') {
         const slot = slots.idle[idx % slots.idle.length];
-        group.idleSprite.setPosition(slot.x, slot.y).setVisible(true);
-        group.workingSprite.setVisible(false);
-        group.nameLabel.setPosition(slot.x, slot.y + 50).setVisible(true);
-      } else if (['writing', 'researching', 'executing'].includes(this.currentState)) {
-        const slot = slots.working[idx % slots.working.length];
+        const workSlot = slots.working[idx % slots.working.length];
+        if (agentStatus === 'running') {
+          group.idleSprite.setVisible(false);
+          group.workingSprite.setPosition(workSlot.x, workSlot.y).setVisible(true);
+          group.workingSprite.play(this.getBreathingAnimationKeyForAgentStatus(agentStatus));
+          group.nameLabel.setPosition(workSlot.x, workSlot.y + 50).setVisible(true);
+        } else if (agentStatus === 'idle') {
+          group.idleSprite.setPosition(slot.x, slot.y).setVisible(true);
+          group.workingSprite.setVisible(false);
+          group.nameLabel.setPosition(slot.x, slot.y + 50).setVisible(true);
+        } else {
+          group.idleSprite.setVisible(false);
+          group.workingSprite.setVisible(false);
+          group.nameLabel.setVisible(false);
+        }
+      } else if (agentStatus === 'running') {
+        const workSlot = slots.working[idx % slots.working.length];
         group.idleSprite.setVisible(false);
-        group.workingSprite.setPosition(slot.x, slot.y).setVisible(true);
-        group.workingSprite.play('star_working');
-        group.nameLabel.setPosition(slot.x, slot.y + 50).setVisible(true);
+        group.workingSprite.setPosition(workSlot.x, workSlot.y).setVisible(true);
+        group.workingSprite.play(this.getBreathingAnimationKeyForAgentStatus(agentStatus));
+        group.nameLabel.setPosition(workSlot.x, workSlot.y + 50).setVisible(true);
       } else {
         group.idleSprite.setVisible(false);
         group.workingSprite.setVisible(false);
