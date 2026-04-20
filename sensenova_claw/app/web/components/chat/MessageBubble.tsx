@@ -11,6 +11,19 @@ import { AskUserResponseForm } from '@/components/chat/AskUserResponseForm';
 
 const MAX_TOOL_CONTENT_HEIGHT = 240;
 
+/**
+ * Issue #211: 把毫秒数格式化为中文耗时字符串，如 "3分15秒"、"12秒"。
+ * 小于 1 秒向上取到 1 秒，避免显示 "0秒"。
+ */
+function formatDurationZh(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const totalSeconds = Math.max(1, Math.round(ms / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}秒`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}分${seconds}秒`;
+}
+
 function ToolContent({ value }: { value: unknown }) {
   if (!value) return <span className="text-muted-foreground italic">empty</span>;
   if (isJsonLike(value)) {
@@ -211,6 +224,15 @@ export const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMes
           {parsedAssistantContent.answerContent ? (
             <div className="text-base md:text-lg text-foreground leading-relaxed">
               <Markdown content={parsedAssistantContent.answerContent} />
+            </div>
+          ) : null}
+          {typeof msg.durationMs === 'number' ? (
+            <div
+              className="text-xs text-muted-foreground assistant-duration"
+              data-testid="assistant-duration"
+              title="从你发送消息到本次回复完成的耗时"
+            >
+              耗时 {formatDurationZh(msg.durationMs)}
             </div>
           ) : null}
         </div>
