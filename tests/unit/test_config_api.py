@@ -214,6 +214,30 @@ def test_update_sections_preserves_other_keys(client, app):
     assert written["custom_key"] == "keep_me"
 
 
+def test_update_llm_model_persists_missing_provider_placeholder(client, app):
+    """当模型引用尚未落盘的 provider 时，保存模型应同时保留该 provider 占位配置。"""
+    resp = client.put("/api/config/llm/models/test-model", json={
+        "name": "test-model",
+        "provider": "custom-openai",
+        "model_id": "gpt-4.1-mini",
+        "type": "chat",
+        "timeout": 60,
+        "max_tokens": 128000,
+        "max_output_tokens": 16384,
+    })
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["providers"]["custom-openai"] == {
+        "source_type": "openai",
+        "base_url": "",
+        "timeout": 60,
+        "max_retries": 3,
+        "api_key": "",
+    }
+    assert written["llm"]["models"]["test-model"]["provider"] == "custom-openai"
+
+
 def test_list_models_accepts_openai_compatible_provider_keys(client, monkeypatch):
     """OpenAI 兼容 provider 应透传具体 key，后端仍按 OpenAI 兼容方式处理"""
     mocked = AsyncMock(return_value=[
@@ -414,6 +438,7 @@ def test_create_single_model_when_missing(client, app):
     assert written["llm"]["models"]["deepseek-chat"] == {
         "provider": "openai",
         "model_id": "deepseek-chat",
+        "type": "chat",
         "timeout": 45,
         "max_tokens": 64000,
         "max_output_tokens": 8192,

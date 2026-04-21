@@ -248,6 +248,7 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     config_manager = request.app.state.config_manager
     raw_config = config_manager._load_raw_yaml()
     llm_section = deepcopy(raw_config.get("llm", {}))
+    providers = deepcopy(llm_section.get("providers", {}))
     models = deepcopy(llm_section.get("models", {}))
 
     model_exists = model_name in models
@@ -269,6 +270,15 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     if body.dimensions:
         model_data["dimensions"] = body.dimensions
     models[next_name] = model_data
+    if body.provider not in providers:
+        providers[body.provider] = {
+            "source_type": "openai",
+            "api_key": "",
+            "base_url": "",
+            "timeout": 60,
+            "max_retries": 3,
+        }
+    llm_section["providers"] = providers
     llm_section["models"] = models
     if model_exists and llm_section.get("default_model") == model_name:
         llm_section["default_model"] = next_name
