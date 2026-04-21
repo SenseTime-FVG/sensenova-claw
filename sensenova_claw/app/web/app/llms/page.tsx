@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { buildDeleteConfirmationConfig, type DeleteTargetType } from './deleteConfirmation';
 import { getExistingModelValidationError, getNewModelValidationError } from './newModelValidation';
+import { getExistingProviderValidationError, getNewProviderValidationError } from './providerValidation';
 
 interface SecretValueStatus {
   configured: boolean;
@@ -110,8 +111,10 @@ export default function LlmsPage() {
 
   const [showNewProvider, setShowNewProvider] = useState(false);
   const [newProviderName, setNewProviderName] = useState('');
+  const [newProviderError, setNewProviderError] = useState('');
   const [newModelDrafts, setNewModelDrafts] = useState<Record<string, string>>({});
   const [newModelErrors, setNewModelErrors] = useState<Record<string, string>>({});
+  const [providerNameErrors, setProviderNameErrors] = useState<Record<string, string>>({});
   const [modelNameErrors, setModelNameErrors] = useState<Record<string, string>>({});
   const [openNewModelForms, setOpenNewModelForms] = useState<Record<string, boolean>>({});
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
@@ -196,6 +199,8 @@ export default function LlmsPage() {
         setBulkTestResults({});
         setOpenBulkTestErrorModel(null);
         setHasBulkTestResults(false);
+        setNewProviderError('');
+        setProviderNameErrors({});
         setNewModelErrors({});
         setModelNameErrors({});
     } catch {
@@ -455,11 +460,13 @@ export default function LlmsPage() {
   };
 
   const addProvider = () => {
-    const name = newProviderName.trim().toLowerCase();
     const providerSource = editingAll && globalDraft ? globalDraft.providers : cloneProvidersToDrafts(providers);
-    if (!name || providerSource[name]) {
+    const error = getNewProviderValidationError(newProviderName, Object.keys(providerSource));
+    if (error) {
+      setNewProviderError(error);
       return;
     }
+    const name = newProviderName.trim().toLowerCase();
     const nextProvider: ProviderDraft = {
         source_type: 'openai',
         api_key: '',
@@ -484,6 +491,7 @@ export default function LlmsPage() {
         [name]: nextProvider,
       }));
     }
+    setNewProviderError('');
     setShowNewProvider(false);
     setNewProviderName('');
     setExpandedProviders((prev) => ({ ...prev, [name]: true }));
@@ -931,10 +939,20 @@ export default function LlmsPage() {
       delete next[name];
       return next;
     });
+    setProviderNameErrors((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   };
 
   const saveProvider = async (name: string) => {
     const draft = getProviderDraft(name);
+    const validationError = getExistingProviderValidationError(name, draft.name, Object.keys(providers));
+    if (validationError) {
+      setProviderNameErrors((prev) => ({ ...prev, [name]: validationError }));
+      return;
+    }
     setSaveMsg('');
     const payload: Record<string, unknown> = {
       name: draft.name,
@@ -953,9 +971,19 @@ export default function LlmsPage() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      setSaveMsg(err.detail || '保存失败');
+      const detail = err.detail || '保存失败';
+      if (typeof detail === 'string' && detail.includes('Provider 已存在')) {
+        setProviderNameErrors((prev) => ({ ...prev, [name]: detail }));
+      } else {
+        setSaveMsg(detail);
+      }
       return;
     }
+    setProviderNameErrors((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
     setSaveMsg('已保存');
     loadConfig();
   };
@@ -1557,28 +1585,51 @@ export default function LlmsPage() {
                 {expandedProviders[providerName] && (
                   <div data-testid={`provider-body-${providerName}`} className="space-y-6 p-6">
                     <div className="grid gap-4 md:grid-cols-2">
-                      <FieldInput
-                        label="Provider 名称"
-                        value={getProviderDraft(providerName).name}
-                        dataTestId={`provider-name-input-${providerName}`}
-                        disabled={!isProviderEditable(providerName)}
-                        onChange={(value) => {
-                          if (editingAll && globalDraft) {
-                            setGlobalDraft({
-                              ...globalDraft,
-                              providers: {
-                                ...globalDraft.providers,
-                                [providerName]: { ...globalDraft.providers[providerName], name: value },
-                              },
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground">Provider 名称</label>
+                        <input
+                          type="text"
+                          value={getProviderDraft(providerName).name}
+                          data-testid={`provider-name-input-${providerName}`}
+                          disabled={!isProviderEditable(providerName)}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setProviderNameErrors((prev) => {
+                              if (!prev[providerName]) return prev;
+                              const next = { ...prev };
+                              delete next[providerName];
+                              return next;
                             });
-                            return;
-                          }
-                          setProviderDrafts((prev) => ({
-                            ...prev,
-                            [providerName]: { ...(prev[providerName] || { ...providers[providerName], name: providerName }), name: value },
-                          }));
-                        }}
-                      />
+                            if (editingAll && globalDraft) {
+                              setGlobalDraft({
+                                ...globalDraft,
+                                providers: {
+                                  ...globalDraft.providers,
+                                  [providerName]: { ...globalDraft.providers[providerName], name: value },
+                                },
+                              });
+                              return;
+                            }
+                            setProviderDrafts((prev) => ({
+                              ...prev,
+                              [providerName]: { ...(prev[providerName] || { ...providers[providerName], name: providerName }), name: value },
+                            }));
+                          }}
+                          className={`w-full rounded-xl bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 ${
+                            providerNameErrors[providerName]
+                              ? 'border border-destructive/60 focus:border-destructive focus:ring-destructive/20'
+                              : 'border border-input focus:border-primary focus:ring-primary/20'
+                          }`}
+                        />
+                        {providerNameErrors[providerName] ? (
+                          <p
+                            data-testid={`provider-name-error-${providerName}`}
+                            className="text-xs font-medium text-destructive"
+                          >
+                            {providerNameErrors[providerName]}
+                          </p>
+                        ) : null}
+                      </div>
                       <FieldSelect
                         label="Provider 来源"
                         value={getProviderDraft(providerName).source_type || 'openai'}
@@ -1978,29 +2029,50 @@ export default function LlmsPage() {
             ))}
 
             {showNewProvider ? (
-              <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-primary/30 bg-muted/20 p-5 md:flex-row">
-                <input
-                  type="text"
-                  value={newProviderName}
-                  data-testid="new-provider-name-input"
-                  onChange={(e) => setNewProviderName(e.target.value)}
-                  placeholder="provider 名称，例如 deepseek"
-                  className="flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <button
-                  type="button"
-                  data-testid="confirm-add-provider-button"
-                  onClick={addProvider}
-                  className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
-                >
-                  添加 provider
-                </button>
+              <div className="rounded-2xl border border-dashed border-primary/30 bg-muted/20 p-5">
+                <div className="flex flex-col gap-3 md:flex-row">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={newProviderName}
+                      data-testid="new-provider-name-input"
+                      onChange={(e) => {
+                        setNewProviderName(e.target.value);
+                        if (newProviderError) {
+                          setNewProviderError('');
+                        }
+                      }}
+                      placeholder="provider 名称，例如 deepseek"
+                      className={`w-full rounded-xl bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:outline-none focus:ring-2 ${
+                        newProviderError
+                          ? 'border border-destructive/60 focus:border-destructive focus:ring-destructive/20'
+                          : 'border border-input focus:border-primary focus:ring-primary/20'
+                      }`}
+                    />
+                    {newProviderError ? (
+                      <p data-testid="new-provider-name-error" className="mt-2 text-xs font-medium text-destructive">
+                        {newProviderError}
+                      </p>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="confirm-add-provider-button"
+                    onClick={addProvider}
+                    className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
+                  >
+                    添加 provider
+                  </button>
+                </div>
               </div>
             ) : (
               <button
                 type="button"
                 data-testid="add-provider-button"
-                onClick={() => setShowNewProvider(true)}
+                onClick={() => {
+                  setShowNewProvider(true);
+                  setNewProviderError('');
+                }}
                 className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/30 px-4 py-4 text-sm font-semibold text-primary transition-all hover:bg-primary/5"
               >
                 <Plus size={16} />
