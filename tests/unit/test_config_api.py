@@ -393,6 +393,39 @@ def test_create_single_provider_when_missing(client, app):
     assert app.state.secret_store.get("sensenova_claw/llm.providers.deepseek.api_key") == "sk-deepseek"
 
 
+def test_delete_provider_removes_provider_models_and_defaults(client, app):
+    """删除 provider 时应同步删除其下模型，并清理相关默认模型引用。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["providers"]["deepseek"] = {
+        "source_type": "deepseek",
+        "api_key": "sk-deepseek",
+        "base_url": "https://api.deepseek.com/v1",
+        "timeout": 60,
+        "max_retries": 3,
+    }
+    raw["llm"]["models"]["deepseek-chat"] = {
+        "provider": "deepseek",
+        "model_id": "deepseek-chat",
+        "type": "chat",
+        "timeout": 60,
+        "max_tokens": 64000,
+        "max_output_tokens": 8192,
+    }
+    raw["llm"]["default_model"] = "deepseek-chat"
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.secret_store.set("sensenova_claw/llm.providers.deepseek.api_key", "sk-deepseek")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.request("DELETE", "/api/config/llm/providers/deepseek")
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert "deepseek" not in written["llm"]["providers"]
+    assert "deepseek-chat" not in written["llm"]["models"]
+    assert written["llm"]["default_model"] == ""
+    assert app.state.secret_store.get("sensenova_claw/llm.providers.deepseek.api_key") is None
+
+
 def test_update_single_model_and_rename_default_model(client, app):
     """单项更新 llm 时允许改名，并联动 default_model。"""
     raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))

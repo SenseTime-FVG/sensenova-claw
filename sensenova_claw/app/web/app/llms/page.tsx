@@ -474,7 +474,7 @@ export default function LlmsPage() {
     setExpandedProviders((prev) => ({ ...prev, [name]: true }));
   };
 
-  const removeProvider = (name: string) => {
+  const removeProvider = async (name: string) => {
     if (!confirm(`确定删除 provider "${name}" 吗？其下关联的 llm 也会一并删除。`)) {
       return;
     }
@@ -494,28 +494,20 @@ export default function LlmsPage() {
         defaultModel: removedModels.includes(globalDraft.defaultModel) ? '' : globalDraft.defaultModel,
         defaultEmbeddingModel: removedModels.includes(globalDraft.defaultEmbeddingModel) ? '' : globalDraft.defaultEmbeddingModel,
       });
-    } else {
-      setProviders((prev) => {
-        const next = { ...prev };
-        delete next[name];
-        return next;
-      });
-      setModels((prev) => {
-        const next = { ...prev };
-        removedModels.forEach((modelName) => {
-          delete next[modelName];
-        });
-        return next;
-      });
+      return;
     }
-    setExpandedProviders((prev) => {
-      const next = { ...prev };
-      delete next[name];
-      return next;
+
+    setSaveMsg('');
+    const res = await authFetch(`${API_BASE}/api/config/llm/providers/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
     });
-    if (!editingAll && removedModels.includes(defaultModel)) {
-      setDefaultModel('');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setSaveMsg(err.detail || '删除失败');
+      return;
     }
+    setSaveMsg('已删除');
+    loadConfig();
   };
 
   const updateModelField = (name: string, field: keyof ModelConfig, value: string | number) => {

@@ -242,6 +242,54 @@ async def update_llm_provider(provider_name: str, body: ProviderUpdateBody, requ
     }
 
 
+@router.delete("/llm/providers/{provider_name}")
+async def delete_llm_provider(provider_name: str, request: Request):
+    """删除单个 LLM provider，并同步清理其下模型与默认模型引用。"""
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    providers = deepcopy(llm_section.get("providers", {}))
+    models = deepcopy(llm_section.get("models", {}))
+
+    if provider_name not in providers:
+        raise HTTPException(404, f"Provider 不存在: {provider_name}")
+
+    providers.pop(provider_name, None)
+    removed_models = [
+        model_name
+        for model_name, model in models.items()
+        if isinstance(model, dict) and model.get("provider") == provider_name
+    ]
+    for model_name in removed_models:
+        models.pop(model_name, None)
+
+    llm_section["providers"] = providers
+    llm_section["models"] = models
+    if llm_section.get("default_model") in removed_models:
+        llm_section["default_model"] = ""
+    if llm_section.get("default_embedding_model") in removed_models:
+        llm_section["default_embedding_model"] = ""
+
+    secret_store = getattr(request.app.state, "secret_store", None)
+    if secret_store is not None:
+        try:
+            secret_store.delete(f"sensenova_claw/llm.providers.{provider_name}.api_key")
+        except Exception:
+            logger.warning("删除 provider secret 失败: %s", provider_name, exc_info=True)
+
+    try:
+        updated_llm = await config_manager.replace("llm", llm_section)
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
+
+    return {
+        "status": "saved",
+        "removed_provider": provider_name,
+        "removed_models": removed_models,
+        "llm": updated_llm,
+    }
+
+
 @router.put("/llm/models/{model_name}")
 async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Request):
     """更新单个 LLM model，支持改名并联动 default_model"""
