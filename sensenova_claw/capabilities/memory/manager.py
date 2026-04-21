@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -39,6 +40,84 @@ _SUMMARIZE_SYSTEM_PROMPT = (
     "- 输出格式简洁自然，不超过 200 字\n"
     "- 如果对话内容过于简单（如只是打招呼），输出空字符串即可"
 )
+
+
+def _normalize_summary_llm_error(provider_name: str, model: str, error_message: str) -> dict[str, Any]:
+    """复制 llm_worker 的错误归一化逻辑，供对话总结重试使用。"""
+    context: dict[str, Any] = {"model": model, "provider": provider_name}
+    normalized = {
+        "error_type": None,
+        "error_code": "llm_call_failed",
+        "error_message": error_message,
+        "user_message": f"LLM调用失败: {error_message}",
+        "context": context,
+    }
+
+    unsupported_params = _extract_summary_unsupported_parameters(error_message)
+    if unsupported_params:
+        context["unsupported_params"] = unsupported_params
+        normalized["error_code"] = "unsupported_parameters"
+        normalized["user_message"] = (
+            "当前模型或网关不支持以下请求参数："
+            f"{', '.join(unsupported_params)}。"
+            "系统会尝试自动移除后重试。"
+        )
+
+    conflicting_params = _extract_summary_conflicting_parameters(error_message)
+    if conflicting_params:
+        context["conflicting_params"] = conflicting_params
+        normalized["error_code"] = "conflicting_parameters"
+        normalized["user_message"] = (
+            "当前模型或网关不允许同时指定以下参数："
+            f"{', '.join(conflicting_params)}。"
+            "系统会尝试仅保留第一个参数后重试。"
+        )
+
+    return normalized
+
+
+def _extract_summary_unsupported_parameters(error_message: str) -> list[str]:
+    """复制 llm_worker 的 unsupported parameter 提取逻辑。"""
+    normalized_message = error_message.replace("\\'", "'").replace('\\"', '"')
+    candidates: list[str] = []
+
+    single_patterns = [
+        r"Unknown parameter:\s*['\"]([^'\"]+)['\"]",
+        r"Unsupported parameter:\s*['\"]([^'\"]+)['\"]",
+    ]
+    for pattern in single_patterns:
+        candidates.extend(re.findall(pattern, normalized_message, flags=re.IGNORECASE))
+
+    list_patterns = [
+        r"Unknown parameters:\s*\[([^\]]+)\]",
+        r"Unsupported parameters:\s*\[([^\]]+)\]",
+    ]
+    for pattern in list_patterns:
+        for raw_group in re.findall(pattern, normalized_message, flags=re.IGNORECASE):
+            candidates.extend(re.findall(r"['\"]([^'\"]+)['\"]", raw_group))
+
+    if re.search(r'"code"\s*:\s*"unknown_parameter"', normalized_message, flags=re.IGNORECASE):
+        candidates.extend(re.findall(r'"param"\s*:\s*"([^"]+)"', normalized_message, flags=re.IGNORECASE))
+
+    unique_params: list[str] = []
+    for name in candidates:
+        param = str(name).strip()
+        if param and param not in unique_params:
+            unique_params.append(param)
+    return unique_params
+
+
+def _extract_summary_conflicting_parameters(error_message: str) -> list[str]:
+    """复制 llm_worker 的 conflicting parameter 提取逻辑。"""
+    normalized_message = error_message.replace("\\'", "'").replace('\\"', '"')
+    match = re.search(
+        r"[`'\"]?([a-zA-Z_][a-zA-Z0-9_]*)[`'\"]?\s+and\s+[`'\"]?([a-zA-Z_][a-zA-Z0-9_]*)[`'\"]?\s+cannot both be specified",
+        normalized_message,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return []
+    return [match.group(1), match.group(2)]
 
 
 class MemoryManager:
@@ -302,24 +381,95 @@ class MemoryManager:
         """调用 LLM 对当前对话进行摘要。"""
         from sensenova_claw.platform.config.config import config
 
-        if not model:
-            model = config.get("llm.default_model")
-        resolved_provider, resolved_model = config.resolve_model(model)
+        if provider_name and model:
+            resolved_provider, resolved_model = provider_name, model
+        else:
+            model_key = model or config.get("llm.default_model")
+            resolved_provider, resolved_model = config.resolve_model(model_key)
+
         provider_name = provider_name or resolved_provider
         model = resolved_model
 
         provider = self.llm_factory.get_provider(provider_name)
-        response = await provider.call(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SUMMARIZE_SYSTEM_PROMPT},
-                {"role": "user", "content": f"请总结以下对话：\n\n{conversation}"},
-            ],
-            tools=None,
-            temperature=1.0,
-            max_tokens=500,
-        )
-        return str(response.get("content", "") or "")
+        attempt_temperature: float | None = 1.0
+        attempt_extra_body = dict(config.get("agent.extra_body", {})) or None
+        unsupported_retry_count = 0
+        conflicting_retry_count = 0
+        messages = [
+            {"role": "system", "content": _SUMMARIZE_SYSTEM_PROMPT},
+            {"role": "user", "content": f"请总结以下对话：\n\n{conversation}"},
+        ]
+
+        while True:
+            try:
+                response = await provider.call(
+                    model=model,
+                    messages=messages,
+                    tools=None,
+                    temperature=attempt_temperature,
+                    max_tokens=500,
+                    extra_body=attempt_extra_body,
+                )
+                return str(response.get("content", "") or "")
+            except Exception as exc:
+                normalized_error = _normalize_summary_llm_error(provider_name, model, str(exc))
+
+                unsupported_params = normalized_error["context"].get("unsupported_params") or []
+                removable_params = [
+                    param for param in unsupported_params
+                    if isinstance(attempt_extra_body, dict) and param in attempt_extra_body
+                ]
+                if (
+                    normalized_error["error_code"] == "unsupported_parameters"
+                    and removable_params
+                    and unsupported_retry_count < 3
+                ):
+                    unsupported_retry_count += 1
+                    logger.warning(
+                        "summary llm call has unsupported parameters, retry without params provider=%s model=%s params=%s attempt=%s",
+                        provider_name,
+                        model,
+                        removable_params,
+                        unsupported_retry_count,
+                    )
+                    next_extra_body = dict(attempt_extra_body)
+                    for param in removable_params:
+                        next_extra_body[param] = None
+                    attempt_extra_body = next_extra_body
+                    continue
+
+                conflicting_params = normalized_error["context"].get("conflicting_params") or []
+                removable_conflicting_params = list(conflicting_params[1:]) if len(conflicting_params) > 1 else []
+                if (
+                    normalized_error["error_code"] == "conflicting_parameters"
+                    and removable_conflicting_params
+                    and conflicting_retry_count < 3
+                ):
+                    conflicting_retry_count += 1
+                    removed_params: list[str] = []
+                    next_extra_body = dict(attempt_extra_body) if attempt_extra_body else {}
+                    for param in removable_conflicting_params:
+                        if param == "temperature":
+                            attempt_temperature = None
+                            removed_params.append(param)
+                            continue
+                        if param in next_extra_body:
+                            next_extra_body[param] = None
+                            removed_params.append(param)
+
+                    if removed_params:
+                        logger.warning(
+                            "summary llm call has conflicting parameters, retry keeping first param provider=%s model=%s params=%s kept=%s attempt=%s",
+                            provider_name,
+                            model,
+                            removed_params,
+                            conflicting_params[0],
+                            conflicting_retry_count,
+                        )
+                        attempt_extra_body = next_extra_body or None
+                        continue
+
+                raise
 
     async def _append_to_memory_md(self, summary: str, agent_id: str | None = None) -> None:
         """将总结内容追加到当日记忆文件 agents/{agent_id}/memory/YYYY-MM-DD.md"""

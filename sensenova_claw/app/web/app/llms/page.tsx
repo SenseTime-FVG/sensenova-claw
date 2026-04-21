@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle, ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, RefreshCw, Save, Server, Trash2, X, XCircle, Zap } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
+import { buildDeleteConfirmationConfig, type DeleteTargetType } from './deleteConfirmation';
 
 interface SecretValueStatus {
   configured: boolean;
@@ -62,6 +64,12 @@ interface ModelTestResult {
 
 interface BulkModelTestState extends ModelTestResult {
   status: 'pending' | 'success' | 'failed';
+}
+
+interface DeleteDialogState {
+  type: DeleteTargetType;
+  name: string;
+  relatedModelCount?: number;
 }
 
 const MAX_BULK_TEST_CONCURRENCY = 10;
@@ -128,6 +136,8 @@ export default function LlmsPage() {
   const [visibleTestTooltipModel, setVisibleTestTooltipModel] = useState<string | null>(null);
   const [hoveringBulkTestButton, setHoveringBulkTestButton] = useState(false);
   const [showBulkTestTooltip, setShowBulkTestTooltip] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
+  const [deletingTarget, setDeletingTarget] = useState(false);
 
   const loadConfig = async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
@@ -474,11 +484,15 @@ export default function LlmsPage() {
     setExpandedProviders((prev) => ({ ...prev, [name]: true }));
   };
 
-  const removeProvider = (name: string) => {
-    if (!confirm(`确定删除 provider "${name}" 吗？其下关联的 llm 也会一并删除。`)) {
-      return;
-    }
+  const removeProvider = async (name: string) => {
+    setDeleteDialog({
+      type: 'provider',
+      name,
+      relatedModelCount: (groupedModels[name] || []).length,
+    });
+  };
 
+  const applyDraftProviderRemoval = (name: string) => {
     const removedModels = groupedModels[name] || [];
     if (editingAll && globalDraft) {
       const nextProviders = { ...globalDraft.providers };
@@ -494,28 +508,22 @@ export default function LlmsPage() {
         defaultModel: removedModels.includes(globalDraft.defaultModel) ? '' : globalDraft.defaultModel,
         defaultEmbeddingModel: removedModels.includes(globalDraft.defaultEmbeddingModel) ? '' : globalDraft.defaultEmbeddingModel,
       });
-    } else {
-      setProviders((prev) => {
-        const next = { ...prev };
-        delete next[name];
-        return next;
-      });
-      setModels((prev) => {
-        const next = { ...prev };
-        removedModels.forEach((modelName) => {
-          delete next[modelName];
-        });
-        return next;
-      });
     }
-    setExpandedProviders((prev) => {
-      const next = { ...prev };
-      delete next[name];
-      return next;
+  };
+
+  const deleteProviderPersisted = async (name: string) => {
+    setSaveMsg('');
+    const res = await authFetch(`${API_BASE}/api/config/llm/providers/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
     });
-    if (!editingAll && removedModels.includes(defaultModel)) {
-      setDefaultModel('');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setSaveMsg(err.detail || '删除失败');
+      return false;
     }
+    setSaveMsg('已删除');
+    await loadConfig();
+    return true;
   };
 
   const updateModelField = (name: string, field: keyof ModelConfig, value: string | number) => {
@@ -606,10 +614,14 @@ export default function LlmsPage() {
     setOpenNewModelForms((prev) => ({ ...prev, [providerName]: false }));
   };
 
-  const removeModel = (name: string) => {
-    if (!confirm(`确定删除 llm "${name}" 吗？`)) {
-      return;
-    }
+  const removeModel = async (name: string) => {
+    setDeleteDialog({
+      type: 'model',
+      name,
+    });
+  };
+
+  const applyDraftModelRemoval = (name: string) => {
     if (editingAll && globalDraft) {
       const nextModels = { ...globalDraft.models };
       delete nextModels[name];
@@ -619,18 +631,62 @@ export default function LlmsPage() {
         defaultModel: globalDraft.defaultModel === name ? '' : globalDraft.defaultModel,
         defaultEmbeddingModel: globalDraft.defaultEmbeddingModel === name ? '' : globalDraft.defaultEmbeddingModel,
       });
-    } else {
-      setModels((prev) => {
-        const next = { ...prev };
-        delete next[name];
-        return next;
-      });
     }
-    if (!editingAll && defaultModel === name) {
-      setDefaultModel('');
+  };
+
+  const deleteModelPersisted = async (name: string) => {
+    setSaveMsg('');
+    const res = await authFetch(`${API_BASE}/api/config/llm/models/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setSaveMsg(err.detail || '删除失败');
+      return false;
     }
-    if (!editingAll && defaultEmbeddingModel === name) {
-      setDefaultEmbeddingModel('');
+    setSaveMsg('已删除');
+    await loadConfig();
+    return true;
+  };
+
+  const handleDeleteDialogChange = (open: boolean) => {
+    if (deletingTarget) {
+      return;
+    }
+    if (!open) {
+      setDeleteDialog(null);
+    }
+  };
+
+  const confirmDeleteTarget = async () => {
+    if (!deleteDialog) return;
+
+    const config = buildDeleteConfirmationConfig(deleteDialog.type, deleteDialog.name, {
+      relatedModelCount: deleteDialog.relatedModelCount,
+      editingAll,
+    });
+
+    setDeletingTarget(true);
+    try {
+      let deleted = false;
+      if (!config.persistToConfig) {
+        if (deleteDialog.type === 'provider') {
+          applyDraftProviderRemoval(deleteDialog.name);
+        } else {
+          applyDraftModelRemoval(deleteDialog.name);
+        }
+        setSaveMsg('已从草稿移除');
+        deleted = true;
+      } else if (deleteDialog.type === 'provider') {
+        deleted = await deleteProviderPersisted(deleteDialog.name);
+      } else {
+        deleted = await deleteModelPersisted(deleteDialog.name);
+      }
+      if (deleted) {
+        setDeleteDialog(null);
+      }
+    } finally {
+      setDeletingTarget(false);
     }
   };
 
@@ -1108,6 +1164,13 @@ export default function LlmsPage() {
     setSaveMsg('');
     await loadConfig();
   };
+
+  const activeDeleteConfig = deleteDialog
+    ? buildDeleteConfirmationConfig(deleteDialog.type, deleteDialog.name, {
+      relatedModelCount: deleteDialog.relatedModelCount,
+      editingAll,
+    })
+    : null;
 
   if (loading) {
     return (
@@ -1857,6 +1920,45 @@ export default function LlmsPage() {
             )}
           </CardContent>
         </Card>
+
+        <Dialog open={Boolean(deleteDialog)} onOpenChange={handleDeleteDialogChange}>
+          <DialogContent
+            data-testid="llm-delete-dialog"
+            showCloseButton={!deletingTarget}
+            className="max-w-[360px] gap-3 rounded-2xl border border-primary/30 bg-[#111722]/95 p-0 text-foreground shadow-2xl ring-1 ring-primary/10 backdrop-blur"
+          >
+            <DialogHeader className="px-5 pt-5">
+              <DialogTitle className="text-lg font-semibold text-foreground">
+                {activeDeleteConfig?.title}
+              </DialogTitle>
+              <DialogDescription className="space-y-2 text-sm leading-6 text-muted-foreground">
+                <span className="block">{activeDeleteConfig?.description}</span>
+                {activeDeleteConfig && !activeDeleteConfig.persistToConfig ? (
+                  <span className="block text-xs text-amber-300/90">
+                    当前处于全局编辑模式，这次删除只作用于草稿，点击“保存全部”前不会写入 config 文件。
+                  </span>
+                ) : null}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="mt-1 border-t border-primary/15 bg-transparent px-5 py-4 sm:justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setDeleteDialog(null)}
+                disabled={deletingTarget}
+              >
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void confirmDeleteTarget()}
+                disabled={deletingTarget}
+                data-testid="llm-delete-confirm"
+              >
+                {deletingTarget ? '删除中' : activeDeleteConfig?.confirmLabel}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={bulkTestDialogOpen} onOpenChange={setBulkTestDialogOpen}>
           <DialogContent data-testid="test-all-llms-dialog" className="z-[260] flex max-h-[85vh] flex-col overflow-hidden rounded-3xl p-0 sm:max-w-3xl">
