@@ -267,7 +267,7 @@ class AgentSessionWorker(SessionWorker):
                 and event.type not in {USER_INPUT, USER_TURN_CANCEL_REQUESTED}
                 and self.rt.state_store.is_turn_cancelled(event.session_id, event.turn_id)
             ):
-                logger.info(
+                logger.debug(
                     "忽略已取消 turn 的事件 session=%s turn=%s type=%s",
                     event.session_id,
                     event.turn_id,

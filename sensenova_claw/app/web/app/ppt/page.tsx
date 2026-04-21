@@ -141,6 +141,7 @@ function PPTWorkspace() {
   const [leftTab, setLeftTab] = useState<LeftTab>('outline');
   const [previewPptx, setPreviewPptx] = useState<DroppedFile | null>(null);
   const [loadingDrop, setLoadingDrop] = useState(false);
+  const [panelSizes, setPanelSizes] = useState({ left: 22, stage: 46, chat: 32, sessions: 20 });
   const [contextMenu, setContextMenu] = useState<{ session: SessionItem; x: number; y: number } | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -205,6 +206,24 @@ function PPTWorkspace() {
     [dropRef],
   );
 
+  useEffect(() => {
+    const updatePanelSizes = () => {
+      const width = window.innerWidth;
+      if (width < 1360) {
+        setPanelSizes({ left: 20, stage: 40, chat: 40, sessions: 16 });
+        return;
+      }
+      if (width < 1680) {
+        setPanelSizes({ left: 21, stage: 43, chat: 36, sessions: 18 });
+        return;
+      }
+      setPanelSizes({ left: 22, stage: 46, chat: 32, sessions: 20 });
+    };
+    updatePanelSizes();
+    window.addEventListener('resize', updatePanelSizes);
+    return () => window.removeEventListener('resize', updatePanelSizes);
+  }, []);
+
   const hasDeck = !!deckData.slideSet || !!deckData.storyboard;
   const stages = hasDeck ? deckData.stages : DEFAULT_STAGES;
 
@@ -263,7 +282,7 @@ function PPTWorkspace() {
       <ResizablePanelGroup orientation="horizontal" className="flex-1 overflow-hidden">
 
         {/* 左栏：大纲 / 风格 / 审查 / 讲稿 */}
-        <ResizablePanel id="ppt-left" defaultSize="22%" minSize="14%" maxSize="35%" className="overflow-hidden border-r border-border/40">
+        <ResizablePanel id="ppt-left" defaultSize={`${panelSizes.left}%`} minSize="14%" maxSize="35%" className="overflow-hidden border-r border-border/40">
           <div className="flex flex-col h-full">
             {/* Tab 切换栏 */}
             <div className="flex items-center border-b border-border/40 shrink-0 px-0.5">
@@ -339,7 +358,7 @@ function PPTWorkspace() {
         <ResizableHandle invisible />
 
         {/* 中栏：幻灯片主舞台 */}
-        <ResizablePanel id="ppt-stage" defaultSize="46%" minSize="25%" className="overflow-hidden relative">
+        <ResizablePanel id="ppt-stage" defaultSize={`${panelSizes.stage}%`} minSize="25%" className="overflow-hidden relative">
           <div className="flex flex-col h-full">
             {previewPptx ? (
               <PptxPreview file={previewPptx} onClose={() => setPreviewPptx(null)} />
@@ -377,10 +396,10 @@ function PPTWorkspace() {
         <ResizableHandle invisible />
 
         {/* 右栏：会话列表 + 对话面板（上下可拖拽调整） */}
-        <ResizablePanel id="ppt-chat" defaultSize="32%" minSize="20%" maxSize="45%" className="overflow-hidden border-l border-border/40">
+        <ResizablePanel id="ppt-chat" defaultSize={`${panelSizes.chat}%`} minSize="20%" maxSize="45%" className="overflow-hidden border-l border-border/40">
           <ResizablePanelGroup orientation="vertical" className="h-full">
             {/* 上部：会话列表（可上下拖拽边框调整高度） */}
-            <ResizablePanel id="ppt-sessions" defaultSize="20%" minSize="8%" maxSize="50%" className="overflow-hidden">
+            <ResizablePanel id="ppt-sessions" defaultSize={`${panelSizes.sessions}%`} minSize="8%" maxSize="50%" className="overflow-hidden">
               <div className="flex flex-col h-full">
                 <div className="flex items-center justify-between px-3 py-1.5 shrink-0">
                   <div className="flex items-center gap-1.5">

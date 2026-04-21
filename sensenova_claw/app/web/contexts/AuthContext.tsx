@@ -87,29 +87,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const urlToken = params.get('token');
       const pathname = window.location.pathname;
 
-      // 根路径带 token 时，原地验证后清除 token 参数，保持在工作台页面
-      if (pathname === '/' && urlToken) {
-        const valid = await verifyToken(urlToken);
-        if (valid) {
-          params.delete('token');
-          const newUrl = params.toString() ? `/?${params.toString()}` : '/';
-          window.history.replaceState({}, '', newUrl);
-          setIsLoading(false);
-          return;
-        }
-      }
-
       if (urlToken) {
-        const valid = await verifyToken(urlToken);
-        if (valid) {
-          // 清除 URL 中的 token 参数
-          params.delete('token');
-          const newUrl = params.toString()
-            ? `${window.location.pathname}?${params.toString()}`
-            : window.location.pathname;
-          window.history.replaceState({}, '', newUrl);
-          setIsLoading(false);
-          return;
+        try {
+          const valid = await verifyToken(urlToken);
+          if (valid) {
+            params.delete('token');
+            const newUrl = pathname === '/' && params.toString()
+              ? `/?${params.toString()}`
+              : pathname === '/'
+                ? '/'
+                : params.toString()
+                  ? `${pathname}?${params.toString()}`
+                  : pathname;
+            window.history.replaceState({}, '', newUrl);
+            setIsLoading(false);
+            return;
+          }
+        } catch (error) {
+          console.error('Token verification during init failed:', error);
         }
       }
 
