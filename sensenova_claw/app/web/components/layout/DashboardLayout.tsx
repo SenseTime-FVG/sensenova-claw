@@ -7,7 +7,8 @@ import { useRouter } from 'next/navigation';
 import {
   DashboardNav,
   NavIcon,
-  type FeatureNavItem,
+  type CustomFeatureNavItem,
+  isCustomFeatureNavItem,
   type SubNavGroup,
 } from './DashboardNav';
 import { Search } from 'lucide-react';
@@ -39,8 +40,8 @@ const ADMIN_PATHS = ['/agents', '/sessions', '/llms', '/gateway', '/tools', '/sk
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
   const [manualGroup, setManualGroup] = useState<SubNavGroup>(null);
-  const [featureContextMenu, setFeatureContextMenu] = useState<{ item: FeatureNavItem; x: number; y: number } | null>(null);
-  const [featureToDelete, setFeatureToDelete] = useState<FeatureNavItem | null>(null);
+  const [featureContextMenu, setFeatureContextMenu] = useState<{ item: CustomFeatureNavItem; x: number; y: number } | null>(null);
+  const [featureToDelete, setFeatureToDelete] = useState<CustomFeatureNavItem | null>(null);
   const { startNewChat } = useSession();
   const { t } = useI18n();
 
@@ -59,8 +60,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     setManualGroup(group);
   }, []);
 
-  const openFeatureContextMenu = useCallback((event: React.MouseEvent, item: FeatureNavItem) => {
-    if (item.kind !== 'custom') return;
+  const openFeatureContextMenu = useCallback((event: React.MouseEvent, item: CustomFeatureNavItem) => {
     event.preventDefault();
     setFeatureContextMenu({ item, x: event.clientX, y: event.clientY });
   }, []);
@@ -129,9 +129,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               <Link
                 key={item.path}
                 href={item.path}
-                data-testid={'kind' in item && item.kind === 'custom' ? `feature-nav-item-${item.pageId}` : undefined}
+                data-testid={isCustomFeatureNavItem(item) ? `feature-nav-item-${item.pageId}` : undefined}
                 onClick={() => { if (pathname?.startsWith(item.path)) startNewChat(); }}
-                onContextMenu={'kind' in item ? (event) => openFeatureContextMenu(event, item as FeatureNavItem) : undefined}
+                onContextMenu={isCustomFeatureNavItem(item) ? (event) => openFeatureContextMenu(event, item) : undefined}
                 className={cn(
                   'px-3 py-1 text-[13px] rounded-lg transition-all duration-150 flex items-center gap-1.5',
                   pathname?.startsWith(item.path)

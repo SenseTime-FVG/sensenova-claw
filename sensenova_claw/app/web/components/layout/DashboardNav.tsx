@@ -31,17 +31,28 @@ const iconMap: Record<string, LucideIcon> = {
   boxes: Boxes,
 };
 
-interface NavItem {
+export interface NavItem {
   path: string;
   label: string;
   exact?: boolean;
   icon?: string;
 }
 
-export interface FeatureNavItem extends NavItem {
-  kind: 'builtin' | 'custom' | 'create';
-  pageId?: string;
+export interface BuiltinFeatureNavItem extends NavItem {
+  kind: 'builtin';
 }
+
+export interface CustomFeatureNavItem extends NavItem {
+  kind: 'custom';
+  pageId: string;
+}
+
+export interface CreateFeatureNavItem extends NavItem {
+  kind: 'create';
+}
+
+export type FeatureNavItem = BuiltinFeatureNavItem | CustomFeatureNavItem | CreateFeatureNavItem;
+export type DashboardSubNavItem = NavItem | FeatureNavItem;
 
 const mainNavItemDefs: { path: string; labelKey: string; exact?: boolean; icon?: string }[] = [
   { path: '/', labelKey: 'nav.workspace', exact: true, icon: 'zap' },
@@ -101,6 +112,10 @@ export function useAdminNavItems(): NavItem[] {
       icon: item.icon,
     }))
   ), [t]);
+}
+
+export function isCustomFeatureNavItem(item: DashboardSubNavItem): item is CustomFeatureNavItem {
+  return 'kind' in item && item.kind === 'custom';
 }
 
 export function NavIcon({ name }: { name?: string }) {
