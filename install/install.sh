@@ -2,13 +2,26 @@
 # Sensenova-Claw 一键安装脚本（Linux/macOS）
 #
 # 用法:
-#   curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash
+#   远程执行（普通用户）:
+#     curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash
 #
-# 或本地执行:
-#   bash install/install.sh
+#   本地执行（普通用户）:
+#     bash install/install.sh
 #
-# 开发模式（跳过克隆，使用当前目录代码，不构建前端）:
-#   bash install/install.sh --dev
+#   开发模式（跳过前端 build/精简，APP_DIR 是完整源码目录，editable 安装）:
+#     本地执行（已有源码）:
+#       bash install/install.sh --dev
+#       bash install/install.sh --dev --dev-source /path/to/sensenova-claw
+#
+#     远程执行（脚本会 clone 源码到 $SENSENOVA_CLAW_HOME/src）:
+#       curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_DEV=1 bash
+#       # 或:
+#       export SENSENOVA_CLAW_DEV=1
+#       curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash -s -- --dev
+#
+#   参数:
+#     --dev                启用开发者模式（等价环境变量 SENSENOVA_CLAW_DEV=1）
+#     --dev-source <path>  源码路径；省略时依次回退到 SENSENOVA_CLAW_DEV_SOURCE、脚本所在仓库、自动 clone
 #
 set -euo pipefail
 
@@ -21,7 +34,13 @@ REPO_URL="${SENSENOVA_CLAW_REPO_URL:-https://github.com/SenseTime-FVG/sensenova-
 REPO_REF="${SENSENOVA_CLAW_APP_BRANCH:-${SENSENOVA_CLAW_REPO_REF:-${SENSENOVA_CLAW_REPO_BRANCH:-dev}}}"
 REQUIRED_PYTHON="3.12"
 REQUIRED_NODE="18"
+# 开发者模式：--dev / SENSENOVA_CLAW_DEV=1 / SENSENOVA_CLAW_DEV_SOURCE 非空 任一触发
 DEV_MODE=false
+if [ -n "${SENSENOVA_CLAW_DEV:-}" ] || [ -n "${SENSENOVA_CLAW_DEV_SOURCE:-}" ]; then
+  DEV_MODE=true
+fi
+DEV_SOURCE="${SENSENOVA_CLAW_DEV_SOURCE:-}"
+DEV_NEEDS_CLONE=false
 
 # 国内镜像
 CN_NPM_REGISTRY="https://registry.npmmirror.com"
@@ -315,6 +334,32 @@ setup_repo() {
   fi
 }
 
+# ── 步骤 4b: 开发者模式远程 clone 源码 ──
+
+setup_repo_dev() {
+  # 目标：把完整源码 clone 到 $APP_DIR（= $SENSENOVA_CLAW_HOME/src）
+  # 和正常模式的 $APP_DIR=$SENSENOVA_CLAW_HOME/app 区分，语义清晰
+  if [ -d "$APP_DIR/.git" ]; then
+    info "更新 Sensenova-Claw 源码 ($REPO_REF)..."
+    cd "$APP_DIR"
+    if git fetch origin "$REPO_REF" --quiet 2>/dev/null; then
+      git checkout "$REPO_REF" --quiet 2>/dev/null || git checkout -B "$REPO_REF" "origin/$REPO_REF" --quiet
+      git reset --hard "origin/$REPO_REF" --quiet 2>/dev/null || warn "reset 失败，保留当前提交"
+      log "源码已更新"
+    else
+      warn "git fetch 失败，使用现有副本"
+    fi
+    cd - >/dev/null
+  else
+    info "克隆 Sensenova-Claw 源码 ($REPO_REF) 到 $APP_DIR..."
+    mkdir -p "$(dirname "$APP_DIR")"
+    # 开发模式 clone 完整历史（不加 --depth 1），方便切分支/查 log
+    git clone --branch "$REPO_REF" "$REPO_URL" "$APP_DIR" || fail "clone 失败，请检查网络或设置 SENSENOVA_CLAW_REPO_URL"
+    log "源码克隆完成: $APP_DIR"
+  fi
+  DEV_SOURCE="$APP_DIR"
+}
+
 # ── 步骤 5: 安装项目依赖 ──
 
 install_deps() {
@@ -527,9 +572,28 @@ print_success() {
 
 main() {
   # 解析参数
-  for arg in "$@"; do
-    case "$arg" in
-      --dev) DEV_MODE=true ;;
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dev)
+        DEV_MODE=true
+        shift
+        ;;
+      --dev-source)
+        DEV_MODE=true
+        DEV_SOURCE="${2:-}"
+        if [ -z "$DEV_SOURCE" ]; then
+          fail "--dev-source 需要指定路径"
+        fi
+        shift 2
+        ;;
+      --dev-source=*)
+        DEV_MODE=true
+        DEV_SOURCE="${1#*=}"
+        shift
+        ;;
+      *)
+        shift
+        ;;
     esac
   done
 
@@ -540,27 +604,50 @@ main() {
   echo ""
 
   if [ "$DEV_MODE" = "true" ]; then
-    # 开发模式：使用当前目录的代码，跳过克隆
-    # 找到 install.sh 所在的仓库根目录
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    APP_DIR="$(cd "$script_dir/.." && pwd)"
-
-    # 校验是否是 sensenova-claw 项目
-    if [ ! -f "$APP_DIR/sensenova_claw/app/gateway/main.py" ]; then
-      fail "当前仓库不是 Sensenova-Claw 项目，无法使用 --dev 模式"
+    # 开发模式：APP_DIR 必须指向完整源码目录
+    # 源码优先级：--dev-source > SENSENOVA_CLAW_DEV_SOURCE > 脚本所在仓库 > 远程 clone 到 $SENSENOVA_CLAW_HOME/src
+    local resolved_source=""
+    if [ -n "$DEV_SOURCE" ]; then
+      resolved_source="$(cd "$DEV_SOURCE" 2>/dev/null && pwd)" || fail "--dev-source 路径不存在: $DEV_SOURCE"
+    else
+      # 判断是否有可解析的脚本所在目录（远程 curl|bash 下 BASH_SOURCE[0] 指向 /dev/stdin 或空）
+      local script_path="${BASH_SOURCE[0]:-}"
+      if [ -n "$script_path" ] && [ -f "$script_path" ]; then
+        local script_dir
+        script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+        local candidate="$(cd "$script_dir/.." && pwd)"
+        if [ -f "$candidate/pyproject.toml" ] && [ -f "$candidate/sensenova_claw/app/gateway/main.py" ]; then
+          resolved_source="$candidate"
+        fi
+      fi
     fi
 
-    log "开发模式: 使用本地代码 $APP_DIR"
+    if [ -n "$resolved_source" ]; then
+      APP_DIR="$resolved_source"
+      DEV_SOURCE="$resolved_source"
+      if [ ! -f "$APP_DIR/sensenova_claw/app/gateway/main.py" ] || [ ! -f "$APP_DIR/pyproject.toml" ]; then
+        fail "指定目录不是 Sensenova-Claw 项目: $APP_DIR"
+      fi
+      log "开发模式（本地）: $APP_DIR"
+    else
+      # 远程模式：clone 到 $SENSENOVA_CLAW_HOME/src
+      DEV_NEEDS_CLONE=true
+      APP_DIR="$SENSENOVA_CLAW_HOME/src"
+      log "开发模式（远程）: 将 clone 源码到 $APP_DIR"
+    fi
+    log "数据目录: $SENSENOVA_CLAW_HOME"
     echo ""
 
     detect_region
     configure_cn_mirrors
+    install_git          # 远程模式要 clone；本地模式已有 git 会秒过
     install_uv
     install_python
     install_nvm
     install_node
-    # 跳过 setup_repo（不克隆）
+    if [ "$DEV_NEEDS_CLONE" = "true" ]; then
+      setup_repo_dev     # 远程：clone 到 $APP_DIR（= $SENSENOVA_CLAW_HOME/src）
+    fi
     install_deps
     setup_home_dir
     setup_config

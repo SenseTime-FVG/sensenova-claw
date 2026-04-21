@@ -1,23 +1,68 @@
 # Sensenova-Claw 一键安装脚本（Windows PowerShell）
 #
 # 用法:
-#   irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
+#   远程执行（普通用户）:
+#     irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
 #
-# 或本地执行:
-#   powershell -ExecutionPolicy Bypass -File install\install.ps1
+#   本地执行（普通用户）:
+#     powershell -ExecutionPolicy Bypass -File install\install.ps1
 #
+#   开发者模式（跳过前端 build/精简，APP_DIR 是完整源码目录，editable 安装，改代码即时生效）:
+#     本地执行（已有源码）:
+#       powershell -ExecutionPolicy Bypass -File install\install.ps1 -Dev
+#       powershell -ExecutionPolicy Bypass -File install\install.ps1 -Dev -DevSource d:\code\sensenova-claw
+#
+#     远程执行（irm | iex，脚本会 clone 源码到 $SENSENOVA_CLAW_HOME\src）:
+#       $env:SENSENOVA_CLAW_DEV = "1"
+#       irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
+#
+#   参数:
+#     -Dev              启用开发者模式（等价环境变量 SENSENOVA_CLAW_DEV=1）
+#     -DevSource <path> 源码路径；省略时依次回退到 SENSENOVA_CLAW_DEV_SOURCE、脚本所在仓库、自动 clone
+#     -InstallHome <p>  自定义 SENSENOVA_CLAW_HOME（配置/数据目录），默认 $env:USERPROFILE\.sensenova-claw
+#     -Ref <branch>     clone 的分支/tag（正常模式和开发模式远程 clone 都生效），默认 dev
+#
+
+param(
+    [switch]$Dev,
+    [string]$DevSource,
+    [Alias("Home")][string]$InstallHome,
+    [string]$Ref
+)
 
 $ErrorActionPreference = "Stop"
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
-# ── 配置 ──
+# ── 配置 ──（CLI 参数优先，环境变量次之，默认值兜底）
 
-$SENSENOVA_CLAW_HOME = if ($env:SENSENOVA_CLAW_HOME) { $env:SENSENOVA_CLAW_HOME } else { "$env:USERPROFILE\.sensenova-claw" }
+$SENSENOVA_CLAW_HOME = if ($InstallHome) { $InstallHome } elseif ($env:SENSENOVA_CLAW_HOME) { $env:SENSENOVA_CLAW_HOME } else { "$env:USERPROFILE\.sensenova-claw" }
 $APP_DIR = "$SENSENOVA_CLAW_HOME\app"
 $REPO_URL = if ($env:SENSENOVA_CLAW_REPO_URL) { $env:SENSENOVA_CLAW_REPO_URL } else { "https://github.com/SenseTime-FVG/sensenova-claw.git" }
-$REPO_REF = if ($env:SENSENOVA_CLAW_APP_BRANCH) { $env:SENSENOVA_CLAW_APP_BRANCH } elseif ($env:SENSENOVA_CLAW_REPO_REF) { $env:SENSENOVA_CLAW_REPO_REF } elseif ($env:SENSENOVA_CLAW_REPO_BRANCH) { $env:SENSENOVA_CLAW_REPO_BRANCH } else { "dev" }
+$REPO_REF = if ($Ref) { $Ref } elseif ($env:SENSENOVA_CLAW_APP_BRANCH) { $env:SENSENOVA_CLAW_APP_BRANCH } elseif ($env:SENSENOVA_CLAW_REPO_REF) { $env:SENSENOVA_CLAW_REPO_REF } elseif ($env:SENSENOVA_CLAW_REPO_BRANCH) { $env:SENSENOVA_CLAW_REPO_BRANCH } else { "dev" }
 $REQUIRED_PYTHON = "3.12"
 $REQUIRED_NODE = 18
+
+# 开发者模式触发：-Dev 开关 / SENSENOVA_CLAW_DEV=1 / SENSENOVA_CLAW_DEV_SOURCE 非空（任一即可）
+# 源码路径优先级：-DevSource > SENSENOVA_CLAW_DEV_SOURCE > 脚本所在仓库 > 自动 clone 到 $SENSENOVA_CLAW_HOME\src
+$DEV_MODE = [bool]($Dev -or $env:SENSENOVA_CLAW_DEV -or $env:SENSENOVA_CLAW_DEV_SOURCE)
+$DEV_SOURCE = $null
+$DEV_NEEDS_CLONE = $false
+if ($DEV_MODE) {
+    $rawSource = if ($DevSource) { $DevSource } `
+                 elseif ($env:SENSENOVA_CLAW_DEV_SOURCE) { $env:SENSENOVA_CLAW_DEV_SOURCE } `
+                 elseif ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } `
+                 else { $null }
+    if ($rawSource) {
+        $resolved = Resolve-Path $rawSource -ErrorAction SilentlyContinue
+        if ($resolved -and (Test-Path "$($resolved.Path)\pyproject.toml")) {
+            $DEV_SOURCE = $resolved.Path
+        }
+    }
+    if (-not $DEV_SOURCE) {
+        # 远程 irm|iex 场景：无 $PSScriptRoot、用户未传 -DevSource → 自动 clone 源码
+        $DEV_NEEDS_CLONE = $true
+    }
+}
 
 # 国内镜像
 $CN_NPM_REGISTRY = "https://registry.npmmirror.com"
@@ -105,6 +150,32 @@ default = true
 "@ | Set-Content "$uvConfigDir\uv.toml" -Encoding UTF8
 
     Log "uv/pip 镜像: $CN_PIP_INDEX"
+}
+
+# ── 步骤 1b: 安装 git ──
+
+function Install-Git {
+    if (Command-Exists git) {
+        Log "git 已安装: $(git --version)"
+        return
+    }
+
+    Info "安装 git..."
+
+    # 方式 1: 尝试 winget
+    if (Command-Exists winget) {
+        winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements 2>$null
+        # 刷新 PATH（winget 装在 Program Files）
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        if (Command-Exists git) {
+            Log "git 安装成功: $(git --version)"
+            return
+        }
+        Warn "winget 安装 git 失败"
+    }
+
+    # 方式 2: 提示手动安装（Git 没有可靠的便携 zip 发行）
+    Fail "无法自动安装 git，请手动安装后重试: https://git-scm.com/download/win"
 }
 
 # ── 步骤 2: 安装 uv + Python ──
@@ -304,6 +375,80 @@ function Resolve-RepoUrls {
 }
 
 function Setup-Repo {
+    # 开发者模式：$APP_DIR 必须指向完整源码目录（本地已有 或 远程 clone 出来）
+    # 这样后续 Install-Deps / Setup-HomeDir / Register-Command 都在源码目录上操作，
+    # editable 安装 + 源码目录本身 = 改源码立即生效。
+    if ($DEV_MODE) {
+        if (-not $DEV_NEEDS_CLONE) {
+            Info "开发者模式：使用本地源码，跳过 clone"
+            Log "源码目录: $DEV_SOURCE"
+            return
+        }
+
+        # 远程模式：clone 到 $SENSENOVA_CLAW_HOME\src（和 \app 区分，语义更清晰）
+        $srcDir = "$SENSENOVA_CLAW_HOME\src"
+        Info "开发者模式（远程）：未检测到本地源码，将 clone 到 $srcDir"
+
+        $urls = Resolve-RepoUrls
+        if (Test-Path "$srcDir\.git") {
+            Info "更新 Sensenova-Claw 源码 ($REPO_REF)..."
+            Push-Location $srcDir
+            try {
+                $fetched = $false
+                foreach ($url in $urls) {
+                    git remote set-url origin $url 2>$null
+                    git fetch origin $REPO_REF --quiet 2>$null
+                    if ($LASTEXITCODE -eq 0) { $fetched = $true; break }
+                }
+                git remote set-url origin $REPO_URL 2>$null
+                if ($fetched) {
+                    git checkout $REPO_REF --quiet 2>$null
+                    if ($LASTEXITCODE -ne 0) {
+                        git checkout -B $REPO_REF "origin/$REPO_REF" --quiet 2>$null
+                    }
+                    git reset --hard "origin/$REPO_REF" --quiet 2>$null
+                    Log "源码已更新到 $REPO_REF"
+                } else {
+                    Warn "无法拉取更新，使用当前本地副本"
+                }
+            } catch {
+                Warn "git 更新失败: $_"
+            }
+            Pop-Location
+        } else {
+            $parent = Split-Path $srcDir -Parent
+            New-Item -ItemType Directory -Force -Path $parent | Out-Null
+
+            $cloned = $false
+            foreach ($url in $urls) {
+                if ($url -eq $REPO_URL) {
+                    Info "使用源: $url"
+                } else {
+                    Warn "直连失败，尝试代理: $url"
+                }
+                # 注意：开发模式下 clone 完整历史（不加 --depth 1），方便切分支/改提交
+                git clone --branch $REPO_REF $url $srcDir
+                if ($LASTEXITCODE -eq 0) { $cloned = $true; break }
+                if (Test-Path $srcDir) {
+                    Remove-Item $srcDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+            if (-not $cloned) {
+                Fail "无法克隆仓库，请检查网络或设置 SENSENOVA_CLAW_REPO_URL"
+            }
+            # 若通过代理完成克隆，恢复 origin 为原始 URL
+            Push-Location $srcDir
+            git remote set-url origin $REPO_URL 2>$null
+            Pop-Location
+            Log "源码克隆完成: $srcDir"
+        }
+
+        # 把 APP_DIR 切到 clone 出来的源码目录
+        $script:DEV_SOURCE = (Resolve-Path $srcDir).Path
+        $script:APP_DIR = $script:DEV_SOURCE
+        return
+    }
+
     $urls = Resolve-RepoUrls
 
     if (Test-Path "$APP_DIR\.git") {
@@ -432,7 +577,19 @@ function Install-Deps {
         }
     }
 
-    # 5) 构建前端生产版本（standalone 模式）
+    # 5) 构建前端生产版本（standalone 模式）——开发者模式跳过
+    if ($DEV_MODE) {
+        Info "开发者模式：跳过 npm run build 与前端产物精简，保留 node_modules 以便 npm run dev:web"
+        Pop-Location
+        Pop-Location
+        Log "项目依赖安装完成（开发者模式）"
+        if ($hasNativePref) {
+            $PSNativeCommandUseErrorActionPreference = $prevNativeEAP
+        }
+        $ErrorActionPreference = $prevEAP
+        return
+    }
+
     Info "构建前端生产版本（standalone 模式）..."
     cmd /c "npm run build 2>&1"
     if ($LASTEXITCODE -ne 0) { Fail "前端生产构建失败（npm run build）" }
@@ -585,9 +742,15 @@ function Print-Success {
     Write-Host "  Sensenova-Claw 安装完成!" -ForegroundColor Green
     Write-Host "======================================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  安装目录: $APP_DIR"
+    if ($DEV_MODE) {
+        Write-Host "  模式:     开发模式"
+        Write-Host "  代码目录: $APP_DIR"
+    } else {
+        Write-Host "  模式:     生产模式（前端已预构建）"
+        Write-Host "  安装目录: $APP_DIR"
+        Write-Host "  安装来源: $REPO_URL@$REPO_REF"
+    }
     Write-Host "  数据目录: $SENSENOVA_CLAW_HOME"
-    Write-Host "  安装来源: $REPO_URL@$REPO_REF"
     Write-Host ""
     if ($IS_CN) {
         Write-Host "  已配置国内镜像: npm($CN_NPM_REGISTRY) pip($CN_PIP_INDEX)"
@@ -617,7 +780,38 @@ function Main {
     Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host ""
 
-    # 选择安装路径
+    if ($DEV_MODE) {
+        Write-Host "  [开发者模式] 跳过 npm run build / 前端精简，editable 安装，改代码即时生效" -ForegroundColor Magenta
+        if ($DEV_NEEDS_CLONE) {
+            Write-Host "  [开发者模式] 远程模式：将 clone 源码到 $SENSENOVA_CLAW_HOME\src" -ForegroundColor Magenta
+        } else {
+            Write-Host "  [开发者模式] 源码: $DEV_SOURCE" -ForegroundColor Magenta
+        }
+        Write-Host ""
+
+        # 本地源码已就绪时，APP_DIR 直接指向源码；远程 clone 情况由 Setup-Repo 回填
+        if (-not $DEV_NEEDS_CLONE) {
+            $script:APP_DIR = $DEV_SOURCE
+        }
+        Log "数据目录: $SENSENOVA_CLAW_HOME"
+        Write-Host ""
+
+        Detect-Region
+        Configure-CN-Mirrors
+        Install-Git      # 远程模式要 clone；本地模式这步会秒过
+        Install-Uv
+        Install-Python
+        Install-Node
+        Setup-Repo       # 本地：立即返回；远程：clone 并回填 $APP_DIR
+        Install-Deps
+        Setup-HomeDir
+        Setup-Config
+        Register-Command
+        Print-Success
+        return
+    }
+
+    # 选择安装路径（仅正常模式）
     $script:SENSENOVA_CLAW_HOME = Prompt-Input "安装路径" $SENSENOVA_CLAW_HOME
     $script:APP_DIR = "$SENSENOVA_CLAW_HOME\app"
     Log "安装到: $SENSENOVA_CLAW_HOME"
@@ -625,10 +819,10 @@ function Main {
 
     Detect-Region
     Configure-CN-Mirrors
+    Install-Git
     Install-Uv
     Install-Python
     Install-Node
-    Install-Git
     Setup-Repo
     Install-Deps
     Setup-HomeDir
