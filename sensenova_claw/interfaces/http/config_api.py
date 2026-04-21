@@ -344,6 +344,36 @@ async def update_llm_model(model_name: str, body: ModelUpdateBody, request: Requ
     }
 
 
+@router.delete("/llm/models/{model_name}")
+async def delete_llm_model(model_name: str, request: Request):
+    """删除单个 LLM model，并同步清理默认模型引用。"""
+    config_manager = request.app.state.config_manager
+    raw_config = config_manager._load_raw_yaml()
+    llm_section = deepcopy(raw_config.get("llm", {}))
+    models = deepcopy(llm_section.get("models", {}))
+
+    if model_name not in models:
+        raise HTTPException(404, f"Model 不存在: {model_name}")
+
+    models.pop(model_name, None)
+    llm_section["models"] = models
+    if llm_section.get("default_model") == model_name:
+        llm_section["default_model"] = ""
+    if llm_section.get("default_embedding_model") == model_name:
+        llm_section["default_embedding_model"] = ""
+
+    try:
+        updated_llm = await config_manager.replace("llm", llm_section)
+    except Exception as exc:
+        raise HTTPException(500, f"写入配置文件失败: {exc}")
+
+    return {
+        "status": "saved",
+        "removed_model": model_name,
+        "llm": updated_llm,
+    }
+
+
 @router.put("/llm/default-model")
 async def update_llm_default_model(body: DefaultModelUpdateBody, request: Request):
     """更新默认模型，不修改 provider/model 其他配置。"""

@@ -426,6 +426,31 @@ def test_delete_provider_removes_provider_models_and_defaults(client, app):
     assert app.state.secret_store.get("sensenova_claw/llm.providers.deepseek.api_key") is None
 
 
+def test_delete_model_removes_model_and_related_defaults(client, app):
+    """删除 llm 时应同步清理相关默认模型引用。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["models"]["text-embedding-3-small"] = {
+        "provider": "openai",
+        "model_id": "text-embedding-3-small",
+        "type": "embedding",
+        "timeout": 60,
+        "max_tokens": 8192,
+        "max_output_tokens": 2048,
+    }
+    raw["llm"]["default_model"] = "gpt-5.4"
+    raw["llm"]["default_embedding_model"] = "text-embedding-3-small"
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.request("DELETE", "/api/config/llm/models/text-embedding-3-small")
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert "text-embedding-3-small" not in written["llm"]["models"]
+    assert written["llm"]["default_model"] == "gpt-5.4"
+    assert written["llm"]["default_embedding_model"] == ""
+
+
 def test_update_single_model_and_rename_default_model(client, app):
     """单项更新 llm 时允许改名，并联动 default_model。"""
     raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
