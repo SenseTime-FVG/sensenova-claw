@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { buildDeleteConfirmationConfig, type DeleteTargetType } from './deleteConfirmation';
+import { getExistingModelValidationError, getNewModelValidationError } from './newModelValidation';
 
 interface SecretValueStatus {
   configured: boolean;
@@ -110,6 +111,8 @@ export default function LlmsPage() {
   const [showNewProvider, setShowNewProvider] = useState(false);
   const [newProviderName, setNewProviderName] = useState('');
   const [newModelDrafts, setNewModelDrafts] = useState<Record<string, string>>({});
+  const [newModelErrors, setNewModelErrors] = useState<Record<string, string>>({});
+  const [modelNameErrors, setModelNameErrors] = useState<Record<string, string>>({});
   const [openNewModelForms, setOpenNewModelForms] = useState<Record<string, boolean>>({});
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
   const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<string, boolean>>({});
@@ -193,6 +196,8 @@ export default function LlmsPage() {
         setBulkTestResults({});
         setOpenBulkTestErrorModel(null);
         setHasBulkTestResults(false);
+        setNewModelErrors({});
+        setModelNameErrors({});
     } catch {
       setSaveMsg('读取配置失败');
     } finally {
@@ -571,12 +576,9 @@ export default function LlmsPage() {
   const addModel = (providerName: string) => {
     const nextName = (newModelDrafts[providerName] || '').trim();
     const modelSource = editingAll && globalDraft ? globalDraft.models : cloneModelsToDrafts(models);
-    if (!nextName) {
-      setSaveMsg('LLM 名称不能为空');
-      return;
-    }
-    if (modelSource[nextName]) {
-      setSaveMsg(`LLM 名称已存在: ${nextName}`);
+    const error = getNewModelValidationError(nextName, Object.keys(modelSource));
+    if (error) {
+      setNewModelErrors((prev) => ({ ...prev, [providerName]: error }));
       return;
     }
     const nextModel: ModelDraft = {
@@ -610,6 +612,11 @@ export default function LlmsPage() {
         [nextName]: nextModel,
       }));
     }
+    setNewModelErrors((prev) => {
+      const next = { ...prev };
+      delete next[providerName];
+      return next;
+    });
     setNewModelDrafts((prev) => ({ ...prev, [providerName]: '' }));
     setOpenNewModelForms((prev) => ({ ...prev, [providerName]: false }));
   };
@@ -971,10 +978,20 @@ export default function LlmsPage() {
       delete next[name];
       return next;
     });
+    setModelNameErrors((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   };
 
   const saveModel = async (name: string) => {
     const draft = getModelDraft(name);
+    const validationError = getExistingModelValidationError(name, draft.name, Object.keys(models));
+    if (validationError) {
+      setModelNameErrors((prev) => ({ ...prev, [name]: validationError }));
+      return;
+    }
     setSaveMsg('');
     const res = await authFetch(`${API_BASE}/api/config/llm/models/${encodeURIComponent(name)}`, {
       method: 'PUT',
@@ -992,9 +1009,19 @@ export default function LlmsPage() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      setSaveMsg(err.detail || '保存失败');
+      const detail = err.detail || '保存失败';
+      if (typeof detail === 'string' && detail.includes('Model 已存在')) {
+        setModelNameErrors((prev) => ({ ...prev, [name]: detail.replace('Model', 'LLM') }));
+      } else {
+        setSaveMsg(detail);
+      }
       return;
     }
+    setModelNameErrors((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
     setSaveMsg('已保存');
     loadConfig();
   };
@@ -1624,7 +1651,20 @@ export default function LlmsPage() {
                         <button
                           type="button"
                           data-testid={`add-llm-button-${providerName}`}
-                          onClick={() => setOpenNewModelForms((prev) => ({ ...prev, [providerName]: !prev[providerName] }))}
+                          onClick={() => {
+                            setOpenNewModelForms((prev) => {
+                              const nextOpen = !prev[providerName];
+                              if (!nextOpen) {
+                                setNewModelErrors((current) => {
+                                  if (!current[providerName]) return current;
+                                  const next = { ...current };
+                                  delete next[providerName];
+                                  return next;
+                                });
+                              }
+                              return { ...prev, [providerName]: nextOpen };
+                            });
+                          }}
                           className="flex items-center gap-2 rounded-xl border border-primary/30 px-4 py-2 text-sm font-semibold text-primary transition-all hover:bg-primary/5"
                         >
                           <Plus size={16} />
@@ -1633,23 +1673,49 @@ export default function LlmsPage() {
                       </div>
 
                       {openNewModelForms[providerName] && (
-                        <div className="flex flex-col gap-3 rounded-xl border border-dashed border-primary/30 bg-background p-4 md:flex-row">
-                          <input
-                            type="text"
-                            value={newModelDrafts[providerName] || ''}
-                            data-testid={`new-llm-name-input-${providerName}`}
-                            onChange={(e) => setNewModelDrafts((prev) => ({ ...prev, [providerName]: e.target.value }))}
-                            placeholder="llm 名称，例如 gpt-4.1-mini"
-                            className="flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                          />
-                          <button
-                            type="button"
-                            data-testid={`confirm-add-llm-button-${providerName}`}
-                            onClick={() => addModel(providerName)}
-                            className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
-                          >
-                            添加
-                          </button>
+                        <div className="rounded-xl border border-dashed border-primary/30 bg-background p-4">
+                          <div className="flex flex-col gap-3 md:flex-row">
+                            <div className="flex-1">
+                              <input
+                                type="text"
+                                value={newModelDrafts[providerName] || ''}
+                                data-testid={`new-llm-name-input-${providerName}`}
+                                onChange={(e) => {
+                                  setNewModelDrafts((prev) => ({ ...prev, [providerName]: e.target.value }));
+                                  setNewModelErrors((prev) => {
+                                    if (!prev[providerName]) {
+                                      return prev;
+                                    }
+                                    const next = { ...prev };
+                                    delete next[providerName];
+                                    return next;
+                                  });
+                                }}
+                                placeholder="llm 名称，例如 gpt-4.1-mini"
+                                className={`w-full rounded-xl bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:outline-none focus:ring-2 ${
+                                  newModelErrors[providerName]
+                                    ? 'border border-destructive/60 focus:border-destructive focus:ring-destructive/20'
+                                    : 'border border-input focus:border-primary focus:ring-primary/20'
+                                }`}
+                              />
+                              {newModelErrors[providerName] ? (
+                                <p
+                                  data-testid={`new-llm-name-error-${providerName}`}
+                                  className="mt-2 text-xs font-medium text-destructive"
+                                >
+                                  {newModelErrors[providerName]}
+                                </p>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              data-testid={`confirm-add-llm-button-${providerName}`}
+                              onClick={() => addModel(providerName)}
+                              className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
+                            >
+                              添加
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -1661,28 +1727,51 @@ export default function LlmsPage() {
                             className="grid gap-4 rounded-2xl border border-border bg-background p-4 md:grid-cols-[minmax(0,1fr)_auto]"
                           >
                             <div className="grid min-w-0 gap-4 md:grid-cols-2">
-                              <FieldInput
-                                label="LLM 名称"
-                                value={getModelDraft(modelName).name}
-                                dataTestId={`llm-name-input-${modelName}`}
-                                disabled={!isModelEditable(modelName)}
-                                onChange={(value) => {
-                                  if (editingAll && globalDraft) {
-                                    setGlobalDraft({
-                                      ...globalDraft,
-                                      models: {
-                                        ...globalDraft.models,
-                                        [modelName]: { ...globalDraft.models[modelName], name: value },
-                                      },
+                              <div className="space-y-1.5">
+                                <label className="text-xs font-semibold text-muted-foreground">LLM 名称</label>
+                                <input
+                                  type="text"
+                                  value={getModelDraft(modelName).name}
+                                  data-testid={`llm-name-input-${modelName}`}
+                                  disabled={!isModelEditable(modelName)}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setModelNameErrors((prev) => {
+                                      if (!prev[modelName]) return prev;
+                                      const next = { ...prev };
+                                      delete next[modelName];
+                                      return next;
                                     });
-                                    return;
-                                  }
-                                  setModelDrafts((prev) => ({
-                                    ...prev,
-                                    [modelName]: { ...(prev[modelName] || { ...models[modelName], name: modelName }), name: value },
-                                  }));
-                                }}
-                              />
+                                    if (editingAll && globalDraft) {
+                                      setGlobalDraft({
+                                        ...globalDraft,
+                                        models: {
+                                          ...globalDraft.models,
+                                          [modelName]: { ...globalDraft.models[modelName], name: value },
+                                        },
+                                      });
+                                      return;
+                                    }
+                                    setModelDrafts((prev) => ({
+                                      ...prev,
+                                      [modelName]: { ...(prev[modelName] || { ...models[modelName], name: modelName }), name: value },
+                                    }));
+                                  }}
+                                  className={`w-full rounded-xl bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 ${
+                                    modelNameErrors[modelName]
+                                      ? 'border border-destructive/60 focus:border-destructive focus:ring-destructive/20'
+                                      : 'border border-input focus:border-primary focus:ring-primary/20'
+                                  }`}
+                                />
+                                {modelNameErrors[modelName] ? (
+                                  <p
+                                    data-testid={`llm-name-error-${modelName}`}
+                                    className="text-xs font-medium text-destructive"
+                                  >
+                                    {modelNameErrors[modelName]}
+                                  </p>
+                                ) : null}
+                              </div>
                               <FieldSelect
                                 label="类型"
                                 value={getModelDraft(modelName).type || 'chat'}
