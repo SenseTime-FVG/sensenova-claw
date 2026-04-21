@@ -312,7 +312,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         "--port", str(backend_port),
     ]
     if not is_production:
-        backend_cmd.insert(4, "--reload")
+        # --reload：改 .py 自动重启。限定监听目录到源码包，避免 tests/、var/、.next/ 的噪声触发重启
+        reload_dir = str(project_root / "sensenova_claw")
+        backend_cmd[4:4] = ["--reload", "--reload-dir", reload_dir]
     print(f"启动后端服务: http://localhost:{backend_port}")
     backend_proc = _spawn_managed_process(backend_cmd, cwd=str(project_root), env=env)
     procs.append(backend_proc)
@@ -386,6 +388,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"  CLI 连接:    sensenova-claw cli --port {backend_port}")
     print()
     print("  注意: 后端日志中包含带 token 的访问 URL")
+    if not is_production:
+        print("  热重载: 改 sensenova_claw/**/*.py 自动重启后端；改前端 .tsx 走 Next.js HMR")
     if not _llm_ok:
         print()
         print("  ⚠️  未检测到可用的 LLM API 配置，当前使用 Mock 模式")

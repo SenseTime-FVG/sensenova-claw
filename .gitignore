@@ -11,6 +11,7 @@ Thumbs.db
 .claude/
 docs/superpowers/
 .superpowers/
+.playwright-mcp/
 
 # ========== Python ==========
 __pycache__/
