@@ -22,6 +22,7 @@
 #   参数:
 #     --dev                启用开发者模式（等价环境变量 SENSENOVA_CLAW_DEV=1）
 #     --dev-source <path>  源码路径；省略时依次回退到 SENSENOVA_CLAW_DEV_SOURCE、脚本所在仓库、自动 clone
+#     --ref <branch>       clone 的分支/tag（正常模式和开发模式远程 clone 都生效），默认 dev
 #
 set -euo pipefail
 
@@ -301,17 +302,42 @@ install_node() {
 
 # ── 步骤 4: 克隆/更新仓库 ──
 
+# 返回可用于 clone/fetch 的 URL 列表（空白分隔）：原始 URL 优先，失败后套公共 GitHub 代理兜底
+resolve_repo_urls() {
+  echo "$REPO_URL"
+  # 仅 github.com 的 URL 才能套公共代理
+  if [[ "$REPO_URL" =~ ^https?://github\.com/ ]]; then
+    echo "https://gh-proxy.com/$REPO_URL"
+    echo "https://ghfast.top/$REPO_URL"
+    echo "https://mirror.ghproxy.com/$REPO_URL"
+  fi
+}
+
 setup_repo() {
   info "app 目录将使用仓库分支/引用: $REPO_REF"
+  local urls
+  urls=$(resolve_repo_urls)
 
   if [ -d "$APP_DIR/.git" ]; then
     info "更新 Sensenova-Claw ($REPO_REF)..."
     cd "$APP_DIR"
-    git fetch origin "$REPO_REF" --quiet || {
-      warn "git fetch $REPO_REF 失败，跳过更新"
+    local fetched=false url
+    while read -r url; do
+      [ -z "$url" ] && continue
+      [ "$url" != "$REPO_URL" ] && warn "直连 GitHub 失败，尝试代理: $url"
+      git remote set-url origin "$url" 2>/dev/null || true
+      if git fetch origin "$REPO_REF" --quiet 2>/dev/null; then
+        fetched=true
+        break
+      fi
+    done <<< "$urls"
+    git remote set-url origin "$REPO_URL" 2>/dev/null || true
+
+    if [ "$fetched" != "true" ]; then
+      warn "所有源均无法拉取更新，跳过更新"
       cd - >/dev/null
       return
-    }
+    fi
     if git show-ref --verify --quiet "refs/remotes/origin/$REPO_REF"; then
       git checkout "$REPO_REF" --quiet 2>/dev/null || git checkout -B "$REPO_REF" "origin/$REPO_REF" --quiet
       git pull origin "$REPO_REF" --ff-only --quiet || {
@@ -329,7 +355,32 @@ setup_repo() {
   else
     info "克隆 Sensenova-Claw 仓库 ($REPO_REF)..."
     mkdir -p "$(dirname "$APP_DIR")"
-    git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$APP_DIR"
+    local cloned=false used_url="" url
+    while read -r url; do
+      [ -z "$url" ] && continue
+      if [ "$url" = "$REPO_URL" ]; then
+        info "使用源: $url"
+      else
+        warn "直连 GitHub 失败，尝试代理: $url"
+      fi
+      if git clone --branch "$REPO_REF" --depth 1 "$url" "$APP_DIR" 2>&1; then
+        cloned=true
+        used_url="$url"
+        break
+      fi
+      # 清理失败 clone 的残留
+      [ -d "$APP_DIR" ] && rm -rf "$APP_DIR"
+    done <<< "$urls"
+
+    if [ "$cloned" != "true" ]; then
+      fail "无法克隆仓库，请检查网络，或设置 SENSENOVA_CLAW_REPO_URL 指向可访问的镜像"
+    fi
+    # 若通过代理完成克隆，恢复 origin 为原始 URL
+    if [ "$used_url" != "$REPO_URL" ]; then
+      cd "$APP_DIR"
+      git remote set-url origin "$REPO_URL" 2>/dev/null || true
+      cd - >/dev/null
+    fi
     log "Sensenova-Claw 克隆完成"
   fi
 }
@@ -339,10 +390,24 @@ setup_repo() {
 setup_repo_dev() {
   # 目标：把完整源码 clone 到 $APP_DIR（= $SENSENOVA_CLAW_HOME/src）
   # 和正常模式的 $APP_DIR=$SENSENOVA_CLAW_HOME/app 区分，语义清晰
+  local urls
+  urls=$(resolve_repo_urls)
+
   if [ -d "$APP_DIR/.git" ]; then
     info "更新 Sensenova-Claw 源码 ($REPO_REF)..."
     cd "$APP_DIR"
-    if git fetch origin "$REPO_REF" --quiet 2>/dev/null; then
+    local fetched=false url
+    while read -r url; do
+      [ -z "$url" ] && continue
+      git remote set-url origin "$url" 2>/dev/null || true
+      if git fetch origin "$REPO_REF" --quiet 2>/dev/null; then
+        fetched=true
+        break
+      fi
+    done <<< "$urls"
+    git remote set-url origin "$REPO_URL" 2>/dev/null || true
+
+    if [ "$fetched" = "true" ]; then
       git checkout "$REPO_REF" --quiet 2>/dev/null || git checkout -B "$REPO_REF" "origin/$REPO_REF" --quiet
       git reset --hard "origin/$REPO_REF" --quiet 2>/dev/null || warn "reset 失败，保留当前提交"
       log "源码已更新"
@@ -353,8 +418,29 @@ setup_repo_dev() {
   else
     info "克隆 Sensenova-Claw 源码 ($REPO_REF) 到 $APP_DIR..."
     mkdir -p "$(dirname "$APP_DIR")"
-    # 开发模式 clone 完整历史（不加 --depth 1），方便切分支/查 log
-    git clone --branch "$REPO_REF" "$REPO_URL" "$APP_DIR" || fail "clone 失败，请检查网络或设置 SENSENOVA_CLAW_REPO_URL"
+    local cloned=false url
+    while read -r url; do
+      [ -z "$url" ] && continue
+      if [ "$url" = "$REPO_URL" ]; then
+        info "使用源: $url"
+      else
+        warn "直连失败，尝试代理: $url"
+      fi
+      # 开发模式 clone 完整历史（不加 --depth 1），方便切分支/查 log
+      if git clone --branch "$REPO_REF" "$url" "$APP_DIR" 2>&1; then
+        cloned=true
+        break
+      fi
+      [ -d "$APP_DIR" ] && rm -rf "$APP_DIR"
+    done <<< "$urls"
+
+    if [ "$cloned" != "true" ]; then
+      fail "clone 失败，请检查网络或设置 SENSENOVA_CLAW_REPO_URL"
+    fi
+    # 恢复 origin 为原始 URL
+    cd "$APP_DIR"
+    git remote set-url origin "$REPO_URL" 2>/dev/null || true
+    cd - >/dev/null
     log "源码克隆完成: $APP_DIR"
   fi
   DEV_SOURCE="$APP_DIR"
@@ -591,6 +677,17 @@ main() {
         DEV_SOURCE="${1#*=}"
         shift
         ;;
+      --ref)
+        REPO_REF="${2:-}"
+        if [ -z "$REPO_REF" ]; then
+          fail "--ref 需要指定分支或 tag"
+        fi
+        shift 2
+        ;;
+      --ref=*)
+        REPO_REF="${1#*=}"
+        shift
+        ;;
       *)
         shift
         ;;
@@ -622,19 +719,21 @@ main() {
       fi
     fi
 
+    echo -e "${YELLOW}  [开发者模式] 跳过 npm run build / 前端精简，editable 安装，改代码即时生效${NC}"
     if [ -n "$resolved_source" ]; then
       APP_DIR="$resolved_source"
       DEV_SOURCE="$resolved_source"
       if [ ! -f "$APP_DIR/sensenova_claw/app/gateway/main.py" ] || [ ! -f "$APP_DIR/pyproject.toml" ]; then
         fail "指定目录不是 Sensenova-Claw 项目: $APP_DIR"
       fi
-      log "开发模式（本地）: $APP_DIR"
+      echo -e "${YELLOW}  [开发者模式] 源码: $APP_DIR${NC}"
     else
       # 远程模式：clone 到 $SENSENOVA_CLAW_HOME/src
       DEV_NEEDS_CLONE=true
       APP_DIR="$SENSENOVA_CLAW_HOME/src"
-      log "开发模式（远程）: 将 clone 源码到 $APP_DIR"
+      echo -e "${YELLOW}  [开发者模式] 远程模式：将 clone 源码到 $APP_DIR${NC}"
     fi
+    echo ""
     log "数据目录: $SENSENOVA_CLAW_HOME"
     echo ""
 

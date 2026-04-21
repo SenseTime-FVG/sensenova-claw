@@ -54,7 +54,10 @@ if ($DEV_MODE) {
                  else { $null }
     if ($rawSource) {
         $resolved = Resolve-Path $rawSource -ErrorAction SilentlyContinue
-        if ($resolved -and (Test-Path "$($resolved.Path)\pyproject.toml")) {
+        # 需同时满足 pyproject.toml 和 gateway/main.py，避免 $PSScriptRoot 落在无关仓库时误判
+        if ($resolved -and `
+            (Test-Path "$($resolved.Path)\pyproject.toml") -and `
+            (Test-Path "$($resolved.Path)\sensenova_claw\app\gateway\main.py")) {
             $DEV_SOURCE = $resolved.Path
         }
     }
