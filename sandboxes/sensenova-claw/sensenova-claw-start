@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONFIG_DIR="$HOME/.sensenova-claw"
+# Agent home：固定指向 PVC 挂载点 /sandbox/.sensenova-claw，实现跨 sandbox 重建持久化。
+# openshell 的 supervisor 会剥离 Dockerfile ENV，因此必须在启动脚本里显式 export。
+export SENSENOVA_CLAW_HOME="${SENSENOVA_CLAW_HOME:-/sandbox/.sensenova-claw}"
+CONFIG_DIR="$SENSENOVA_CLAW_HOME"
 CONFIG_FILE="$CONFIG_DIR/config.yml"
+mkdir -p "$CONFIG_DIR/data"
 
 # ── 1. 初始化 $HOME/.sensenova-claw（如不存在）──
 if [ ! -f "$CONFIG_FILE" ]; then

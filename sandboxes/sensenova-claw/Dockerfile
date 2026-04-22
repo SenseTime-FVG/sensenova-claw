@@ -57,5 +57,11 @@ COPY .sensenova-claw/skills/ /etc/sensenova-claw/skills/
 RUN mkdir -p /home/sandbox/.sensenova-claw/data && \
     chown -R sandbox:sandbox /home/sandbox/.sensenova-claw
 
+# 将 sandbox 工作区（PVC 挂载点）预先设置为 sandbox 所有，
+# 以便 openshell 的 workspace-init 容器用 `tar -xpf` 注入 PVC 时保留 sandbox:sandbox 权限，
+# 使 agent 真正可写 /sandbox。并将 agent home 指向 /sandbox/.sensenova-claw 以获得持久化。
+RUN mkdir -p /sandbox/.sensenova-claw && chown -R sandbox:sandbox /sandbox
+ENV SENSENOVA_CLAW_HOME=/sandbox/.sensenova-claw
+
 WORKDIR /sandbox
 EXPOSE 8000 3000
