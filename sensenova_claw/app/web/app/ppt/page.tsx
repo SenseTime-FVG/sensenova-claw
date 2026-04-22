@@ -138,6 +138,7 @@ function PPTWorkspace() {
   const [leftTab, setLeftTab] = useState<LeftTab>('outline');
   const [previewPptx, setPreviewPptx] = useState<DroppedFile | null>(null);
   const [loadingDrop, setLoadingDrop] = useState(false);
+  const [exportingHtmlZip, setExportingHtmlZip] = useState(false);
   const dropContainerRef = useRef<HTMLDivElement>(null);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
 
@@ -202,6 +203,31 @@ function PPTWorkspace() {
   const hasDeck = !!deckData.slideSet || !!deckData.storyboard;
   const stages = hasDeck ? deckData.stages : DEFAULT_STAGES;
 
+  const handleExport = useCallback(async (format: string, _withNotes: boolean) => {
+    if (format !== 'html-zip' || !deckData.deckDir || exportingHtmlZip) return;
+
+    setExportingHtmlZip(true);
+    try {
+      const res = await authFetch(
+        `${API_BASE}/api/files/workdir-archive?dir=${encodeURIComponent(deckData.deckDir)}`,
+      );
+      if (!res.ok) return;
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const fileName = `${deckData.deckDir.split('/').pop() || 'deck'}.zip`;
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportingHtmlZip(false);
+    }
+  }, [deckData.deckDir, exportingHtmlZip]);
+
   // ── 工作台模式（三栏布局） ──
   return (
     <div ref={setRef} className="flex flex-col h-full overflow-hidden">
@@ -229,6 +255,7 @@ function PPTWorkspace() {
           </Button>
           <ExportDropdown
             deckDir={deckData.deckDir}
+            onExport={handleExport}
             hasSpeakerNotes={!!deckData.speakerNotes}
           />
         </div>
