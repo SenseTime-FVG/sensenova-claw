@@ -1,547 +1,517 @@
-# Deep Research — 深度研究多 Agent 系统
+# Deep Research — 自治研究编排系统
 
-## 概述
+## 系统定义
 
-Deep Research 是 Sensenova-Claw 平台的深度研究功能，采用多 Agent 协作架构，从用户提交研究 query 到输出带引用的结构化报告全程自动化。支持商业调研、竞品分析、技术深挖、事实核查、学术综述等综合场景。
+Deep Research 是 Sensenova-Claw 面向复杂知识任务构建的自治研究编排系统。它并不是传统意义上的“搜索增强问答”，也不是单一的长文生成 Agent，而是一套以问题建模、研究编排、证据挖掘、可信治理和结果沉淀为核心的 Research OS。
 
-**核心特点**：
+在这套体系中，系统处理的对象不再是一次性的 Prompt，而是一个需要被持续拆解、求证、修订和综合的研究任务；系统交付的结果也不再是单轮回答，而是一份具备证据约束、引用治理和结构化结论的 `Evidence-Backed Research Dossier`。
 
-- **LLM 驱动编排**：流程由总控 Agent 自主调度，非硬编码状态机，可根据研究进展动态调整
-- **波次并行**：按维度依赖关系分波执行，同一波次内多维度并发研究
-- **双层质量审查**：子报告逐篇审查 + 终稿整合审查，审查不通过自动打回修订
-- **引用全链路管理**：从子报告脚注到终稿统一编号，自动去重、URL 归一化
-- **多源搜索体系**：主链搜索引擎 + 5 类专业领域搜索 Skill，按需调用
+从能力边界上看，Deep Research 完成的是以下升级：
+
+- 从信息检索升级为研究生产
+- 从文本生成升级为研究工件交付
+- 从单点回答升级为多阶段自治编排
+- 从来源调用升级为数据源级路由与治理
 
 ---
 
-## 架构总览
+## 设计目标
 
-### 三层架构
+Deep Research 面向的是以下类型的问题：
 
-```
-┌───────────────────────────────────────────────────────────────┐
-│                        用户 Query                              │
-│                           │                                    │
-│                      ┌────▼─────┐                              │
-│                      │  总控Agent │  入口、调度、结果收口        │
-│                      └────┬─────┘                              │
-│                           │ send_message                       │
-│         ┌────────┬────────┼────────┬──────────┐                │
-│         ▼        ▼        ▼        ▼          ▼                │
-│     Scout    Plan    Research   Review    Report                │
-│     Agent    Agent    Agent     Agent     Agent                │
-│                                    ▲                           │
-│                         │          │                           │
-│                    Report Agent ────┘                           │
-│                                                                │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │         工程治理层（透明中间件，Agent 无感知）              │  │
-│  │   CitationManager  │  prepare_report_citations 工具       │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                           │                                    │
-│              落盘: report.md + citations.json                   │
-└───────────────────────────────────────────────────────────────┘
-```
+- 研究目标开放，无法通过单次搜索直接收敛
+- 需要跨来源、跨视角、跨阶段推进
+- 对结果的可信度、可追溯性和可复核性有明确要求
 
-### 层级职责
+围绕这类问题，系统设计聚焦于五个核心目标：
 
-| 层 | 职责 | 实现方式 |
-|---|---|---|
-| **Agent 层** | 思考、推理、内容生成、调度决策 | 独立 AgentConfig，通过 `send_message` 委派 |
-| **工程治理层** | Citation 标准化/去重/编号 | `CitationManager` + `prepare_report_citations` 工具 |
-| **存储层** | 报告和引用落盘 | `write_file` 写入 workspace 报告目录 |
+1. **Problem Formalization**  
+   将自然语言问题转化为结构化研究对象、研究边界、关键维度和执行约束。
 
-### 设计原则
+2. **Cognitive Orchestration**  
+   由总控 Agent 持续驱动全局流程，根据证据密度、任务进展和信息缺口动态调整后续路径。
+
+3. **Evidence-Centric Research**  
+   以证据而非文案为中心组织研究过程，要求关键结论始终绑定来源与求证状态。
+
+4. **Trust & Governance by Default**  
+   将引用治理、质量审查、冲突识别和风险提示作为系统内生能力，而非后置补丁。
+
+5. **Assetization of Research**  
+   将研究过程沉淀为可复用、可审计、可再加工的结构化工件。
+
+---
+
+## 核心原则
 
 | 原则 | 说明 |
 |---|---|
-| 总控 Agent 驱动 | 流程由 LLM 自主决策推进，非 Python 状态机硬编码 |
-| 零新增工具 | 完全复用现有 `send_message` / `ask_user` / `write_file` 等 |
-| 治理层透明 | CitationManager 自动运作，Agent 无需感知 |
-| Skill 扩展来源 | 特定领域搜索通过 Skill 接入，不硬编码到 Agent |
+| `Orchestrator-first` | 研究流程由总控 Agent 驱动，而不是由固定状态机硬编码 |
+| `Research over Writing` | 系统优先完成问题建模、证据构建与结论收敛，而非优先追求文案长度 |
+| `Evidence before Narrative` | 叙事必须建立在已求证证据之上，不能让写作先于研究 |
+| `Path over Payload` | 跨 Agent 协作优先传递路径和结构化指令，避免上下文膨胀 |
+| `Data Source over Tool` | 检索能力按数据源和路由策略组织，而非按单个工具堆叠 |
+| `Governance as Infrastructure` | 引用治理与质量门控属于底层基础设施，而不是附属流程 |
+| `Graceful Degradation` | 局部数据源失败不阻塞主流程，但必须显式暴露覆盖边界与可信限制 |
 
 ---
 
-## Agent 团队
+## 总体架构
 
-### 团队总览
+### 架构分层
 
-```
-deep-research-controller (总控)
-├── scout-agent        侦察 — 领域地形扫描 + 用户需求澄清
-├── plan-agent         规划 — 维度拆解 + 波次编排
-├── research-agent     研究 — 按维度搜集证据 + 输出子报告
-├── review-agent       审查 — 证据/逻辑/完整性审查
-└── report-agent       报告 — 综合子报告生成结构化终稿
-```
+Deep Research 采用四层架构：
 
-### 各 Agent 详细说明
+- **Cognitive Orchestration Layer**：负责目标理解、阶段推进、任务调度与结果收敛
+- **Research Execution Layer**：负责侦察、规划、证据挖掘、审查和终稿综合
+- **Trust & Governance Layer**：负责引用治理、可信收口和结果标准化
+- **Persistence Layer**：负责研究工件沉淀与后续复用
 
-#### 1. Deep Research Controller（总控 Agent）
+### 架构概览
 
-**职责**：
-- 接收用户研究需求，依次调度各专家 Agent
-- 管理报告目录结构和文件路径（所有路径为绝对路径）
-- 分波并行调度 research-agent，控制修订循环
-- 调用 `prepare_report_citations` 完成引用后处理
-- 只做调度，不做研究
-
-**关键规则**：
-- 所有跨 Agent 的文件路径必须使用绝对路径
-- 文件由 Agent 自行写入，总控不替代其写入操作
-- 传递文件路径而非大段文本
-- 异常处理：重试一次，失败则跳过并说明
-
-#### 2. Scout Agent（侦察 Agent）
-
-**职责**：快速侦察研究领域地形，建立领域认知，通过预研和用户澄清为后续规划提供认知基础。
-
-**工作流程**：
-1. **意图解析**：从 query 中提取研究对象、研究类型、隐含决策背景
-2. **快速扫描**（2-3 轮搜索）：
-   - 第 1 轮：核心关键词搜索 → 关键实体、领域结构、术语
-   - 第 2 轮：实体与争议搜索 → 关系、核心分歧
-   - 第 3 轮（可选）：补盲搜索
-3. **用户澄清**：提出 2-5 个针对性问题（研究边界、目标受众、时间焦点、深度期望等）
-4. **输出 Research Briefing**，包含：
-   - 问题画像（研究类型、确认的约束）
-   - 领域地图（关键实体、核心术语、领域阶段、子领域划分）
-   - 认知缺口（已有共识、核心争议、信息空白）
-   - 信息地形（高价值来源、时效敏感度、获取障碍）
-
-**研究类型适配**：
-
-| 类型 | 侧重点 |
-|---|---|
-| 学术研究 | 研究脉络、关键论文/作者、方法学派、前沿 |
-| 商业调研 | 市场结构、主要玩家、竞争格局、商业模式 |
-| 金融投资 | 基本面、估值、关键指标、风险 |
-| 医疗健康 | 疾病机制、治疗方案、临床阶段、监管、证据等级 |
-| 法律政策 | 监管框架、范围、政策演进、合规 |
-| 热点事件 | 时间线、各方立场、影响范围、信息可靠性 |
-| 技术评估 | 技术原理、社区、成熟度、应用场景 |
-| 人物画像 | 背景、成就、关系网络、公众评价 |
-
-#### 3. Plan Agent（规划 Agent）
-
-**职责**：基于 Research Briefing，拆解研究维度，规划数据源和执行顺序。
-
-**工作流程**：
-1. **确定研究策略**：根据研究类型选择总体策略
-2. **维度拆解**（3-7 个维度）：
-   - 可用维度类型：`topic`, `entity_comparison`, `timeline`, `perspective`, `cause_chain`, `evidence_types`, `geography`, `value_chain`, `depth_layers`, `process_stages`
-   - 流程：识别相关维度 → 选择主维度 → 设计切片 → 验证覆盖 → 验证可行性
-3. **来源类别匹配**（指定类别而非具体工具）：
-   - `official` / `news` / `social_media` / `github` / `academic` / `forum` / `analyst` / `review`
-4. **波次编排**：按维度依赖关系分波，无依赖的维度同一波并行
-5. **深度分配**：
-   - `skim`：可靠来源 + 关键结论
-   - `moderate`：主要来源覆盖，关键数据核实
-   - `thorough`：多源交叉验证，对立观点，详细数据
-
-**输出格式**（严格 JSON）：
-```json
-{
-  "strategy": {
-    "relevant_dimensions": ["by_topic", "by_entity"],
-    "primary_dimension": "by_topic",
-    "rationale": "..."
-  },
-  "dimensions": [
-    {
-      "id": "d1",
-      "name": "维度名称",
-      "description": "该维度回答什么问题",
-      "key_questions": ["问题1", "问题2"],
-      "focus": "方向性证据指引",
-      "context_from_briefing": "Briefing 中的已知背景",
-      "sources": [
-        {"category": "official", "description": "具体来源说明"}
-      ],
-      "depth": "thorough",
-      "wave": 1,
-      "depends_on": []
-    }
-  ]
-}
+```text
+User Query
+    ↓
+Cognitive Orchestrator
+    ↓
+Multi-Agent Research Fabric
+    ├── Domain Recon Agent
+    ├── Research Planning Agent
+    ├── Evidence Mining Agent
+    ├── Trust & Quality Review Agent
+    └── Narrative Synthesis Agent
+    ↓
+Trust & Governance Layer
+    ├── CitationManager
+    └── prepare_report_citations
+    ↓
+Persistence Layer
+    ├── briefing.md
+    ├── plan.json
+    ├── sub_reports/d*.md
+    ├── report.md
+    └── citations.json
 ```
 
-#### 4. Research Agent（研究 Agent）
+### 分层职责
 
-**职责**：按指定维度搜集证据，输出带引用的子报告。
-
-**工作流程**：
-1. **搜索策略规划**：将 key_questions 拆解为可搜索的子问题，设计多角度搜索（正反面证据、不同信息主体、中英文）
-2. **搜索-评估循环**：
-   - 来源层级：一次来源（原始数据/论文/财报）> 二次来源（媒体/分析）> 三次来源（摘要/聚合）
-   - 信息类型区分：事实 / 观点 / 推断
-   - 线索追踪：发现原始报告/数据源引用时，用 `fetch_url` 追溯原始出处
-   - 停止条件根据深度要求而定（`skim` 可靠来源 / `moderate` 完整回答 / `thorough`  独立来源交叉验证）
-3. **子报告写入**：使用脚注引用格式
-
-**子报告引用格式**：
-```markdown
-## 关键问题回答
-
-某个有证据支撑的数据点 [^citation_key]。进一步分析 [^another_key]。
-
-## 额外发现
-{超出 key_questions 但可能重要的发现}
-
-[^citation_key]: [来源标题](URL)
-[^another_key]: [来源标题](URL)
-```
-
-citation_key 命名规则：`{来源缩写}_{主题关键词}_{年份}`，全小写下划线连接。
-
-#### 5. Review Agent（审查 Agent）
-
-**职责**：审查子报告和终稿的证据充分性、来源冲突和逻辑问题。
-
-**审查维度**：
-
-| 类别 | 审查点 |
-|---|---|
-| **A. 证据审查** | 充分性（每个结论有来源）、质量（来源层级/偏见/时效）、真实性（抽查引用可访问且准确） |
-| **B. 逻辑审查** | 逻辑跳跃、选择性证据、因果混淆、过度推断 |
-| **C. 完整性审查**（子报告） | 问题覆盖与深度、多视角、不确定性标注 |
-| **D. 整合审查**（终稿） | 跨维度一致性、叙事流畅、综合结论是否有支撑、是否回答原始问题 |
-
-**输出格式**：
-```
-## 审查结论
-VERDICT: pass / revise
-
-## 问题清单
-### 🔴 硬伤 (必须修复)
-1. [位置] 问题 → 修复建议
-
-### 🟡 改进建议 (建议修复)
-1. [位置] 建议 → 修复方向
-
-## 审查说明
-{整体质量评估和判断理由}
-```
-
-**判定规则**：存在任何 🔴 硬伤 → `revise`；仅有 🟡 建议 → `pass`。
-
-#### 6. Report Agent（报告 Agent）
-
-**职责**：综合所有子报告，生成结构化研究终稿。
-
-**工作要求**：
-- **综合而非拼接**：整合发现，跨维度交叉引用，避免重复
-- **引用纪律**：复用子报告的 `[^key]` 脚注格式和原有 citation_key，不引入子报告之外的新事实
-- **矛盾处理**：发现跨维度矛盾时必须讨论，不隐藏
-- **深度适配**：overview → 简洁结论导向；deep_analysis → 均衡；expert_level → 详尽
-- 不写 `## 参考文献` 章节（由引用后处理自动生成）
+| 层级 | 核心实体 | 职责 |
+|---|---|---|
+| 编排层 | `Cognitive Orchestrator` | 接收用户目标，驱动全流程，执行阶段调度、回路控制与结果收敛 |
+| 执行层 | `Research Fabric` | 承担问题侦察、研究规划、证据挖掘、质量审查和叙事综合 |
+| 治理层 | `CitationManager` / `prepare_report_citations` | 统一处理来源映射、编号、去重、规范化与可信收口 |
+| 持久层 | Research Assets | 保存中间工件与最终产物，支撑复盘、复用和审计 |
 
 ---
 
-## 执行流程
+## Agent Fabric
 
-### 完整流程图
+### 角色拓扑
 
-```
-用户 Query
-    │
-    ▼
-┌──────────────────┐
-│  Stage 1: 侦察    │  scout-agent
-│  领域扫描 + 澄清   │  → briefing.md
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│  Stage 2: 规划    │  plan-agent
-│  维度拆解 + 波次   │  → plan.json
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│  Stage 3: 确认    │  ask_user（可选）
-│  用户审批研究方案   │
-└────────┬─────────┘
-         ▼
-┌──────────────────────────────────────┐
-│  Stage 4: 分波研究 + 审查              │
-│                                       │
-│  Wave 1:  research-agent × N (并行)   │
-│           → sub_reports/d1.md ...      │
-│           review-agent × N (并行)      │
-│           → pass / revise (最多重试2次) │
-│                                       │
-│  Wave 间回顾: 评估已有发现，调整后续波次  │
-│                                       │
-│  Wave 2:  research-agent × M (并行)   │
-│           → sub_reports/dN.md ...      │
-│           review-agent × M (并行)      │
-│           ...                         │
-└────────┬─────────────────────────────┘
-         ▼
-┌──────────────────┐
-│  Stage 5: 生成终稿 │  report-agent
-│  综合子报告        │  → report.md
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│  Stage 6: 终稿审查 │  review-agent
-│  整合质量检查      │  → pass / revise
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│  Stage 7: 引用处理 │  prepare_report_citations
-│  脚注→编号+参考文献 │  → report.md (覆写) + citations.json
-└──────────────────┘
+```text
+deep-research-controller
+├── recon-agent
+├── planning-agent
+├── mining-agent
+├── review-agent
+└── synthesis-agent
 ```
 
-### 执行示例
+### 1. Deep Research Controller
 
-**用户输入**：*"深度分析 Tesla 2026 年竞争格局和挑战"*
+总控 Agent 是系统唯一的研究编排中枢。它负责驱动全局流程，但不直接承担领域研究。
 
-1. **侦察**：scout-agent 快速搜索 2-3 轮，了解 Tesla 当前状况、主要竞争对手、行业趋势；向用户确认研究边界（是否包含中国市场？聚焦哪些业务线？）；输出 `briefing.md`
-2. **规划**：plan-agent 读取 briefing，拆解为 4 个维度 —— d1: 财务与经营、d2: 产品与技术、d3: 市场地位、d4: 竞争威胁；规划为 2 波执行，输出 `plan.json`
-3. **确认**：总控向用户展示研究方案，用户确认或调整
-4. **Wave 1 研究**：4 个 research-agent 并行研究 d1-d4，各自输出子报告 → 4 个 review-agent 并行审查 → 通过/打回修订
-5. **波间回顾**：总控评估 Wave 1 成果，判断是否需要补充维度或调整后续波次
-6. **终稿生成**：report-agent 读取所有子报告，交叉引用发现，生成结构化终稿
-7. **终稿审查**：review-agent 检查跨维度一致性、叙事逻辑、结论是否有证据支撑
-8. **引用处理**：`prepare_report_citations` 汇总所有脚注，统一编号 `[1]` `[2]` ...，生成参考文献列表
+职责：
+
+- 接收用户研究目标并初始化研究目录
+- 按阶段调度各类专业 Agent
+- 按 wave 组织并行执行和修订闭环
+- 在阶段边界完成任务收敛、异常容错和结果交接
+- 调用治理能力完成终稿收口
+
+约束：
+
+- 只负责调度，不替代子 Agent 写研究内容
+- 所有跨 Agent 文件路径必须使用绝对路径
+- 优先传递路径和结构化任务描述，而非大段正文
+- 异常任务默认重试一次，失败则记录限制并继续主流程
+
+### 2. Domain Recon Agent
+
+负责完成问题初筛、领域扫描和用户意图澄清，为后续规划建立认知地基。
+
+输出：`briefing.md`
+
+职责：
+
+- 提取研究对象、研究目标、隐含决策背景
+- 识别关键实体、核心术语、主流叙事和争议焦点
+- 判断研究边界是否清晰，是否需要补充澄清
+- 输出结构化 `Research Briefing`
+
+### 3. Research Planning Agent
+
+负责将问题空间转化为结构化、可执行、可并行的研究蓝图。
+
+输出：`plan.json`
+
+职责：
+
+- 确定总体研究策略与主研究轴
+- 将问题拆解为 3 到 7 个核心研究维度
+- 为维度分配来源类别、研究深度和依赖关系
+- 生成可由总控执行的 `Execution Blueprint`
+
+### 4. Evidence Mining Agent
+
+负责围绕单个研究维度执行检索、筛选、求证、交叉验证和子报告撰写。
+
+输出：`sub_reports/d*.md`
+
+职责：
+
+- 将 `key_questions` 细化为可搜索子问题
+- 规划多角度检索路径与原始出处追溯路径
+- 评估来源层级、偏见风险、时效性和可信边界
+- 区分事实、观点与推断
+- 产出带脚注引用的维度级 `Evidence Brief`
+
+### 5. Trust & Quality Review Agent
+
+负责对维度级输出和终稿分别进行质量门控。
+
+职责：
+
+- 检查关键结论是否有来源支撑
+- 检查逻辑链条是否稳固
+- 识别遗漏、偏差、冲突与过度推断
+- 判断结果是否真正回答原始问题
+
+输出判定：
+
+- `pass`
+- `revise`
+
+### 6. Narrative Synthesis Agent
+
+负责将多个维度级 `Evidence Brief` 综合为结构化研究终稿。
+
+输出：`report.md`
+
+职责：
+
+- 综合而非拼接各维度研究结果
+- 沿用既有 citation key
+- 显式处理跨维度冲突和证据张力
+- 保持结论、论证与证据的一致性
 
 ---
 
-## 报告目录结构
+## 执行机制
 
+### 研究闭环
+
+Deep Research 采用完整的多阶段研究闭环：
+
+```text
+Stage 1  Problem Framing & Domain Recon
+Stage 2  Research Blueprinting
+Stage 3  Intent Calibration
+Stage 4  Wavefront Evidence Acquisition
+Stage 5  Dimension Review Loop
+Stage 6  Narrative Synthesis
+Stage 7  Global Consistency Review
+Stage 8  Provenance Consolidation
 ```
+
+### 阶段职责
+
+| 阶段 | 执行主体 | 输出 | 作用 |
+|---|---|---|---|
+| Stage 1 | `recon-agent` | `briefing.md` | 建立问题画像、领域地图与信息地形 |
+| Stage 2 | `planning-agent` | `plan.json` | 建立维度拆解、波次规划与来源类别建议 |
+| Stage 3 | `controller` / `ask_user` | 用户确认 | 在边界、深度、重点不清晰时完成校准 |
+| Stage 4 | `mining-agent × N` | `sub_reports/d*.md` | 按 wave 并行执行证据挖掘 |
+| Stage 5 | `review-agent × N` | 修订意见或通过 | 对子报告做质量门控 |
+| Stage 6 | `synthesis-agent` | `report.md` | 综合维度发现，生成终稿 |
+| Stage 7 | `review-agent` | 终稿判定 | 审查全局一致性、可信性和回答完整性 |
+| Stage 8 | `CitationManager` | `report.md` + `citations.json` | 完成引用编号与治理收口 |
+
+### Wavefront Parallelism
+
+Wavefront 是系统的核心执行机制。
+
+- 同一 wave 内：维度任务并行执行
+- wave 与 wave 之间：根据已有发现重新评估后续路径
+- 当前序 wave 暴露出新的关键问题时：后续 wave 可动态调整
+
+这使得系统具备一种更接近真实研究团队的推进方式：先探索、再校准、再加深，而不是一次性静态拆题。
+
+### 执行样例
+
+以“深度分析 Tesla 2026 年竞争格局和挑战”为例：
+
+1. Recon Agent 识别核心业务、主要竞争者、争议焦点与边界问题
+2. Planning Agent 将任务拆解为财务表现、产品技术、市场格局、战略风险等维度
+3. Controller 视情况向用户确认是否覆盖中国市场、Robotaxi、能源业务等边界
+4. Mining Agent 按 wave 并行研究各维度，并产出子报告
+5. Review Agent 对每份子报告做可信性和完整性审查
+6. Synthesis Agent 综合各维度输出终稿，并显式处理支持关系与潜在冲突
+7. Review Agent 对终稿做全局一致性审查
+8. CitationManager 完成统一编号、参考文献生成与元数据导出
+
+---
+
+## 数据源接入与检索编排
+
+### 抽象层次
+
+Deep Research 不将 `serper_search`、`fetch_url`、`arxiv_search.py` 视为同一层级能力。
+
+系统中的检索能力被拆分为三个抽象层：
+
+- **Data Source**：信息来自哪里
+- **Access Mode**：系统如何访问它
+- **Routing Policy**：系统在当前任务中为什么选择它
+
+这意味着系统组织的不是“工具列表”，而是一套面向研究任务的数据源路由体系。
+
+### 数据源分类
+
+| 类别 | 典型对象 | 主要价值 |
+|---|---|---|
+| `official` | 官网、财报、监管文件、政策文本 | 一次来源、权威边界、制度口径 |
+| `news` | 主流媒体、行业媒体、事件报道 | 时效信息、事件线索、外部观察 |
+| `academic` | arXiv、Semantic Scholar、PubMed | 学术证据、方法论、前沿研究 |
+| `code` | GitHub、Hugging Face、Stack Overflow | 技术实现、生态成熟度、开发者反馈 |
+| `social_media` | Reddit、YouTube、微博、知乎、小红书 | 用户感知、社区讨论、实践经验 |
+| `forum` | Hacker News、垂直论坛 | 早期讨论、专家意见、社区信号 |
+| `analyst` | 行业报告、投研文章 | 结构化观点、市场框架、竞争视角 |
+| `review` | 产品测评、用户评测 | 使用体验、横向对比、口碑信号 |
+
+### 接入方式
+
+| 接入方式 | 说明 | 代表能力 |
+|---|---|---|
+| `Search` | 基于搜索引擎做发现与召回 | `serper_search`、`brave_search`、`tavily_search` |
+| `Fetch` | 对已发现页面做正文抓取与原始出处追溯 | `fetch_url` |
+| `Site Adapter` | 面向特定平台封装的查询脚本或 Skill | `search-academic`、`search-code`、`search-social-*` |
+| `Direct Source` | 直接命中特定权威来源或已知 URL | 官方页面、论文详情页、仓库页 |
+
+### 默认主链
+
+系统默认优先走通用发现链：
+
+```text
+serper_search / brave_search / tavily_search
+    ↓
+候选来源发现
+    ↓
+fetch_url
+    ↓
+原始出处追溯与证据提取
+```
+
+主链适合覆盖大多数通用研究问题，也是最低耦合、最稳定的默认路径。
+
+### 专业增强层
+
+当主链覆盖不足、用户显式指定来源，或任务天然依赖特定专业语境时，系统会按需调用专业 Skill：
+
+- `search-academic`
+- `search-code`
+- `search-social-cn`
+- `search-social-en`
+
+这些 Skill 的定位不是“默认入口”，而是特定数据源簇的增强型适配层。
+
+### 路由原则
+
+- 通用搜索始终优先
+- 专业 Skill 作为增强层按需触发
+- 遇到二次引用时优先回溯原始出处
+- 社交和社区信号用于补充视角，不替代一次来源
+- 特定数据源失败不阻塞主流程，但必须显式记录限制
+
+---
+
+## Trust & Governance
+
+### 治理目标
+
+Deep Research 的终稿可信性并不来自“写得像”，而来自一套可检查、可追踪、可规范化的治理流程。
+
+治理层承担的核心目标包括：
+
+- 保证关键结论与来源之间存在明确映射
+- 保证引用格式、编号与别名关系的一致性
+- 保证子报告与终稿都经过质量门控
+- 保证冲突、不确定性和边界条件被显式暴露
+
+### 引用流转模型
+
+```text
+Evidence Mining Agent
+    ↓ 写入 [^key]
+sub_reports/d*.md
+    ↓ 复用同一组 key
+report.md
+    ↓ CitationManager 统一处理
+report.md（编号格式） + citations.json
+```
+
+### CitationManager
+
+实现路径：`sensenova_claw/capabilities/deep_research/citation_manager.py`
+
+处理职责：
+
+1. 收集所有脚注定义
+2. 统一规范 URL
+3. 合并同源引用与别名 key
+4. 按终稿首次出现顺序分配编号
+5. 将正文中的 `[^key]` 替换为编号引用
+6. 生成 `## 参考文献` 与 `citations.json`
+
+### `prepare_report_citations`
+
+参数：
+
+- `report_path`
+- `sub_report_paths`
+
+行为：
+
+- 扫描所有子报告与终稿中的脚注定义
+- 完成引用映射、编号与正文替换
+- 覆写 `report.md`
+- 输出 `citations.json`
+
+---
+
+## 研究工件模型
+
+### 目录结构
+
+```text
 {workspace}/.sensenova-claw/workdir/deep-research-controller/reports/
 └── YYYY-MM-DD-{topic}/
-    ├── briefing.md          # Scout Agent 的 Research Briefing
-    ├── plan.json            # Plan Agent 的研究计划
+    ├── briefing.md
+    ├── plan.json
     ├── sub_reports/
-    │   ├── d1.md            # 维度 1 子报告（脚注引用格式）
-    │   ├── d2.md            # 维度 2 子报告
+    │   ├── d1.md
+    │   ├── d2.md
     │   └── ...
-    ├── report.md            # 终稿（经引用处理后，[N] 编号 + 参考文献）
-    └── citations.json       # 引用元数据
+    ├── report.md
+    └── citations.json
 ```
 
----
+### 工件语义
 
-## 引用管理系统
-
-### 引用流转
-
-```
-子报告写入阶段                    终稿写入阶段                    后处理阶段
-research-agent                  report-agent                  CitationManager
-    │                               │                              │
-    │  [^reuters_tesla_q4]          │  复用相同 [^key]              │  收集所有 [^key] 定义
-    │  [^bloomberg_ev_2026]         │  不引入新事实                  │  URL 归一化去重
-    │                               │                              │  按出现顺序编号 [1][2]...
-    ▼                               ▼                              ▼
-  d1.md (脚注格式)               report.md (脚注格式)           report.md (编号格式)
-                                                               citations.json
-```
-
-### CitationManager 核心逻辑
-
-**实现路径**：`sensenova_claw/capabilities/deep_research/citation_manager.py`
-
-1. **收集定义**：解析所有 `[^key]: [title](url)` 脚注定义
-2. **URL 归一化**：scheme/host 小写、去尾部斜杠，相同 URL 合并为同一引用
-3. **统一编号**：按首次出现顺序分配 `[1]`, `[2]`, ...，多个 key 指向同一 URL 共享编号
-4. **替换**：正文中 `[^key]` → `[N]`，移除脚注定义，追加 `## 参考文献` 列表
-5. **导出**：生成 `citations.json`，保留 key/url/title/alias_keys 元数据
-
-### prepare_report_citations 工具
-
-**参数**：
-- `report_path`：终稿绝对路径
-- `sub_report_paths`：所有子报告绝对路径列表
-
-**执行**：扫描所有子报告 + 终稿的脚注定义 → 处理终稿 → 覆写 report.md → 生成 citations.json
-
----
-
-## 搜索体系
-
-### 主链搜索
-
-Agent 直接调用的搜索工具，为所有研究的默认首选：
-
-| 工具 | 说明 |
+| 文件 | 语义 |
 |---|---|
-| `serper_search` | Google SERP 搜索（主力） |
-| `brave_search` | Brave 搜索引擎 |
-| `tavily_search` | Tavily AI 搜索 |
-| `fetch_url` | 网页深度抓取 |
-| `image_search` | 图片搜索 |
+| `briefing.md` | 问题建模结果，定义问题空间与信息地形 |
+| `plan.json` | 研究蓝图，定义维度、深度、依赖、波次和来源类别 |
+| `sub_reports/d*.md` | 维度级证据简报，保存事实、判断与引用 |
+| `report.md` | 最终研究终稿，在治理前为脚注格式，治理后为统一编号格式 |
+| `citations.json` | 引用元数据，支撑后续分析、导出和审计 |
 
-### 专业领域 Skill（补充来源）
-
-仅在主链搜索不足时按需调用，非默认使用：
-
-#### search-academic — 学术搜索
-
-| 脚本 | 来源 | 特点 |
-|---|---|---|
-| `arxiv_search.py` | arXiv | 30+ 学科分类，按领域/作者筛选 |
-| `semantic_scholar_search.py` | Semantic Scholar | 全学科论文，引用影响力指标 |
-| `pubmed_search.py` | PubMed | 生物医学文献，结构化摘要 |
-| `wikipedia_search.py` | Wikipedia | 多语言百科 |
-
-#### search-code — 开发者搜索
-
-| 脚本 | 来源 | 特点 |
-|---|---|---|
-| `github_search.py` | GitHub | 仓库/代码/Issue 搜索 |
-| `stackoverflow_search.py` | Stack Overflow | 技术问答，按标签/投票筛选 |
-| `hackernews_search.py` | Hacker News | 技术新闻与讨论 |
-| `huggingface_search.py` | HuggingFace | 模型/数据集/Spaces |
-
-#### search-social-cn — 中文社交平台
-
-| 脚本 | 来源 | 需要认证 |
-|---|---|---|
-| `bilibili_search.py` | B站 | 可选 Cookie |
-| `zhihu_search.py` | 知乎 | 需要 ZHIHU_COOKIE |
-| `xiaohongshu_search.py` | 小红书 | 需要 XHS_COOKIE |
-| `weibo_search.py` | 微博 | 需要 WEIBO_COOKIE |
-| `douyin_search.py` | 抖音 | 需要 DOUYIN_COOKIE |
-
-> 注：中文社交平台无稳定公开 API，稳定性中等偏低。
-
-#### search-social-en — 英文社交平台
-
-| 脚本 | 来源 | 需要认证 |
-|---|---|---|
-| `reddit_search.py` | Reddit | 无需认证 |
-| `twitter_search.py` | Twitter/X | 需要 TIKHUB_TOKEN |
-| `youtube_search.py` | YouTube | 需要 YOUTUBE_API_KEY |
-
-
-### Skill 调用策略
-
-- 主链搜索（`serper_search` + `fetch_url`）**始终优先**
-- Skill 仅在以下情况使用：
-  - 主链对某子问题搜索结果不足（0 个有效来源）
-  - 用户明确要求特定来源
-  - 特定领域主链覆盖弱（如中文社区讨论、学术论文、代码仓库）
-- Skill 调用失败不阻塞主流程，报告中说明限制即可
+这些工件共同构成了 Deep Research 的研究资产层，使系统天然具备复盘、复用和二次加工能力。
 
 ---
 
-### send_message 工具
+## 工程映射
 
-Deep Research 的 Agent 间通信完全基于 `send_message` 工具：
+### Skill 结构
 
-**单目标模式**：
-```python
-send_message(target_agent="plan-agent", message="...", mode="sync")
-```
-
-**多目标并行模式**（同一波次研究使用）：
-```python
-send_message(targets=[
-    {"target_agent": "research-agent", "message": "维度 1 任务..."},
-    {"target_agent": "research-agent", "message": "维度 2 任务..."},
-    {"target_agent": "research-agent", "message": "维度 3 任务..."},
-])
-```
-
-### 委派权限
-
-| Agent | 可委派给 | 说明 |
-|---|---|---|
-| deep-research-controller | scout, plan, research, review, report | 全权调度 |
-| scout-agent | 无 | 只做侦察 |
-| plan-agent | 无 | 只做规划 |
-| research-agent | 无 | 只做研究 |
-| review-agent | 无 | 只做审查 |
-| report-agent | 无 | 只做报告 |
-
-### 文件共享协议
-
-- 每个 Agent 有独立的工作目录
-- 总控通过绝对路径指定输出位置
-- 子 Agent 将结果写入总控指定的路径
-- 总控通过 `read_file` 验证写入完成后，传递文件路径给下一个 Agent
-
-
-### Skill 配置文件位置
-
-```
+```text
 ~/.sensenova-claw/skills/
-├── _search-common/          # 搜索通用工具库
+├── _search-common/
 │   └── search_utils.py
-├── search-academic/         # 学术搜索
+├── search-academic/
 │   ├── SKILL.md
 │   └── scripts/
-├── search-code/             # 代码/开发者搜索
+├── search-code/
 │   ├── SKILL.md
 │   └── scripts/
-├── search-social-cn/        # 中文社交搜索
+├── search-social-cn/
 │   ├── SKILL.md
 │   └── scripts/
-├── search-social-en/        # 英文社交搜索
+├── search-social-en/
 │   ├── SKILL.md
 │   └── scripts/
-└── research-union/          # 一体化研究流程
+└── research-union/
     └── SKILL.md
 ```
 
-### 搜索 API Key 配置
+### 配置入口
 
-在 `~/.sensenova-claw/config.yml` 中配置：
+在 `~/.sensenova-claw/config.yml` 中配置基础搜索能力：
 
 ```yaml
 tools:
   serper_search:
-    api_key: ${SERPER_API_KEY}     # Google SERP（主力搜索）
+    api_key: ${SERPER_API_KEY}
   brave_search:
-    api_key: ${BRAVE_API_KEY}      # Brave 搜索
+    api_key: ${BRAVE_API_KEY}
   tavily_search:
-    api_key: ${TAVILY_API_KEY}     # Tavily 搜索
+    api_key: ${TAVILY_API_KEY}
 ```
 
-社交平台 Cookie 通过环境变量配置：`ZHIHU_COOKIE`, `XHS_COOKIE`, `WEIBO_COOKIE`, `DOUYIN_COOKIE`, `TIKHUB_TOKEN`, `YOUTUBE_API_KEY`, `GITHUB_TOKEN`。
+平台认证通过环境变量配置，例如：
 
----
+- `ZHIHU_COOKIE`
+- `XHS_COOKIE`
+- `WEIBO_COOKIE`
+- `DOUYIN_COOKIE`
+- `TIKHUB_TOKEN`
+- `YOUTUBE_API_KEY`
+- `GITHUB_TOKEN`
 
-## 关键代码路径
+### 关键代码路径
 
-```
+```text
 sensenova_claw/
 ├── capabilities/
 │   ├── agents/
-│   │   ├── config.py              # AgentConfig 数据类
-│   │   └── registry.py            # AgentRegistry — Agent 发现、注册、运行时更新
+│   │   ├── config.py
+│   │   └── registry.py
 │   ├── deep_research/
-│   │   └── citation_manager.py    # CitationManager — 引用收集/去重/编号
+│   │   └── citation_manager.py
 │   └── tools/
-│       ├── citation_tool.py       # prepare_report_citations 工具
-│       └── send_message_tool.py   # send_message 工具（单目标/多目标并行）
+│       ├── citation_tool.py
+│       └── send_message_tool.py
 ├── kernel/
 │   └── runtime/
-│       └── agent_runtime.py       # AgentRuntime — 会话管理、Worker 工厂
+│       └── agent_runtime.py
 
 docs/superpowers/
 ├── specs/
-│   └── 2026-04-08-deep-research-agent-design.md   # 设计规格文档
+│   └── 2026-04-08-deep-research-agent-design.md
 └── plans/
-    └── 2026-04-08-deep-research-agent.md          # 实现计划文档
+    └── 2026-04-08-deep-research-agent.md
 ```
+
+### 关键技术决策
+
+| 决策 | 选择 | 原因 |
+|---|---|---|
+| 编排方式 | 总控 Agent 驱动 | 支持动态调度与阶段性重规划 |
+| 工具策略 | 零新增核心工具 | 复用现有 `send_message`、`ask_user`、`write_file` 能力 |
+| 工件模型 | 文件化沉淀 | 便于复核、调试、审计与二次加工 |
+| 引用格式 | 脚注 `[^key]` | 便于模型生成，也便于后处理解析 |
+| 编号时机 | 终稿统一编号 | 保持子报告独立性，减少中间扰动 |
+| 检索扩展 | Skill 化接入 | 与现有能力体系一致，便于逐步演进 |
+| 路由策略 | Plan 定类别，Mining 选路径 | 将策略层与执行层解耦 |
+| 审查机制 | 双层质量门控 | 同时保证局部可信与全局一致 |
+| 并发机制 | Wavefront | 兼顾依赖感知与吞吐效率 |
 
 ---
 
-## 关键设计决策
+## 总结
 
-| 决策 | 选择 | 理由 |
-|---|---|---|
-| 编排方式 | LLM 驱动总控 | 灵活，动态调整无需改代码 |
-| 新增工具 | 零（复用现有） | 降低复杂度，`send_message` + `write_file` 已足够 |
-| 引用格式 | 脚注 `[^key]` | LLM 自然生成，解析无歧义 |
-| 引用编号时机 | 终稿后处理统一编号 | 保持子报告独立性，Report Agent 只管综合 |
-| 引用存储 | 内存 dict + 最终 JSON | 10-50 条引用无需数据库 |
-| 搜索扩展 | 通过 Skill | 灵活，与现有 Skill 体系一致 |
-| 来源规划 | Plan 指定类别，Research 选工具 | 策略与执行分离，Research 思维更自由 |
-| 审查策略 | 双层（子报告 + 终稿） | 更严格的质量控制 |
-| 并发模式 | 波次并行 | 感知依赖关系，最大化并行效率 |
+Deep Research 的本质，不是一个“更会搜索、更会写报告”的 Agent，而是一套面向复杂问题求解的自治研究系统。
+
+它通过 Cognitive Orchestrator、Agent Fabric、Data Source Routing 和 Trust & Governance 四类核心能力，将研究过程从一次性文本生成提升为一条可编排、可求证、可治理、可沉淀的研究流水线。
+
+最终，系统交付的不是一篇看起来完整的生成文本，而是一份真正具备证据约束、逻辑闭环和工程可复用性的 `Evidence-Backed Research Dossier`。

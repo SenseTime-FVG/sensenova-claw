@@ -41,6 +41,37 @@ class _ErrorProvider(LLMProvider):
         raise RuntimeError("API 超时")
 
 
+class _CountedErrorProvider(LLMProvider):
+    """始终抛异常并记录调用次数的 Provider。"""
+
+    def __init__(self, error_message: str = "API 超时"):
+        self.error_message = error_message
+        self.calls: list[dict] = []
+
+    async def call(self, **kwargs):
+        self.calls.append(kwargs)
+        raise RuntimeError(self.error_message)
+
+
+class _FailsTwiceThenSuccessProvider(LLMProvider):
+    """前两次失败，第三次成功。"""
+
+    def __init__(self, content: str):
+        self.content = content
+        self.calls: list[dict] = []
+
+    async def call(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) < 3:
+            raise RuntimeError(f"第 {len(self.calls)} 次调用失败")
+        return {
+            "content": self.content,
+            "tool_calls": [],
+            "finish_reason": "stop",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+
 class _SilentTimeoutProvider(LLMProvider):
     """抛出无 message 的 TimeoutError，用于验证错误文案兜底。"""
 
@@ -540,6 +571,167 @@ class TestLLMWorkerError:
             fallback = [e for e in collected if e.type == LLM_CALL_RESULT][0]
             assert err.payload["error_message"] == "TimeoutError"
             assert "TimeoutError" in fallback.payload["response"]["content"]
+        finally:
+            config.data = original
+
+    async def test_plain_provider_failure_retries_same_target_until_third_success(
+        self, private_bus, public_bus
+    ):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "gemini-pro"
+            config.data["llm"]["providers"]["qwen"] = {
+                "source_type": "qwen",
+                "api_key": "sk-test-qwen",
+                "base_url": "",
+                "timeout": 60,
+                "max_retries": 2,
+            }
+            config.data["llm"]["models"]["gemini-pro"] = {
+                "provider": "gemini",
+                "model_id": "gemini-2.5-pro",
+            }
+
+            qwen = _FailsTwiceThenSuccessProvider("第三次成功")
+            gemini = _SuccessProvider("不应触发 fallback")
+            factory = LLMFactory()
+            factory._providers["qwen"] = qwen
+            factory._providers["gemini"] = gemini
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 3)
+
+            event = EventEnvelope(
+                type=LLM_CALL_REQUESTED,
+                session_id="s1",
+                turn_id="t1",
+                payload={
+                    "llm_call_id": "llm_retry_same_target_success",
+                    "provider": "qwen",
+                    "model": "qwen3.5-plus",
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "stream": False,
+                },
+            )
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert notices == []
+            result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert result.payload["response"]["content"] == "第三次成功"
+            assert len(qwen.calls) == 3
+            assert gemini.calls == []
+        finally:
+            config.data = original
+
+    async def test_plain_provider_failure_retries_three_times_before_fallback(
+        self, private_bus, public_bus
+    ):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "gemini-pro"
+            config.data["llm"]["providers"]["qwen"] = {
+                "source_type": "qwen",
+                "api_key": "sk-test-qwen",
+                "base_url": "",
+                "timeout": 60,
+                "max_retries": 2,
+            }
+            config.data["llm"]["models"]["gemini-pro"] = {
+                "provider": "gemini",
+                "model_id": "gemini-2.5-pro",
+            }
+
+            qwen = _CountedErrorProvider("API 超时")
+            gemini = _SuccessProvider("fallback after three failures")
+            factory = LLMFactory()
+            factory._providers["qwen"] = qwen
+            factory._providers["gemini"] = gemini
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 5)
+
+            event = EventEnvelope(
+                type=LLM_CALL_REQUESTED,
+                session_id="s1",
+                turn_id="t1",
+                payload={
+                    "llm_call_id": "llm_retry_same_target_fallback",
+                    "provider": "qwen",
+                    "model": "qwen3.5-plus",
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "stream": False,
+                },
+            )
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 2
+            assert "qwen:qwen3.5-plus" in notices[0].payload["body"]
+            assert "gemini:gemini-2.5-pro" in notices[1].payload["body"]
+            result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert result.payload["response"]["content"] == "fallback after three failures"
+            assert len(qwen.calls) == 3
+            assert len(gemini.calls) == 1
+        finally:
+            config.data = original
+
+    async def test_plain_provider_failure_respects_provider_max_retries(
+        self, private_bus, public_bus
+    ):
+        original = deepcopy(config.data)
+        try:
+            config.data["llm"]["default_model"] = "gemini-pro"
+            config.data["llm"]["providers"]["qwen"] = {
+                "source_type": "qwen",
+                "api_key": "sk-test-qwen",
+                "base_url": "",
+                "timeout": 60,
+                "max_retries": 1,
+            }
+            config.data["llm"]["models"]["gemini-pro"] = {
+                "provider": "gemini",
+                "model_id": "gemini-2.5-pro",
+            }
+
+            qwen = _CountedErrorProvider("API 超时")
+            gemini = _SuccessProvider("fallback after config retries")
+            factory = LLMFactory()
+            factory._providers["qwen"] = qwen
+            factory._providers["gemini"] = gemini
+            runtime = _SimpleLLMRuntime(factory)
+            worker = LLMSessionWorker("s1", private_bus, runtime)
+
+            collected, done, task = await _collect_from_bus(public_bus, 5)
+
+            event = EventEnvelope(
+                type=LLM_CALL_REQUESTED,
+                session_id="s1",
+                turn_id="t1",
+                payload={
+                    "llm_call_id": "llm_retry_same_target_config",
+                    "provider": "qwen",
+                    "model": "qwen3.5-plus",
+                    "messages": [{"role": "user", "content": "你好"}],
+                    "stream": False,
+                },
+            )
+            await worker._handle(event)
+            await asyncio.wait_for(done.wait(), timeout=5)
+            task.cancel()
+
+            notices = [e for e in collected if e.type == NOTIFICATION_SESSION]
+            assert len(notices) == 2
+            result = [e for e in collected if e.type == LLM_CALL_RESULT][0]
+            assert result.payload["response"]["content"] == "fallback after config retries"
+            assert len(qwen.calls) == 2
+            assert len(gemini.calls) == 1
         finally:
             config.data = original
 

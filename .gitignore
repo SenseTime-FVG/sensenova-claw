@@ -96,3 +96,8 @@ updates/
 
 # ========== Lock 文件（仅保留 npm） ==========
 pnpm-lock.yaml
+
+.codex
+tmp/
+
+deep-research-plugin/
