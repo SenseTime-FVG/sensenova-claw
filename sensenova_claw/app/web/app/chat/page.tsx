@@ -2,7 +2,6 @@
 
 import { Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
-import dynamic from 'next/dynamic';
 import {
   Loader2, Bot, MessageSquare, Plus, Search, RefreshCw, Trash2,
   ChevronDown, ChevronRight, GitBranch,
@@ -15,23 +14,12 @@ import { useI18n } from '@/contexts/I18nContext';
 import { type SessionItem, type SessionTreeNode, type ContextFileRef, buildSessionTree, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
 import { MessageArea } from '@/components/chat/MessageArea';
 import { ChatInput } from '@/components/chat/ChatInput';
+import { InlinePreview } from '@/components/chat/InlinePreview';
 import { useSlideSet } from '@/components/ppt/PPTViewer';
+import { type FilePreviewType } from '@/components/files/fileTypes';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useResizablePreview } from '@/hooks/useResizablePreview';
-
-// Lazy load SlideViewer
-const SlideViewer = dynamic(
-  () => import('@/components/ppt/PPTViewer').then(mod => mod.SlideViewer),
-  {
-    loading: () => (
-      <div className="h-full flex items-center justify-center bg-muted/20">
-        <Loader2 className="animate-spin text-muted-foreground" />
-      </div>
-    ),
-    ssr: false,
-  },
-);
 
 /* ── workdir 根目录缓存 ── */
 let _workdirRootCache: string | null | undefined;
@@ -309,7 +297,8 @@ function ChatContent() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(agentFromUrl);
   const [searchQuery, setSearchQuery] = useState('');
   const [slidePreviewDir, setSlidePreviewDir] = useState<string | null>(null);
-  
+  const [filePreview, setFilePreview] = useState<{ path: string; type: FilePreviewType } | null>(null);
+
   const { previewHeight, onPreviewResize } = useResizablePreview(350);
   const slideSet = useSlideSet(slidePreviewDir);
   
@@ -335,12 +324,29 @@ function ChatContent() {
         });
       }
       setSlidePreviewDir(resolvedDir);
+      setFilePreview(null);
     };
     window.addEventListener('sensenova-claw:open-slide-preview', handler);
     return () => window.removeEventListener('sensenova-claw:open-slide-preview', handler);
   }, [selectedAgentId, currentSessionId, sessions, openToPath]);
 
-  useEffect(() => { setSlidePreviewDir(null); }, [currentSessionId]);
+  // File Preview Logic：聊天气泡里的 [..](#sensenova-claw-file:...) 链接点击会
+  // 派发此事件，这里与 slide 预览互斥共存。之前 /chat 页面漏接此事件，
+  // 导致 md 文件点击只定位到文件面板，对话区无预览。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { path: string; type: FilePreviewType };
+      setFilePreview(detail);
+      setSlidePreviewDir(null);
+    };
+    window.addEventListener('sensenova-claw:open-file-preview', handler);
+    return () => window.removeEventListener('sensenova-claw:open-file-preview', handler);
+  }, []);
+
+  useEffect(() => {
+    setSlidePreviewDir(null);
+    setFilePreview(null);
+  }, [currentSessionId]);
 
   const loadAgents = useCallback(async () => {
     setLoadingAgents(true);
@@ -516,14 +522,14 @@ function ChatContent() {
             
             <MessageArea messages={messages} isTyping={isTyping} currentSessionId={currentSessionId} emptyState={emptyState} />
 
-            {slidePreviewDir && slideSet && (
-              <div className="shrink-0 flex flex-col border-t border-border/60" style={{ height: previewHeight }}>
-                <div className="flex items-center justify-center h-2 cursor-ns-resize hover:bg-primary/20 group transition-colors" onMouseDown={onPreviewResize}>
-                  <div className="w-8 h-1 rounded-full bg-border group-hover:bg-primary/50" />
-                </div>
-                <SlideViewer slideSet={slideSet} onClose={() => setSlidePreviewDir(null)} />
-              </div>
-            )}
+            <InlinePreview
+              previewHeight={previewHeight}
+              onPreviewResize={onPreviewResize}
+              slideSet={slideSet}
+              onCloseSlides={() => setSlidePreviewDir(null)}
+              filePreview={filePreview}
+              onCloseFile={() => setFilePreview(null)}
+            />
 
             <ChatInput
               defaultAgentId={selectedAgentId || 'default'}
