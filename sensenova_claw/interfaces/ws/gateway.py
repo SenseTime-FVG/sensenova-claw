@@ -111,6 +111,28 @@ class Gateway:
         """列出会话"""
         return await self.repo.list_sessions(limit=limit, include_hidden=include_hidden)
 
+    async def list_sessions_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        include_hidden: bool = False,
+        search_term: str = "",
+        status: str = "all",
+        include_ancestors: bool = False,
+        include_all: bool = False,
+    ) -> dict:
+        """按页列出会话。"""
+        return await self.repo.list_sessions_page(
+            page=page,
+            page_size=page_size,
+            include_hidden=include_hidden,
+            search_term=search_term,
+            status=status,
+            include_ancestors=include_ancestors,
+            include_all=include_all,
+        )
+
     # ── 消息收发 ──────────────────────────────────────
 
     async def send_user_input(

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from sensenova_claw.adapters.llm.base import LLMProvider
 from sensenova_claw.capabilities.memory.config import MemoryConfig
 from sensenova_claw.capabilities.memory.manager import MemoryManager, _SUMMARIZE_SYSTEM_PROMPT
 
@@ -181,3 +182,49 @@ class TestSummarizeTurn:
         assert messages[0]["content"] == _SUMMARIZE_SYSTEM_PROMPT
         assert messages[1]["role"] == "user"
         assert "帮我写代码" in messages[1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_summarize_turn_retries_after_conflicting_sampling_parameters(self, workspace, tmp_path):
+        class _RetryableConflictingSamplingProvider(LLMProvider):
+            def __init__(self):
+                self.calls: list[dict] = []
+
+            async def call(self, **kwargs):
+                self.calls.append(kwargs)
+                if len(self.calls) == 1:
+                    raise RuntimeError(
+                        'Error code: 400 - {\'error\': {\'code\': \'400\', \'message\': '
+                        '\'{"message":"`temperature` and `top_p` cannot both be specified for this model. '
+                        'Please use only one."}\'}}'
+                    )
+                return {"content": "摘要重试成功"}
+
+        provider = _RetryableConflictingSamplingProvider()
+        factory = MagicMock()
+        factory.get_provider.return_value = provider
+        manager = MemoryManager(
+            workspace_dir=str(workspace),
+            config=MemoryConfig(enabled=True, bootstrap_max_chars=8000),
+            db_path=tmp_path / "test_memory.db",
+            llm_factory=factory,
+        )
+
+        await manager.summarize_turn(
+            [
+                {"role": "user", "content": "帮我记录这个问题"},
+                {"role": "assistant", "content": "正在总结"},
+            ],
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+
+        assert len(provider.calls) == 2
+        assert provider.calls[0]["temperature"] == 1.0
+        assert provider.calls[0]["extra_body"] == {"top_p": 0.95, "top_k": 20}
+        assert provider.calls[1]["temperature"] == 1.0
+        assert provider.calls[1]["extra_body"] == {"top_p": None, "top_k": 20}
+        from datetime import datetime
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        memory_path = workspace / "agents" / "default" / "memory" / f"{today_str}.md"
+        assert memory_path.exists()
+        assert "摘要重试成功" in memory_path.read_text(encoding="utf-8")

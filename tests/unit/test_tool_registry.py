@@ -127,11 +127,11 @@ class TestToolRegistry:
                 del tools_section["bash_command"]["enabled"]
 
     def test_config_disabled_file_operations_hides_related(self):
-        """tools.file_operations.enabled=False → read_file/write_file/edit/apply_patch 不暴露"""
+        """tools.file_operations.enabled=False → read_file/write_file/edit_file/apply_patch 不暴露"""
         from sensenova_claw.platform.config.config import config
         r = ToolRegistry()
         names_before = {t["name"] for t in r.as_llm_tools()}
-        file_ops = {"read_file", "write_file", "edit", "apply_patch"}
+        file_ops = {"read_file", "write_file", "edit_file", "apply_patch"}
         assert file_ops.issubset(names_before)
 
         config.set("tools.file_operations.enabled", False)

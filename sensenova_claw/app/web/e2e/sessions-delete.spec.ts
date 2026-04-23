@@ -47,16 +47,23 @@ test('sessions 页面应支持选择模式和批量删除', async ({ page }) => 
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
       const method = init?.method?.toUpperCase() ?? 'GET';
+      const parsed = new URL(url, window.location.origin);
 
-      if (url.includes('/api/auth/status')) {
+      if (parsed.pathname.includes('/api/auth/status') || parsed.pathname.includes('/api/auth/verify-token')) {
         return new Response(JSON.stringify({ authenticated: true }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (url.endsWith('/api/sessions') && method === 'GET') {
-        return new Response(JSON.stringify({ sessions }), {
+      if (parsed.pathname.endsWith('/api/sessions') && method === 'GET') {
+        return new Response(JSON.stringify({
+          sessions,
+          page: Number(parsed.searchParams.get('page') ?? '1'),
+          page_size: Number(parsed.searchParams.get('page_size') ?? '50'),
+          total: sessions.length,
+          total_pages: 1,
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -103,7 +110,7 @@ test('sessions 页面应支持选择模式和批量删除', async ({ page }) => 
   });
 
   await page.goto('about:blank');
-  await page.goto('/sessions');
+  await page.goto(`/sessions?token=${encodeURIComponent(token)}`);
 
   await expect(page.getByText('Alpha Active')).toBeVisible({ timeout: 10000 });
   await page.getByTestId('sessions-selection-toggle').click();
@@ -173,16 +180,23 @@ test('sessions 页面删除含子会话的记录时应提供作用域选项', as
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
       const method = init?.method?.toUpperCase() ?? 'GET';
+      const parsed = new URL(url, window.location.origin);
 
-      if (url.includes('/api/auth/status')) {
+      if (parsed.pathname.includes('/api/auth/status') || parsed.pathname.includes('/api/auth/verify-token')) {
         return new Response(JSON.stringify({ authenticated: true }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      if (url.endsWith('/api/sessions') && method === 'GET') {
-        return new Response(JSON.stringify({ sessions }), {
+      if (parsed.pathname.endsWith('/api/sessions') && method === 'GET') {
+        return new Response(JSON.stringify({
+          sessions,
+          page: Number(parsed.searchParams.get('page') ?? '1'),
+          page_size: Number(parsed.searchParams.get('page_size') ?? '50'),
+          total: sessions.length,
+          total_pages: 1,
+        }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -213,7 +227,7 @@ test('sessions 页面删除含子会话的记录时应提供作用域选项', as
   });
 
   await page.goto('about:blank');
-  await page.goto('/sessions');
+  await page.goto(`/sessions?token=${encodeURIComponent(token)}`);
 
   await expect(page.getByText('Parent Session')).toBeVisible({ timeout: 10000 });
   await page.getByTestId('session-delete-button-sess_parent_001').click();

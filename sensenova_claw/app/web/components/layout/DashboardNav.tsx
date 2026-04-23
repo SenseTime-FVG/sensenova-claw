@@ -31,12 +31,28 @@ const iconMap: Record<string, LucideIcon> = {
   boxes: Boxes,
 };
 
-interface NavItem {
+export interface NavItem {
   path: string;
   label: string;
   exact?: boolean;
   icon?: string;
 }
+
+export interface BuiltinFeatureNavItem extends NavItem {
+  kind: 'builtin';
+}
+
+export interface CustomFeatureNavItem extends NavItem {
+  kind: 'custom';
+  pageId: string;
+}
+
+export interface CreateFeatureNavItem extends NavItem {
+  kind: 'create';
+}
+
+export type FeatureNavItem = BuiltinFeatureNavItem | CustomFeatureNavItem | CreateFeatureNavItem;
+export type DashboardSubNavItem = NavItem | FeatureNavItem;
 
 const mainNavItemDefs: { path: string; labelKey: string; exact?: boolean; icon?: string }[] = [
   { path: '/', labelKey: 'nav.workspace', exact: true, icon: 'zap' },
@@ -63,23 +79,26 @@ const adminNavItemDefs: { path: string; labelKey: string; icon?: string }[] = [
   { path: '/acp', labelKey: 'nav.adminItems.acp', icon: 'shield' },
 ];
 
-export function useFeatureNavItems() {
+export function useFeatureNavItems(): FeatureNavItem[] {
   const { t } = useI18n();
   const { pages } = useCustomPages();
   return useMemo(() => {
-    const builtinItems = builtinFeatureNavItemDefs.map((item) => ({
+    const builtinItems: FeatureNavItem[] = builtinFeatureNavItemDefs.map((item) => ({
       path: item.path,
       label: t(item.labelKey),
       icon: item.icon,
+      kind: 'builtin',
     }));
-    const customItems = pages.map(p => ({
+    const customItems: FeatureNavItem[] = pages.map(p => ({
       path: `/features/${p.slug}`,
       label: p.name,
+      pageId: p.slug,
+      kind: 'custom',
     }));
     return [
       ...builtinItems,
       ...customItems,
-      { path: '/create-feature', label: t('nav.feature.create') },
+      { path: '/create-feature', label: t('nav.feature.create'), kind: 'create' },
     ];
   }, [pages, t]);
 }
@@ -93,6 +112,10 @@ export function useAdminNavItems(): NavItem[] {
       icon: item.icon,
     }))
   ), [t]);
+}
+
+export function isCustomFeatureNavItem(item: DashboardSubNavItem): item is CustomFeatureNavItem {
+  return 'kind' in item && item.kind === 'custom';
 }
 
 export function NavIcon({ name }: { name?: string }) {

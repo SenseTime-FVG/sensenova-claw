@@ -80,10 +80,10 @@ from fpdf import FPDF
 pdf = FPDF()
 pdf.add_page()
 pdf.set_font("Helvetica", size=16)
-pdf.cell(200, 10, text="Hello World", align="C")
+pdf.cell(200, 10, txt="Hello World", align="C")
 
 pdf.set_font("Helvetica", size=12)
-pdf.multi_cell(0, 10, text="Long paragraph text...")
+pdf.multi_cell(0, 10, txt="Long paragraph text...")
 
 pdf.output("output.pdf")
 ```

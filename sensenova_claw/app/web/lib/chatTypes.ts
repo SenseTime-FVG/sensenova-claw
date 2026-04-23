@@ -47,6 +47,8 @@ export interface ChatMessage {
   /** 工具消息在没有 toolInfo 时展示的工具名。 */
   name?: string;
   toolInfo?: ToolInfo;
+  /** Issue #211: assistant 最终回复时填充，表示从用户最近一条消息到该回复完成的耗时（ms）。 */
+  durationMs?: number;
 }
 
 export interface SessionItem {
@@ -155,6 +157,17 @@ export function getTaskId(meta: string): string | null {
     return JSON.parse(meta).task_id || null;
   } catch {
     return null;
+  }
+}
+
+export function updateSessionMetaTitle(meta: string, title: string): string {
+  try {
+    const parsed = JSON.parse(meta);
+    const nextMeta = parsed && typeof parsed === 'object' ? parsed : {};
+    nextMeta.title = title;
+    return JSON.stringify(nextMeta);
+  } catch {
+    return JSON.stringify({ title });
   }
 }
 
