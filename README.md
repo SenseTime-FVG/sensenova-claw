@@ -147,7 +147,50 @@ npm run dev
 http://localhost:3000/?token=<your-token>
 ```
 
-**3. 其他启动方式**
+**3. OpenShell 沙箱启动**
+
+通过 [OpenShell](https://docs.openshell.dev) 在隔离沙箱中运行，无需本地安装 Python/Node.js 环境：
+
+```bash
+# 从社区仓库启动
+openshell sandbox create \
+  --forward 8000 \
+  --from sensenova-claw \
+  -- sensenova-claw-start
+
+# 追加前端端口转发
+openshell forward start 3000 <sandbox-name>
+```
+
+启动后访问 http://127.0.0.1:3000 配置 LLM provider 和 API key 即可使用。
+
+<details>
+<summary><b>从本地源码构建</b></summary>
+
+```bash
+# 在仓库根目录构建镜像
+docker build -f sandboxes/sensenova-claw/Dockerfile -t sensenova-claw-sandbox:v0.5 .
+
+# 导入镜像到 OpenShell 集群
+CLUSTER=$(docker ps --format '{{.Names}}' | grep openshell-cluster)
+docker save sensenova-claw-sandbox:v0.5 | docker exec -i "$CLUSTER" ctr -n k8s.io images import -
+
+# 创建沙箱
+openshell sandbox create \
+  --forward 8000 \
+  --from sensenova-claw-sandbox:v0.5 \
+  --policy sandboxes/sensenova-claw/policy.yaml \
+  -- sensenova-claw-start
+
+# 追加前端端口转发
+openshell forward start 3000 <sandbox-name>
+```
+
+> 使用非 `latest` 标签避免 k8s 尝试从远程 registry 拉取本地镜像。
+
+</details>
+
+**4. 其他启动方式**
 
 ```bash
 # 仅启动后端 API（http://localhost:8000）
@@ -716,7 +759,7 @@ cd sensenova_claw/app/web && PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playw
 - [ ] 流式响应
 - [ ] Token 用量管理
 - [ ] 用户认证与权限
-- [ ] 沙箱执行环境
+- [x] 沙箱执行环境（OpenShell）
 - [ ] 更多渠道集成（钉钉等）
 - [ ] 更多 Skill 市场源
 

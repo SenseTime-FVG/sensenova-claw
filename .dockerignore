@@ -1,0 +1,36 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# Node.js (前端由 Stage 1 独立构建，不需要宿主机的产物)
+sensenova_claw/app/web/node_modules/
+sensenova_claw/app/web/.next/
+
+# Git & IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# 运行时数据
+var/
+*.db
+*.sqlite
+
+# 文档和测试（镜像不需要）
+docs/
+tests/
+scripts/
+*.md
+
+# 其他
+.sensenova-claw/*
+!.sensenova-claw/agents
+!.sensenova-claw/agents/**
+!.sensenova-claw/skills
+!.sensenova-claw/skills/**
+.claude/

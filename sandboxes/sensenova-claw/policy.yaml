@@ -1,0 +1,153 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 SenseTime-FVG. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Sensenova-Claw sandbox 策略
+# 文件系统隔离 + 尽量开放的网络出站（HTTPS/HTTP）
+#
+# 注意：OpenShell 策略校验器禁止 host: "*" 以及 *.com 这类 TLD 通配，
+# 因此只能按 "*.example.com" 形式枚举。新增目的地需追加条目并重新下发。
+
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /usr
+    - /lib
+    - /proc
+    - /dev/urandom
+    - /etc
+    - /opt/sensenova-claw
+    - /var/log
+    - /home/sandbox
+  read_write:
+    - /sandbox
+    - /tmp
+    - /dev/null
+    - /home/sandbox/.sensenova-claw
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  internet-access:
+    name: internet-access
+    binaries:
+      - path: "/**"
+    endpoints:
+      # ── LLM Providers ──
+      - { host: "*.openai.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.anthropic.com",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.claude.ai",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.googleapis.com",    port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.google.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.azure.com",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.microsoft.com",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.minimax.chat",      port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.uniapi.io",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.aliyuncs.com",      port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.aliyun.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.dashscope.com",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.deepseek.com",      port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.moonshot.cn",       port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.zhipuai.cn",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.bigmodel.cn",       port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.mistral.ai",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.openrouter.ai",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.volces.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.volcengine.com",    port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.groq.com",          port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.x.ai",              port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.cohere.ai",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.cohere.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.together.ai",       port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.fireworks.ai",      port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.stepfun.com",       port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.sensenova.cn",      port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.sensecore.cn",      port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.perplexity.ai",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.siliconflow.cn",    port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.01.ai",             port: 443, protocol: rest, enforcement: enforce, access: full }
+
+      # ── 搜索工具 ──
+      - { host: "*.serper.dev",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.brave.com",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.search.brave.com",  port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.tavily.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.baidu.com",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.bing.com",          port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.duckduckgo.com",    port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.appbuilder.baidu.com", port: 443, protocol: rest, enforcement: enforce, access: full }
+
+      # ── 代码 / 文档 / 包仓库 ──
+      - { host: "*.github.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.githubusercontent.com", port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.githubassets.com",  port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.gitlab.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.wikipedia.org",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.wikimedia.org",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.stackoverflow.com", port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.stackexchange.com", port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.pypi.org",          port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.pythonhosted.org",  port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.npmjs.org",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.npmjs.com",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.readthedocs.io",    port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.mdn.dev",           port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.mozilla.org",       port: 443, protocol: rest, enforcement: enforce, access: full }
+
+      # ── 飞书 / Lark ──
+      - { host: "*.feishu.cn",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.feishu.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.larksuite.com",     port: 443, protocol: rest, enforcement: enforce, access: full }
+
+      # ── 图片 / 媒体 ──
+      - { host: "*.unsplash.com",      port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.pexels.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.pixabay.com",       port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.googleusercontent.com", port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.gstatic.com",       port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.ggpht.com",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.youtube.com",       port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.ytimg.com",         port: 443, protocol: rest, enforcement: enforce, access: full }
+
+      # ── CDN ──
+      - { host: "*.cloudflare.com",    port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.cloudfront.net",    port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.jsdelivr.net",      port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.fastly.net",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.cdnjs.com",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.akamaihd.net",      port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.akamaized.net",     port: 443, protocol: rest, enforcement: enforce, access: full }
+
+      # ── 云存储 ──
+      - { host: "*.blob.core.windows.net", port: 443, protocol: rest, enforcement: enforce, access: full }  # tiktoken
+      - { host: "*.amazonaws.com",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.r2.dev",            port: 443, protocol: rest, enforcement: enforce, access: full }
+
+      # ── 新闻 / 资讯 ──
+      - { host: "*.nytimes.com",       port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.bbc.com",           port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.bbc.co.uk",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.reuters.com",       port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.bloomberg.com",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.cnn.com",           port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.forbes.com",        port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.wsj.com",           port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.xinhuanet.com",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.people.com.cn",     port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.qq.com",            port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.sina.com.cn",       port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.163.com",           port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.weibo.com",         port: 443, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.zhihu.com",         port: 443, protocol: rest, enforcement: enforce, access: full }
+
+      # ── HTTP 回退（少量 fetch_url 目标仍用 80）──
+      - { host: "*.github.com",        port: 80, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.githubusercontent.com", port: 80, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.wikipedia.org",     port: 80, protocol: rest, enforcement: enforce, access: full }
+      - { host: "*.jsdelivr.net",      port: 80, protocol: rest, enforcement: enforce, access: full }
