@@ -7,12 +7,19 @@
 
 from __future__ import annotations
 
+import posixpath
 import re
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote
 
 
 # 匹配 Markdown 行内代码 `...` 中包含的文件路径
 _CODE_SPAN_RE = re.compile(r"`([^`]+)`")
+
+# 匹配 [text](#sensenova-claw-file:PATH) 形式的文件链接
+# 前端 Markdown.tsx 以此前缀识别并渲染成可点击卡片；PATH 由 LLM 产出，
+# 常因路径规则理解偏差出现相对形式，导致点击打开失败。
+_FILE_LINK_RE = re.compile(r"(\]\(#sensenova-claw-file:)([^)]*?)(\))")
 
 # 常见文件扩展名，用于判定是否像一个文件路径
 _FILE_EXTENSIONS = {
@@ -78,3 +85,81 @@ def rewrite_relative_paths(content: str, workdir: str) -> str:
         return f"`{abs_path}`"
 
     return _CODE_SPAN_RE.sub(_replace, content)
+
+
+def _is_absolute_pathlike(text: str) -> bool:
+    """跨平台判断路径是否已是绝对形式。
+
+    不依赖 ``Path.is_absolute()`` 的运行时平台行为：
+    - POSIX 上 ``PurePath('C:\\foo').is_absolute()`` 会返回 False
+    - Windows 上 ``PurePath('/a').is_absolute()`` 会返回 False
+    我们需要一个对两端输入都正确的判断（agent 可能在 Linux 沙箱跑，
+    也可能在开发机 Windows 跑；LLM 的输出平台无关）。
+    """
+    if not text:
+        return False
+    if text[0] in ("/", "\\"):
+        return True
+    # 视 ``~`` 起始为用户显式引用，不再二次解析
+    if text.startswith("~"):
+        return True
+    # Windows 盘符: C:\foo  或  C:/foo
+    if (
+        len(text) >= 3
+        and text[0].isalpha()
+        and text[1] == ":"
+        and text[2] in ("/", "\\")
+    ):
+        return True
+    return False
+
+
+def rewrite_file_link_hrefs(content: str, workdir: str) -> str:
+    """将 ``[text](#sensenova-claw-file:PATH)`` 中非绝对的 PATH 拼成绝对路径。
+
+    设计要点：
+
+    - **workdir 为空/未配置**：直接返回原文（agent 可能在开发机本地运行，
+      或未配置 workdir，此时强行拼接反而误导）。
+    - **PATH 已是绝对形式**：不改（POSIX / Windows 盘符 / ``~`` 三种）。
+    - **反斜杠归一**：Python 在 POSIX 上不把 ``\\`` 当分隔符，因此先把
+      ``\\`` 替换为 ``/``，再用 ``posixpath.normpath`` 统一处理
+      ``.``、``..``、冗余斜杠。拒绝依赖当前运行平台的 Path 行为。
+    - **URL 编码兼容**：LLM 多数直接写原始路径，也可能产出百分号编码；
+      ``unquote`` 对普通文本是 no-op，对编码文本能正确解码。
+      输出统一用解码后的原始路径，前端 ``decodeURIComponent`` 仍是 no-op。
+    - **安全边界**：越出 workdir 的 ``..`` 组合会按字面规范化，不会额外
+      阻断；下游 ``/api/files/download`` 自带 path_policy 校验，这里
+      只负责语义归一。
+    """
+    if not content or not workdir:
+        return content
+
+    try:
+        # 统一以正斜杠作为输出分隔符，避免 Windows ``\\`` 进入 markdown 后被
+        # 下游 ``decodeURIComponent`` 或 URL 解析误判。
+        workdir_abs = str(Path(workdir).expanduser().resolve()).replace("\\", "/")
+    except Exception:
+        return content
+
+    def _replace(match: re.Match) -> str:
+        prefix = match.group(1)
+        raw_href = match.group(2).strip()
+        suffix = match.group(3)
+
+        try:
+            decoded = unquote(raw_href)
+        except Exception:
+            decoded = raw_href
+
+        if not decoded or _is_absolute_pathlike(decoded):
+            return match.group(0)
+
+        normalized = decoded.replace("\\", "/")
+        # PurePosixPath 保证在任意宿主平台上的行为一致
+        joined = str(PurePosixPath(workdir_abs) / normalized)
+        abs_path = posixpath.normpath(joined)
+
+        return f"{prefix}{abs_path}{suffix}"
+
+    return _FILE_LINK_RE.sub(_replace, content)
