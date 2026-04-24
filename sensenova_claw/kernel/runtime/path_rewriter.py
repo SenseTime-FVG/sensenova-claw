@@ -194,18 +194,26 @@ def rewrite_relative_paths(content: str, workdir: str) -> str:
     return _CODE_SPAN_RE.sub(_replace, content)
 
 
-def encode_file_link_parens(content: str) -> str:
-    """把 ``#sensenova-claw-file:`` href 中的未转义括号做 URL 编码。
+def sanitize_file_link_href(content: str) -> str:
+    """规避 markdown link destination 中对 ``#sensenova-claw-file:`` href 的错误解析。
 
-    **存在的原因**：Windows 常见路径 ``C:\\Program Files (x86)\\...`` 里
-    带未转义的 ``(``/``)``，会把 markdown link 语法拦腰切断 —— 不只是
-    本模块的正则，前端 react-markdown / remark-gfm 也会在第一个 ``)``
-    处结束 link，导致 chip 的 href 被截短，点击必然 404。
+    两类字符会被 markdown parser 误处理，必须在 LLM 输出落地前转写：
 
-    **做法**：先用支持一层 ``(...)`` 嵌套的平衡正则定位完整 href，然后
-    把 body 中所有 ``(``/``)`` 替换成 ``%28``/``%29``。后续 markdown
-    解析和 ``rewrite_file_link_hrefs`` 都能正常工作；前端
-    ``decodeURIComponent`` 会把它们还原成真正的括号显示给用户。
+    - **未转义的 ``(`` / ``)``**：Windows 典型路径 ``C:\\Program Files (x86)\\...``
+      里带裸括号，虽然 CommonMark 允许一层 balanced parens，但多种渲染器
+      （包括本模块正则和前端 react-markdown）在嵌套/配对失衡时会在第一个
+      ``)`` 处截断 link，href 缺尾，点击必 404。替换为 ``%28`` / ``%29``。
+    - **反斜杠 + ASCII 标点（``\\.``、``\\_``、``\\-`` 等）**：CommonMark 把
+      link destination 中的 ``\\ + 标点`` 识别为 backslash-escape，反斜杠
+      被吃掉。Windows 路径 ``C:\\Users\\foo\\.sensenova-claw\\...`` 里的
+      ``\\.`` 会退化成 ``.``，得到 ``C:\\Users\\foo.sensenova-claw\\...``
+      这种少一级分隔符的错误路径，下游 ``/api/files/download`` 必然 404。
+      做法：把 href body 中所有 ``\\`` 统一换成 ``/``。Windows Python
+      ``Path`` 同时接受 ``/`` / ``\\``，语义无损；下游匹配走 ``norm()`` 再
+      归一，不会因分隔符差异失败。
+
+    用支持一层 ``(...)`` 平衡嵌套的正则定位完整 href，后续
+    ``rewrite_file_link_hrefs`` 与前端 ``decodeURIComponent`` 均能正常工作。
     """
     if not content:
         return content
@@ -214,12 +222,20 @@ def encode_file_link_parens(content: str) -> str:
         prefix = match.group(1)
         body = match.group(2)
         suffix = match.group(3)
-        if "(" not in body and ")" not in body:
+        if "(" not in body and ")" not in body and "\\" not in body:
             return match.group(0)
-        encoded = body.replace("(", "%28").replace(")", "%29")
-        return f"{prefix}{encoded}{suffix}"
+        sanitized = (
+            body.replace("\\", "/")
+                .replace("(", "%28")
+                .replace(")", "%29")
+        )
+        return f"{prefix}{sanitized}{suffix}"
 
     return _FILE_LINK_RE.sub(_replace, content)
+
+
+# 保留旧名作为别名，避免外部 import 失败（过渡期，后续可移除）
+encode_file_link_parens = sanitize_file_link_href
 
 
 def rewrite_file_link_hrefs(content: str, workdir: str) -> str:

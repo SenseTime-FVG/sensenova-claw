@@ -11,9 +11,9 @@ from sensenova_claw.kernel.runtime.path_rewriter import (
     _looks_like_relative_file_path,
     _normalize_workdir,
     _split_drive,
-    encode_file_link_parens,
     rewrite_file_link_hrefs,
     rewrite_relative_paths,
+    sanitize_file_link_href,
 )
 
 
@@ -400,50 +400,90 @@ class TestRewriteFileLinkHrefsWindows:
         assert "(#sensenova-claw-file:/etc/passwd)" in result
 
 
-class TestEncodeFileLinkParens:
-    """Bug B：Windows 路径中未转义的 () 必须被编码，避免 markdown 截断。"""
+class TestSanitizeFileLinkHref:
+    """Bug B：规避 markdown link destination 对 href 的两类误解析。"""
 
     def test_program_files_x86(self):
         text = "[foo](#sensenova-claw-file:C:/Program Files (x86)/foo.md)"
-        result = encode_file_link_parens(text)
+        result = sanitize_file_link_href(text)
         assert (
             "[foo](#sensenova-claw-file:C:/Program Files %28x86%29/foo.md)" in result
         )
 
-    def test_no_parens_no_change(self):
+    def test_backslash_turns_into_slash(self):
+        """Windows 反斜杠必须归一为 /，否则 markdown 会把 \\.、\\_ 等吃掉反斜杠。"""
+        text = (
+            "[x](#sensenova-claw-file:"
+            "C:\\Users\\zhengjieli1\\.sensenova-claw\\workdir\\default\\a.md)"
+        )
+        result = sanitize_file_link_href(text)
+        assert (
+            "(#sensenova-claw-file:"
+            "C:/Users/zhengjieli1/.sensenova-claw/workdir/default/a.md)"
+        ) in result
+        # 关键防回归：任何 \. 或 \_ 序列都不允许残留在 href 里
+        href_segment = result.split("(#sensenova-claw-file:", 1)[1].split(")", 1)[0]
+        assert "\\" not in href_segment
+
+    def test_backslash_and_parens_together(self):
+        text = (
+            "[x](#sensenova-claw-file:"
+            "C:\\Program Files (x86)\\.app\\run.bat)"
+        )
+        result = sanitize_file_link_href(text)
+        assert (
+            "(#sensenova-claw-file:"
+            "C:/Program Files %28x86%29/.app/run.bat)"
+        ) in result
+
+    def test_no_special_chars_no_change(self):
         text = "[foo](#sensenova-claw-file:/sandbox/a.md)"
-        assert encode_file_link_parens(text) == text
+        assert sanitize_file_link_href(text) == text
 
     def test_multiple_file_links(self):
         text = (
             "[a](#sensenova-claw-file:a.md) 和 "
             "[b](#sensenova-claw-file:Files (x86)/b.md)"
         )
-        result = encode_file_link_parens(text)
+        result = sanitize_file_link_href(text)
         assert "[a](#sensenova-claw-file:a.md)" in result
         assert "[b](#sensenova-claw-file:Files %28x86%29/b.md)" in result
 
     def test_workdir_prefix_not_touched(self):
-        # 只编码 file 前缀，workdir 前缀维持原样
+        # 只处理 file 前缀，workdir 前缀维持原样（slide preview 用相对路径）
         text = "[slides](#sensenova-claw-workdir:my-ppt (draft)/page.html)"
-        assert encode_file_link_parens(text) == text
+        assert sanitize_file_link_href(text) == text
 
     def test_plain_link_not_touched(self):
         text = "参考 [wiki](https://en.wikipedia.org/wiki/Foo_(bar))"
-        assert encode_file_link_parens(text) == text
+        assert sanitize_file_link_href(text) == text
 
     def test_combined_with_rewrite(self):
-        """关键场景：含括号的 Windows 路径能完整走完 encode → rewrite 链路。"""
+        """含括号的 Windows 路径能完整走完 sanitize → rewrite 链路。"""
         text = "[报告](#sensenova-claw-file:Program Files (x86)/report.md)"
-        step1 = encode_file_link_parens(text)
+        step1 = sanitize_file_link_href(text)
         step2 = rewrite_file_link_hrefs(step1, "C:/sandbox")
         assert (
             "(#sensenova-claw-file:C:/sandbox/Program Files %28x86%29/report.md)"
             in step2
         )
 
+    def test_combined_windows_absolute_with_hidden_dir(self):
+        """真实线上场景回归：Windows 绝对路径 + 隐藏目录 \\.sensenova-claw。"""
+        text = (
+            "文件在 [a.md](#sensenova-claw-file:"
+            "C:\\Users\\zhengjieli1\\.sensenova-claw\\workdir\\default\\a.md)"
+        )
+        step1 = sanitize_file_link_href(text)
+        step2 = rewrite_file_link_hrefs(step1, "C:\\Users\\zhengjieli1\\.sensenova-claw\\workdir\\default")
+        # sanitize 后路径是正斜杠绝对，rewrite 判为绝对路径不再改动
+        assert (
+            "(#sensenova-claw-file:"
+            "C:/Users/zhengjieli1/.sensenova-claw/workdir/default/a.md)"
+        ) in step2
+
     def test_empty_content(self):
-        assert encode_file_link_parens("") == ""
+        assert sanitize_file_link_href("") == ""
 
 
 class TestRewriteRelativePathsWindows:
