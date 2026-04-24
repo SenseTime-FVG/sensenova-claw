@@ -3,7 +3,7 @@
 #
 # 用法:
 #   远程执行（普通用户）:
-#     curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash
+#     curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.sh | bash
 #
 #   本地执行（普通用户）:
 #     bash install/install.sh
@@ -14,10 +14,10 @@
 #       bash install/install.sh --dev --dev-source /path/to/sensenova-claw
 #
 #     远程执行（脚本会 clone 源码到 $SENSENOVA_CLAW_HOME/src）:
-#       curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | SENSENOVA_CLAW_DEV=1 bash
+#       curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.sh | SENSENOVA_CLAW_DEV=1 bash
 #       # 或:
 #       export SENSENOVA_CLAW_DEV=1
-#       curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.sh | bash -s -- --dev
+#       curl -fsSL https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.sh | bash -s -- --dev
 #
 #   参数:
 #     --dev                启用开发者模式（等价环境变量 SENSENOVA_CLAW_DEV=1）

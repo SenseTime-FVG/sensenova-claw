@@ -2,7 +2,7 @@
 #
 # 用法:
 #   远程执行（普通用户）:
-#     irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
+#     irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.ps1 | iex
 #
 #   本地执行（普通用户）:
 #     powershell -ExecutionPolicy Bypass -File install\install.ps1
@@ -14,7 +14,7 @@
 #
 #     远程执行（irm | iex，脚本会 clone 源码到 $SENSENOVA_CLAW_HOME\src）:
 #       $env:SENSENOVA_CLAW_DEV = "1"
-#       irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova_claw/dev/install/install.ps1 | iex
+#       irm https://raw.githubusercontent.com/SenseTime-FVG/sensenova-claw/dev/install/install.ps1 | iex
 #
 #   参数:
 #     -Dev              启用开发者模式（等价环境变量 SENSENOVA_CLAW_DEV=1）
