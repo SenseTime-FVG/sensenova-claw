@@ -587,9 +587,15 @@ class AgentSessionWorker(SessionWorker):
         from sensenova_claw.kernel.runtime.path_rewriter import (
             rewrite_file_link_hrefs,
             rewrite_relative_paths,
+            sanitize_file_link_href,
         )
         _home = str(resolve_sensenova_claw_home(config))
         _workdir = resolve_agent_workdir(_home, self.agent_config)
+        # 先把 file-link href 里会被 markdown 误解的字符规避（括号 + 反斜杠）：
+        # - `C:\Program Files (x86)\...` 的 `(` `)` 会截断 link
+        # - `C:\Users\foo\.sensenova-claw\...` 的 `\.` `\_` 会被 backslash-escape
+        #   吃掉反斜杠，得到少一级分隔符的错误路径
+        content = sanitize_file_link_href(content)
         content = rewrite_relative_paths(content, _workdir)
         # 文件卡片 href（#sensenova-claw-file:）里 LLM 可能塞相对路径，
         # 前端点击会 404。此处与 inline code 规范化互补。
