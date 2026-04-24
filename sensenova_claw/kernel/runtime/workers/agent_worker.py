@@ -585,11 +585,15 @@ class AgentSessionWorker(SessionWorker):
         # 后处理：将回复中的相对路径改写为绝对路径
         from sensenova_claw.platform.config.workspace import resolve_agent_workdir, resolve_sensenova_claw_home
         from sensenova_claw.kernel.runtime.path_rewriter import (
+            encode_file_link_parens,
             rewrite_file_link_hrefs,
             rewrite_relative_paths,
         )
         _home = str(resolve_sensenova_claw_home(config))
         _workdir = resolve_agent_workdir(_home, self.agent_config)
+        # 先把 file-link href 里未转义的括号编码，避免 `C:\Program Files (x86)\...`
+        # 这类 Windows 路径被 markdown parser 或后续正则截断。
+        content = encode_file_link_parens(content)
         content = rewrite_relative_paths(content, _workdir)
         # 文件卡片 href（#sensenova-claw-file:）里 LLM 可能塞相对路径，
         # 前端点击会 404。此处与 inline code 规范化互补。

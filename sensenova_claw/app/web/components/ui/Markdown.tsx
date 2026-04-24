@@ -188,6 +188,7 @@ export const Markdown = memo(function Markdown({ content, className, variant = '
           <a
             href="#"
             onClick={handleClick}
+            title={filePath}
             className="inline-flex items-center gap-1.5 px-2.5 py-1 my-0.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-sm font-medium no-underline border border-primary/20 cursor-pointer"
             {...props}
           >
@@ -210,6 +211,7 @@ export const Markdown = memo(function Markdown({ content, className, variant = '
           <a
             href="#"
             onClick={handleClick}
+            title={relPath}
             className="inline-flex items-center gap-1.5 px-2.5 py-1 my-0.5 rounded-lg bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/20 transition-colors text-sm font-medium no-underline border border-orange-500/20 cursor-pointer"
             {...props}
           >

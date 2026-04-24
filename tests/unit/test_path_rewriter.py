@@ -7,7 +7,11 @@ from urllib.parse import quote
 
 from sensenova_claw.kernel.runtime.path_rewriter import (
     _is_absolute_pathlike,
+    _join_and_normalize,
     _looks_like_relative_file_path,
+    _normalize_workdir,
+    _split_drive,
+    encode_file_link_parens,
     rewrite_file_link_hrefs,
     rewrite_relative_paths,
 )
@@ -276,3 +280,194 @@ class TestRewriteFileLinkHrefs:
         step2 = rewrite_file_link_hrefs(step1, wd)
         assert f"`{wd_fwd}/自我介绍.md`" in step2
         assert f"(#sensenova-claw-file:{wd_fwd}/自我介绍.md)" in step2
+
+
+class TestSplitDrive:
+    def test_forward_slash_drive(self):
+        assert _split_drive("C:/foo") == ("C:", "/foo")
+
+    def test_backslash_drive(self):
+        assert _split_drive("D:\\foo\\bar") == ("D:", "\\foo\\bar")
+
+    def test_no_drive_posix(self):
+        assert _split_drive("/home/user") == ("", "/home/user")
+
+    def test_no_drive_relative(self):
+        assert _split_drive("foo/bar") == ("", "foo/bar")
+
+    def test_colon_without_separator_not_drive(self):
+        # `C:foo` 这种无分隔符形式不当作盘符（和 _is_absolute_pathlike 一致）
+        assert _split_drive("C:foo") == ("", "C:foo")
+
+    def test_empty(self):
+        assert _split_drive("") == ("", "")
+
+
+class TestNormalizeWorkdir:
+    def test_posix_absolute_unchanged(self):
+        # 即使在 Windows 宿主跑到这里，也不得拼当前盘符
+        assert _normalize_workdir("/home/user/work") == "/home/user/work"
+
+    def test_windows_drive_forward_slash(self):
+        assert _normalize_workdir("C:/sandbox/work") == "C:/sandbox/work"
+
+    def test_windows_drive_backslash(self):
+        assert _normalize_workdir("C:\\sandbox\\work") == "C:/sandbox/work"
+
+    def test_empty(self):
+        assert _normalize_workdir("") == ""
+
+    def test_dotdot_normalized(self):
+        assert _normalize_workdir("C:/sandbox/../work") == "C:/work"
+
+    def test_trailing_slash_trimmed(self):
+        # posixpath.normpath 会去掉尾部 /（保留根目录 / 本身）
+        assert _normalize_workdir("/a/b/") == "/a/b"
+
+
+class TestJoinAndNormalize:
+    """核心断言：Windows 盘符不能被 .. 吃掉。"""
+
+    def test_simple_join_posix(self):
+        assert _join_and_normalize("/sandbox", "a.md") == "/sandbox/a.md"
+
+    def test_simple_join_windows(self):
+        assert _join_and_normalize("C:/sandbox", "a.md") == "C:/sandbox/a.md"
+
+    def test_dotdot_stops_at_root_posix(self):
+        # POSIX 根目录上 .. 不会退出根
+        assert _join_and_normalize("/sandbox", "../../../a.md") == "/a.md"
+
+    def test_dotdot_stops_at_drive_root_windows(self):
+        # 关键 Bug A 回归：.. 越界应停在盘符根，而不是把盘符吃掉
+        result = _join_and_normalize("C:/sandbox", "../../../Windows/System32/x.txt")
+        assert result == "C:/Windows/System32/x.txt"
+        # 对比 posixpath.normpath 原生行为（会退化成 "Windows/System32/x.txt"）
+        assert result.startswith("C:")
+
+    def test_backslash_relative_normalized(self):
+        # Bug C：反斜杠形式的相对路径要归一
+        assert _join_and_normalize("/sandbox", "sub\\dir\\a.md") == "/sandbox/sub/dir/a.md"
+
+    def test_backslash_relative_with_drive(self):
+        assert (
+            _join_and_normalize("C:/sandbox", "sub\\dir\\a.md")
+            == "C:/sandbox/sub/dir/a.md"
+        )
+
+    def test_dot_slash_prefix(self):
+        assert _join_and_normalize("/sandbox", "./a.md") == "/sandbox/a.md"
+
+    def test_nested_dotdot_inside_workdir(self):
+        # workdir 内合法的 .. 仍然能走
+        assert _join_and_normalize("/sandbox/a/b", "../c.md") == "/sandbox/a/c.md"
+
+
+class TestRewriteFileLinkHrefsWindows:
+    """Bug A/C/D 在 file link 场景下的回归。"""
+
+    def test_dotdot_cannot_eat_windows_drive(self):
+        """Bug A：.. 越界时盘符必须保留。"""
+        text = "[x](#sensenova-claw-file:../../../Windows/System32/x.txt)"
+        result = rewrite_file_link_hrefs(text, "C:/sandbox")
+        assert "(#sensenova-claw-file:C:/Windows/System32/x.txt)" in result
+        # 保证输出没有退化成相对路径
+        assert "(#sensenova-claw-file:Windows/" not in result
+
+    def test_backslash_workdir_input(self):
+        """Bug D：workdir 传入 Windows 反斜杠形式也能正常归一。"""
+        text = "[x](#sensenova-claw-file:a.md)"
+        result = rewrite_file_link_hrefs(text, "C:\\sandbox\\work")
+        assert "(#sensenova-claw-file:C:/sandbox/work/a.md)" in result
+
+    def test_posix_workdir_not_prefixed_with_drive(self):
+        """Bug D：宿主是 Windows 时，传入 POSIX 风格 workdir 也不该被拼盘符。
+
+        模拟：_normalize_workdir 直接走字符串归一分支。
+        """
+        text = "[x](#sensenova-claw-file:a.md)"
+        result = rewrite_file_link_hrefs(text, "/home/user/work")
+        assert "(#sensenova-claw-file:/home/user/work/a.md)" in result
+        # 不应出现任何 <letter>: 盘符前缀
+        import re as _re
+        assert not _re.search(r"#sensenova-claw-file:[A-Za-z]:", result)
+
+    def test_dotdot_cannot_escape_posix_root(self):
+        """越界回退到 POSIX 根，不影响下游白名单。"""
+        text = "[x](#sensenova-claw-file:../../../etc/passwd)"
+        result = rewrite_file_link_hrefs(text, "/sandbox/work")
+        # 退到根目录，但不丢前导 /
+        assert "(#sensenova-claw-file:/etc/passwd)" in result
+
+
+class TestEncodeFileLinkParens:
+    """Bug B：Windows 路径中未转义的 () 必须被编码，避免 markdown 截断。"""
+
+    def test_program_files_x86(self):
+        text = "[foo](#sensenova-claw-file:C:/Program Files (x86)/foo.md)"
+        result = encode_file_link_parens(text)
+        assert (
+            "[foo](#sensenova-claw-file:C:/Program Files %28x86%29/foo.md)" in result
+        )
+
+    def test_no_parens_no_change(self):
+        text = "[foo](#sensenova-claw-file:/sandbox/a.md)"
+        assert encode_file_link_parens(text) == text
+
+    def test_multiple_file_links(self):
+        text = (
+            "[a](#sensenova-claw-file:a.md) 和 "
+            "[b](#sensenova-claw-file:Files (x86)/b.md)"
+        )
+        result = encode_file_link_parens(text)
+        assert "[a](#sensenova-claw-file:a.md)" in result
+        assert "[b](#sensenova-claw-file:Files %28x86%29/b.md)" in result
+
+    def test_workdir_prefix_not_touched(self):
+        # 只编码 file 前缀，workdir 前缀维持原样
+        text = "[slides](#sensenova-claw-workdir:my-ppt (draft)/page.html)"
+        assert encode_file_link_parens(text) == text
+
+    def test_plain_link_not_touched(self):
+        text = "参考 [wiki](https://en.wikipedia.org/wiki/Foo_(bar))"
+        assert encode_file_link_parens(text) == text
+
+    def test_combined_with_rewrite(self):
+        """关键场景：含括号的 Windows 路径能完整走完 encode → rewrite 链路。"""
+        text = "[报告](#sensenova-claw-file:Program Files (x86)/report.md)"
+        step1 = encode_file_link_parens(text)
+        step2 = rewrite_file_link_hrefs(step1, "C:/sandbox")
+        assert (
+            "(#sensenova-claw-file:C:/sandbox/Program Files %28x86%29/report.md)"
+            in step2
+        )
+
+    def test_empty_content(self):
+        assert encode_file_link_parens("") == ""
+
+
+class TestRewriteRelativePathsWindows:
+    """inline code span 的跨平台路径回归。"""
+
+    def test_backslash_relative_in_posix_workdir(self):
+        """Bug C：POSIX 后端处理 Windows 风格反斜杠路径也要归一。"""
+        wd = "/sandbox/work"
+        text = "结果在 `docs\\report.md`"
+        result = rewrite_relative_paths(text, wd)
+        assert "`/sandbox/work/docs/report.md`" in result
+
+    def test_drive_root_escape_stops_at_drive(self):
+        """Bug A：inline code span 的 .. 越界同样要保留盘符。"""
+        wd = "C:/sandbox"
+        text = "这个文件 `../../../Windows/System32/x.txt`"
+        result = rewrite_relative_paths(text, wd)
+        # 由于 () 被排除在"路径样"判定外，这里用简单的 ../ 链
+        # _looks_like_relative_file_path 会识别 .txt → 触发改写
+        assert "`C:/Windows/System32/x.txt`" in result
+
+    def test_posix_workdir_on_windows_host(self):
+        """Bug D：用 POSIX 风格 workdir 不应被拼盘符。"""
+        wd = "/home/user/work"
+        text = "文件在 `report.md`"
+        result = rewrite_relative_paths(text, wd)
+        assert "`/home/user/work/report.md`" in result
