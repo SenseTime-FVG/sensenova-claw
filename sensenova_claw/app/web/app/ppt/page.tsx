@@ -145,6 +145,7 @@ function PPTWorkspace() {
   const [contextMenu, setContextMenu] = useState<{ session: SessionItem; x: number; y: number } | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [exportingHtmlZip, setExportingHtmlZip] = useState(false);
   const dropContainerRef = useRef<HTMLDivElement>(null);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
 
@@ -246,6 +247,31 @@ function PPTWorkspace() {
     }
   };
 
+  const handleExport = useCallback(async (format: string, _withNotes: boolean) => {
+    if (format !== 'html-zip' || !deckData.deckDir || exportingHtmlZip) return;
+
+    setExportingHtmlZip(true);
+    try {
+      const res = await authFetch(
+        `${API_BASE}/api/files/workdir-archive?dir=${encodeURIComponent(deckData.deckDir)}`,
+      );
+      if (!res.ok) return;
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const fileName = `${deckData.deckDir.split('/').pop() || 'deck'}.zip`;
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportingHtmlZip(false);
+    }
+  }, [deckData.deckDir, exportingHtmlZip]);
+
   // ── 工作台模式（三栏布局） ──
   return (
     <div ref={setRef} className="flex flex-col h-full overflow-hidden">
@@ -273,6 +299,7 @@ function PPTWorkspace() {
           </Button>
           <ExportDropdown
             deckDir={deckData.deckDir}
+            onExport={handleExport}
             hasSpeakerNotes={!!deckData.speakerNotes}
           />
         </div>
