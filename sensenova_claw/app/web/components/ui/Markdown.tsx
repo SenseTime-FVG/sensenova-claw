@@ -3,7 +3,9 @@
 import { memo, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeKatex from 'rehype-katex';
 import type { Components } from 'react-markdown';
 import { Check, Copy, FolderOpen, Presentation, FileText } from 'lucide-react';
 import { useFilePanel } from '@/contexts/FilePanelContext';
@@ -54,6 +56,20 @@ function preprocessFileLinks(md: string): string {
       return `[${display.replace(/\\/g, '/')}](${href})`;
     },
   );
+}
+
+// 将 \(...\) / \[...\] 归一化为 $...$ / $$...$$，让 remark-math 能识别。
+// 跳过围栏代码块与行内代码，避免把代码里的反斜杠当成数学。
+function normalizeLatexDelimiters(md: string): string {
+  const parts = md.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+  return parts
+    .map((part, idx) => {
+      if (idx % 2 === 1) return part; // 保留代码段原样
+      let s = part.replace(/\\\[([\s\S]+?)\\\]/g, (_m, inner) => `$$${inner}$$`);
+      s = s.replace(/\\\(([\s\S]+?)\\\)/g, (_m, inner) => `$${inner}$`);
+      return s;
+    })
+    .join('');
 }
 
 /* ── UI Components ── */
@@ -163,7 +179,10 @@ interface MarkdownProps {
 
 export const Markdown = memo(function Markdown({ content, className, variant = 'default' }: MarkdownProps) {
   const { openToPath } = useFilePanel();
-  const processed = useMemo(() => preprocessFileLinks(content), [content]);
+  const processed = useMemo(
+    () => normalizeLatexDelimiters(preprocessFileLinks(content)),
+    [content],
+  );
 
   const mdComponents = useMemo<Components>(() => ({
     ...baseComponents,
@@ -245,9 +264,9 @@ export const Markdown = memo(function Markdown({ content, className, variant = '
       variant === 'detail' && "text-xs",
       className
     )}>
-      <ReactMarkdown 
-        remarkPlugins={[remarkGfm]} 
-        rehypePlugins={variant !== 'user' ? [rehypeHighlight] : []} 
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={variant !== 'user' ? [rehypeHighlight, rehypeKatex] : [rehypeKatex]}
         components={mdComponents}
       >
         {processed}
