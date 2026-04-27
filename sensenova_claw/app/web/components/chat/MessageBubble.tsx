@@ -170,8 +170,8 @@ export const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMes
         <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center shrink-0 border-2 border-border shadow-md">
           <User size={20} className="text-secondary-foreground" />
         </div>
-        <div className="flex-1 flex flex-col items-end pt-1">
-          <div className="bg-primary text-primary-foreground text-sm p-4 rounded-3xl rounded-tr-sm max-w-[85%] leading-relaxed shadow-lg">
+        <div className="flex-1 flex flex-col items-end pt-1 min-w-0">
+          <div className="bg-primary text-primary-foreground text-sm p-4 rounded-3xl rounded-tr-sm max-w-[85%] min-w-0 leading-relaxed shadow-lg">
             <Markdown variant="user" content={msg.content} />
           </div>
         </div>
@@ -186,7 +186,7 @@ export const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMes
         <Bot size={20} className="text-primary-foreground" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="space-y-3">
+        <div className="space-y-3 min-w-0">
           {parsedAssistantContent.thinkContent ? (
             <div className="rounded-2xl border border-amber-500/25 bg-amber-500/8 overflow-hidden">
               <button

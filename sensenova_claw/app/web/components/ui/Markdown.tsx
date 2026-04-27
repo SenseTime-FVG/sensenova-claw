@@ -237,7 +237,7 @@ export const Markdown = memo(function Markdown({ content, className, variant = '
 
   return (
     <div className={cn(
-      "markdown-body prose prose-sm dark:prose-invert max-w-none break-words",
+      "markdown-body prose prose-sm dark:prose-invert max-w-none break-words w-full min-w-0",
       variant === 'system' && "text-[10px] text-muted-foreground",
       variant === 'user' && "prose-invert",
       variant === 'detail' && "text-xs",
