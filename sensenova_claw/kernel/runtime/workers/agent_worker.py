@@ -585,6 +585,7 @@ class AgentSessionWorker(SessionWorker):
         # 后处理：将回复中的相对路径改写为绝对路径
         from sensenova_claw.platform.config.workspace import resolve_agent_workdir, resolve_sensenova_claw_home
         from sensenova_claw.kernel.runtime.path_rewriter import (
+            rewrite_absolute_path_references,
             rewrite_file_link_hrefs,
             rewrite_relative_paths,
             sanitize_file_link_href,
@@ -595,6 +596,7 @@ class AgentSessionWorker(SessionWorker):
         # - `C:\Program Files (x86)\...` 的 `(` `)` 会截断 link
         # - `C:\Users\foo\.sensenova-claw\...` 的 `\.` `\_` 会被 backslash-escape
         #   吃掉反斜杠，得到少一级分隔符的错误路径
+        content = rewrite_absolute_path_references(content)
         content = sanitize_file_link_href(content)
         content = rewrite_relative_paths(content, _workdir)
         # 文件卡片 href（#sensenova-claw-file:）里 LLM 可能塞相对路径，

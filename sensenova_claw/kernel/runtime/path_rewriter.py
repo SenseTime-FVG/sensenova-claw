@@ -30,6 +30,14 @@ _FILE_LINK_RE = re.compile(
     r"(\))"
 )
 
+# 匹配普通 Markdown 链接，用于把 ``[报告](/tmp/report.md)`` 这类本地
+# 绝对路径链接转成前端可拦截的 ``#sensenova-claw-file:`` 链接。
+_MARKDOWN_LINK_RE = re.compile(
+    r"(\[[^\]]+?\]\()"
+    r"((?:[^)(]|\([^)(]*\))*)"
+    r"(\))"
+)
+
 # 常见文件扩展名，用于判定是否像一个文件路径
 _FILE_EXTENSIONS = {
     ".md", ".txt", ".csv", ".json", ".jsonl", ".yaml", ".yml",
@@ -170,6 +178,35 @@ def _looks_like_relative_file_path(text: str) -> bool:
     return True
 
 
+def _looks_like_absolute_path_reference(text: str) -> bool:
+    """判断 text 是否像本地绝对路径引用，供前端文件链接改写使用。"""
+    text = text.strip()
+    if not text:
+        return False
+    if text.startswith(("http://", "https://", "ftp://", "data:", "mailto:")):
+        return False
+    if not _is_absolute_pathlike(text):
+        return False
+    if len(text) > 300:
+        return False
+    if any(c in text for c in ("{", "}", "<", ">", "|", ";", "&", "=")):
+        return False
+    unified = text.replace("\\", "/")
+    suffix = posixpath.splitext(unified)[1].lower()
+    if suffix in _FILE_EXTENSIONS:
+        return True
+    # 目录型引用只在行内代码或 Markdown 链接中改写，范围较窄，可以接受。
+    return unified.startswith(("/tmp", "/var/folders", "~/")) or bool(re.match(r"^[A-Za-z]:/", unified))
+
+
+def _encode_file_link_path(path: str) -> str:
+    return (
+        path.replace("\\", "/")
+            .replace("(", "%28")
+            .replace(")", "%29")
+    )
+
+
 def rewrite_relative_paths(content: str, workdir: str) -> str:
     """将 assistant 回复文本中 `...` 引用的相对路径改写为绝对路径。
 
@@ -192,6 +229,46 @@ def rewrite_relative_paths(content: str, workdir: str) -> str:
         return f"`{abs_path}`"
 
     return _CODE_SPAN_RE.sub(_replace, content)
+
+
+def rewrite_absolute_path_references(content: str) -> str:
+    """将本地绝对路径引用改写为前端可点击的内部文件链接。
+
+    覆盖两类常见 LLM 输出：
+    - 普通 Markdown 链接：``[报告](/tmp/report.md)``
+    - 行内代码路径：`` `/tmp/report.md` ``
+    """
+    if not content:
+        return content
+
+    def _replace_link(match: re.Match) -> str:
+        prefix = match.group(1)
+        raw_href = match.group(2).strip()
+        suffix = match.group(3)
+        try:
+            decoded = unquote(raw_href)
+        except Exception:
+            decoded = raw_href
+        if decoded.startswith(("#sensenova-claw-file:", "#sensenova-claw-workdir:")):
+            return match.group(0)
+        if not _looks_like_absolute_path_reference(decoded):
+            return match.group(0)
+        return f"{prefix}#sensenova-claw-file:{_encode_file_link_path(decoded)}{suffix}"
+
+    content = _MARKDOWN_LINK_RE.sub(_replace_link, content)
+
+    def _replace_code(match: re.Match) -> str:
+        start, end = match.span()
+        # 跳过已经作为 Markdown 链接文本的 code span，避免生成嵌套链接。
+        if start > 0 and content[start - 1] == "[" and content[end:end + 2] == "](":
+            return match.group(0)
+        raw = match.group(1).strip()
+        if not _looks_like_absolute_path_reference(raw):
+            return match.group(0)
+        encoded = _encode_file_link_path(raw)
+        return f"[`{raw}`](#sensenova-claw-file:{encoded})"
+
+    return _CODE_SPAN_RE.sub(_replace_code, content)
 
 
 def sanitize_file_link_href(content: str) -> str:
