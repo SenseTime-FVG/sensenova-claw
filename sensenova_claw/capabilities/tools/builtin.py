@@ -109,6 +109,33 @@ def _resolve_bash_cwd(
     return str(resolved_cwd), None
 
 
+def _resolve_with_policy(
+    raw_path: str,
+    agent_workdir: str | None,
+    policy: Any,
+    *,
+    operation: Literal["read", "write"],
+) -> tuple[Path | None, dict[str, Any] | None]:
+    """Resolve a file path and enforce an injected path policy when present."""
+    if not policy:
+        return _resolve_with_workdir(raw_path, agent_workdir), None
+
+    from sensenova_claw.platform.security.path_policy import PathVerdict
+
+    verdict = policy.check_read(raw_path) if operation == "read" else policy.check_write(raw_path)
+    resolved = policy.safe_resolve(raw_path)
+    if verdict == PathVerdict.DENY:
+        return None, {"success": False, "error": f"系统目录禁止访问: {raw_path}"}
+    if verdict == PathVerdict.NEED_GRANT:
+        return None, {
+            "success": False,
+            "error": f"该路径未授权，请先获得用户许可: {raw_path}",
+            "action": "need_grant",
+            "path": str(resolved),
+        }
+    return resolved, None
+
+
 _FETCH_URL_ALLOWED_FORMATS = {"markdown", "text"}
 _FETCH_URL_HTML_CANDIDATE_SELECTORS = (
     ".abstract",
@@ -570,11 +597,16 @@ class BashCommandTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        kwargs.pop("_path_policy", None)
+        policy = kwargs.pop("_path_policy", None)
         agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         command = str(kwargs.get("command", ""))
-        cwd_raw = kwargs.get("working_dir")
-        cwd = cwd_raw or agent_workdir or "."
+        cwd, cwd_error = _resolve_bash_cwd(
+            policy=policy,
+            working_dir=kwargs.get("working_dir"),
+            agent_workdir=agent_workdir,
+        )
+        if cwd_error is not None:
+            return cwd_error
 
         def _run() -> dict[str, Any]:
             proc = subprocess.run(
@@ -1078,11 +1110,19 @@ class ReadFileTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        kwargs.pop("_path_policy", None)
+        policy = kwargs.pop("_path_policy", None)
         agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         raw_path = str(kwargs["file_path"])
 
-        file_path = _resolve_with_workdir(raw_path, agent_workdir)
+        file_path, policy_error = _resolve_with_policy(
+            raw_path,
+            agent_workdir,
+            policy,
+            operation="read",
+        )
+        if policy_error is not None:
+            return policy_error
+        assert file_path is not None
 
         if not file_path.exists():
             return {"success": False, "error": f"文件不存在: {file_path}"}
@@ -1127,6 +1167,7 @@ class EditFileTool(Tool):
         old_text = self._pick_text(kwargs, primary="oldText", snake="old_text", compat="old_string")
         new_text = self._pick_text(kwargs, primary="newText", snake="new_text", compat="new_string")
         agent_workdir = kwargs.get("_agent_workdir")
+        policy = kwargs.get("_path_policy")
 
         if not path_param:
             return {"success": False, "error": "path 不能为空"}
@@ -1138,13 +1179,20 @@ class EditFileTool(Tool):
             return {"success": False, "error": "oldText 不能为空字符串"}
 
         try:
-            return self._execute_once(path_param=path_param, old_text=old_text, new_text=new_text, agent_workdir=agent_workdir)
+            return self._execute_once(
+                path_param=path_param,
+                old_text=old_text,
+                new_text=new_text,
+                agent_workdir=agent_workdir,
+                policy=policy,
+            )
         except Exception as exc:
             recovered = self._recover_post_write_success(
                 path_param=path_param,
                 old_text=old_text,
                 new_text=new_text,
                 agent_workdir=agent_workdir,
+                policy=policy,
             )
             if recovered is not None:
                 return recovered
@@ -1165,8 +1213,17 @@ class EditFileTool(Tool):
         old_text: str,
         new_text: str,
         agent_workdir: str | None,
+        policy: Any,
     ) -> dict[str, Any]:
-        target = _resolve_with_workdir(path_param, agent_workdir)
+        target, policy_error = _resolve_with_policy(
+            path_param,
+            agent_workdir,
+            policy,
+            operation="write",
+        )
+        if policy_error is not None:
+            return policy_error
+        assert target is not None
         if not target.exists():
             return {"success": False, "error": f"文件不存在: {path_param}"}
         if not target.is_file():
@@ -1198,9 +1255,17 @@ class EditFileTool(Tool):
         old_text: str,
         new_text: str,
         agent_workdir: str | None,
+        policy: Any,
     ) -> dict[str, Any] | None:
         try:
-            target = _resolve_with_workdir(path_param, agent_workdir)
+            target, policy_error = _resolve_with_policy(
+                path_param,
+                agent_workdir,
+                policy,
+                operation="read",
+            )
+            if policy_error is not None or target is None:
+                return None
             content = _read_text(target)
         except Exception:
             return None
@@ -1255,11 +1320,19 @@ class WriteFileTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> Any:
-        kwargs.pop("_path_policy", None)
+        policy = kwargs.pop("_path_policy", None)
         agent_workdir: str | None = kwargs.pop("_agent_workdir", None)
         raw_path = str(kwargs["file_path"])
 
-        file_path = _resolve_with_workdir(raw_path, agent_workdir)
+        file_path, policy_error = _resolve_with_policy(
+            raw_path,
+            agent_workdir,
+            policy,
+            operation="write",
+        )
+        if policy_error is not None:
+            return policy_error
+        assert file_path is not None
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         content = str(kwargs.get("content", ""))
