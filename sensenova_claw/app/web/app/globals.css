@@ -1000,6 +1000,12 @@ body {
 .markdown-body {
   line-height: 1.7;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.markdown-body * {
+  min-width: 0;
 }
 
 .markdown-body > *:first-child {
@@ -1066,12 +1072,20 @@ body {
 .markdown-body pre {
   margin: 0;
   background: transparent !important;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .markdown-body pre code {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.85em;
   line-height: 1.6;
+}
+
+.markdown-body :not(pre) > code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-body img {
