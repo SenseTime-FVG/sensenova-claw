@@ -1011,7 +1011,84 @@ sensenova-claw serve --tcp HOST:PORT  # 蓝图
 | `app/main.py` 子命令分发 | 直接加 `serve` 子命令 |
 | `platform/config/` `platform/secrets/` | 全部复用 |
 
-## 9. 不在范围
+## 9. 现有代码的兼容性与迁移路径
+
+按四个维度区分。本期承诺：终端用户体验和事件协议 100% 兼容；现有业务代码不需重写，只需一次"挂 manifest"的迁移；数据库走一次轻量加列迁移。
+
+### 9.1 终端用户体验兼容（CLI / 前端）
+
+| 入口 | 本期变化 |
+|---|---|
+| `sensenova-claw run` | 不动（前端 + backend 一键启动保留） |
+| `sensenova-claw cli` | 不动（TUI 客户端继续走现有 WS） |
+| `sensenova-claw version` | 不动 |
+| 前端 Dashboard | 不动（继续连现有 `interfaces/ws/` Gateway） |
+| `sensenova-claw serve --stdio` | ★ 新增，与现有命令并列；不影响以上任何入口 |
+
+现有 e2e 测试不改。
+
+### 9.2 现有扩展代码兼容（Tool / Skill / Agent / Channel / LLM Provider）
+
+| 现有资产 | 迁移方式 | 是否需要重写业务逻辑 |
+|---|---|---|
+| `ToolRegistry._register_builtin()` 注册的所有内置 tool（`bash_command`、`serper_search`、`fetch_url` 等 11+ 个 + 6 个邮件 tool + cron/memory/send_message 等条件注册） | 包装为一个内置 plugin `core/builtin-tools`，每个 tool 作为 `type: python` 贡献，原 Python 类不动 | 否 |
+| 24 个内置 skill（`ppt-superpower`、`feishu-doc`、`knowledge-base` 等） | 每个挂一个 manifest 条目（`path` 指向已有 `SKILL.md`） | 否 |
+| 4 个 LLM provider（openai / anthropic / gemini / mock） | 包装成 `core/builtin-llm` plugin，每个 provider 作为 `llm_providers` 贡献 | 否 |
+| 飞书 Channel | 改成新 manifest 格式（已是 plugin 形态，最小改动） | 否 |
+| 多 Agent 配置 | 每个 agent 挂 manifest 条目（`path` 指向已有 agent 定义） | 否 |
+| Skills 系统的现有 yaml/Markdown 定义 | 不动（manifest 只引用 path） | 否 |
+
+**M0 迁移工作量**：把现有内置能力分门别类挂到 3-4 个内置 plugin 的 manifest 下，**只写 manifest，不动业务逻辑**。
+
+### 9.3 事件协议兼容（前端 / 集成）
+
+| 项 | 兼容性 |
+|---|---|
+| `EventEnvelope`（`event_id` / `type` / `session_id` / `turn_id` / `trace_id` / `payload` / `source`） | 100% 复用，Control Protocol 不发明新结构（已在 §5.3 明确） |
+| 现有事件类型（`user.input` / `agent.step_*` / `llm.call_*` / `tool.call_*` / `config.*`） | 不变 |
+| 前端 WebSocket 协议 | 不变（前端继续走 `interfaces/ws/`，不强制迁到 Control Protocol） |
+
+### 9.4 数据库 schema 兼容
+
+需要一次性轻量迁移，**不破坏数据**：
+
+| 表 | 变更 | 老数据处理 |
+|---|---|---|
+| `sessions` / `turns` / `messages` / `events` / `agent_messages` | 新增 `team_id` 列 | 填默认值 `local-team` |
+| 新增 `plugin_kv` 表 | 新表，无老数据 | — |
+
+迁移脚本一次性跑完。回滚方式：删 `team_id` 列即可。
+
+### 9.5 会变化的地方（诚实声明）
+
+| 变化点 | 影响范围 | 说明 |
+|---|---|---|
+| 在 SDK 里调 core 必须走 Control Protocol | **仅新接入**的业务代码 | 不能直接 `import sensenova_claw` 写业务逻辑——这是 SDK 化的根本变化，但已有代码不受影响 |
+| 新增 plugin 必须写 manifest | **仅新业务团队** | 正是 SDK 化的目标。已有内置能力由 §9.2 的迁移覆盖 |
+| 多团队 identity 启用后，tool 列表会按 visibility 过滤 | **仅启用 identity 隔离的环境** | M0 默认 identity（`local-team`）下，所有现有 tool 的 visibility 都设为 `public`，对终端用户表现和现状完全一致 |
+
+### 9.6 迁移路径（M0 内部步骤，每步独立可回滚）
+
+```
+1. 抽出 PluginLoader / Registry 抽象（不影响运行）
+2. 把现有内置能力包成 3-4 个内置 plugin manifest:
+     - core/builtin-tools
+     - core/builtin-llm
+     - core/builtin-skills
+     - core/builtin-channels
+3. 现有 ToolRegistry / SkillRegistry / 等改为通过 PluginLoader 加载
+   这一步保证旧代码完全等价行为
+4. 加 sensenova-claw serve --stdio 子命令
+5. 加 Control Protocol Server
+6. 加 Python SDK 瘦客户端
+7. 加多团队 identity 字段（默认 local-team，不影响现有用户）
+8. 加数据库迁移脚本
+9. e2e 全跑，前端 / TUI 验证一遍
+```
+
+每一步都不破坏 §9.1~9.4 的兼容承诺。
+
+## 10. 不在范围
 
 以下不在本期 spec 中，需独立 spec：
 
@@ -1019,11 +1096,11 @@ sensenova-claw serve --tcp HOST:PORT  # 蓝图
 - 云端服务架构（Gateway、租户隔离、计费、PostgreSQL 迁移）
 - Plugin marketplace 服务（注册、发现、版本管理、签名）
 - 前端开源仓库切出方案
-- 现有 sensenova-claw 各模块到新 plugin manifest 的迁移细节（builtin plugin 怎么定义、tool/skill/agent 怎么改造）
+- 现有 sensenova-claw 各模块到新 plugin manifest 的迁移**详细字段映射**（本 spec §9 给方向，逐 tool / skill / agent 的 manifest 条目在实施时落地）
 - Control Protocol 的完整 JSON Schema 文件（本 spec 给字段，schema 文件在实现时落 `docs/protocols/`）
 - Hook input envelope 各 event 的 `context` 详细 schema（同上）
 
-## 10. 风险与开放问题
+## 11. 风险与开放问题
 
 - **Control Protocol 和 MCP 双协议**的认知成本：业务团队既要懂"用 MCP 加工具"，又要懂"用 Python SDK 调 core"。文档要清晰区分两者职责。
 - **Hook 子进程性能**：每次 LLM/tool 调用都 spawn 一个进程开销不低。M0 先不做优化，必要时引入 hook 长驻进程模式（保留扩展空间，本期不做）。
