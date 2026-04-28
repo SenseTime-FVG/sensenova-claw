@@ -135,6 +135,15 @@ def test_identity_dataclass_immutable_fields():
     assert ident.team_id == "t1"
     assert ident.org_id == "o1"
     assert ident.source == "explicit"
+
+
+def test_identity_default_source_is_placeholder():
+    """契约保护：无参构造的 source 默认是 "placeholder"，
+    避免 P3/P4 占位实例被误标为 "explicit"。
+    （契约：docs/design/2026-04-27-plan-decomposition.md §3.4）
+    """
+    ident = Identity(user_id="u1", team_id="t1", org_id="o1")
+    assert ident.source == "placeholder"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -164,17 +173,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-IdentitySource = Literal["explicit", "env", "file", "default"]
+IdentitySource = Literal["explicit", "env", "file", "default", "placeholder"]
 
 
 @dataclass(frozen=True)
 class Identity:
-    """用户/团队/组织三元组。整个 session 生命周期内不可变。"""
+    """用户/团队/组织三元组。整个 session 生命周期内不可变。
+
+    `source` 为诊断日志字段，下游业务逻辑不读取。默认值 "placeholder"
+    用于让 P3/P4 上线前的临时占位实例可以无参构造而不会被错误地
+    标记为 "explicit"；resolve() / from_env() / from_file() /
+    default_local() 等工厂方法会显式覆盖为正确值。
+    （契约定义：docs/design/2026-04-27-plan-decomposition.md §3.4）
+    """
 
     user_id: str
     team_id: str
     org_id: str
-    source: IdentitySource = "explicit"
+    source: IdentitySource = "placeholder"
 
     @classmethod
     def default_local(cls) -> "Identity":
