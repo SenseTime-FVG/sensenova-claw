@@ -1140,12 +1140,23 @@ Handler = Callable[["ControlServer", dict], Awaitable[dict]]
 async def initialize(server: "ControlServer", params: dict) -> dict:
     """spec §5.2 握手"""
     server.client_info = params.get("client_info", {}) or {}
-    # P3：identity 用占位；P5 接入真实 Identity 类后替换
-    server.identity = params.get("identity") or {
-        "user_id": "local-dev",
-        "team_id": "local-team",
-        "org_id": "local-org",
-    }
+    # P3：identity 用最小 dataclass 占位（属性访问形态，不是 dict），
+    # 这样 P5 把真实 Identity 类接进来时直接替换实例即可，下游
+    # `server.identity.team_id` 不需要改写。
+    from dataclasses import dataclass
+
+    @dataclass
+    class _IdentityPlaceholder:
+        user_id: str = "local-dev"
+        team_id: str = "local-team"
+        org_id: str = "local-org"
+
+    raw = params.get("identity") or {}
+    server.identity = _IdentityPlaceholder(
+        user_id=raw.get("user_id", "local-dev"),
+        team_id=raw.get("team_id", "local-team"),
+        org_id=raw.get("org_id", "local-org"),
+    )
 
     available_agents = [
         {"id": a.id, "name": a.name, "description": a.description, "model": a.model}
@@ -1398,8 +1409,8 @@ class ControlServer:
                     "session_id": envelope.session_id,
                     "turn_id": envelope.turn_id,
                     "tool_call_id": tool_call_id,
-                    "tool_name": envelope.payload.get("tool_name"),
-                    "arguments": envelope.payload.get("arguments", {}),
+                    "tool": envelope.payload.get("tool_name"),
+                    "args": envelope.payload.get("arguments", {}),
                     "risk_level": envelope.payload.get("risk_level"),
                     "message": envelope.payload.get("message"),
                 },
@@ -3089,7 +3100,7 @@ S→C request 的 id 由 server 维护独立空间（`srv-1`, `srv-2`, ...），
 
 ```
 1. core 内部某个 tool 触发 tool.confirmation_requested 事件
-2. ControlServer 拦截：发 S→C request "permission.request"，附带 tool_call_id / tool_name / arguments
+2. ControlServer 拦截：发 S→C request "permission.request"，附带 tool_call_id / tool / args（wire 字段名按 spec §5.5）
 3. client 必须用 Response 回 { "decision": "allow" | "deny" }
 4. ControlServer 收到后 publish 一条 tool.confirmation_response 事件回总线
 5. tool_worker 原有逻辑（已存在）继续放行 / 拒绝
