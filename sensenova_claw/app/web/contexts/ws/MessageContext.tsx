@@ -10,6 +10,7 @@ import { useEventDispatcher } from './EventDispatcherContext';
 import { extractThinkContentFromReasoningDetails } from '@/lib/assistantThink';
 import type { WsInboundEvent } from '@/lib/wsEvents';
 import {
+  type ChatAttachmentRef,
   type ChatMessage,
   type StepItem,
   type TaskProgressItem,
@@ -97,7 +98,13 @@ export interface MessageContextValue {
   prefillInput: (value: string | PrefillInputPayload) => void;
   clearPendingPrefill: () => void;
 
-  sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string, recommendation?: RecommendationSendMeta | null) => void;
+  sendMessage: (
+    content: string,
+    contextFiles?: ContextFileRef[],
+    agentId?: string,
+    recommendation?: RecommendationSendMeta | null,
+    attachments?: ChatAttachmentRef[],
+  ) => void;
   cancelTurn: () => void;
   handleSkillInvoke: (skillName: string, args: string) => void;
   setTyping: (typing: boolean) => void;
@@ -174,7 +181,12 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
   const cancelledTurnIdsRef = useRef<Set<string>>(new Set());
   const lastStreamingTurnIdRef = useRef<string | null>(null);
-  const pendingInputRef = useRef<{ content: string; contextFiles?: string[]; meta?: Record<string, string> } | null>(null);
+  const pendingInputRef = useRef<{
+    content: string;
+    contextFiles?: string[];
+    meta?: Record<string, string>;
+    attachments?: ChatAttachmentRef[];
+  } | null>(null);
   const pendingSessionBootstrapIdRef = useRef<string | null>(null);
 
   // ── helpers ──
@@ -611,9 +623,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         const newSid = event.session_id;
         if (!newSid) return;
         if (pendingInputRef.current) {
-          const { content, contextFiles, meta } = pendingInputRef.current;
+          const { content, contextFiles, meta, attachments } = pendingInputRef.current;
           pendingSessionBootstrapIdRef.current = newSid;
-          const payload: Record<string, unknown> = { content, attachments: [], context_files: contextFiles || [] };
+          const payload: Record<string, unknown> = { content, attachments: attachments || [], context_files: contextFiles || [] };
           if (meta) payload.meta = meta;
           wsSend({
             type: 'user_input',
@@ -632,8 +644,14 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
   // ── 对外接口 ──
 
-  const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string, recommendation?: RecommendationSendMeta | null) => {
-    if (!content.trim()) return;
+  const sendMessage = useCallback((
+    content: string,
+    contextFiles?: ContextFileRef[],
+    agentId?: string,
+    recommendation?: RecommendationSendMeta | null,
+    attachments?: ChatAttachmentRef[],
+  ) => {
+    if (!content.trim() && !attachments?.length) return;
 
     // 防止在 session 创建中重复发送：如果已有 pending input 且正在等待 session_created，忽略
     if (pendingInputRef.current && !sessionIdRef.current) return;
@@ -646,7 +664,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
     emptySessionIdRef.current = null;
     resetTurnTracking();
-    addMsg('user', content);
+    addMsg('user', content || `[图片] ${attachments?.length || 0}`);
 
     const filePaths = contextFiles?.map(f => f.path) || [];
 
@@ -657,9 +675,11 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         : undefined;
 
     if (!sessionIdRef.current) {
-      pendingInputRef.current = { content, contextFiles: filePaths, meta };
+      pendingInputRef.current = { content, contextFiles: filePaths, meta, attachments };
       markFrontendCreate();
-      const sessionMeta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
+      const sessionMeta: Record<string, string> = {
+        title: content.slice(0, 20) || attachments?.[0]?.name || '图片对话',
+      };
       const requestId = makeId();
       wsSend({
         type: 'create_session',
@@ -667,7 +687,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         timestamp: Date.now() / 1000,
       });
     } else {
-      const payload: Record<string, unknown> = { content, attachments: [], context_files: filePaths };
+      const payload: Record<string, unknown> = { content, attachments: attachments || [], context_files: filePaths };
       if (meta) payload.meta = meta;
       wsSend({
         type: 'user_input',

@@ -49,6 +49,21 @@ class TestContextBuilder:
         assert len(msgs) == 4  # system + 2 history + user
         assert msgs[1]["content"] == "old"
 
+    def test_build_messages_with_image_attachments(self):
+        cb = ContextBuilder()
+        attachments = [
+            {
+                "kind": "image",
+                "name": "diagram.png",
+                "mime_type": "image/png",
+                "data": "ZmFrZV9iYXNlNjQ=",
+            }
+        ]
+        msgs = cb.build_messages("解释这张图", attachments=attachments)
+        assert msgs[-1]["role"] == "user"
+        assert "解释这张图" in msgs[-1]["content"]
+        assert msgs[-1]["attachments"] == attachments
+
     def test_build_messages_with_tools(self):
         tr = ToolRegistry()
         cb = ContextBuilder(tool_registry=tr)

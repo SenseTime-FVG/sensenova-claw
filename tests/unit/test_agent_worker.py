@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -356,6 +357,40 @@ class TestHandleUserInput:
         await worker._handle(event)
 
         fake_memory_manager.load_memory_md.assert_awaited_once_with(agent_id="planner")
+
+    async def test_user_input_loads_image_attachments_into_messages(self, private_bus, runtime, state_store, tmp_path):
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+        image_path = tmp_path / "shot.png"
+        image_path.write_bytes(b"fake-image-bytes")
+
+        event = EventEnvelope(
+            type=USER_INPUT, session_id="s1", turn_id="t1",
+            payload={
+                "content": "看看这张图",
+                "attachments": [
+                    {
+                        "kind": "image",
+                        "name": "shot.png",
+                        "path": str(image_path),
+                        "mime_type": "image/png",
+                    }
+                ],
+            },
+        )
+        await worker._handle(event)
+
+        state = state_store.get_turn("s1", "t1")
+        assert state is not None
+        user_message = state.messages[-1]
+        assert user_message["role"] == "user"
+        assert user_message["attachments"] == [
+            {
+                "kind": "image",
+                "name": "shot.png",
+                "mime_type": "image/png",
+                "data": "ZmFrZS1pbWFnZS1ieXRlcw==",
+            }
+        ]
 
 
 # ── LLM_CALL_RESULT 处理测试 ─────────────────────────────

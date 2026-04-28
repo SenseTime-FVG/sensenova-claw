@@ -4,9 +4,17 @@ import { useState, useCallback } from 'react';
 import { singleFileFlow, dirUploadFlow, type ProgressCallback } from '@/lib/fileUpload';
 import { type UploadProgressItem } from '@/components/chat/UploadProgress';
 
+export interface UploadedItem {
+  path: string;
+  name: string;
+  mimeType: string;
+  isImage: boolean;
+  isFolder: boolean;
+}
+
 interface UseFileUploadOptions {
   selectedAgent: string;
-  onUploadSuccess: (path: string) => void;
+  onUploadSuccess: (item: UploadedItem) => void;
 }
 
 export function useFileUpload({ selectedAgent, onUploadSuccess }: UseFileUploadOptions) {
@@ -41,7 +49,13 @@ export function useFileUpload({ selectedAgent, onUploadSuccess }: UseFileUploadO
           : undefined;
 
         const result = await dirUploadFlow(topFolder, fileList, selectedAgent, onProgress);
-        onUploadSuccess(result.path);
+        onUploadSuccess({
+          path: result.path,
+          name: topFolder,
+          mimeType: 'inode/directory',
+          isImage: false,
+          isFolder: true,
+        });
         setUploadItems(prev => prev.map(it => it.id === itemId ? { ...it, status: 'done', percent: 100 } : it));
       } catch (err) {
         setUploadItems(prev => prev.map(it => it.id === itemId
@@ -66,7 +80,13 @@ export function useFileUpload({ selectedAgent, onUploadSuccess }: UseFileUploadO
             : undefined;
 
           const result = await singleFileFlow(file, selectedAgent, onProgress);
-          onUploadSuccess(result.path);
+          onUploadSuccess({
+            path: result.path,
+            name: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            isImage: file.type.startsWith('image/'),
+            isFolder: false,
+          });
           setUploadItems(prev => prev.map(it => it.id === itemId ? { ...it, status: 'done', percent: 100 } : it));
         } catch (err) {
           setUploadItems(prev => prev.map(it => it.id === itemId

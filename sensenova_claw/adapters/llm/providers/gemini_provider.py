@@ -322,9 +322,12 @@ class GeminiProvider(LLMProvider):
         for msg in messages:
             if pending_google_tool_reply and msg.get("role") == "tool":
                 cleaned.append(self._normalize_tool_message_for_google(msg))
+                pending_google_tool_reply = False
                 continue
 
-            if msg.get("role") == "assistant" and has_thought_signature(msg):
+            if msg.get("role") == "user" and msg.get("attachments"):
+                cleaned.append(self._normalize_user_message(msg))
+            elif msg.get("role") == "assistant" and has_thought_signature(msg):
                 cleaned.append(self._rebuild_assistant_message(msg))
             elif msg.get("role") == "assistant":
                 cleaned.append(self._normalize_assistant_message(msg))
@@ -388,7 +391,13 @@ class GeminiProvider(LLMProvider):
             # 收集后续连续的 tool 消息
             found_ids: set[str] = set()
             tool_msgs: list[dict[str, Any]] = []
-            while i < len(messages) and messages[i].get("role") == "tool":
+            while i < len(messages) and (
+                messages[i].get("role") == "tool"
+                or (
+                    messages[i].get("role") == "user"
+                    and messages[i].get("tool_call_id")
+                )
+            ):
                 tool_msg = messages[i]
                 tid = tool_msg.get("tool_call_id", "")
                 found_ids.add(tid)
@@ -508,6 +517,32 @@ class GeminiProvider(LLMProvider):
             "tool_call_id": message.get("tool_call_id"),
             "content": message.get("content", ""),
         }
+
+    def _normalize_user_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(message)
+        attachments = normalized.pop("attachments", []) or []
+        blocks: list[dict[str, Any]] = []
+
+        content = normalized.get("content", "")
+        if isinstance(content, str) and content:
+            blocks.append({"type": "text", "text": content})
+
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+            if str(attachment.get("kind") or "") != "image":
+                continue
+            mime_type = str(attachment.get("mime_type") or "").strip()
+            data = str(attachment.get("data") or "").strip()
+            if not mime_type or not data:
+                continue
+            blocks.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime_type};base64,{data}"},
+            })
+
+        normalized["content"] = blocks or [{"type": "text", "text": ""}]
+        return normalized
 
     def _normalize_assistant_message(self, message: dict[str, Any]) -> dict[str, Any]:
         result = dict(message)

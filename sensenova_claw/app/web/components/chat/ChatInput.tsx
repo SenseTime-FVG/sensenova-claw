@@ -1,11 +1,11 @@
 'use client';
 
 import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect, useMemo } from 'react';
-import { Send, Square, Paperclip, File, FolderOpen } from 'lucide-react';
+import { Send, Square, Paperclip, File, FolderOpen, X } from 'lucide-react';
 import { useDrop } from 'react-dnd';
 import { TargetSelector } from './TargetSelector';
 import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
-import { type ContextFileRef } from '@/lib/chatTypes';
+import { type ChatAttachmentRef, type ContextFileRef } from '@/lib/chatTypes';
 import { UploadProgress } from './UploadProgress';
 import { useFileUpload } from '@/hooks/useFileUpload';
 import { singleFileFlow } from '@/lib/fileUpload';
@@ -20,6 +20,7 @@ interface ChatInputProps {
     content: string,
     contextFiles?: ContextFileRef[],
     recommendation?: RecommendationSendMeta | null,
+    attachments?: ChatAttachmentRef[],
   ) => void;
   onSlashSubmit: (content: string) => boolean;
   onStop?: () => void;
@@ -39,11 +40,13 @@ export interface ChatInputHandle {
 interface SessionDraftState {
   text: string;
   recommendation: RecommendationSendMeta | null;
+  attachments: ChatAttachmentRef[];
 }
 
 const EMPTY_DRAFT: SessionDraftState = {
   text: '',
   recommendation: null,
+  attachments: [],
 };
 
 function getDraftKey(sessionId: string | null): string {
@@ -85,12 +88,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const currentDraft = sessionDrafts[currentDraftKey] ?? EMPTY_DRAFT;
   const inputValue = currentDraft.text;
   const draftRecommendation = currentDraft.recommendation;
+  const draftAttachments = currentDraft.attachments;
 
   const setCurrentDraft = useCallback((updater: (prev: SessionDraftState) => SessionDraftState) => {
     setSessionDrafts(prev => {
       const current = prev[currentDraftKey] ?? EMPTY_DRAFT;
       const nextDraft = updater(current);
-      if (!nextDraft.text && !nextDraft.recommendation) {
+      if (!nextDraft.text && !nextDraft.recommendation && !nextDraft.attachments.length) {
         if (!(currentDraftKey in prev)) {
           return prev;
         }
@@ -109,6 +113,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     setCurrentDraft(prev => ({
       text,
       recommendation: text.trim() ? prev.recommendation : null,
+      attachments: prev.attachments,
     }));
   }, [setCurrentDraft]);
 
@@ -137,6 +142,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     setCurrentDraft(() => ({
       text: pendingPrefill.text,
       recommendation: pendingPrefill.recommendation || null,
+      attachments: [],
     }));
     clearPendingPrefill();
     setTimeout(() => {
@@ -180,6 +186,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       return {
         text: prefix + `@${path} `,
         recommendation: null,
+        attachments: prev.attachments,
       };
     });
     resizeTextarea();
@@ -197,7 +204,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const { uploadItems, handleFileSelect } = useFileUpload({
     selectedAgent,
-    onUploadSuccess: insertAtRef,
+    onUploadSuccess: (item) => {
+      if (item.isImage && !item.isFolder) {
+        setCurrentDraft(prev => ({
+          text: prev.text,
+          recommendation: null,
+          attachments: prev.attachments.some(att => att.path === item.path)
+            ? prev.attachments
+            : [...prev.attachments, {
+              kind: 'image',
+              name: item.name,
+              path: item.path,
+              mime_type: item.mimeType,
+            }],
+        }));
+        return;
+      }
+      insertAtRef(item.path);
+    },
   });
 
   useImperativeHandle(ref, () => ({
@@ -205,6 +229,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       setCurrentDraft(() => ({
         text,
         recommendation: null,
+        attachments: [],
       }));
       resizeTextarea();
     },
@@ -230,7 +255,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const handleSend = useCallback(() => {
     const content = inputValue.trim();
-    if (!content || !wsConnected || disabled || isSubmitting || showStopButton) return;
+    const hasAttachments = draftAttachments.length > 0;
+    if ((!content && !hasAttachments) || !wsConnected || disabled || isSubmitting || showStopButton) return;
 
     if (handleSlashSubmitHook(content)) {
       clearCurrentDraft();
@@ -256,11 +282,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       setIsSubmitting(true);
     }
     const contextFiles = parseAtRefs(content);
-    onSend(content, contextFiles.length > 0 ? contextFiles : undefined, draftRecommendation);
+    onSend(
+      content,
+      contextFiles.length > 0 ? contextFiles : undefined,
+      draftRecommendation,
+      hasAttachments ? draftAttachments : undefined,
+    );
     clearCurrentDraft();
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   }, [
     inputValue,
+    draftAttachments,
     wsConnected,
     disabled,
     isSubmitting,
@@ -305,12 +337,31 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       if (!file) continue;
       try {
         const result = await singleFileFlow(file, selectedAgent);
-        insertAtRef(result.path);
+        setCurrentDraft(prev => ({
+          text: prev.text,
+          recommendation: null,
+          attachments: prev.attachments.some(att => att.path === result.path)
+            ? prev.attachments
+            : [...prev.attachments, {
+              kind: 'image',
+              name: file.name || 'pasted-image.png',
+              path: result.path,
+              mime_type: file.type || 'image/png',
+            }],
+        }));
       } catch {
         // 上传失败静默忽略
       }
     }
-  }, [selectedAgent, insertAtRef]);
+  }, [selectedAgent, setCurrentDraft]);
+
+  const removeAttachment = useCallback((path: string) => {
+    setCurrentDraft(prev => ({
+      text: prev.text,
+      recommendation: prev.recommendation,
+      attachments: prev.attachments.filter(att => att.path !== path),
+    }));
+  }, [setCurrentDraft]);
 
   return (
     <div className="border-t bg-card/50 backdrop-blur-sm px-4 pt-2.5 pb-2 shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
@@ -377,6 +428,26 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
           <div className="flex-1">
             <UploadProgress items={uploadItems} />
+            {draftAttachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2 px-2 pt-1">
+                {draftAttachments.map((attachment) => (
+                  <div
+                    key={attachment.path}
+                    className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-muted/60 px-3 py-1 text-xs text-foreground"
+                  >
+                    <span className="max-w-[220px] truncate">{attachment.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(attachment.path)}
+                      className="rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                      aria-label={`移除附件 ${attachment.name}`}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <SlashCommandMenu inputValue={inputValue} skills={skills} onSelect={handleSlashSelect} visible={showMenu} />
             <textarea
               data-testid="chat-input"
@@ -411,7 +482,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             <button
               data-testid="send-button"
               onClick={handleSend}
-              disabled={!inputValue.trim() || !wsConnected || disabled || isSubmitting}
+              disabled={(!inputValue.trim() && draftAttachments.length === 0) || !wsConnected || disabled || isSubmitting}
               title={t('chat.sendMessage')}
               aria-label={t('chat.sendMessage')}
               className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-md shadow-primary/20"
