@@ -54,3 +54,4 @@ class ToolRuntime:
         if worker:
             await worker.stop()
             logger.info("Cleaned up ToolSessionWorker for session %s", session_id)
+        await self.registry.dispose_mcp_session(session_id)

@@ -38,11 +38,43 @@ class TestAgentConfig:
         expected_keys = {
             "id", "name", "description", "model",
             "temperature", "max_tokens", "extra_body", "system_prompt", "tools",
-            "skills", "workdir", "can_delegate_to", "max_delegation_depth",
+            "skills", "mcp_servers", "mcp_tools", "workdir", "can_delegate_to", "max_delegation_depth",
             "max_pingpong_turns",
             "enabled", "created_at", "updated_at",
         }
         assert set(d.keys()) == expected_keys
+
+    def test_mcp_policy_roundtrip(self):
+        a = AgentConfig.create(
+            id="mcp",
+            name="MCP",
+            mcp_servers=["docs", "browser"],
+            mcp_tools=["docs/search", "browser/click"],
+        )
+        b = AgentConfig.from_dict(a.to_dict())
+        assert b.mcp_servers == ["docs", "browser"]
+        assert b.mcp_tools == ["docs/search", "browser/click"]
+
+    def test_tri_state_lists_preserve_none(self):
+        a = AgentConfig.create(
+            id="tri",
+            name="Tri",
+            tools=None,
+            skills=None,
+            mcp_servers=None,
+            mcp_tools=None,
+        )
+        d = a.to_dict()
+        assert d["tools"] is None
+        assert d["skills"] is None
+        assert d["mcp_servers"] is None
+        assert d["mcp_tools"] is None
+
+        b = AgentConfig.from_dict(d)
+        assert b.tools is None
+        assert b.skills is None
+        assert b.mcp_servers is None
+        assert b.mcp_tools is None
 
     def test_create_supports_send_message_aliases(self):
         a = AgentConfig.create(

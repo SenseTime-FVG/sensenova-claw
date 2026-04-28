@@ -13,6 +13,8 @@ from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import ERROR_RAISED, PROACTIVE_RESULT, USER_INPUT
 
+ACTIVE_TURN_STATUSES = {"started", "running", "waiting_user", "tool_waiting"}
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT PRIMARY KEY,
@@ -249,7 +251,73 @@ class Repository:
     ) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self._sync_list_sessions, limit, include_hidden)
 
+    async def list_sessions_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        include_hidden: bool = False,
+        search_term: str = "",
+        status: str = "all",
+        include_ancestors: bool = False,
+        include_all: bool = False,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            self._sync_list_sessions_page,
+            page,
+            page_size,
+            include_hidden,
+            search_term,
+            status,
+            include_ancestors,
+            include_all,
+        )
+
     def _sync_list_sessions(self, limit: int, include_hidden: bool) -> list[dict[str, Any]]:
+        sessions = self._sync_get_visible_sessions(include_hidden)
+        return self._include_visible_ancestors_within_limit(sessions, limit)
+
+    def _sync_list_sessions_page(
+        self,
+        page: int,
+        page_size: int,
+        include_hidden: bool,
+        search_term: str,
+        status: str,
+        include_ancestors: bool,
+        include_all: bool,
+    ) -> dict[str, Any]:
+        safe_page = max(1, int(page))
+        safe_page_size = max(1, int(page_size))
+        sessions = self._sync_get_visible_sessions(include_hidden)
+        sessions = self._filter_sessions(sessions, search_term=search_term, status=status)
+        total = len(sessions)
+        active_total = sum(1 for session in sessions if str(session.get("status", "")).strip().lower() == "active")
+        if include_all:
+            return {
+                "sessions": sessions,
+                "total": total,
+                "active_total": active_total,
+                "page": 1,
+                "page_size": total,
+                "total_pages": 1 if total else 0,
+            }
+        total_pages = (total + safe_page_size - 1) // safe_page_size if total else 0
+        start = (safe_page - 1) * safe_page_size
+        end = start + safe_page_size
+        page_sessions = sessions[start:end]
+        if include_ancestors:
+            page_sessions = self._include_visible_ancestors_for_page(sessions, page_sessions)
+        return {
+            "sessions": page_sessions,
+            "total": total,
+            "active_total": active_total,
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "total_pages": total_pages,
+        }
+
+    def _sync_get_visible_sessions(self, include_hidden: bool) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
             """
@@ -270,9 +338,170 @@ class Repository:
             """,
         ).fetchall()
         sessions = [dict(row) for row in rows]
+        for row in sessions:
+            row["status"] = self._derive_session_status(row)
+        child_parent_ids = self._collect_child_parent_ids(sessions)
+        for row in sessions:
+            row["has_children"] = row.get("session_id") in child_parent_ids
         if not include_hidden:
             sessions = [row for row in sessions if not self._is_hidden_session(row.get("meta"))]
-        return sessions[:limit]
+        return sessions
+
+    def _parse_parent_session_id(self, meta: Any) -> str | None:
+        if not meta:
+            return None
+        try:
+            payload = json.loads(meta) if isinstance(meta, str) else dict(meta)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+        parent_session_id = str(payload.get("parent_session_id") or "").strip()
+        return parent_session_id or None
+
+    def _collect_child_parent_ids(self, sessions: list[dict[str, Any]]) -> set[str]:
+        parent_ids: set[str] = set()
+        for session in sessions:
+            parent_session_id = self._parse_parent_session_id(session.get("meta"))
+            if parent_session_id:
+                parent_ids.add(parent_session_id)
+        return parent_ids
+
+    def _include_visible_ancestors_within_limit(
+        self,
+        sessions: list[dict[str, Any]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or len(sessions) <= limit:
+            return sessions
+
+        session_map = {str(session["session_id"]): session for session in sessions}
+        selected_ids = [str(session["session_id"]) for session in sessions[:limit]]
+        seen_ids = set(selected_ids)
+
+        for session_id in list(selected_ids):
+            current = session_map.get(session_id)
+            while current is not None:
+                parent_session_id = self._parse_parent_session_id(current.get("meta"))
+                if not parent_session_id or parent_session_id in seen_ids:
+                    break
+                parent = session_map.get(parent_session_id)
+                if parent is None:
+                    break
+                seen_ids.add(parent_session_id)
+                selected_ids.append(parent_session_id)
+                current = parent
+
+        return [session_map[session_id] for session_id in selected_ids]
+
+    def _include_visible_ancestors_for_page(
+        self,
+        all_sessions: list[dict[str, Any]],
+        page_sessions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not page_sessions:
+            return []
+        session_map = {str(session["session_id"]): session for session in all_sessions}
+        ordered_ids = [str(session["session_id"]) for session in page_sessions]
+        seen_ids = set(ordered_ids)
+
+        for session_id in list(ordered_ids):
+            current = session_map.get(session_id)
+            while current is not None:
+                parent_session_id = self._parse_parent_session_id(current.get("meta"))
+                if not parent_session_id or parent_session_id in seen_ids:
+                    break
+                parent = session_map.get(parent_session_id)
+                if parent is None:
+                    break
+                seen_ids.add(parent_session_id)
+                ordered_ids.append(parent_session_id)
+                current = parent
+
+        return [session_map[session_id] for session_id in ordered_ids]
+
+    def _filter_sessions(
+        self,
+        sessions: list[dict[str, Any]],
+        *,
+        search_term: str,
+        status: str,
+    ) -> list[dict[str, Any]]:
+        normalized_search = str(search_term or "").strip().lower()
+        normalized_status = str(status or "all").strip().lower()
+        if not normalized_search and normalized_status in {"", "all"}:
+            return sessions
+
+        filtered: list[dict[str, Any]] = []
+        for session in sessions:
+            session_status = str(session.get("status", "")).strip().lower()
+            if normalized_status not in {"", "all"} and session_status != normalized_status:
+                continue
+            if normalized_search:
+                session_id = str(session.get("session_id", "")).lower()
+                title = self._parse_session_title(session.get("meta"))
+                if normalized_search not in session_id and normalized_search not in title:
+                    continue
+            filtered.append(session)
+        return filtered
+
+    def _parse_session_title(self, meta: Any) -> str:
+        if not meta:
+            return ""
+        try:
+            payload = json.loads(meta) if isinstance(meta, str) else dict(meta)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return ""
+        return str(payload.get("title") or payload.get("name") or "").strip().lower()
+
+    def _derive_session_status(self, session: dict[str, Any]) -> str:
+        last_turn_status = str(session.get("last_turn_status") or "").strip().lower()
+        if not last_turn_status:
+            stored_status = str(session.get("status") or "").strip().lower()
+            return stored_status or "active"
+        if last_turn_status in ACTIVE_TURN_STATUSES:
+            return "active"
+        return "closed"
+
+    def _sync_update_session_status_from_turn(self, conn: sqlite3.Connection, turn_id: str) -> None:
+        row = conn.execute(
+            "SELECT session_id, status FROM turns WHERE turn_id = ?",
+            (turn_id,),
+        ).fetchone()
+        if not row:
+            return
+        session_id = str(row["session_id"])
+        turn_status = str(row["status"] or "").strip().lower()
+        session_status = "active" if turn_status in ACTIVE_TURN_STATUSES else "closed"
+        conn.execute(
+            "UPDATE sessions SET status = ? WHERE session_id = ?",
+            (session_status, session_id),
+        )
+
+    async def list_descendant_session_ids(self, session_id: str) -> list[str]:
+        """列出某会话的全部后代会话 ID，按从近到远的层级顺序返回。"""
+        return await asyncio.to_thread(self._sync_list_descendant_session_ids, session_id)
+
+    def _sync_list_descendant_session_ids(self, session_id: str) -> list[str]:
+        conn = self._conn()
+        rows = conn.execute("SELECT session_id, meta FROM sessions").fetchall()
+        children_by_parent: dict[str, list[str]] = {}
+        for row in rows:
+            child_session_id = str(row["session_id"])
+            parent_session_id = self._parse_parent_session_id(row["meta"])
+            if not parent_session_id:
+                continue
+            children_by_parent.setdefault(parent_session_id, []).append(child_session_id)
+
+        descendants: list[str] = []
+        queue = list(children_by_parent.get(session_id, []))
+        seen: set[str] = set()
+        while queue:
+            current = queue.pop(0)
+            if current in seen:
+                continue
+            seen.add(current)
+            descendants.append(current)
+            queue.extend(children_by_parent.get(current, []))
+        return descendants
 
     async def create_turn(self, turn_id: str, session_id: str, user_input: str) -> None:
         await asyncio.to_thread(self._sync_create_turn, turn_id, session_id, user_input)
@@ -283,6 +512,7 @@ class Repository:
             "INSERT INTO turns (turn_id, session_id, status, started_at, user_input) VALUES (?, ?, ?, ?, ?)",
             (turn_id, session_id, "started", time.time(), user_input),
         )
+        conn.execute("UPDATE sessions SET status = ? WHERE session_id = ?", ("active", session_id))
         conn.commit()
 
     async def complete_turn(self, turn_id: str, agent_response: str) -> None:
@@ -294,6 +524,7 @@ class Repository:
             "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
             ("completed", time.time(), agent_response, turn_id),
         )
+        self._sync_update_session_status_from_turn(conn, turn_id)
         conn.commit()
 
     async def update_turn_status(
@@ -311,6 +542,7 @@ class Repository:
             "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
             (status, time.time(), agent_response, turn_id),
         )
+        self._sync_update_session_status_from_turn(conn, turn_id)
         conn.commit()
 
     async def cancel_stale_started_turns(
@@ -341,6 +573,7 @@ class Repository:
                 "UPDATE turns SET status = ?, ended_at = ?, agent_response = ? WHERE turn_id = ?",
                 ("cancelled", now, reason, turn_id),
             )
+            self._sync_update_session_status_from_turn(conn, turn_id)
             conn.execute(
                 """INSERT INTO events (event_id, session_id, turn_id, event_type, timestamp, source, trace_id, payload_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -405,6 +638,74 @@ class Repository:
         conn = self._conn()
         rows = conn.execute("SELECT * FROM events WHERE session_id = ? ORDER BY timestamp", (session_id,)).fetchall()
         return [dict(row) for row in rows]
+
+    async def get_agent_analytics(self, since_ts: float) -> dict[str, dict[str, Any]]:
+        """按 agent_id 聚合会话/轮次/LLM/工具调用数（timestamp >= since_ts 的增量）。
+
+        返回 {agent_id: {sessions, turns, llm_calls, tool_calls, last_active}}。
+        sessions 与 last_active 统计的是全量，其他统计受 since_ts 过滤。
+        """
+        return await asyncio.to_thread(self._sync_get_agent_analytics, since_ts)
+
+    def _sync_get_agent_analytics(self, since_ts: float) -> dict[str, dict[str, Any]]:
+        conn = self._conn()
+        session_rows = conn.execute(
+            "SELECT session_id, agent_id, meta, last_active FROM sessions"
+        ).fetchall()
+        session_to_agent: dict[str, str] = {}
+        by_agent: dict[str, dict[str, Any]] = {}
+        for row in session_rows:
+            aid = row["agent_id"] or "default"
+            # 回退逻辑与 _resolve_agent_id 保持一致：列为 default 时再查 meta JSON
+            if aid == "default" and row["meta"]:
+                try:
+                    meta = json.loads(row["meta"])
+                    meta_aid = meta.get("agent_id") if isinstance(meta, dict) else None
+                    if meta_aid:
+                        aid = meta_aid
+                except (json.JSONDecodeError, TypeError, AttributeError):
+                    pass
+            session_to_agent[row["session_id"]] = aid
+            info = by_agent.setdefault(
+                aid,
+                {"sessions": 0, "turns": 0, "llm_calls": 0, "tool_calls": 0, "last_active": 0.0},
+            )
+            info["sessions"] += 1
+            info["last_active"] = max(info["last_active"], row["last_active"] or 0.0)
+
+        turn_rows = conn.execute(
+            "SELECT session_id, COUNT(*) AS cnt FROM turns WHERE started_at >= ? GROUP BY session_id",
+            (since_ts,),
+        ).fetchall()
+        for row in turn_rows:
+            aid = session_to_agent.get(row["session_id"])
+            if aid is None:
+                continue
+            by_agent.setdefault(
+                aid,
+                {"sessions": 0, "turns": 0, "llm_calls": 0, "tool_calls": 0, "last_active": 0.0},
+            )["turns"] += row["cnt"]
+
+        event_rows = conn.execute(
+            "SELECT session_id, event_type, COUNT(*) AS cnt FROM events "
+            "WHERE timestamp >= ? AND event_type IN (?, ?) "
+            "GROUP BY session_id, event_type",
+            (since_ts, "llm.call_completed", "tool.call_completed"),
+        ).fetchall()
+        for row in event_rows:
+            aid = session_to_agent.get(row["session_id"])
+            if aid is None:
+                continue
+            info = by_agent.setdefault(
+                aid,
+                {"sessions": 0, "turns": 0, "llm_calls": 0, "tool_calls": 0, "last_active": 0.0},
+            )
+            if row["event_type"] == "llm.call_completed":
+                info["llm_calls"] += row["cnt"]
+            else:
+                info["tool_calls"] += row["cnt"]
+
+        return by_agent
 
     def _parse_payload_json(self, raw: str | bytes | None) -> dict[str, Any]:
         """解析 events.payload_json，失败时回退为空 dict。"""

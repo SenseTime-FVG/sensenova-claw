@@ -33,7 +33,7 @@ Create professional charts, graphs, and statistical visualizations using Python'
 ### Setup Environment
 
 ```bash
-cd skills/python-dataviz
+cd .sensenova-claw/skills/python-dataviz
 python3 -m venv .venv
 source .venv/bin/activate
 pip install .
@@ -41,8 +41,21 @@ pip install .
 
 ### Create a Chart
 
+**⚠️ 图中包含任何中文（标题 / 坐标轴 / 图例 / 标签 / 注释）时，必须在 `import matplotlib.pyplot` 之后立刻设置中文字体，否则会渲染成 □□□ 豆腐块。**
+
 ```python
+import matplotlib
 import matplotlib.pyplot as plt
+
+# 跨平台中文字体回退列表：按顺序找第一个存在的字体
+matplotlib.rcParams['font.sans-serif'] = [
+    'PingFang SC', 'Heiti SC', 'Arial Unicode MS',  # macOS
+    'Microsoft YaHei', 'SimHei',                    # Windows
+    'Noto Sans CJK SC', 'WenQuanYi Micro Hei',      # Linux
+    'DejaVu Sans',                                  # 兜底（英文 fallback）
+]
+matplotlib.rcParams['axes.unicode_minus'] = False   # 避免负号显示成方块
+
 import numpy as np
 
 # Data
@@ -62,6 +75,8 @@ plt.tight_layout()
 plt.savefig('output.png', dpi=300, bbox_inches='tight')
 plt.savefig('output.svg', bbox_inches='tight')
 ```
+
+若使用 seaborn，同样在 `sns.set_theme()` / `sns.set_style()` 之前或之后执行上述 `rcParams` 设置都生效（seaborn 只接管样式，不覆盖字体族）。
 
 ## Chart Selection Guide
 
@@ -87,7 +102,7 @@ plt.savefig('output.svg', bbox_inches='tight')
 
 **Interactive:**
 - Any plotly chart → `plotly.express` or `plotly.graph_objects`
-- See references/plotly-examples.md
+- See `scripts/interactive.py` for examples
 
 ## Best Practices
 
@@ -149,8 +164,6 @@ See references/ for detailed guides:
 
 - **Color theory & palettes**: references/colors.md
 - **Statistical plots**: references/statistical.md
-- **Plotly interactive charts**: references/plotly-examples.md
-- **Multi-panel layouts**: references/layouts.md
 
 ## Example Scripts
 
@@ -209,9 +222,9 @@ plt.savefig('output.png', dpi=300)
 
 **"No module named matplotlib"**
 ```bash
-cd skills/python-dataviz
+cd .sensenova-claw/skills/python-dataviz
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install .
 ```
 
 **Blank output / "Figure is empty"**
@@ -230,12 +243,17 @@ plt.savefig('output.png', bbox_inches='tight')
 plt.savefig('output.png', dpi=300)  # Not 72 or 100
 ```
 
+**中文显示成 □□□ / tofu 方块**
+
+matplotlib 默认字体 `DejaVu Sans` 不包含 CJK 字形，必须显式配置中文字体。见上文 "Create a Chart" 段落开头的 `rcParams['font.sans-serif']` 设置。
+排查：`python -c "import matplotlib.font_manager as fm; print([f.name for f in fm.fontManager.ttflist if 'Hei' in f.name or 'Ping' in f.name or 'CJK' in f.name])"` 看本机实际有哪些中文字体，把存在的那几个放在回退列表最前。
+
 ## Environment
 
 The skill includes a venv with all dependencies. Always activate before use:
 
 ```bash
-cd /home/matt/.openclaw/workspace/skills/python-dataviz
+cd .sensenova-claw/skills/python-dataviz
 source .venv/bin/activate
 ```
 

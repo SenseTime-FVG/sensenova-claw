@@ -22,6 +22,12 @@ from sensenova_claw.capabilities.agents.preferences import (
     save_preferences,
 )
 from sensenova_claw.capabilities.agents.registry import SYSTEM_PROMPT_FILENAME
+from sensenova_claw.capabilities.mcp.runtime import (
+    SessionMcpRuntime,
+    is_mcp_server_enabled_for_agent,
+    is_mcp_tool_enabled_for_agent,
+)
+from sensenova_claw.platform.config.mcp import build_mcp_servers_fingerprint, normalize_mcp_servers
 from sensenova_claw.capabilities.tools.registry import _is_tool_config_enabled
 from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
@@ -55,14 +61,61 @@ def _agent_prompt_path(request: Request, agent_id: str) -> Path:
     return _sensenova_claw_home_path(request) / "agents" / agent_id / SYSTEM_PROMPT_FILENAME
 
 
+def _remove_dedicated_miniapp_pages(request: Request, agent_id: str) -> None:
+    custom_pages_path = _sensenova_claw_home_path(request) / "custom_pages.json"
+    if not custom_pages_path.exists():
+        return
+
+    try:
+        raw_pages = json.loads(custom_pages_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("读取 custom_pages.json 失败，跳过 mini-app 清理", exc_info=True)
+        return
+
+    if not isinstance(raw_pages, list):
+        return
+
+    filtered_pages = [
+        page for page in raw_pages
+        if not (
+            isinstance(page, dict)
+            and str(page.get("agent_id") or "") == agent_id
+            and bool(page.get("create_dedicated_agent", False))
+        )
+    ]
+    if len(filtered_pages) == len(raw_pages):
+        return
+
+    custom_pages_path.write_text(
+        json.dumps(filtered_pages, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+async def _get_agent_detail_mcp_runtime(request: Request, servers: dict[str, Any]) -> SessionMcpRuntime:
+    fingerprint = build_mcp_servers_fingerprint(servers)
+    runtime = getattr(request.app.state, "_agent_detail_mcp_runtime", None)
+    current = getattr(request.app.state, "_agent_detail_mcp_fingerprint", None)
+    if runtime is not None and current == fingerprint:
+        return runtime
+    if runtime is not None:
+        await runtime.close()
+    runtime = SessionMcpRuntime(session_id="agent-detail:shared", servers=servers)
+    request.app.state._agent_detail_mcp_runtime = runtime
+    request.app.state._agent_detail_mcp_fingerprint = fingerprint
+    return runtime
+
+
 def _serialize_agent_for_config(agent: AgentConfig) -> dict[str, Any]:
     data: dict[str, Any] = {
         "name": agent.name,
         "description": agent.description,
         "model": agent.model,
         "temperature": agent.temperature,
-        "tools": list(agent.tools),
-        "skills": list(agent.skills),
+        "tools": list(agent.tools) if agent.tools is not None else None,
+        "skills": list(agent.skills) if agent.skills is not None else None,
+        "mcp_servers": list(agent.mcp_servers) if agent.mcp_servers is not None else None,
+        "mcp_tools": list(agent.mcp_tools) if agent.mcp_tools is not None else None,
         "workdir": agent.workdir,
         "can_delegate_to": list(agent.can_delegate_to) if agent.can_delegate_to is not None else None,
         "max_delegation_depth": agent.max_delegation_depth,
@@ -105,7 +158,36 @@ def _persist_agent_prompt(request: Request, agent_id: str, system_prompt: str) -
         prompt_path.unlink()
 
 
-def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, Any]:
+def _is_agent_builtin_tool_enabled(agent_cfg: AgentConfig, tool_name: str) -> bool:
+    if tool_name == "send_message" and agent_cfg.can_delegate_to is None:
+        return False
+    if agent_cfg.tools is None:
+        return False
+    if not agent_cfg.tools:
+        return True
+    if tool_name == "send_message" and agent_cfg.can_delegate_to is not None:
+        return True
+    return tool_name in agent_cfg.tools
+
+
+def _is_agent_skill_enabled(
+    agent_cfg: AgentConfig,
+    skill_name: str,
+    skill_prefs: dict[str, bool],
+) -> bool:
+    if agent_cfg.skills is None:
+        return False
+    if not agent_cfg.skills:
+        return skill_prefs.get(skill_name, True)
+    return skill_name in agent_cfg.skills
+
+
+async def _build_agent_detail(
+    agent_cfg: AgentConfig,
+    request: Request,
+    *,
+    include_mcp_detail: bool = True,
+) -> dict[str, Any]:
     """构建 Agent 的完整描述（含工具和技能详情）"""
     tool_registry = request.app.state.tool_registry
     skill_registry = request.app.state.skill_registry
@@ -117,10 +199,7 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
     for name, tool in tool_registry._tools.items():
         if name == "send_message" and agent_cfg.can_delegate_to is None:
             continue
-        # 如果 Agent 配置了 tools 列表，过滤展示
-        if agent_cfg.tools and name not in agent_cfg.tools:
-            continue
-        enabled = _is_tool_config_enabled(name)
+        enabled = _is_tool_config_enabled(name) and _is_agent_builtin_tool_enabled(agent_cfg, name)
         tools_detail.append({
             "name": name,
             "description": tool.description or "",
@@ -129,11 +208,7 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
 
     skills_detail = []
     for skill in skill_registry.get_all():
-        # 显示所有技能，根据 Agent 配置决定 enabled 状态
-        if agent_cfg.skills:
-            enabled = skill.name in agent_cfg.skills
-        else:
-            enabled = skill_prefs.get(skill.name, True)
+        enabled = _is_agent_skill_enabled(agent_cfg, skill.name, skill_prefs)
         # 分类: installed / builtin / workspace
         if skill.install_info:
             category = "installed"
@@ -150,7 +225,38 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
             "category": category,
         })
 
-    return {
+    mcp_servers_detail: list[dict[str, Any]] = []
+    mcp_tools_detail: list[dict[str, Any]] = []
+    mcp_servers = normalize_mcp_servers(getattr(request.app.state, "config").get("mcp.servers", {}))
+    if include_mcp_detail and mcp_servers:
+        runtime = await _get_agent_detail_mcp_runtime(request, mcp_servers)
+        try:
+            catalog = await runtime.ensure_catalog()
+            descriptors = catalog.tools
+        except Exception:  # noqa: BLE001
+            logger.warning("构建 Agent MCP 详情失败 agent=%s", agent_cfg.id, exc_info=True)
+            descriptors = []
+        descriptors_by_server: dict[str, list[Any]] = {}
+        for descriptor in descriptors:
+            descriptors_by_server.setdefault(descriptor.server_name, []).append(descriptor)
+            mcp_tools_detail.append({
+                "name": f"{descriptor.server_name}/{descriptor.tool_name}",
+                "serverName": descriptor.server_name,
+                "toolName": descriptor.tool_name,
+                "safeName": descriptor.safe_name,
+                "description": descriptor.description or "",
+                "enabled": is_mcp_tool_enabled_for_agent(descriptor, agent_cfg),
+            })
+        for server_name, server_cfg in sorted(mcp_servers.items()):
+            server_tools = descriptors_by_server.get(server_name, [])
+            mcp_servers_detail.append({
+                "name": server_name,
+                "transport": server_cfg.transport,
+                "enabled": is_mcp_server_enabled_for_agent(server_name, agent_cfg),
+                "toolCount": len(server_tools),
+            })
+
+    payload = {
         "id": agent_cfg.id,
         "name": agent_cfg.name,
         "status": "active" if agent_cfg.enabled else "disabled",
@@ -161,8 +267,12 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
         "maxTokens": agent_cfg.max_tokens,
         "toolCount": sum(1 for t in tools_detail if t["enabled"]),
         "skillCount": sum(1 for s in skills_detail if s["enabled"]),
+        "mcpServerCount": sum(1 for s in mcp_servers_detail if s["enabled"]),
+        "mcpToolCount": sum(1 for t in mcp_tools_detail if t["enabled"]),
         "tools": [t["name"] for t in tools_detail if t["enabled"]],
         "skills": [s["name"] for s in skills_detail if s["enabled"]],
+        "mcpServers": [s["name"] for s in mcp_servers_detail if s["enabled"]],
+        "mcpTools": [t["name"] for t in mcp_tools_detail if t["enabled"]],
         "toolsDetail": tools_detail,
         "skillsDetail": skills_detail,
         "canDelegateTo": agent_cfg.can_delegate_to,
@@ -170,6 +280,10 @@ def _build_agent_detail(agent_cfg: AgentConfig, request: Request) -> dict[str, A
         "createdAt": agent_cfg.created_at,
         "updatedAt": agent_cfg.updated_at,
     }
+    if include_mcp_detail:
+        payload["mcpServersDetail"] = mcp_servers_detail
+        payload["mcpToolsDetail"] = mcp_tools_detail
+    return payload
 
 
 # ── Pydantic 模型 ──────────────────────────────────────
@@ -189,6 +303,8 @@ class AgentConfigUpdate(BaseModel):
     systemPrompt: str | None = None
     tools: list[str] | None = None
     skills: list[str] | None = None
+    mcp_servers: list[str] | None = None
+    mcp_tools: list[str] | None = None
     can_delegate_to: list[str] | None = None
     max_delegation_depth: int | None = None
 
@@ -203,6 +319,8 @@ class AgentCreate(BaseModel):
     system_prompt: str = ""
     tools: list[str] = []
     skills: list[str] = []
+    mcp_servers: list[str] = []
+    mcp_tools: list[str] = []
     can_delegate_to: list[str] = []
     max_delegation_depth: int = 3
 
@@ -236,7 +354,7 @@ async def list_agents(request: Request):
 
     result = []
     for agent_cfg in registry.list_all():
-        agent = _build_agent_detail(agent_cfg, request)
+        agent = await _build_agent_detail(agent_cfg, request, include_mcp_detail=False)
 
         # 统计该 Agent 的会话数（兼容 agent_id 列与 meta JSON）
         agent_sessions = [s for s in sessions if _resolve_agent_id(s) == agent_cfg.id]
@@ -261,6 +379,73 @@ async def list_agents(request: Request):
     return result
 
 
+_ANALYTICS_RANGE_SECONDS: dict[str, int | None] = {
+    "1d": 86400,
+    "7d": 7 * 86400,
+    "30d": 30 * 86400,
+    "all": None,
+}
+
+
+@router.get("/analytics")
+async def get_agents_analytics(request: Request, range: str = "7d"):
+    """按 agent 维度返回使用聚合：会话/轮次/LLM 调用/工具调用。
+
+    range 取值：1d / 7d / 30d / all；sessions 与 last_active 统计的是全量，
+    turns / llm_calls / tool_calls 受 range 过滤。
+    """
+    if range not in _ANALYTICS_RANGE_SECONDS:
+        raise HTTPException(status_code=400, detail=f"Invalid range: {range}")
+    seconds = _ANALYTICS_RANGE_SECONDS[range]
+    since_ts = 0.0 if seconds is None else time.time() - seconds
+
+    registry = _get_agent_registry(request)
+    services = _get_services(request)
+    by_agent_raw = await services.repo.get_agent_analytics(since_ts)
+
+    rows: list[dict[str, Any]] = []
+    totals = {"sessions": 0, "turns": 0, "llm_calls": 0, "tool_calls": 0}
+    seen: set[str] = set()
+
+    def _append_row(agent_id: str, name: str, info: dict[str, Any]) -> None:
+        row = {
+            "agent_id": agent_id,
+            "name": name,
+            "sessions": int(info.get("sessions", 0)),
+            "turns": int(info.get("turns", 0)),
+            "llm_calls": int(info.get("llm_calls", 0)),
+            "tool_calls": int(info.get("tool_calls", 0)),
+            "last_active": float(info.get("last_active", 0.0) or 0.0),
+        }
+        rows.append(row)
+        totals["sessions"] += row["sessions"]
+        totals["turns"] += row["turns"]
+        totals["llm_calls"] += row["llm_calls"]
+        totals["tool_calls"] += row["tool_calls"]
+
+    # 先按注册表顺序输出（保证所有已注册 agent 都出现，哪怕无使用）
+    for cfg in registry.list_all():
+        info = by_agent_raw.get(cfg.id, {})
+        _append_row(cfg.id, cfg.name, info)
+        seen.add(cfg.id)
+
+    # 再补上已删除但还有历史会话的 agent（例如 default 回退等）
+    for agent_id, info in by_agent_raw.items():
+        if agent_id in seen:
+            continue
+        _append_row(agent_id, agent_id, info)
+
+    # 排序：按 sessions desc，其次 turns desc
+    rows.sort(key=lambda r: (r["sessions"], r["turns"]), reverse=True)
+
+    return {
+        "range": range,
+        "since_ts": since_ts,
+        "totals": totals,
+        "agents": rows,
+    }
+
+
 @router.get("/{agent_id}")
 async def get_agent(agent_id: str, request: Request):
     """获取 Agent 详情"""
@@ -270,7 +455,7 @@ async def get_agent(agent_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     services = _get_services(request)
-    agent = _build_agent_detail(agent_cfg, request)
+    agent = await _build_agent_detail(agent_cfg, request)
 
     sessions = await services.repo.list_sessions(limit=9999)
     agent_sessions = [s for s in sessions if _resolve_agent_id(s) == agent_id]
@@ -310,6 +495,8 @@ async def create_agent(body: AgentCreate, request: Request):
         system_prompt=body.system_prompt,
         tools=body.tools,
         skills=body.skills,
+        mcp_servers=body.mcp_servers,
+        mcp_tools=body.mcp_tools,
         can_delegate_to=body.can_delegate_to,
         max_delegation_depth=body.max_delegation_depth,
     )
@@ -321,7 +508,7 @@ async def create_agent(body: AgentCreate, request: Request):
     registry.register(agent)
 
     logger.info("Created agent: %s", agent.id)
-    return _build_agent_detail(agent, request)
+    return await _build_agent_detail(agent, request)
 
 
 @router.put("/{agent_id}/config")
@@ -346,10 +533,14 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
         updates["max_tokens"] = body.max_tokens
     if body.systemPrompt is not None:
         updates["system_prompt"] = body.systemPrompt
-    if body.tools is not None:
+    if "tools" in provided_fields:
         updates["tools"] = body.tools
-    if body.skills is not None:
+    if "skills" in provided_fields:
         updates["skills"] = body.skills
+    if "mcp_servers" in provided_fields:
+        updates["mcp_servers"] = body.mcp_servers
+    if "mcp_tools" in provided_fields:
+        updates["mcp_tools"] = body.mcp_tools
     if "can_delegate_to" in provided_fields:
         updates["can_delegate_to"] = body.can_delegate_to
     if body.max_delegation_depth is not None:
@@ -360,7 +551,7 @@ async def update_agent_config(agent_id: str, body: AgentConfigUpdate, request: R
     await _persist_agent_record(request, agent_id, updated)
     registry.register(updated)
     logger.info("Agent config updated: %s -> %s", agent_id, list(updates.keys()))
-    return _build_agent_detail(updated, request)
+    return await _build_agent_detail(updated, request)
 
 
 @router.delete("/{agent_id}")
@@ -373,6 +564,7 @@ async def delete_agent(agent_id: str, request: Request):
     if not registry.get(agent_id):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
+    _remove_dedicated_miniapp_pages(request, agent_id)
     await _persist_agent_record(request, agent_id, None)
     _persist_agent_prompt(request, agent_id, "")
     registry.delete(agent_id)

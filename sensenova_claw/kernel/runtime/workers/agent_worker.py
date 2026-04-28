@@ -8,6 +8,10 @@ import uuid
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from sensenova_claw.capabilities.agents.preferences import (
+    load_preferences,
+    resolve_tool_enabled_from_prefs,
+)
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.kernel.events.envelope import EventEnvelope
 from sensenova_claw.kernel.events.types import (
@@ -74,12 +78,20 @@ class AgentSessionWorker(SessionWorker):
     def _get_provider(self) -> str:
         """解析 provider 名称：从 agent_config.model → llm.models → provider"""
         model_key = self._get_model_key()
+        if self.agent_config and self.agent_config.model:
+            provider_override = str(getattr(self.agent_config, "provider", "") or "").strip()
+            if provider_override and model_key not in config.get("llm.models", {}):
+                return provider_override
         provider, _ = config.resolve_model(model_key)
         return provider
 
     def _get_model(self) -> str:
         """解析实际 model_id（传给 LLM API 的模型名）"""
         model_key = self._get_model_key()
+        if self.agent_config and self.agent_config.model:
+            provider_override = str(getattr(self.agent_config, "provider", "") or "").strip()
+            if provider_override and model_key not in config.get("llm.models", {}):
+                return model_key
         _, model_id = config.resolve_model(model_key)
         return model_id
 
@@ -112,17 +124,38 @@ class AgentSessionWorker(SessionWorker):
 
     def _get_filtered_tools(self) -> list[dict]:
         """根据 Agent 配置过滤可用工具"""
-        all_tools = self.rt.tool_registry.as_llm_tools()  # 已含 config enabled 过滤
-        if not self.agent_config or not self.agent_config.tools:
+        all_tools = self.rt.tool_registry.as_llm_tools(
+            session_id=self.session_id,
+            agent_config=self.agent_config,
+        )  # 已含 config enabled 过滤
+        if not self.agent_config:
             tools = all_tools  # 空列表 = 全部工具
+        elif self.agent_config.tools is None:
+            tools = [t for t in all_tools if t["name"].startswith("mcp__")]
+        elif not self.agent_config.tools:
+            tools = all_tools
         else:
             allowed = set(self.agent_config.tools)
             # 保留 send_message 工具（除非 can_delegate_to 为 None 表示禁止委托）
             if self.agent_config.can_delegate_to is not None:
                 allowed.add("send_message")
-            tools = [t for t in all_tools if t["name"] in allowed]
+            tools = [t for t in all_tools if t["name"].startswith("mcp__") or t["name"] in allowed]
         if self.agent_config and self.agent_config.can_delegate_to is None:
             tools = [t for t in tools if t["name"] != "send_message"]
+
+        if self.agent_config:
+            home = self.rt.context_builder.sensenova_claw_home if self.rt.context_builder else None
+            if home:
+                prefs = load_preferences(home)
+                tools = [
+                    tool for tool in tools
+                    if resolve_tool_enabled_from_prefs(
+                        prefs,
+                        self.agent_config.id,
+                        tool["name"],
+                        default=True,
+                    )
+                ]
 
         # 仅对 proactive 会话应用安全限制
         if self._session_meta and self._session_meta.get("proactive_job_id"):
@@ -234,7 +267,7 @@ class AgentSessionWorker(SessionWorker):
                 and event.type not in {USER_INPUT, USER_TURN_CANCEL_REQUESTED}
                 and self.rt.state_store.is_turn_cancelled(event.session_id, event.turn_id)
             ):
-                logger.info(
+                logger.debug(
                     "忽略已取消 turn 的事件 session=%s turn=%s type=%s",
                     event.session_id,
                     event.turn_id,
@@ -363,11 +396,14 @@ class AgentSessionWorker(SessionWorker):
             agent_id = self.agent_config.id if self.agent_config else None
             memory_context = await self.rt.memory_manager.load_memory_md(agent_id=agent_id)
 
+        await self.rt.tool_registry.ensure_mcp_session(self.session_id)
+
         messages = self.rt.context_builder.build_messages(
             content, history,
             memory_context=memory_context,
             context_files=context_files,
             agent_config=self.agent_config,
+            session_id=self.session_id,
         )
         state = TurnState(turn_id=turn_id, user_input=content, messages=messages)
         # 记录新消息的起始位置：跳过 system prompt(1条) + 旧历史
@@ -548,10 +584,24 @@ class AgentSessionWorker(SessionWorker):
 
         # 后处理：将回复中的相对路径改写为绝对路径
         from sensenova_claw.platform.config.workspace import resolve_agent_workdir, resolve_sensenova_claw_home
-        from sensenova_claw.kernel.runtime.path_rewriter import rewrite_relative_paths
+        from sensenova_claw.kernel.runtime.path_rewriter import (
+            rewrite_absolute_path_references,
+            rewrite_file_link_hrefs,
+            rewrite_relative_paths,
+            sanitize_file_link_href,
+        )
         _home = str(resolve_sensenova_claw_home(config))
         _workdir = resolve_agent_workdir(_home, self.agent_config)
+        # 先把 file-link href 里会被 markdown 误解的字符规避（括号 + 反斜杠）：
+        # - `C:\Program Files (x86)\...` 的 `(` `)` 会截断 link
+        # - `C:\Users\foo\.sensenova-claw\...` 的 `\.` `\_` 会被 backslash-escape
+        #   吃掉反斜杠，得到少一级分隔符的错误路径
+        content = rewrite_absolute_path_references(content)
+        content = sanitize_file_link_href(content)
         content = rewrite_relative_paths(content, _workdir)
+        # 文件卡片 href（#sensenova-claw-file:）里 LLM 可能塞相对路径，
+        # 前端点击会 404。此处与 inline code 规范化互补。
+        content = rewrite_file_link_hrefs(content, _workdir)
 
         state.final_response = content
         await self.rt.repo.complete_turn(event.turn_id, agent_response=content)

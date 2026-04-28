@@ -18,6 +18,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { authFetch, API_BASE } from '@/lib/authFetch';
+import { SessionContextMenu } from '@/components/session/SessionContextMenu';
+import { InlineSessionTitleEditor } from '@/components/session/InlineSessionTitleEditor';
+import { updateSessionMetaTitle } from '@/lib/chatTypes';
 
 interface Session {
   session_id: string;
@@ -25,12 +28,15 @@ interface Session {
   last_active: number;
   status: string;
   meta: string;
+  has_children?: boolean;
   channel?: string;
   message_count?: number;
 }
 
 interface AgentOption { id: string; name: string; description: string; }
 type SelectionMode = 'manual' | 'page' | 'filtered_all';
+type DeleteScope = 'self' | 'self_and_descendants';
+const PAGE_SIZE = 50;
 
 function formatTime(ts: number): string {
   if (!ts) return '-';
@@ -64,6 +70,11 @@ export default function SessionsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(PAGE_SIZE);
+  const [total, setTotal] = useState(0);
+  const [activeTotal, setActiveTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
@@ -75,27 +86,47 @@ export default function SessionsPage() {
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [bulkDeleteError, setBulkDeleteError] = useState('');
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ session: Session; x: number; y: number } | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
-  const loadSessions = () => {
+  const loadSessions = (targetPage: number, targetSearchTerm: string, targetStatus: string) => {
     setLoading(true);
-    authFetch(`${API_BASE}/api/sessions`)
+    const params = new URLSearchParams({
+      page: String(targetPage),
+      page_size: String(pageSize),
+      search_term: targetSearchTerm,
+      status: targetStatus,
+    });
+    authFetch(`${API_BASE}/api/sessions?${params.toString()}`)
       .then(res => res.json())
-      .then(data => setSessions(data.sessions || []))
-      .catch(() => setSessions([]))
+      .then(data => {
+        setSessions(data.sessions || []);
+        setTotal(data.total || 0);
+        setActiveTotal(data.active_total || 0);
+        setTotalPages(data.total_pages || 0);
+        if ((data.total_pages || 0) > 0 && targetPage > data.total_pages) {
+          setPage(data.total_pages);
+        }
+      })
+      .catch(() => {
+        setSessions([]);
+        setTotal(0);
+        setActiveTotal(0);
+        setTotalPages(0);
+      })
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    loadSessions();
-  }, []);
+    loadSessions(page, searchTerm, statusFilter);
+  }, [page, pageSize, searchTerm, statusFilter]);
 
-  const filteredSessions = sessions.filter((s) => {
-    const title = parseTitle(s.meta);
-    const matchesSearch = title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.session_id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || s.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, statusFilter]);
+
+  const filteredSessions = sessions;
 
   const getTargetLabel = (meta: string) => {
     const m = parseMeta(meta);
@@ -110,12 +141,13 @@ export default function SessionsPage() {
     setSessionToDelete(session);
   };
 
-  const deleteSession = async () => {
+  const deleteSession = async (scope: DeleteScope = 'self') => {
     if (!sessionToDelete) return;
     setDeletingSessionId(sessionToDelete.session_id);
     setDeleteError('');
     try {
-      const res = await authFetch(`${API_BASE}/api/sessions/${sessionToDelete.session_id}`, {
+      const suffix = scope === 'self_and_descendants' ? '?scope=self_and_descendants' : '';
+      const res = await authFetch(`${API_BASE}/api/sessions/${sessionToDelete.session_id}${suffix}`, {
         method: 'DELETE',
       });
       if (!res.ok) {
@@ -124,7 +156,7 @@ export default function SessionsPage() {
         return;
       }
       setSessionToDelete(null);
-      loadSessions();
+      loadSessions(page, searchTerm, statusFilter);
     } catch {
       setDeleteError('删除失败');
     } finally {
@@ -202,7 +234,7 @@ export default function SessionsPage() {
       }
       setShowBulkDeleteConfirm(false);
       exitSelectionMode();
-      loadSessions();
+      loadSessions(page, searchTerm, statusFilter);
     } catch {
       setBulkDeleteError('批量删除失败');
     } finally {
@@ -218,6 +250,39 @@ export default function SessionsPage() {
     : selectionMode === 'page'
       ? `已选中当前页面 ${selectedSessionIds.length} 个会话`
       : `已手动选中 ${selectedSessionIds.length} 个会话`;
+
+  const startRename = () => {
+    if (!contextMenu) return;
+    setEditingSessionId(contextMenu.session.session_id);
+    setRenameValue(parseTitle(contextMenu.session.meta));
+  };
+
+  const cancelRename = () => {
+    setEditingSessionId(null);
+    setRenameValue('');
+  };
+
+  const submitRename = async () => {
+    if (!editingSessionId) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) return;
+    try {
+      const res = await authFetch(`${API_BASE}/api/sessions/${editingSessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      if (!res.ok) return;
+      setSessions((prev) => prev.map((session) => (
+        session.session_id === editingSessionId
+          ? { ...session, meta: updateSessionMetaTitle(session.meta, trimmed) }
+          : session
+      )));
+      cancelRename();
+    } catch {
+      // ignore
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -248,9 +313,6 @@ export default function SessionsPage() {
               <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent bg-primary text-primary-foreground shadow-lg shadow-primary/20">
                 <MessageSquare className="h-5 w-5" /> Recent History
               </button>
-              <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground opacity-60">
-                <span className="h-5 w-5 bg-muted rounded-full flex items-center justify-center text-[10px]">★</span> Bookmarked
-              </button>
               <div className="h-px bg-border/40 my-4 mx-4" />
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70 mb-2 px-4">Filters</p>
               <div className="px-4 py-2 space-y-4">
@@ -279,7 +341,7 @@ export default function SessionsPage() {
                   <MessageSquare className="h-5 w-5 text-primary" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-4xl font-black">{sessions.length}</div>
+                  <div className="text-4xl font-black">{total}</div>
                   <p className="text-sm font-medium text-muted-foreground mt-2">Total tracked sessions</p>
                 </CardContent>
               </Card>
@@ -295,8 +357,8 @@ export default function SessionsPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-4xl font-black text-green-600 dark:text-green-500">{sessions.filter(s => s.status === 'active').length}</div>
-                  <p className="text-sm font-medium text-muted-foreground mt-2">Currently running processes</p>
+                  <div data-testid="sessions-active-total" className="text-4xl font-black text-green-600 dark:text-green-500">{activeTotal}</div>
+                  <p className="text-sm font-medium text-muted-foreground mt-2">Active on current filter</p>
                 </CardContent>
               </Card>
             </div>
@@ -350,6 +412,31 @@ export default function SessionsPage() {
                     </div>
                   </div>
                 )}
+                <div className="mt-6 flex flex-col gap-3 border-t border-border/60 pt-6 md:flex-row md:items-center md:justify-between">
+                  <p data-testid="sessions-pagination-summary" className="text-sm font-semibold text-muted-foreground">
+                    {totalPages > 0 ? `第 ${page} / ${totalPages} 页，共 ${total} 条` : `第 1 / 1 页，共 ${total} 条`}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      data-testid="sessions-pagination-prev"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                      disabled={loading || page <= 1}
+                    >
+                      上一页
+                    </Button>
+                    <Button
+                      data-testid="sessions-pagination-next"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((prev) => prev + 1)}
+                      disabled={loading || totalPages <= 1 || page >= totalPages}
+                    >
+                      下一页
+                    </Button>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="p-0">
                 {loading ? (
@@ -421,7 +508,28 @@ export default function SessionsPage() {
                                 </Badge>
                               </TableCell>
                               <TableCell className="font-mono text-sm text-foreground/70 font-bold">{session.session_id.slice(0, 8)}...</TableCell>
-                              <TableCell className="font-bold text-lg text-foreground group-hover:text-primary transition-colors">{parseTitle(session.meta)}</TableCell>
+                              <TableCell
+                                className="font-bold text-lg text-foreground group-hover:text-primary transition-colors"
+                                onContextMenu={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setContextMenu({ session, x: event.clientX, y: event.clientY });
+                                }}
+                                data-testid={`sessions-title-cell-${session.session_id}`}
+                              >
+                                {editingSessionId === session.session_id ? (
+                                  <InlineSessionTitleEditor
+                                    value={renameValue}
+                                    onChange={setRenameValue}
+                                    onSubmit={submitRename}
+                                    onCancel={cancelRename}
+                                    testId={`sessions-rename-input-${session.session_id}`}
+                                    className="w-full rounded-lg border border-primary/40 bg-background px-2 py-1 text-base font-bold text-foreground outline-none ring-0"
+                                  />
+                                ) : (
+                                  parseTitle(session.meta)
+                                )}
+                              </TableCell>
                               <TableCell>
                                 {target ? (
                                   <Badge variant="outline" className="gap-2 bg-primary/5 text-primary text-xs px-3 py-1.5 font-bold border-primary/20 rounded-lg">
@@ -473,7 +581,9 @@ export default function SessionsPage() {
             <DialogTitle>确认删除会话</DialogTitle>
             <DialogDescription>
               {sessionToDelete
-                ? `确定要删除会话 "${parseTitle(sessionToDelete.meta)}" 吗？如果该会话仍在运行，将被强制终止并删除对应的 session 文件。`
+                ? sessionToDelete.has_children
+                  ? `会话 "${parseTitle(sessionToDelete.meta)}" 存在子会话。你可以仅删除当前会话，或删除当前会话和全部子会话。父会话不会被删除。`
+                  : `确定要删除会话 "${parseTitle(sessionToDelete.meta)}" 吗？如果该会话仍在运行，将被强制终止并删除对应的 session 文件。`
                 : ''}
             </DialogDescription>
           </DialogHeader>
@@ -489,19 +599,53 @@ export default function SessionsPage() {
             >
               取消
             </Button>
-            <Button
-              variant="destructive"
-              data-testid="session-delete-confirm"
-              onClick={deleteSession}
-              disabled={!sessionToDelete || !!deletingSessionId}
-              className="gap-2"
-            >
-              {deletingSessionId && <Loader2 size={16} className="animate-spin" />}
-              删除
-            </Button>
+            {sessionToDelete?.has_children ? (
+              <>
+                <Button
+                  variant="outline"
+                  data-testid="session-delete-self-confirm"
+                  onClick={() => deleteSession('self')}
+                  disabled={!sessionToDelete || !!deletingSessionId}
+                  className="gap-2"
+                >
+                  {deletingSessionId && <Loader2 size={16} className="animate-spin" />}
+                  仅删除当前会话
+                </Button>
+                <Button
+                  variant="destructive"
+                  data-testid="session-delete-descendants-confirm"
+                  onClick={() => deleteSession('self_and_descendants')}
+                  disabled={!sessionToDelete || !!deletingSessionId}
+                  className="gap-2"
+                >
+                  {deletingSessionId && <Loader2 size={16} className="animate-spin" />}
+                  删除当前会话和子会话
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="destructive"
+                data-testid="session-delete-confirm"
+                onClick={() => deleteSession('self')}
+                disabled={!sessionToDelete || !!deletingSessionId}
+                className="gap-2"
+              >
+                {deletingSessionId && <Loader2 size={16} className="animate-spin" />}
+                删除
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SessionContextMenu
+        open={!!contextMenu}
+        x={contextMenu?.x ?? 0}
+        y={contextMenu?.y ?? 0}
+        onClose={() => setContextMenu(null)}
+        onRename={startRename}
+        testId="sessions-context-menu"
+      />
 
       <Dialog open={showBulkDeleteConfirm} onOpenChange={(open) => {
         setShowBulkDeleteConfirm(open);

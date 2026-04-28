@@ -11,6 +11,19 @@ import { AskUserResponseForm } from '@/components/chat/AskUserResponseForm';
 
 const MAX_TOOL_CONTENT_HEIGHT = 240;
 
+/**
+ * Issue #211: 把毫秒数格式化为中文耗时字符串，如 "3分15秒"、"12秒"。
+ * 小于 1 秒向上取到 1 秒，避免显示 "0秒"。
+ */
+function formatDurationZh(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const totalSeconds = Math.max(1, Math.round(ms / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}秒`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}分${seconds}秒`;
+}
+
 function ToolContent({ value }: { value: unknown }) {
   if (!value) return <span className="text-muted-foreground italic">empty</span>;
   if (isJsonLike(value)) {
@@ -170,8 +183,8 @@ export const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMes
         <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center shrink-0 border-2 border-border shadow-md">
           <User size={20} className="text-secondary-foreground" />
         </div>
-        <div className="flex-1 flex flex-col items-end pt-1">
-          <div className="bg-primary text-primary-foreground text-sm p-4 rounded-3xl rounded-tr-sm max-w-[85%] leading-relaxed shadow-lg">
+        <div className="flex-1 flex flex-col items-end pt-1 min-w-0">
+          <div className="bg-primary text-primary-foreground text-sm p-4 rounded-3xl rounded-tr-sm max-w-[85%] min-w-0 leading-relaxed shadow-lg">
             <Markdown variant="user" content={msg.content} />
           </div>
         </div>
@@ -186,7 +199,7 @@ export const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMes
         <Bot size={20} className="text-primary-foreground" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="space-y-3">
+        <div className="space-y-3 min-w-0">
           {parsedAssistantContent.thinkContent ? (
             <div className="rounded-2xl border border-amber-500/25 bg-amber-500/8 overflow-hidden">
               <button
@@ -211,6 +224,15 @@ export const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMes
           {parsedAssistantContent.answerContent ? (
             <div className="text-base md:text-lg text-foreground leading-relaxed">
               <Markdown content={parsedAssistantContent.answerContent} />
+            </div>
+          ) : null}
+          {typeof msg.durationMs === 'number' ? (
+            <div
+              className="text-xs text-muted-foreground assistant-duration"
+              data-testid="assistant-duration"
+              title="从你发送消息到本次回复完成的耗时"
+            >
+              耗时 {formatDurationZh(msg.durationMs)}
             </div>
           ) : null}
         </div>

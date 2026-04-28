@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from pathlib import Path
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -27,11 +28,14 @@ from sensenova_claw.kernel.events.types import (
 )
 from sensenova_claw.capabilities.tools.base import Tool
 from sensenova_claw.kernel.runtime.workers.base import SessionWorker
+from sensenova_claw.platform.security.path_policy import PathPolicy, PathVerdict
 
 if TYPE_CHECKING:
     from sensenova_claw.kernel.runtime.tool_runtime import ToolRuntime
 
 logger = logging.getLogger(__name__)
+
+_PATH_POLICY_TOOLS = {"read_file", "write_file", "edit_file", "apply_patch", "bash_command"}
 
 
 class ToolSessionWorker(SessionWorker):
@@ -298,6 +302,111 @@ class ToolSessionWorker(SessionWorker):
             self._pending_confirmations.pop(tool_call_id, None)
             self._confirmation_results.pop(tool_call_id, None)
 
+    async def _request_path_confirmation(
+        self,
+        event: EventEnvelope,
+        tool: Tool,
+        *,
+        path: str,
+        operation: str,
+    ) -> bool:
+        """Ask the user before allowing a one-off access outside the agent workdir."""
+        base_tool_call_id = str(event.payload["tool_call_id"])
+        confirmation_id = f"{base_tool_call_id}:path"
+        wait_event = asyncio.Event()
+        self._pending_confirmations[confirmation_id] = wait_event
+        timeout = float(config.get("tools.permission.confirmation_timeout", 60))
+        timeout_action = str(config.get("tools.permission.timeout_action", "reject")).lower()
+
+        await self.bus.publish(
+            EventEnvelope(
+                type=TOOL_CONFIRMATION_REQUESTED,
+                session_id=event.session_id,
+                turn_id=event.turn_id,
+                trace_id=confirmation_id,
+                source="tool",
+                payload={
+                    "tool_call_id": confirmation_id,
+                    "tool_name": tool.name,
+                    "arguments": event.payload.get("arguments", {}),
+                    "risk_level": tool.risk_level.value,
+                    "timeout": timeout,
+                    "timeout_action": timeout_action,
+                    "requested_at_ms": int(time.time() * 1000),
+                    "message": f"工具 {tool.name} 请求{operation}工作目录外的路径，是否允许本次访问？\n{path}",
+                    "path": path,
+                    "operation": operation,
+                },
+            )
+        )
+
+        try:
+            if timeout_action == "block":
+                await wait_event.wait()
+            else:
+                await asyncio.wait_for(wait_event.wait(), timeout=timeout)
+            approved = self._confirmation_results.pop(confirmation_id, False)
+            await self._publish_confirmation_resolved(
+                event,
+                tool_name=tool.name,
+                tool_call_id=confirmation_id,
+                approved=approved,
+                reason="user_approved_path" if approved else "user_rejected_path",
+                resolved_by="user",
+            )
+            return approved
+        except asyncio.TimeoutError:
+            approved = timeout_action == "approve"
+            await self._publish_confirmation_resolved(
+                event,
+                tool_name=tool.name,
+                tool_call_id=confirmation_id,
+                approved=approved,
+                reason="timeout_approved_path" if approved else "timeout_rejected_path",
+                resolved_by="timeout",
+            )
+            return approved
+        finally:
+            self._pending_confirmations.pop(confirmation_id, None)
+            self._confirmation_results.pop(confirmation_id, None)
+
+    def _path_policy_for_call(
+        self,
+        agent_workdir: str | None,
+        extra_grants: list[str] | None = None,
+    ) -> PathPolicy | None:
+        if not agent_workdir:
+            return None
+        granted_paths = list(config.get("system.granted_paths", []) or [])
+        granted_paths.extend(extra_grants or [])
+        return PathPolicy(workspace=Path(agent_workdir), granted_paths=granted_paths)
+
+    def _path_check_target(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> tuple[str, str] | None:
+        if tool_name in {"read_file", "write_file"}:
+            raw_path = arguments.get("file_path")
+            if raw_path:
+                return str(raw_path), "读取" if tool_name == "read_file" else "写入"
+        if tool_name == "edit_file":
+            raw_path = arguments.get("path")
+            if raw_path:
+                return str(raw_path), "编辑"
+        if tool_name == "bash_command":
+            raw_path = arguments.get("working_dir")
+            if raw_path:
+                return str(raw_path), "使用作为命令工作目录"
+        return None
+
+    @staticmethod
+    def _nearest_existing_dir(path: Path) -> str:
+        candidate = path if path.exists() and path.is_dir() else path.parent
+        while not candidate.exists() and candidate != candidate.parent:
+            candidate = candidate.parent
+        return str(candidate)
+
     # ── ask_user 支持 ──────────────────────────────────
 
     def _make_ask_user_handler(self):
@@ -456,7 +565,7 @@ class ToolSessionWorker(SessionWorker):
             )
         )
 
-        tool = self.rt.registry.get(str(tool_name))
+        tool = self.rt.registry.get(str(tool_name), session_id=event.session_id)
         if not tool:
             await self.bus.publish(
                 EventEnvelope(
@@ -498,6 +607,58 @@ class ToolSessionWorker(SessionWorker):
             )
             return
 
+        # Normalize tool arguments before both permission checks and execution.
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except (json.JSONDecodeError, TypeError):
+                arguments = {}
+        exec_args = dict(arguments) if isinstance(arguments, dict) else {}
+        agent_workdir = event.payload.get("_agent_workdir")
+        path_policy = (
+            self._path_policy_for_call(str(agent_workdir))
+            if agent_workdir and str(tool_name) in _PATH_POLICY_TOOLS
+            else None
+        )
+
+        # 路径权限确认：工作目录外的访问需要用户确认后才放行本次调用。
+        if path_policy is not None:
+            target = self._path_check_target(str(tool_name), exec_args)
+            if target is not None:
+                raw_path, operation = target
+                if str(tool_name) == "read_file":
+                    verdict = path_policy.check_read(raw_path)
+                elif str(tool_name) == "bash_command":
+                    verdict = path_policy.check_cwd(raw_path)
+                else:
+                    verdict = path_policy.check_write(raw_path)
+                resolved_path = path_policy.safe_resolve(raw_path)
+                if verdict == PathVerdict.DENY:
+                    await self._publish_tool_result(
+                        event,
+                        result=f"系统目录禁止访问: {resolved_path}",
+                        success=False,
+                    )
+                    return
+                if verdict == PathVerdict.NEED_GRANT:
+                    approved = await self._request_path_confirmation(
+                        event,
+                        tool,
+                        path=str(resolved_path),
+                        operation=operation,
+                    )
+                    if not approved:
+                        await self._publish_tool_result(
+                            event,
+                            result=f"用户拒绝访问工作目录外路径: {resolved_path}",
+                            success=False,
+                        )
+                        return
+                    path_policy = self._path_policy_for_call(
+                        str(agent_workdir),
+                        extra_grants=[self._nearest_existing_dir(resolved_path)],
+                    )
+
         # 权限确认：高风险工具需要用户确认
         if self._needs_confirmation(tool):
             approved = await self._request_confirmation(event, tool)
@@ -519,17 +680,13 @@ class ToolSessionWorker(SessionWorker):
         error = ""
         result = None
         # 构建执行参数：注入内部上下文对象（不可 JSON 序列化，仅供工具内部使用）
-        if isinstance(arguments, str):
-            try:
-                arguments = json.loads(arguments)
-            except (json.JSONDecodeError, TypeError):
-                arguments = {}
-        exec_kwargs = dict(arguments) if isinstance(arguments, dict) else {}
+        exec_kwargs = dict(exec_args)
         if self.rt.agent_registry:
             exec_kwargs["_agent_registry"] = self.rt.agent_registry
-        agent_workdir = event.payload.get("_agent_workdir")
         if agent_workdir:
             exec_kwargs["_agent_workdir"] = agent_workdir
+        if path_policy is not None:
+            exec_kwargs["_path_policy"] = path_policy
         exec_kwargs["_source_agent_id"] = source_agent_id
         if event.turn_id:
             exec_kwargs["_turn_id"] = event.turn_id

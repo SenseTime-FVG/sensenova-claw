@@ -57,7 +57,7 @@ DEFAULT_CONFIG_PATH = get_default_config_path()
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "system": {
-        "log_level": "DEBUG",
+        "log_level": "INFO",
         "workspace_dir": "",                          # 已废弃，由 sensenova_claw_home 替代
         "database_path": "",                          # 空=自动用 {sensenova_claw_home}/data/sensenova-claw.db
         "max_concurrent_sessions": 10,
@@ -186,6 +186,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "confirmation_timeout": 60,
             "timeout_action": "reject",  # reject | approve | block
         },
+    },
+    "mcp": {
+        "servers": {},
     },
     "skills": {
         "extra_dirs": [],
@@ -630,7 +633,12 @@ class Config:
         # 精确匹配 models 注册表
         if model_key in models:
             entry = models[model_key]
-            return entry.get("provider", "mock"), str(entry.get("model_id", ""))
+            default_entry = DEFAULT_CONFIG.get("llm", {}).get("models", {}).get(model_key, {})
+            provider_name = entry.get("provider") or default_entry.get("provider", "mock")
+            model_id = entry.get("model_id")
+            if str(model_id or "").strip().lower() in {"", "none", "null"}:
+                model_id = default_entry.get("model_id", "")
+            return str(provider_name or "mock"), str(model_id or "")
 
         logger.warning("未知的模型 key: %s，使用 mock provider", model_key)
         return "mock", ""

@@ -14,6 +14,7 @@ from rich.console import Console
 
 from sensenova_claw.app.cli.commands import CommandDispatcher
 from sensenova_claw.app.cli.display import DisplayEngine, read_user_input
+from sensenova_claw.platform.security.auth import read_token_file
 
 
 class CLIApp:
@@ -203,9 +204,13 @@ class CLIApp:
         """发送 HTTP 请求到后端 REST API，返回 JSON 响应"""
         url = f"{self._base_url}{path}"
         data = json.dumps(body).encode() if body is not None else None
+        headers = {"Content-Type": "application/json"} if data else {}
+        token = read_token_file()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         req = urllib.request.Request(
             url, data=data, method=method,
-            headers={"Content-Type": "application/json"} if data else {},
+            headers=headers,
         )
         try:
             resp = await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)

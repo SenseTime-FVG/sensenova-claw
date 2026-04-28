@@ -10,6 +10,8 @@ Thumbs.db
 # ========== Claude Code ==========
 .claude/
 docs/superpowers/
+.superpowers/
+.playwright-mcp/
 
 # ========== Python ==========
 __pycache__/

@@ -97,7 +97,7 @@ class ProactiveExecutor:
             "job_id": job.id,
             "session_id": session_id,
             "status": "running",
-            "triggered_by": job.trigger.kind if job.trigger else "manual",
+            "triggered_by": getattr(job.trigger, "kind", "manual"),
             "started_at_ms": start_ms,
         })
 
@@ -231,47 +231,6 @@ class ProactiveExecutor:
             return (scratch_session_id, None)
         finally:
             self._running_jobs.discard(job.id)
-
-    async def _wait_for_completion_by_turn(
-        self, session_id: str, turn_id: str, timeout_ms: float,
-    ) -> str | None:
-        """等待指定 turn 的 agent.step_completed 事件。"""
-        timeout_s = timeout_ms / 1000.0
-        heartbeat_timeout_s = timeout_s / 3.0
-        queue = self._bus.subscribe_queue()
-        try:
-            deadline = time.monotonic() + timeout_s
-            last_event_time = time.monotonic()
-
-            while True:
-                now = time.monotonic()
-                remaining = deadline - now
-                if remaining <= 0:
-                    return None
-
-                # 心跳超时：长时间无任何事件
-                if (now - last_event_time) >= heartbeat_timeout_s:
-                    logger.warning(
-                        "推荐 turn %s 心跳超时（%.1fs 无事件）",
-                        turn_id, heartbeat_timeout_s,
-                    )
-                    return None
-
-                # 等待下一个事件，最多等到心跳超时
-                wait_s = min(remaining, heartbeat_timeout_s - (now - last_event_time))
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=max(wait_s, 0.01))
-                except asyncio.TimeoutError:
-                    continue
-
-                last_event_time = time.monotonic()
-
-                if (event.type == AGENT_STEP_COMPLETED
-                        and event.session_id == session_id
-                        and event.turn_id == turn_id):
-                    return event.payload.get("result", {}).get("content", "")
-        finally:
-            self._bus.unsubscribe_queue(queue)
 
     async def _handle_failure(
         self,

@@ -1,6 +1,7 @@
 """Agents API 端点单测 — 使用真实组件，无 mock"""
 import asyncio
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,12 +21,38 @@ from sensenova_claw.platform.config.config_manager import ConfigManager
 from sensenova_claw.platform.secrets.store import InMemorySecretStore
 from sensenova_claw.kernel.events.bus import PublicEventBus
 from sensenova_claw.adapters.storage.repository import Repository
+from sensenova_claw.capabilities.mcp.runtime import SessionMcpRuntime
 
 
 class _SendMessageTool(Tool):
     name = "send_message"
     description = "向其他 Agent 发送消息"
     parameters = {"type": "object", "properties": {}}
+
+
+def _write_probe_server(tmp_path: Path) -> Path:
+    script_path = tmp_path / "mcp_probe_server.py"
+    script_path.write_text(
+        """
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("probe")
+
+@mcp.tool()
+def search_docs(query: str) -> str:
+    return f"DOCS:{query}"
+
+@mcp.tool()
+def fetch_page(path: str) -> str:
+    return f"PAGE:{path}"
+
+if __name__ == "__main__":
+    mcp.run("stdio")
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    return script_path
 
 
 @pytest.fixture
@@ -40,7 +67,18 @@ def app(tmp_path):
 
     # 真实 Config
     config_path = tmp_path / "config.yml"
+    probe_server = _write_probe_server(tmp_path)
     config_path.write_text(yaml.dump({
+        "mcp": {
+            "servers": {
+                "docs-search": {
+                    "transport": "stdio",
+                    "command": sys.executable,
+                    "args": [str(probe_server)],
+                    "timeout": 5,
+                },
+            },
+        },
         "agents": {
             "research": {
                 "name": "Research Agent",
@@ -66,6 +104,12 @@ def app(tmp_path):
     # 真实 SkillRegistry（不加载 builtin skills 目录，避免环境依赖）
     skills_dir = workspace_dir / "skills"
     skills_dir.mkdir()
+    sample_skill_dir = skills_dir / "sample-skill"
+    sample_skill_dir.mkdir()
+    (sample_skill_dir / "SKILL.md").write_text(
+        "---\nname: sample-skill\ndescription: 示例技能\n---\n测试 skill\n",
+        encoding="utf-8",
+    )
     state_file = workspace_dir / "skills_state.json"
     skill_registry = SkillRegistry(
         workspace_dir=skills_dir,
@@ -115,6 +159,8 @@ def test_list_agents(client):
         assert "toolCount" in agent
         assert "sessionCount" in agent
         assert "lastActive" in agent
+        assert "mcpServersDetail" not in agent
+        assert "mcpToolsDetail" not in agent
 
 
 def test_list_agents_no_sessions(client):
@@ -137,6 +183,42 @@ def test_get_agent_found(client):
     assert "sessions" in data
     assert "toolsDetail" in data
     assert "skillsDetail" in data
+    assert "mcpServersDetail" in data
+    assert "mcpToolsDetail" in data
+
+
+def test_get_agent_includes_mcp_details(client):
+    """Agent 详情应返回 MCP server/tool 明细和启用状态。"""
+    resp = client.get("/api/agents/default")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    server = next(item for item in data["mcpServersDetail"] if item["name"] == "docs-search")
+    assert server["enabled"] is True
+    assert server["toolCount"] == 2
+
+    tool_names = {item["name"] for item in data["mcpToolsDetail"]}
+    assert "docs-search/search_docs" in tool_names
+    assert "docs-search/fetch_page" in tool_names
+
+
+def test_get_agent_reuses_cached_mcp_catalog(client, monkeypatch):
+    """同一配置下重复打开 Agent 详情时，不应重复探测 MCP catalog。"""
+    original = SessionMcpRuntime._list_tools_for_server
+    calls = {"count": 0}
+
+    async def counted(self, server_cfg):  # type: ignore[no-untyped-def]
+        calls["count"] += 1
+        return await original(self, server_cfg)
+
+    monkeypatch.setattr(SessionMcpRuntime, "_list_tools_for_server", counted)
+
+    first = client.get("/api/agents/default")
+    second = client.get("/api/agents/default")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls["count"] == 1
 
 
 def test_get_agent_not_found(client):
@@ -234,6 +316,50 @@ def test_update_agent_config_persists_to_config(client, app):
     assert prompt_file.read_text(encoding="utf-8") == "新的系统提示词"
 
 
+def test_update_agent_config_persists_mcp_whitelists(client, app):
+    """更新 Agent MCP 白名单后应写回 config.yml 并反映到详情接口。"""
+    resp = client.put("/api/agents/default/config", json={
+        "mcp_servers": ["docs-search"],
+        "mcp_tools": ["docs-search/search_docs"],
+    })
+    assert resp.status_code == 200
+
+    data = resp.json()
+    server = next(item for item in data["mcpServersDetail"] if item["name"] == "docs-search")
+    assert server["enabled"] is True
+    search_tool = next(item for item in data["mcpToolsDetail"] if item["name"] == "docs-search/search_docs")
+    fetch_tool = next(item for item in data["mcpToolsDetail"] if item["name"] == "docs-search/fetch_page")
+    assert search_tool["enabled"] is True
+    assert fetch_tool["enabled"] is False
+
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["agents"]["default"]["mcp_servers"] == ["docs-search"]
+    assert written["agents"]["default"]["mcp_tools"] == ["docs-search/search_docs"]
+
+
+def test_update_agent_config_persists_null_as_all_disabled(client, app):
+    """显式传 null 时，tools/skills/MCP 应落盘为 null，并在详情中表现为全禁用。"""
+    resp = client.put("/api/agents/default/config", json={
+        "tools": None,
+        "skills": None,
+        "mcp_servers": None,
+        "mcp_tools": None,
+    })
+    assert resp.status_code == 200
+
+    data = resp.json()
+    assert all(item["enabled"] is False for item in data["toolsDetail"])
+    assert all(item["enabled"] is False for item in data["skillsDetail"])
+    assert all(item["enabled"] is False for item in data["mcpServersDetail"])
+    assert all(item["enabled"] is False for item in data["mcpToolsDetail"])
+
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["agents"]["default"]["tools"] is None
+    assert written["agents"]["default"]["skills"] is None
+    assert written["agents"]["default"]["mcp_servers"] is None
+    assert written["agents"]["default"]["mcp_tools"] is None
+
+
 def test_update_agent_config_can_disable_delegation(client, app):
     """显式传 null 时，应禁用委托并隐藏 send_message。"""
     app.state.tool_registry.register(_SendMessageTool())
@@ -286,6 +412,33 @@ def test_delete_agent_persists_to_config(client, app):
     assert "research" not in written.get("agents", {})
 
 
+def test_delete_agent_removes_dedicated_miniapp_page(client, app):
+    """删除专属 mini-app agent 时，应同步清理对应的功能页记录。"""
+    home = Path(app.state.sensenova_claw_home)
+    home.mkdir(parents=True, exist_ok=True)
+    custom_pages_path = home / "custom_pages.json"
+    custom_pages_path.write_text(
+        json.dumps([
+            {
+                "id": "page-issue217",
+                "slug": "issue217-test",
+                "name": "issue217-test",
+                "type": "miniapp",
+                "agent_id": "research",
+                "base_agent_id": "default",
+                "create_dedicated_agent": True,
+            }
+        ], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    resp = client.delete("/api/agents/research")
+    assert resp.status_code == 200
+
+    pages = json.loads(custom_pages_path.read_text(encoding="utf-8"))
+    assert pages == []
+
+
 def test_delete_default_agent(client):
     """不允许删除 default Agent"""
     resp = client.delete("/api/agents/default")
@@ -304,22 +457,21 @@ def test_delete_agent_not_found(client):
 def test_update_preferences(client):
     """正常更新偏好"""
     resp = client.put("/api/agents/default/preferences", json={
-        "tools": {"bash_command": False},
-        "skills": {},
+        "skills": {"sample-skill": False},
     })
     assert resp.status_code == 200
     assert resp.json()["status"] == "saved"
 
     prefs = json.loads((Path(client.app.state.sensenova_claw_home) / ".agent_preferences.json").read_text(encoding="utf-8"))
-    assert prefs["agent_tools"]["default"]["bash_command"] is False
+    assert prefs["skills"]["sample-skill"] is False
 
     default_detail = client.get("/api/agents/default").json()
-    default_bash = next(tool for tool in default_detail["toolsDetail"] if tool["name"] == "bash_command")
-    assert default_bash["enabled"] is False
+    default_skill = next(skill for skill in default_detail["skillsDetail"] if skill["name"] == "sample-skill")
+    assert default_skill["enabled"] is False
 
     research_detail = client.get("/api/agents/research").json()
-    research_bash = next(tool for tool in research_detail["toolsDetail"] if tool["name"] == "bash_command")
-    assert research_bash["enabled"] is True
+    research_skill = next(skill for skill in research_detail["skillsDetail"] if skill["name"] == "sample-skill")
+    assert research_skill["enabled"] is False
 
 
 def test_update_preferences_agent_not_found(client):

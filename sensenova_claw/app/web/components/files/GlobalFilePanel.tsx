@@ -31,12 +31,13 @@ function norm(p: string): string {
 
 /* ── 文件树节点 ── */
 
-function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu, onFileClick }: {
+function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu, onFileClick, searchQuery }: {
   item: FileItem;
   depth?: number;
   expandToPath?: string | null;
   onContextMenu?: (e: React.MouseEvent, item: FileItem, children: FileItem[] | null) => void;
   onFileClick?: (item: FileItem) => void;
+  searchQuery?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileItem[] | null>(null);
@@ -45,6 +46,20 @@ function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu, onFileClic
   const prevExpandTo = useRef(expandToPath);
   const itemRef = useRef<HTMLDivElement>(null);
   const isFolder = item.type === 'folder';
+
+  // 搜索过滤：在已加载的子节点中递归匹配
+  const query = searchQuery?.toLowerCase() || '';
+  const matchesSelf = query ? item.name.toLowerCase().includes(query) : true;
+
+  const filteredChildren = useMemo(() => {
+    if (!children || !query) return children;
+    return children.filter(child => {
+      // 文件：名称匹配则显示
+      // 文件夹：始终显示（可能有匹配的子节点未加载）
+      if (child.type === 'folder') return true;
+      return child.name.toLowerCase().includes(query);
+    });
+  }, [children, query]);
 
   const normItem = norm(item.path);
   const normTarget = expandToPath ? norm(expandToPath) : null;
@@ -137,20 +152,20 @@ function FileTreeItem({ item, depth = 0, expandToPath, onContextMenu, onFileClic
         ) : (
           <File className={cn('w-4 h-4 shrink-0', isTarget ? 'text-primary' : 'text-muted-foreground')} />
         )}
-        <span className={cn('truncate text-xs', isTarget ? 'text-primary' : 'text-foreground/80')}>
+        <span className={cn('whitespace-nowrap text-xs', isTarget ? 'text-primary' : 'text-foreground/80')}>
           {item.name}
         </span>
         {loading && <Loader2 className="w-3 h-3 text-muted-foreground ml-auto animate-spin" />}
       </div>
 
-      {isFolder && expanded && children && (
+      {isFolder && expanded && filteredChildren && (
         <div>
-          {children.map(child => (
-            <FileTreeItem key={child.path} item={child} depth={depth + 1} expandToPath={expandToPath} onContextMenu={onContextMenu} onFileClick={onFileClick} />
+          {filteredChildren.map(child => (
+            <FileTreeItem key={child.path} item={child} depth={depth + 1} expandToPath={expandToPath} onContextMenu={onContextMenu} onFileClick={onFileClick} searchQuery={searchQuery} />
           ))}
-          {children.length === 0 && (
+          {filteredChildren.length === 0 && (
             <div className="text-[10px] text-muted-foreground/50 py-1" style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}>
-              空文件夹
+              {query ? '无匹配项' : '空文件夹'}
             </div>
           )}
         </div>
@@ -318,6 +333,9 @@ export function GlobalFilePanel() {
   const [pathInputValue, setPathInputValue] = useState('');
   const [pathInputError, setPathInputError] = useState<string | null>(null);
   const pathInputRef = useRef<HTMLInputElement>(null);
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -494,6 +512,24 @@ export function GlobalFilePanel() {
             </div>
             <div className="flex items-center gap-0.5">
               <button
+                onClick={() => {
+                  setSearchVisible(v => {
+                    if (!v) {
+                      setSearchQuery('');
+                      setTimeout(() => searchInputRef.current?.focus(), 0);
+                    }
+                    return !v;
+                  });
+                }}
+                title="搜索文件"
+                className={cn(
+                  'p-1.5 rounded-lg hover:bg-muted text-muted-foreground/50 hover:text-foreground transition-all',
+                  searchVisible && 'bg-muted text-foreground',
+                )}
+              >
+                <Search className="w-3 h-3" />
+              </button>
+              <button
                 onClick={togglePathInput}
                 title="输入路径定位"
                 className={cn(
@@ -536,8 +572,30 @@ export function GlobalFilePanel() {
               )}
             </div>
           )}
-          <div className="flex-1 overflow-y-auto py-1">
-            <div className="space-y-0.5 px-1" key={localTreeKey}>
+          {searchVisible && (
+            <div className="px-2 py-1.5 border-b border-border/40 bg-muted/30">
+              <div className="flex items-center gap-1">
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Escape') { setSearchVisible(false); setSearchQuery(''); } }}
+                  placeholder="搜索已加载的文件…"
+                  className="flex-1 min-w-0 text-xs bg-background border border-border rounded-md px-2 py-1 outline-none transition-colors focus:border-primary"
+                  autoFocus
+                />
+                <button
+                  onClick={() => { setSearchVisible(false); setSearchQuery(''); }}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground/50 hover:text-foreground shrink-0"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="flex-1 overflow-auto py-1">
+            <div className="space-y-0.5 px-1 min-w-max" key={localTreeKey}>
               {roots.map(r => (
                 <FileTreeItem
                   key={r.path}
@@ -545,6 +603,7 @@ export function GlobalFilePanel() {
                   expandToPath={bestRoot === norm(r.path) ? focusPath : null}
                   onContextMenu={handleContextMenu}
                   onFileClick={handleFileClick}
+                  searchQuery={searchQuery}
                 />
               ))}
               {roots.length === 0 && (

@@ -5,10 +5,16 @@ Usage: python interactive.py
 Output: HTML files that can be opened in a browser
 """
 
+from pathlib import Path
+
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+
+# 输出目录
+OUTPUT_DIR = Path(__file__).parent.parent / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Example 1: Interactive scatter plot
 def interactive_scatter():
@@ -26,7 +32,7 @@ def interactive_scatter():
                     template='plotly_white')
     
     fig.update_traces(marker=dict(size=10, opacity=0.7, line=dict(width=1, color='white')))
-    fig.write_html('interactive_scatter.html')
+    fig.write_html(str(OUTPUT_DIR / 'interactive_scatter.html'))
     print("✓ Saved: interactive_scatter.html")
 
 # Example 2: Interactive line chart
@@ -56,7 +62,7 @@ def interactive_line():
         hovermode='x unified'
     )
     
-    fig.write_html('interactive_line.html')
+    fig.write_html(str(OUTPUT_DIR / 'interactive_line.html'))
     print("✓ Saved: interactive_line.html")
 
 # Example 3: Interactive bar chart
@@ -73,7 +79,7 @@ def interactive_bar():
                 template='plotly_white')
     
     fig.update_traces(marker_line_color='white', marker_line_width=1.5)
-    fig.write_html('interactive_bar.html')
+    fig.write_html(str(OUTPUT_DIR / 'interactive_bar.html'))
     print("✓ Saved: interactive_bar.html")
 
 # Example 4: Interactive heatmap
@@ -99,7 +105,7 @@ def interactive_heatmap():
         template='plotly_white'
     )
     
-    fig.write_html('interactive_heatmap.html')
+    fig.write_html(str(OUTPUT_DIR / 'interactive_heatmap.html'))
     print("✓ Saved: interactive_heatmap.html")
 
 # Example 5: 3D scatter plot
@@ -117,7 +123,7 @@ def interactive_3d():
                        template='plotly_white')
     
     fig.update_traces(marker=dict(size=5, opacity=0.8, line=dict(width=0.5, color='white')))
-    fig.write_html('interactive_3d.html')
+    fig.write_html(str(OUTPUT_DIR / 'interactive_3d.html'))
     print("✓ Saved: interactive_3d.html")
 
 # Example 6: Interactive pie chart
@@ -135,7 +141,7 @@ def interactive_pie():
     
     fig.update_traces(textposition='inside', textinfo='percent+label',
                      marker=dict(line=dict(color='white', width=2)))
-    fig.write_html('interactive_pie.html')
+    fig.write_html(str(OUTPUT_DIR / 'interactive_pie.html'))
     print("✓ Saved: interactive_pie.html")
 
 if __name__ == '__main__':

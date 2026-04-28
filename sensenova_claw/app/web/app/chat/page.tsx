@@ -2,7 +2,6 @@
 
 import { Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
-import dynamic from 'next/dynamic';
 import {
   Loader2, Bot, MessageSquare, Plus, Search, RefreshCw, Trash2,
   ChevronDown, ChevronRight, GitBranch,
@@ -12,26 +11,17 @@ import { authFetch, API_BASE } from '@/lib/authFetch';
 import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 import { useFilePanel } from '@/contexts/FilePanelContext';
 import { useI18n } from '@/contexts/I18nContext';
-import { type SessionItem, type ContextFileRef, getAgentId, getParentSessionId, getTitle, timeLabel } from '@/lib/chatTypes';
+import { type SessionItem, type SessionTreeNode, type ContextFileRef, buildSessionTree, getAgentId, getTitle, timeLabel } from '@/lib/chatTypes';
 import { MessageArea } from '@/components/chat/MessageArea';
 import { ChatInput } from '@/components/chat/ChatInput';
+import { InlinePreview } from '@/components/chat/InlinePreview';
 import { useSlideSet } from '@/components/ppt/PPTViewer';
+import { type FilePreviewType } from '@/components/files/fileTypes';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useResizablePreview } from '@/hooks/useResizablePreview';
-
-// Lazy load SlideViewer
-const SlideViewer = dynamic(
-  () => import('@/components/ppt/PPTViewer').then(mod => mod.SlideViewer),
-  {
-    loading: () => (
-      <div className="h-full flex items-center justify-center bg-muted/20">
-        <Loader2 className="animate-spin text-muted-foreground" />
-      </div>
-    ),
-    ssr: false,
-  },
-);
+import { SessionContextMenu } from '@/components/session/SessionContextMenu';
+import { InlineSessionTitleEditor } from '@/components/session/InlineSessionTitleEditor';
 
 /* ── workdir 根目录缓存 ── */
 let _workdirRootCache: string | null | undefined;
@@ -122,29 +112,40 @@ function AgentContactItem({
 
 /* ── Session 列表项（中栏） ── */
 function SessionListItem({
-  session, isActive, onClick, onDelete, index, isChild, isLast, noMargin,
+  session, isActive, onClick, onDelete, onContextMenu, index, isChild, isLast, noMargin, isRenaming, renameValue, onRenameValueChange, onRenameSubmit, onRenameCancel,
 }: {
   session: SessionItem;
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
+  onContextMenu: (event: React.MouseEvent) => void;
   index: number;
   isChild?: boolean;
   isLast?: boolean;
   noMargin?: boolean;
+  isRenaming: boolean;
+  renameValue: string;
+  onRenameValueChange: (value: string) => void;
+  onRenameSubmit: () => void;
+  onRenameCancel: () => void;
 }) {
   const { locale, t } = useI18n();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const hasChildren = Boolean(session.has_children);
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (hasChildren) {
+      onDelete();
+      return;
+    }
     if (confirmDelete) {
       onDelete();
       setConfirmDelete(false);
-    } else {
-      setConfirmDelete(true);
-      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
     }
+    setConfirmDelete(true);
+    setTimeout(() => setConfirmDelete(false), 3000);
   };
 
   if (isChild) {
@@ -161,7 +162,9 @@ function SessionListItem({
           <div className="w-2.5 h-px bg-violet-300/40 dark:bg-violet-500/25" />
         </div>
         <div
+          onContextMenu={onContextMenu}
           onClick={onClick}
+          data-testid={`chat-session-item-${session.session_id}`}
           className={cn(
             'flex items-center gap-2 flex-1 min-w-0 px-2.5 py-2 rounded-lg cursor-pointer transition-all group',
             isActive
@@ -174,10 +177,21 @@ function SessionListItem({
             isActive ? 'bg-violet-500' : 'bg-violet-300/60 dark:bg-violet-500/40',
           )} />
           <div className="flex-1 min-w-0">
-            <div className="truncate text-[11px] font-medium">{getTitle(session.meta, locale)}</div>
+            {isRenaming ? (
+              <InlineSessionTitleEditor
+                value={renameValue}
+                onChange={onRenameValueChange}
+                onSubmit={onRenameSubmit}
+                onCancel={onRenameCancel}
+                testId={`chat-rename-input-${session.session_id}`}
+                className="w-full rounded border border-violet-300/60 bg-background px-1.5 py-0.5 text-[11px] font-medium text-foreground outline-none ring-0"
+              />
+            ) : (
+              <div className="truncate text-[11px] font-medium">{getTitle(session.meta, locale)}</div>
+            )}
             <div className="text-[9px] text-muted-foreground/50 mt-0.5">{timeLabel(session.last_active, locale)}</div>
           </div>
-          <button onClick={handleDelete} className={cn('shrink-0 p-0.5 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive hover:bg-destructive/10' : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive')}>
+          <button data-testid={`chat-delete-session-${session.session_id}`} onClick={handleDelete} className={cn('shrink-0 p-0.5 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive hover:bg-destructive/10' : 'opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive')}>
             <Trash2 className="w-2.5 h-2.5" />
           </button>
         </div>
@@ -187,7 +201,9 @@ function SessionListItem({
 
   return (
     <div
+      onContextMenu={onContextMenu}
       onClick={onClick}
+      data-testid={`chat-session-item-${session.session_id}`}
       className={cn(
         'flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer transition-all text-sm group relative',
         !noMargin && 'mx-2',
@@ -196,52 +212,117 @@ function SessionListItem({
     >
       <MessageSquare className={cn('w-4 h-4 shrink-0', isActive ? 'text-blue-500' : 'text-muted-foreground')} />
       <div className="flex-1 min-w-0">
-        <div className="truncate font-medium text-xs">{getTitle(session.meta, locale)}</div>
+        {isRenaming ? (
+          <InlineSessionTitleEditor
+            value={renameValue}
+            onChange={onRenameValueChange}
+            onSubmit={onRenameSubmit}
+            onCancel={onRenameCancel}
+            testId={`chat-rename-input-${session.session_id}`}
+            className="w-full rounded-lg border border-blue-300/60 bg-background px-2 py-1 text-xs font-medium text-foreground outline-none ring-0"
+          />
+        ) : (
+          <div className="truncate font-medium text-xs">{getTitle(session.meta, locale)}</div>
+        )}
         <div className="text-[10px] text-muted-foreground mt-0.5">{timeLabel(session.last_active, locale)}</div>
       </div>
-      <button onClick={handleDelete} className={cn('shrink-0 p-1 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive' : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive')}>
+      <button data-testid={`chat-delete-session-${session.session_id}`} onClick={handleDelete} className={cn('shrink-0 p-1 rounded transition-colors', confirmDelete ? 'opacity-100 text-destructive' : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive')}>
         <Trash2 className="w-3.5 h-3.5" />
       </button>
     </div>
   );
 }
 
-function SessionListGroup({
-  session, children: childSessions, currentSessionId, switchSession, deleteSession, index,
+function SessionTreeBranch({
+  children,
+  isChild,
+  isLast,
 }: {
-  session: SessionItem;
-  children: SessionItem[];
+  children: React.ReactNode;
+  isChild?: boolean;
+  isLast?: boolean;
+}) {
+  if (!isChild) return <>{children}</>;
+
+  return (
+    <div className="flex items-stretch">
+      <div className="w-6 shrink-0 flex flex-col items-center">
+        <div className={cn('w-px flex-1 bg-violet-300/40 dark:bg-violet-400/30', isLast && 'max-h-[50%]')} />
+        {isLast && <div className="flex-1" />}
+      </div>
+      <div className="flex items-center -ml-[3px]">
+        <div className="w-3 h-px bg-violet-300/40 dark:bg-violet-400/30" />
+      </div>
+      <div className="flex-1 min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function SessionListGroup({
+  node, currentSessionId, switchSession, deleteSession, onContextMenu, editingSessionId, renameValue, setRenameValue, submitRename, cancelRename, index, isChild = false, isLast = false,
+}: {
+  node: SessionTreeNode;
   currentSessionId: string | null;
   switchSession: (sid: string) => void;
   deleteSession: (sid: string) => Promise<void>;
+  onContextMenu: (event: React.MouseEvent, session: SessionItem) => void;
+  editingSessionId: string | null;
+  renameValue: string;
+  setRenameValue: (value: string) => void;
+  submitRename: () => void;
+  cancelRename: () => void;
   index: number;
+  isChild?: boolean;
+  isLast?: boolean;
 }) {
   const { t } = useI18n();
-  const hasActiveChild = childSessions.some(c => c.session_id === currentSessionId);
+  const { session, children: childSessions } = node;
+  const hasActiveChild = childSessions.some(child => child.session.session_id === currentSessionId);
   const [expanded, setExpanded] = useState(hasActiveChild);
 
   useEffect(() => {
     if (hasActiveChild && !expanded) setExpanded(true);
-  }, [hasActiveChild]);
+  }, [expanded, hasActiveChild]);
 
   return (
-    <div className={cn('mx-2 rounded-xl transition-colors', expanded && 'bg-violet-50/40 dark:bg-violet-950/20 pb-1.5')}>
-      <SessionListItem session={session} isActive={currentSessionId === session.session_id} onClick={() => switchSession(session.session_id)} onDelete={() => deleteSession(session.session_id)} index={index} noMargin />
-      <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} className={cn('flex items-center gap-1.5 w-full pl-6 pr-3 py-1 text-[10px] font-medium', expanded ? 'text-violet-500' : 'text-muted-foreground/50')}>
+    <SessionTreeBranch isChild={isChild} isLast={isLast}>
+      <div className={cn('rounded-xl transition-colors', expanded && 'bg-violet-50/40 dark:bg-violet-950/20 pb-1.5')}>
+        <SessionListItem session={session} isActive={currentSessionId === session.session_id} onClick={() => switchSession(session.session_id)} onDelete={() => deleteSession(session.session_id)} onContextMenu={(event) => onContextMenu(event, session)} index={index} noMargin isRenaming={editingSessionId === session.session_id} renameValue={renameValue} onRenameValueChange={setRenameValue} onRenameSubmit={submitRename} onRenameCancel={cancelRename} />
+        <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} className={cn('flex items-center gap-1.5 w-full pr-3 py-1 text-[10px] font-medium', 'pl-6', expanded ? 'text-violet-500' : 'text-muted-foreground/50')}>
         <div className="flex items-center gap-1">
           {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           <GitBranch className="w-3 h-3" />
         </div>
         <span>{t('chat.teamSessionsCount', { count: childSessions.length })}</span>
-      </button>
-      {expanded && (
-        <div className="pl-4 pr-1">
-          {childSessions.map((child, childIdx) => (
-            <SessionListItem key={child.session_id} session={child} isActive={currentSessionId === child.session_id} onClick={() => switchSession(child.session_id)} onDelete={() => deleteSession(child.session_id)} index={index + 1 + childIdx} isChild isLast={childIdx === childSessions.length - 1} />
-          ))}
-        </div>
-      )}
-    </div>
+        </button>
+        {expanded && (
+          <div className="pl-4 pr-1">
+            {childSessions.map((child, childIdx) => (
+              child.children.length > 0 ? (
+                <SessionListGroup
+                  key={child.session.session_id}
+                  node={child}
+                  currentSessionId={currentSessionId}
+                  switchSession={switchSession}
+                  deleteSession={deleteSession}
+                  onContextMenu={onContextMenu}
+                  editingSessionId={editingSessionId}
+                  renameValue={renameValue}
+                  setRenameValue={setRenameValue}
+                  submitRename={submitRename}
+                  cancelRename={cancelRename}
+                  index={index + 1 + childIdx}
+                  isChild
+                  isLast={childIdx === childSessions.length - 1}
+                />
+              ) : (
+                <SessionListItem key={child.session.session_id} session={child.session} isActive={currentSessionId === child.session.session_id} onClick={() => switchSession(child.session.session_id)} onDelete={() => deleteSession(child.session.session_id)} onContextMenu={(event) => onContextMenu(event, child.session)} index={index + 1 + childIdx} isChild isLast={childIdx === childSessions.length - 1} isRenaming={editingSessionId === child.session.session_id} renameValue={renameValue} onRenameValueChange={setRenameValue} onRenameSubmit={submitRename} onRenameCancel={cancelRename} />
+              )
+            ))}
+          </div>
+        )}
+      </div>
+    </SessionTreeBranch>
   );
 }
 
@@ -249,7 +330,7 @@ function ChatContent() {
   const { locale, t } = useI18n();
   const {
     wsConnected, currentSessionId, sessions, messages, isTyping, turnActive, activeInteraction, currentSessionQuestionInteraction, interactionSubmitting,
-    sendMessage, sendCurrentSessionQuestionAnswer, switchSession, createSession, deleteSession, startNewChat,
+    sendMessage, sendCurrentSessionQuestionAnswer, switchSession, createSession, deleteSession, renameSession, startNewChat,
     refreshTaskGroups, loadingSessions, handleSkillInvoke, cancelTurn, cleanupEmptySession,
   } = useChatSession();
 
@@ -262,12 +343,16 @@ function ChatContent() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(agentFromUrl);
   const [searchQuery, setSearchQuery] = useState('');
   const [slidePreviewDir, setSlidePreviewDir] = useState<string | null>(null);
-  
+  const [filePreview, setFilePreview] = useState<{ path: string; type: FilePreviewType } | null>(null);
+
   const { previewHeight, onPreviewResize } = useResizablePreview(350);
   const slideSet = useSlideSet(slidePreviewDir);
   
   const requiredCheckDone = useRef(false);
   const creatingSessionForAgent = useRef<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ session: SessionItem; x: number; y: number } | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   // PPT Viewer Logic
   useEffect(() => {
@@ -288,12 +373,29 @@ function ChatContent() {
         });
       }
       setSlidePreviewDir(resolvedDir);
+      setFilePreview(null);
     };
     window.addEventListener('sensenova-claw:open-slide-preview', handler);
     return () => window.removeEventListener('sensenova-claw:open-slide-preview', handler);
   }, [selectedAgentId, currentSessionId, sessions, openToPath]);
 
-  useEffect(() => { setSlidePreviewDir(null); }, [currentSessionId]);
+  // File Preview Logic：聊天气泡里的 [..](#sensenova-claw-file:...) 链接点击会
+  // 派发此事件，这里与 slide 预览互斥共存。之前 /chat 页面漏接此事件，
+  // 导致 md 文件点击只定位到文件面板，对话区无预览。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { path: string; type: FilePreviewType };
+      setFilePreview(detail);
+      setSlidePreviewDir(null);
+    };
+    window.addEventListener('sensenova-claw:open-file-preview', handler);
+    return () => window.removeEventListener('sensenova-claw:open-file-preview', handler);
+  }, []);
+
+  useEffect(() => {
+    setSlidePreviewDir(null);
+    setFilePreview(null);
+  }, [currentSessionId]);
 
   const loadAgents = useCallback(async () => {
     setLoadingAgents(true);
@@ -321,19 +423,9 @@ function ChatContent() {
 
   useEffect(() => { if (selectedAgentId) refreshTaskGroups(); }, [selectedAgentId, refreshTaskGroups]);
 
-  const { rootSelectedSessions, selectedChildrenMap } = useMemo(() => {
+  const selectedSessionTree = useMemo(() => {
     const all = selectedAgentId ? (sessionsByAgent[selectedAgentId] || []).sort((a, b) => b.last_active - a.last_active) : [];
-    const idSet = new Set(all.map(s => s.session_id));
-    const cMap: Record<string, SessionItem[]> = {};
-    const roots: SessionItem[] = [];
-    for (const s of all) {
-      const parentId = getParentSessionId(s.meta);
-      if (parentId && idSet.has(parentId)) {
-        if (!cMap[parentId]) cMap[parentId] = [];
-        cMap[parentId].push(s);
-      } else roots.push(s);
-    }
-    return { rootSelectedSessions: roots, selectedChildrenMap: cMap };
+    return buildSessionTree(all);
   }, [sessionsByAgent, selectedAgentId]);
 
   useEffect(() => {
@@ -355,6 +447,31 @@ function ChatContent() {
   const filteredAgents = searchQuery.trim()
     ? agents.filter(a => a.name.toLowerCase().includes(searchQuery.toLowerCase()) || a.description.toLowerCase().includes(searchQuery.toLowerCase()))
     : agents;
+
+  const openContextMenu = (event: React.MouseEvent, session: SessionItem) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ session, x: event.clientX, y: event.clientY });
+  };
+
+  const startRename = () => {
+    if (!contextMenu) return;
+    setEditingSessionId(contextMenu.session.session_id);
+    setRenameValue(getTitle(contextMenu.session.meta));
+  };
+
+  const cancelRename = () => {
+    setEditingSessionId(null);
+    setRenameValue('');
+  };
+
+  const submitRename = async () => {
+    if (!editingSessionId) return;
+    const success = await renameSession(editingSessionId, renameValue);
+    if (success) {
+      cancelRename();
+    }
+  };
 
   // 必配清单检查：进入 system-admin 新 session 时自动发送缺失配置提醒
   useEffect(() => {
@@ -453,10 +570,9 @@ function ChatContent() {
             <button onClick={handleNewChat} className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold text-primary hover:bg-primary/10 transition-colors"><Plus size={14} /> {t('chat.newChat')}</button>
           </div>
           <div className="flex-1 overflow-y-auto py-2">
-            {rootSelectedSessions.map((session, idx) => {
-              const children = selectedChildrenMap[session.session_id] || [];
-              return children.length > 0 ? <SessionListGroup key={session.session_id} session={session} children={children} currentSessionId={currentSessionId} switchSession={switchSession} deleteSession={deleteSession} index={idx} />
-                : <SessionListItem key={session.session_id} session={session} isActive={currentSessionId === session.session_id} onClick={() => switchSession(session.session_id)} onDelete={() => deleteSession(session.session_id)} index={idx} />;
+            {selectedSessionTree.map((node, idx) => {
+              return node.children.length > 0 ? <SessionListGroup key={node.session.session_id} node={node} currentSessionId={currentSessionId} switchSession={switchSession} deleteSession={deleteSession} onContextMenu={openContextMenu} editingSessionId={editingSessionId} renameValue={renameValue} setRenameValue={setRenameValue} submitRename={submitRename} cancelRename={cancelRename} index={idx} />
+                : <SessionListItem key={node.session.session_id} session={node.session} isActive={currentSessionId === node.session.session_id} onClick={() => switchSession(node.session.session_id)} onDelete={() => deleteSession(node.session.session_id)} onContextMenu={(event) => openContextMenu(event, node.session)} index={idx} isRenaming={editingSessionId === node.session.session_id} renameValue={renameValue} onRenameValueChange={setRenameValue} onRenameSubmit={submitRename} onRenameCancel={cancelRename} />;
             })}
           </div>
         </ResizablePanel>
@@ -480,14 +596,14 @@ function ChatContent() {
             
             <MessageArea messages={messages} isTyping={isTyping} currentSessionId={currentSessionId} emptyState={emptyState} />
 
-            {slidePreviewDir && slideSet && (
-              <div className="shrink-0 flex flex-col border-t border-border/60" style={{ height: previewHeight }}>
-                <div className="flex items-center justify-center h-2 cursor-ns-resize hover:bg-primary/20 group transition-colors" onMouseDown={onPreviewResize}>
-                  <div className="w-8 h-1 rounded-full bg-border group-hover:bg-primary/50" />
-                </div>
-                <SlideViewer slideSet={slideSet} onClose={() => setSlidePreviewDir(null)} />
-              </div>
-            )}
+            <InlinePreview
+              previewHeight={previewHeight}
+              onPreviewResize={onPreviewResize}
+              slideSet={slideSet}
+              onCloseSlides={() => setSlidePreviewDir(null)}
+              filePreview={filePreview}
+              onCloseFile={() => setFilePreview(null)}
+            />
 
             <ChatInput
               defaultAgentId={selectedAgentId || 'default'}
@@ -505,6 +621,15 @@ function ChatContent() {
           </>
         )}
       </ResizablePanel>
+
+      <SessionContextMenu
+        open={!!contextMenu}
+        x={contextMenu?.x ?? 0}
+        y={contextMenu?.y ?? 0}
+        onClose={() => setContextMenu(null)}
+        onRename={startRename}
+        testId="chat-session-context-menu"
+      />
     </ResizablePanelGroup>
   );
 }

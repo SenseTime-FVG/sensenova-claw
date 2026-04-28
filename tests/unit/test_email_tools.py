@@ -1,7 +1,9 @@
 """邮件工具单元测试"""
 
-import pytest
+from email.message import EmailMessage
 from unittest.mock import patch
+
+import pytest
 
 from sensenova_claw.capabilities.tools.email import (
     SendEmailTool,
@@ -54,6 +56,254 @@ async def test_list_emails_tool_schema():
     assert tool.risk_level == ToolRiskLevel.LOW
     assert "folder" in tool.parameters["properties"]
     assert tool.parameters["required"] == []
+
+
+def test_list_emails_selects_folder_before_search():
+    """列邮件前必须先 select 文件夹，否则 IMAP 仍停留在 AUTH 状态。"""
+    tool = ListEmailsTool()
+    calls = []
+
+    header = EmailMessage()
+    header["Subject"] = "Test subject"
+    header["From"] = "sender@example.com"
+    header["Date"] = "Mon, 01 Jan 2024 00:00:00 +0000"
+
+    class FakeIMAP:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def login(self, username, password):
+            calls.append(("login", username, password))
+            return "OK", [b"logged in"]
+
+        def select(self, folder):
+            calls.append(("select", folder))
+            return "OK", [b"1"]
+
+        def search(self, charset, criteria):
+            calls.append(("search", charset, criteria))
+            return "OK", [b"1"]
+
+        def fetch(self, num, query):
+            calls.append(("fetch", num, query))
+            return "OK", [(b"1 (RFC822.HEADER {0})", header.as_bytes())]
+
+    with patch("sensenova_claw.capabilities.tools.email.imaplib.IMAP4_SSL", return_value=FakeIMAP()):
+        emails = tool._fetch_emails(
+            "imap.test.com",
+            993,
+            "user@test.com",
+            "secret",
+            "INBOX",
+            10,
+            False,
+            None,
+            None,
+            None,
+        )
+
+    assert emails == [
+        {
+            "id": "1",
+            "from": "sender@example.com",
+            "subject": "Test subject",
+            "date": "Mon, 01 Jan 2024 00:00:00 +0000",
+        }
+    ]
+    assert [name for name, *_ in calls] == ["login", "select", "search", "fetch"]
+
+
+def test_list_emails_sends_imap_id_for_163_before_select():
+    """163 邮箱要求在 select 前发送 IMAP ID。"""
+    tool = ListEmailsTool()
+    calls = []
+
+    header = EmailMessage()
+    header["Subject"] = "Test subject"
+    header["From"] = "sender@example.com"
+    header["Date"] = "Mon, 01 Jan 2024 00:00:00 +0000"
+
+    class FakeIMAP:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def login(self, username, password):
+            calls.append(("login", username, password))
+            return "OK", [b"logged in"]
+
+        def _simple_command(self, name, *args):
+            calls.append(("command", name, *args))
+            return "OK", [b"ID completed"]
+
+        def select(self, folder):
+            calls.append(("select", folder))
+            return "OK", [b"1"]
+
+        def search(self, charset, criteria):
+            calls.append(("search", charset, criteria))
+            return "OK", [b"1"]
+
+        def fetch(self, num, query):
+            calls.append(("fetch", num, query))
+            return "OK", [(b"1 (RFC822.HEADER {0})", header.as_bytes())]
+
+    with patch("sensenova_claw.capabilities.tools.email.imaplib.IMAP4_SSL", return_value=FakeIMAP()):
+        tool._fetch_emails(
+            "imap.163.com",
+            993,
+            "user@163.com",
+            "secret",
+            "INBOX",
+            10,
+            False,
+            None,
+            None,
+            None,
+        )
+
+    assert [name for name, *_ in calls] == ["login", "command", "select", "search", "fetch"]
+    assert calls[1][1] == "ID"
+    assert "support-email" in calls[1][2]
+
+
+def test_list_emails_does_not_send_imap_id_for_other_hosts():
+    """非 163 邮箱保持原状，不发送 IMAP ID。"""
+    tool = ListEmailsTool()
+    calls = []
+
+    header = EmailMessage()
+    header["Subject"] = "Test subject"
+    header["From"] = "sender@example.com"
+    header["Date"] = "Mon, 01 Jan 2024 00:00:00 +0000"
+
+    class FakeIMAP:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def login(self, username, password):
+            calls.append(("login", username, password))
+            return "OK", [b"logged in"]
+
+        def _simple_command(self, name, *args):
+            calls.append(("command", name, *args))
+            return "OK", [b"ID completed"]
+
+        def select(self, folder):
+            calls.append(("select", folder))
+            return "OK", [b"1"]
+
+        def search(self, charset, criteria):
+            calls.append(("search", charset, criteria))
+            return "OK", [b"1"]
+
+        def fetch(self, num, query):
+            calls.append(("fetch", num, query))
+            return "OK", [(b"1 (RFC822.HEADER {0})", header.as_bytes())]
+
+    with patch("sensenova_claw.capabilities.tools.email.imaplib.IMAP4_SSL", return_value=FakeIMAP()):
+        tool._fetch_emails(
+            "imap.qq.com",
+            993,
+            "user@qq.com",
+            "secret",
+            "INBOX",
+            10,
+            False,
+            None,
+            None,
+            None,
+        )
+
+    assert [name for name, *_ in calls] == ["login", "select", "search", "fetch"]
+
+
+def test_list_emails_empty_folder_falls_back_to_inbox():
+    """空 folder 不应传给 IMAP；应回退到默认 INBOX。"""
+    tool = ListEmailsTool()
+    selected_folders = []
+
+    header = EmailMessage()
+    header["Subject"] = "Test subject"
+    header["From"] = "sender@example.com"
+    header["Date"] = "Mon, 01 Jan 2024 00:00:00 +0000"
+
+    class FakeIMAP:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def login(self, username, password):
+            return "OK", [b"logged in"]
+
+        def select(self, folder):
+            selected_folders.append(folder)
+            return "OK", [b"1"]
+
+        def search(self, charset, criteria):
+            return "OK", [b"1"]
+
+        def fetch(self, num, query):
+            return "OK", [(b"1 (RFC822.HEADER {0})", header.as_bytes())]
+
+    with patch("sensenova_claw.capabilities.tools.email.imaplib.IMAP4_SSL", return_value=FakeIMAP()):
+        tool._fetch_emails(
+            "imap.test.com",
+            993,
+            "user@test.com",
+            "secret",
+            "",
+            10,
+            False,
+            None,
+            None,
+            None,
+        )
+
+    assert selected_folders == ["INBOX"]
+
+
+def test_list_emails_raises_clear_error_when_select_fails():
+    """select 失败时应直接报出文件夹错误，避免误导成 SEARCH/AUTH。"""
+    tool = ListEmailsTool()
+
+    class FakeIMAP:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def login(self, username, password):
+            return "OK", [b"logged in"]
+
+        def select(self, folder):
+            return "NO", [b"Mailbox does not exist"]
+
+    with patch("sensenova_claw.capabilities.tools.email.imaplib.IMAP4_SSL", return_value=FakeIMAP()):
+        with pytest.raises(ValueError, match="选择邮箱文件夹失败"):
+            tool._fetch_emails(
+                "imap.test.com",
+                993,
+                "user@test.com",
+                "secret",
+                "INBOX",
+                10,
+                False,
+                None,
+                None,
+                None,
+            )
 
 
 @pytest.mark.asyncio

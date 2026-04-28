@@ -28,13 +28,23 @@ from sensenova_claw.platform.secrets.store import build_default_secret_store
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # 前端目录解析：根据 project_root 定位
+def _has_frontend(web_dir: Path) -> bool:
+    """检查前端目录是否可用（有 node_modules 或 standalone 产物）。"""
+    if (web_dir / "node_modules").exists():
+        return True
+    # standalone 模式：build 后仅保留 .next/standalone，无 node_modules
+    if (web_dir / ".next" / "standalone").is_dir():
+        return True
+    return False
+
+
 def _resolve_web_dir(project_root: Path) -> Path:
     web_dir = project_root / "sensenova_claw" / "app" / "web"
-    if (web_dir / "node_modules").exists():
+    if _has_frontend(web_dir):
         return web_dir
     # 回退到 SENSENOVA_CLAW_HOME/app 下的前端（install.sh 安装场景）
     installed_web = default_sensenova_claw_home() / "app" / "sensenova_claw" / "app" / "web"
-    if (installed_web / "node_modules").exists():
+    if _has_frontend(installed_web):
         return installed_web
     return web_dir
 
@@ -69,24 +79,37 @@ def _build_frontend_dev_cmd(web_dir: Path, frontend_port: int) -> list[str]:
     return []
 
 
-def _build_frontend_prod_cmd(web_dir: Path, frontend_port: int) -> list[str]:
-    """生产模式：使用 next start 启动预构建的前端。"""
-    # 仅在存在有效生产构建标记时才允许 next start，避免把 dev/.next 缓存误判成可启动产物。
+def _build_frontend_prod_cmd(web_dir: Path, frontend_port: int) -> tuple[list[str], str]:
+    """生产模式：优先使用 standalone server.js，回退到 next start。
+
+    返回 (命令列表, 工作目录)。命令列表为空表示无可用的生产模式启动方式。
+    """
+    # 仅在存在有效生产构建标记时才允许启动，避免把 dev/.next 缓存误判成可启动产物。
     build_id = web_dir / ".next" / "BUILD_ID"
     if not build_id.exists():
-        return []
+        return [], str(web_dir)
     if not build_id.read_text(encoding="utf-8").strip():
-        return []
+        return [], str(web_dir)
 
-    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
     node = _find_node()
+
+    # 优先使用 standalone 模式（体积最小，无需 node_modules）
+    # standalone server.js 通过 PORT 环境变量指定端口，不接受 -p 参数
+    # cwd 必须设为 standalone 目录，server.js 从 cwd 查找 public/ 和 .next/static/
+    standalone_dir = web_dir / ".next" / "standalone"
+    standalone_server = standalone_dir / "server.js"
+    if node and standalone_server.exists():
+        return [node, str(standalone_server)], str(standalone_dir)
+
+    # 回退到 next start（需要 node_modules）
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin" / "next"
     if node and next_cli.exists():
-        return [node, str(next_cli), "start", "-p", str(frontend_port)]
+        return [node, str(next_cli), "start", "-p", str(frontend_port)], str(web_dir)
 
     npm = _find_npm()
     if npm:
-        return [npm, "run", "start", "--", "-p", str(frontend_port)]
-    return []
+        return [npm, "run", "start", "--", "-p", str(frontend_port)], str(web_dir)
+    return [], str(web_dir)
 
 
 def _spawn_managed_process(
@@ -280,7 +303,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
 
     # 启动后端：仅在前端存在有效生产构建时才视为生产模式。
-    is_production = bool(_build_frontend_prod_cmd(web_dir, frontend_port))
+    _prod_cmd, _prod_cwd = _build_frontend_prod_cmd(web_dir, frontend_port)
+    is_production = bool(_prod_cmd)
     backend_cmd = [
         sys.executable, "-m", "uvicorn",
         "sensenova_claw.app.gateway.main:app",
@@ -288,7 +312,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         "--port", str(backend_port),
     ]
     if not is_production:
-        backend_cmd.insert(4, "--reload")
+        # --reload：改 .py 自动重启。限定监听目录到源码包，避免 tests/、var/、.next/ 的噪声触发重启
+        reload_dir = str(project_root / "sensenova_claw")
+        backend_cmd[4:4] = ["--reload", "--reload-dir", reload_dir]
     print(f"启动后端服务: http://localhost:{backend_port}")
     backend_proc = _spawn_managed_process(backend_cmd, cwd=str(project_root), env=env)
     procs.append(backend_proc)
@@ -301,26 +327,33 @@ def cmd_run(args: argparse.Namespace) -> int:
     if _check_port(backend_port):
         print("警告: 后端进程已启动，但端口尚未就绪，初始化可能仍在继续。")
 
-    # 启动前端：检测到 .next/ 目录（已 build）自动用 next start，否则回退 next dev
+    # 启动前端：检测到 .next/ 目录（已 build）自动用 standalone/next start，否则回退 next dev
     frontend_proc = None
+    frontend_cwd = str(web_dir)
+    is_prod_frontend = False
     if not no_frontend:
-        frontend_cmd = _build_frontend_prod_cmd(web_dir, frontend_port)
+        frontend_cmd, frontend_cwd = _build_frontend_prod_cmd(web_dir, frontend_port)
         if frontend_cmd:
-            print("检测到前端预构建产物，使用 next start（生产模式）")
+            print("检测到前端预构建产物，使用生产模式启动")
+            is_prod_frontend = True
         else:
             print("未检测到前端预构建产物，使用 next dev（开发模式）")
             frontend_cmd = _build_frontend_dev_cmd(web_dir, frontend_port)
+            frontend_cwd = str(web_dir)
         if not frontend_cmd:
             print("警告: 未找到可用的 Node.js/npm，跳过前端启动。安装 Node.js 后可使用前端 dashboard。", file=sys.stderr)
-        elif not (web_dir / "node_modules").exists():
+        elif not is_prod_frontend and not _has_frontend(web_dir):
+            # 仅开发模式需要检查 node_modules；生产模式已由 _build_frontend_prod_cmd 确认可用
             print("警告: 前端依赖未安装，请先执行 'npm install'。跳过前端启动。", file=sys.stderr)
         else:
             print(f"启动前端 dashboard: http://localhost:{frontend_port}")
             frontend_env = env.copy()
             frontend_env["PORT"] = str(frontend_port)
+            # standalone server.js 默认只监听 localhost，设置 HOSTNAME 以支持外部访问
+            frontend_env.setdefault("HOSTNAME", "0.0.0.0")
             frontend_proc = _spawn_managed_process(
                 frontend_cmd,
-                cwd=str(web_dir),
+                cwd=frontend_cwd,
                 env=frontend_env,
             )
             procs.append(frontend_proc)
@@ -355,6 +388,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"  CLI 连接:    sensenova-claw cli --port {backend_port}")
     print()
     print("  注意: 后端日志中包含带 token 的访问 URL")
+    if not is_production:
+        print("  热重载: 改 sensenova_claw/**/*.py 自动重启后端；改前端 .tsx 走 Next.js HMR")
     if not _llm_ok:
         print()
         print("  ⚠️  未检测到可用的 LLM API 配置，当前使用 Mock 模式")

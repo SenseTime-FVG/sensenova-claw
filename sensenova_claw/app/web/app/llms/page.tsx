@@ -4,8 +4,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle, ChevronDown, ChevronRight, Cpu, Eye, EyeOff, Loader2, Plus, RefreshCw, Save, Server, Trash2, X, XCircle, Zap } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
+import { buildDeleteConfirmationConfig, type DeleteTargetType } from './deleteConfirmation';
+import { getExistingModelValidationError, getNewModelValidationError } from './newModelValidation';
+import { getExistingProviderValidationError, getNewProviderValidationError } from './providerValidation';
 
 interface SecretValueStatus {
   configured: boolean;
@@ -64,6 +68,12 @@ interface BulkModelTestState extends ModelTestResult {
   status: 'pending' | 'success' | 'failed';
 }
 
+interface DeleteDialogState {
+  type: DeleteTargetType;
+  name: string;
+  relatedModelCount?: number;
+}
+
 const MAX_BULK_TEST_CONCURRENCY = 10;
 const TEST_TOOLTIP_DELAY_MS = 1000;
 const TEST_TOOLTIP_MESSAGE = '连接测试会消耗少量token';
@@ -101,7 +111,11 @@ export default function LlmsPage() {
 
   const [showNewProvider, setShowNewProvider] = useState(false);
   const [newProviderName, setNewProviderName] = useState('');
+  const [newProviderError, setNewProviderError] = useState('');
   const [newModelDrafts, setNewModelDrafts] = useState<Record<string, string>>({});
+  const [newModelErrors, setNewModelErrors] = useState<Record<string, string>>({});
+  const [providerNameErrors, setProviderNameErrors] = useState<Record<string, string>>({});
+  const [modelNameErrors, setModelNameErrors] = useState<Record<string, string>>({});
   const [openNewModelForms, setOpenNewModelForms] = useState<Record<string, boolean>>({});
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
   const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<string, boolean>>({});
@@ -128,6 +142,8 @@ export default function LlmsPage() {
   const [visibleTestTooltipModel, setVisibleTestTooltipModel] = useState<string | null>(null);
   const [hoveringBulkTestButton, setHoveringBulkTestButton] = useState(false);
   const [showBulkTestTooltip, setShowBulkTestTooltip] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
+  const [deletingTarget, setDeletingTarget] = useState(false);
 
   const loadConfig = async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
@@ -183,6 +199,10 @@ export default function LlmsPage() {
         setBulkTestResults({});
         setOpenBulkTestErrorModel(null);
         setHasBulkTestResults(false);
+        setNewProviderError('');
+        setProviderNameErrors({});
+        setNewModelErrors({});
+        setModelNameErrors({});
     } catch {
       setSaveMsg('读取配置失败');
     } finally {
@@ -440,11 +460,13 @@ export default function LlmsPage() {
   };
 
   const addProvider = () => {
-    const name = newProviderName.trim().toLowerCase();
     const providerSource = editingAll && globalDraft ? globalDraft.providers : cloneProvidersToDrafts(providers);
-    if (!name || providerSource[name]) {
+    const error = getNewProviderValidationError(newProviderName, Object.keys(providerSource));
+    if (error) {
+      setNewProviderError(error);
       return;
     }
+    const name = newProviderName.trim().toLowerCase();
     const nextProvider: ProviderDraft = {
         source_type: 'openai',
         api_key: '',
@@ -469,16 +491,21 @@ export default function LlmsPage() {
         [name]: nextProvider,
       }));
     }
+    setNewProviderError('');
     setShowNewProvider(false);
     setNewProviderName('');
     setExpandedProviders((prev) => ({ ...prev, [name]: true }));
   };
 
-  const removeProvider = (name: string) => {
-    if (!confirm(`确定删除 provider "${name}" 吗？其下关联的 llm 也会一并删除。`)) {
-      return;
-    }
+  const removeProvider = async (name: string) => {
+    setDeleteDialog({
+      type: 'provider',
+      name,
+      relatedModelCount: (groupedModels[name] || []).length,
+    });
+  };
 
+  const applyDraftProviderRemoval = (name: string) => {
     const removedModels = groupedModels[name] || [];
     if (editingAll && globalDraft) {
       const nextProviders = { ...globalDraft.providers };
@@ -494,28 +521,22 @@ export default function LlmsPage() {
         defaultModel: removedModels.includes(globalDraft.defaultModel) ? '' : globalDraft.defaultModel,
         defaultEmbeddingModel: removedModels.includes(globalDraft.defaultEmbeddingModel) ? '' : globalDraft.defaultEmbeddingModel,
       });
-    } else {
-      setProviders((prev) => {
-        const next = { ...prev };
-        delete next[name];
-        return next;
-      });
-      setModels((prev) => {
-        const next = { ...prev };
-        removedModels.forEach((modelName) => {
-          delete next[modelName];
-        });
-        return next;
-      });
     }
-    setExpandedProviders((prev) => {
-      const next = { ...prev };
-      delete next[name];
-      return next;
+  };
+
+  const deleteProviderPersisted = async (name: string) => {
+    setSaveMsg('');
+    const res = await authFetch(`${API_BASE}/api/config/llm/providers/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
     });
-    if (!editingAll && removedModels.includes(defaultModel)) {
-      setDefaultModel('');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setSaveMsg(err.detail || '删除失败');
+      return false;
     }
+    setSaveMsg('已删除');
+    await loadConfig();
+    return true;
   };
 
   const updateModelField = (name: string, field: keyof ModelConfig, value: string | number) => {
@@ -563,12 +584,9 @@ export default function LlmsPage() {
   const addModel = (providerName: string) => {
     const nextName = (newModelDrafts[providerName] || '').trim();
     const modelSource = editingAll && globalDraft ? globalDraft.models : cloneModelsToDrafts(models);
-    if (!nextName) {
-      setSaveMsg('LLM 名称不能为空');
-      return;
-    }
-    if (modelSource[nextName]) {
-      setSaveMsg(`LLM 名称已存在: ${nextName}`);
+    const error = getNewModelValidationError(nextName, Object.keys(modelSource));
+    if (error) {
+      setNewModelErrors((prev) => ({ ...prev, [providerName]: error }));
       return;
     }
     const nextModel: ModelDraft = {
@@ -602,14 +620,23 @@ export default function LlmsPage() {
         [nextName]: nextModel,
       }));
     }
+    setNewModelErrors((prev) => {
+      const next = { ...prev };
+      delete next[providerName];
+      return next;
+    });
     setNewModelDrafts((prev) => ({ ...prev, [providerName]: '' }));
     setOpenNewModelForms((prev) => ({ ...prev, [providerName]: false }));
   };
 
-  const removeModel = (name: string) => {
-    if (!confirm(`确定删除 llm "${name}" 吗？`)) {
-      return;
-    }
+  const removeModel = async (name: string) => {
+    setDeleteDialog({
+      type: 'model',
+      name,
+    });
+  };
+
+  const applyDraftModelRemoval = (name: string) => {
     if (editingAll && globalDraft) {
       const nextModels = { ...globalDraft.models };
       delete nextModels[name];
@@ -619,18 +646,62 @@ export default function LlmsPage() {
         defaultModel: globalDraft.defaultModel === name ? '' : globalDraft.defaultModel,
         defaultEmbeddingModel: globalDraft.defaultEmbeddingModel === name ? '' : globalDraft.defaultEmbeddingModel,
       });
-    } else {
-      setModels((prev) => {
-        const next = { ...prev };
-        delete next[name];
-        return next;
-      });
     }
-    if (!editingAll && defaultModel === name) {
-      setDefaultModel('');
+  };
+
+  const deleteModelPersisted = async (name: string) => {
+    setSaveMsg('');
+    const res = await authFetch(`${API_BASE}/api/config/llm/models/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setSaveMsg(err.detail || '删除失败');
+      return false;
     }
-    if (!editingAll && defaultEmbeddingModel === name) {
-      setDefaultEmbeddingModel('');
+    setSaveMsg('已删除');
+    await loadConfig();
+    return true;
+  };
+
+  const handleDeleteDialogChange = (open: boolean) => {
+    if (deletingTarget) {
+      return;
+    }
+    if (!open) {
+      setDeleteDialog(null);
+    }
+  };
+
+  const confirmDeleteTarget = async () => {
+    if (!deleteDialog) return;
+
+    const config = buildDeleteConfirmationConfig(deleteDialog.type, deleteDialog.name, {
+      relatedModelCount: deleteDialog.relatedModelCount,
+      editingAll,
+    });
+
+    setDeletingTarget(true);
+    try {
+      let deleted = false;
+      if (!config.persistToConfig) {
+        if (deleteDialog.type === 'provider') {
+          applyDraftProviderRemoval(deleteDialog.name);
+        } else {
+          applyDraftModelRemoval(deleteDialog.name);
+        }
+        setSaveMsg('已从草稿移除');
+        deleted = true;
+      } else if (deleteDialog.type === 'provider') {
+        deleted = await deleteProviderPersisted(deleteDialog.name);
+      } else {
+        deleted = await deleteModelPersisted(deleteDialog.name);
+      }
+      if (deleted) {
+        setDeleteDialog(null);
+      }
+    } finally {
+      setDeletingTarget(false);
     }
   };
 
@@ -868,10 +939,20 @@ export default function LlmsPage() {
       delete next[name];
       return next;
     });
+    setProviderNameErrors((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   };
 
   const saveProvider = async (name: string) => {
     const draft = getProviderDraft(name);
+    const validationError = getExistingProviderValidationError(name, draft.name, Object.keys(providers));
+    if (validationError) {
+      setProviderNameErrors((prev) => ({ ...prev, [name]: validationError }));
+      return;
+    }
     setSaveMsg('');
     const payload: Record<string, unknown> = {
       name: draft.name,
@@ -890,9 +971,19 @@ export default function LlmsPage() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      setSaveMsg(err.detail || '保存失败');
+      const detail = err.detail || '保存失败';
+      if (typeof detail === 'string' && detail.includes('Provider 已存在')) {
+        setProviderNameErrors((prev) => ({ ...prev, [name]: detail }));
+      } else {
+        setSaveMsg(detail);
+      }
       return;
     }
+    setProviderNameErrors((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
     setSaveMsg('已保存');
     loadConfig();
   };
@@ -915,10 +1006,20 @@ export default function LlmsPage() {
       delete next[name];
       return next;
     });
+    setModelNameErrors((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   };
 
   const saveModel = async (name: string) => {
     const draft = getModelDraft(name);
+    const validationError = getExistingModelValidationError(name, draft.name, Object.keys(models));
+    if (validationError) {
+      setModelNameErrors((prev) => ({ ...prev, [name]: validationError }));
+      return;
+    }
     setSaveMsg('');
     const res = await authFetch(`${API_BASE}/api/config/llm/models/${encodeURIComponent(name)}`, {
       method: 'PUT',
@@ -936,9 +1037,19 @@ export default function LlmsPage() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      setSaveMsg(err.detail || '保存失败');
+      const detail = err.detail || '保存失败';
+      if (typeof detail === 'string' && detail.includes('Model 已存在')) {
+        setModelNameErrors((prev) => ({ ...prev, [name]: detail.replace('Model', 'LLM') }));
+      } else {
+        setSaveMsg(detail);
+      }
       return;
     }
+    setModelNameErrors((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
     setSaveMsg('已保存');
     loadConfig();
   };
@@ -1108,6 +1219,13 @@ export default function LlmsPage() {
     setSaveMsg('');
     await loadConfig();
   };
+
+  const activeDeleteConfig = deleteDialog
+    ? buildDeleteConfirmationConfig(deleteDialog.type, deleteDialog.name, {
+      relatedModelCount: deleteDialog.relatedModelCount,
+      editingAll,
+    })
+    : null;
 
   if (loading) {
     return (
@@ -1467,28 +1585,51 @@ export default function LlmsPage() {
                 {expandedProviders[providerName] && (
                   <div data-testid={`provider-body-${providerName}`} className="space-y-6 p-6">
                     <div className="grid gap-4 md:grid-cols-2">
-                      <FieldInput
-                        label="Provider 名称"
-                        value={getProviderDraft(providerName).name}
-                        dataTestId={`provider-name-input-${providerName}`}
-                        disabled={!isProviderEditable(providerName)}
-                        onChange={(value) => {
-                          if (editingAll && globalDraft) {
-                            setGlobalDraft({
-                              ...globalDraft,
-                              providers: {
-                                ...globalDraft.providers,
-                                [providerName]: { ...globalDraft.providers[providerName], name: value },
-                              },
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground">Provider 名称</label>
+                        <input
+                          type="text"
+                          value={getProviderDraft(providerName).name}
+                          data-testid={`provider-name-input-${providerName}`}
+                          disabled={!isProviderEditable(providerName)}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setProviderNameErrors((prev) => {
+                              if (!prev[providerName]) return prev;
+                              const next = { ...prev };
+                              delete next[providerName];
+                              return next;
                             });
-                            return;
-                          }
-                          setProviderDrafts((prev) => ({
-                            ...prev,
-                            [providerName]: { ...(prev[providerName] || { ...providers[providerName], name: providerName }), name: value },
-                          }));
-                        }}
-                      />
+                            if (editingAll && globalDraft) {
+                              setGlobalDraft({
+                                ...globalDraft,
+                                providers: {
+                                  ...globalDraft.providers,
+                                  [providerName]: { ...globalDraft.providers[providerName], name: value },
+                                },
+                              });
+                              return;
+                            }
+                            setProviderDrafts((prev) => ({
+                              ...prev,
+                              [providerName]: { ...(prev[providerName] || { ...providers[providerName], name: providerName }), name: value },
+                            }));
+                          }}
+                          className={`w-full rounded-xl bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 ${
+                            providerNameErrors[providerName]
+                              ? 'border border-destructive/60 focus:border-destructive focus:ring-destructive/20'
+                              : 'border border-input focus:border-primary focus:ring-primary/20'
+                          }`}
+                        />
+                        {providerNameErrors[providerName] ? (
+                          <p
+                            data-testid={`provider-name-error-${providerName}`}
+                            className="text-xs font-medium text-destructive"
+                          >
+                            {providerNameErrors[providerName]}
+                          </p>
+                        ) : null}
+                      </div>
                       <FieldSelect
                         label="Provider 来源"
                         value={getProviderDraft(providerName).source_type || 'openai'}
@@ -1561,7 +1702,20 @@ export default function LlmsPage() {
                         <button
                           type="button"
                           data-testid={`add-llm-button-${providerName}`}
-                          onClick={() => setOpenNewModelForms((prev) => ({ ...prev, [providerName]: !prev[providerName] }))}
+                          onClick={() => {
+                            setOpenNewModelForms((prev) => {
+                              const nextOpen = !prev[providerName];
+                              if (!nextOpen) {
+                                setNewModelErrors((current) => {
+                                  if (!current[providerName]) return current;
+                                  const next = { ...current };
+                                  delete next[providerName];
+                                  return next;
+                                });
+                              }
+                              return { ...prev, [providerName]: nextOpen };
+                            });
+                          }}
                           className="flex items-center gap-2 rounded-xl border border-primary/30 px-4 py-2 text-sm font-semibold text-primary transition-all hover:bg-primary/5"
                         >
                           <Plus size={16} />
@@ -1570,23 +1724,49 @@ export default function LlmsPage() {
                       </div>
 
                       {openNewModelForms[providerName] && (
-                        <div className="flex flex-col gap-3 rounded-xl border border-dashed border-primary/30 bg-background p-4 md:flex-row">
-                          <input
-                            type="text"
-                            value={newModelDrafts[providerName] || ''}
-                            data-testid={`new-llm-name-input-${providerName}`}
-                            onChange={(e) => setNewModelDrafts((prev) => ({ ...prev, [providerName]: e.target.value }))}
-                            placeholder="llm 名称，例如 gpt-4.1-mini"
-                            className="flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                          />
-                          <button
-                            type="button"
-                            data-testid={`confirm-add-llm-button-${providerName}`}
-                            onClick={() => addModel(providerName)}
-                            className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
-                          >
-                            添加
-                          </button>
+                        <div className="rounded-xl border border-dashed border-primary/30 bg-background p-4">
+                          <div className="flex flex-col gap-3 md:flex-row">
+                            <div className="flex-1">
+                              <input
+                                type="text"
+                                value={newModelDrafts[providerName] || ''}
+                                data-testid={`new-llm-name-input-${providerName}`}
+                                onChange={(e) => {
+                                  setNewModelDrafts((prev) => ({ ...prev, [providerName]: e.target.value }));
+                                  setNewModelErrors((prev) => {
+                                    if (!prev[providerName]) {
+                                      return prev;
+                                    }
+                                    const next = { ...prev };
+                                    delete next[providerName];
+                                    return next;
+                                  });
+                                }}
+                                placeholder="llm 名称，例如 gpt-4.1-mini"
+                                className={`w-full rounded-xl bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:outline-none focus:ring-2 ${
+                                  newModelErrors[providerName]
+                                    ? 'border border-destructive/60 focus:border-destructive focus:ring-destructive/20'
+                                    : 'border border-input focus:border-primary focus:ring-primary/20'
+                                }`}
+                              />
+                              {newModelErrors[providerName] ? (
+                                <p
+                                  data-testid={`new-llm-name-error-${providerName}`}
+                                  className="mt-2 text-xs font-medium text-destructive"
+                                >
+                                  {newModelErrors[providerName]}
+                                </p>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              data-testid={`confirm-add-llm-button-${providerName}`}
+                              onClick={() => addModel(providerName)}
+                              className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
+                            >
+                              添加
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -1598,28 +1778,51 @@ export default function LlmsPage() {
                             className="grid gap-4 rounded-2xl border border-border bg-background p-4 md:grid-cols-[minmax(0,1fr)_auto]"
                           >
                             <div className="grid min-w-0 gap-4 md:grid-cols-2">
-                              <FieldInput
-                                label="LLM 名称"
-                                value={getModelDraft(modelName).name}
-                                dataTestId={`llm-name-input-${modelName}`}
-                                disabled={!isModelEditable(modelName)}
-                                onChange={(value) => {
-                                  if (editingAll && globalDraft) {
-                                    setGlobalDraft({
-                                      ...globalDraft,
-                                      models: {
-                                        ...globalDraft.models,
-                                        [modelName]: { ...globalDraft.models[modelName], name: value },
-                                      },
+                              <div className="space-y-1.5">
+                                <label className="text-xs font-semibold text-muted-foreground">LLM 名称</label>
+                                <input
+                                  type="text"
+                                  value={getModelDraft(modelName).name}
+                                  data-testid={`llm-name-input-${modelName}`}
+                                  disabled={!isModelEditable(modelName)}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setModelNameErrors((prev) => {
+                                      if (!prev[modelName]) return prev;
+                                      const next = { ...prev };
+                                      delete next[modelName];
+                                      return next;
                                     });
-                                    return;
-                                  }
-                                  setModelDrafts((prev) => ({
-                                    ...prev,
-                                    [modelName]: { ...(prev[modelName] || { ...models[modelName], name: modelName }), name: value },
-                                  }));
-                                }}
-                              />
+                                    if (editingAll && globalDraft) {
+                                      setGlobalDraft({
+                                        ...globalDraft,
+                                        models: {
+                                          ...globalDraft.models,
+                                          [modelName]: { ...globalDraft.models[modelName], name: value },
+                                        },
+                                      });
+                                      return;
+                                    }
+                                    setModelDrafts((prev) => ({
+                                      ...prev,
+                                      [modelName]: { ...(prev[modelName] || { ...models[modelName], name: modelName }), name: value },
+                                    }));
+                                  }}
+                                  className={`w-full rounded-xl bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 ${
+                                    modelNameErrors[modelName]
+                                      ? 'border border-destructive/60 focus:border-destructive focus:ring-destructive/20'
+                                      : 'border border-input focus:border-primary focus:ring-primary/20'
+                                  }`}
+                                />
+                                {modelNameErrors[modelName] ? (
+                                  <p
+                                    data-testid={`llm-name-error-${modelName}`}
+                                    className="text-xs font-medium text-destructive"
+                                  >
+                                    {modelNameErrors[modelName]}
+                                  </p>
+                                ) : null}
+                              </div>
                               <FieldSelect
                                 label="类型"
                                 value={getModelDraft(modelName).type || 'chat'}
@@ -1826,29 +2029,50 @@ export default function LlmsPage() {
             ))}
 
             {showNewProvider ? (
-              <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-primary/30 bg-muted/20 p-5 md:flex-row">
-                <input
-                  type="text"
-                  value={newProviderName}
-                  data-testid="new-provider-name-input"
-                  onChange={(e) => setNewProviderName(e.target.value)}
-                  placeholder="provider 名称，例如 deepseek"
-                  className="flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <button
-                  type="button"
-                  data-testid="confirm-add-provider-button"
-                  onClick={addProvider}
-                  className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
-                >
-                  添加 provider
-                </button>
+              <div className="rounded-2xl border border-dashed border-primary/30 bg-muted/20 p-5">
+                <div className="flex flex-col gap-3 md:flex-row">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={newProviderName}
+                      data-testid="new-provider-name-input"
+                      onChange={(e) => {
+                        setNewProviderName(e.target.value);
+                        if (newProviderError) {
+                          setNewProviderError('');
+                        }
+                      }}
+                      placeholder="provider 名称，例如 deepseek"
+                      className={`w-full rounded-xl bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all focus:outline-none focus:ring-2 ${
+                        newProviderError
+                          ? 'border border-destructive/60 focus:border-destructive focus:ring-destructive/20'
+                          : 'border border-input focus:border-primary focus:ring-primary/20'
+                      }`}
+                    />
+                    {newProviderError ? (
+                      <p data-testid="new-provider-name-error" className="mt-2 text-xs font-medium text-destructive">
+                        {newProviderError}
+                      </p>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="confirm-add-provider-button"
+                    onClick={addProvider}
+                    className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90"
+                  >
+                    添加 provider
+                  </button>
+                </div>
               </div>
             ) : (
               <button
                 type="button"
                 data-testid="add-provider-button"
-                onClick={() => setShowNewProvider(true)}
+                onClick={() => {
+                  setShowNewProvider(true);
+                  setNewProviderError('');
+                }}
                 className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/30 px-4 py-4 text-sm font-semibold text-primary transition-all hover:bg-primary/5"
               >
                 <Plus size={16} />
@@ -1857,6 +2081,45 @@ export default function LlmsPage() {
             )}
           </CardContent>
         </Card>
+
+        <Dialog open={Boolean(deleteDialog)} onOpenChange={handleDeleteDialogChange}>
+          <DialogContent
+            data-testid="llm-delete-dialog"
+            showCloseButton={!deletingTarget}
+            className="max-w-[360px] gap-3 rounded-2xl border border-primary/30 bg-[#111722]/95 p-0 text-foreground shadow-2xl ring-1 ring-primary/10 backdrop-blur"
+          >
+            <DialogHeader className="px-5 pt-5">
+              <DialogTitle className="text-lg font-semibold text-foreground">
+                {activeDeleteConfig?.title}
+              </DialogTitle>
+              <DialogDescription className="space-y-2 text-sm leading-6 text-muted-foreground">
+                <span className="block">{activeDeleteConfig?.description}</span>
+                {activeDeleteConfig && !activeDeleteConfig.persistToConfig ? (
+                  <span className="block text-xs text-amber-300/90">
+                    当前处于全局编辑模式，这次删除只作用于草稿，点击“保存全部”前不会写入 config 文件。
+                  </span>
+                ) : null}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="mt-1 border-t border-primary/15 bg-transparent px-5 py-4 sm:justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setDeleteDialog(null)}
+                disabled={deletingTarget}
+              >
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void confirmDeleteTarget()}
+                disabled={deletingTarget}
+                data-testid="llm-delete-confirm"
+              >
+                {deletingTarget ? '删除中' : activeDeleteConfig?.confirmLabel}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={bulkTestDialogOpen} onOpenChange={setBulkTestDialogOpen}>
           <DialogContent data-testid="test-all-llms-dialog" className="z-[260] flex max-h-[85vh] flex-col overflow-hidden rounded-3xl p-0 sm:max-w-3xl">

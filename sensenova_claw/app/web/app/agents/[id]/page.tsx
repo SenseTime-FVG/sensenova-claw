@@ -10,6 +10,8 @@ import { authFetch, API_BASE } from '@/lib/authFetch';
 
 interface ToolDetail { name: string; description: string; enabled: boolean; }
 interface SkillDetail { name: string; description: string; enabled: boolean; }
+interface McpServerDetail { name: string; transport: string; enabled: boolean; toolCount: number; }
+interface McpToolDetail { name: string; serverName: string; toolName: string; safeName: string; description: string; enabled: boolean; }
 interface WorkspaceFile { name: string; size: number; editable: boolean; }
 interface AgentSummary { id: string; name: string; }
 
@@ -25,13 +27,36 @@ interface AgentDetail {
   sessionCount: number;
   toolCount: number;
   skillCount: number;
+  mcpServerCount: number;
+  mcpToolCount: number;
   tools: string[];
   skills: string[];
+  mcpServers: string[];
+  mcpTools: string[];
   toolsDetail: ToolDetail[];
   skillsDetail: SkillDetail[];
+  mcpServersDetail: McpServerDetail[];
+  mcpToolsDetail: McpToolDetail[];
   canDelegateTo: string[] | null;
   maxDelegationDepth: number;
   sessions: { id: string; status: string; channel: string; messageCount: number }[];
+}
+
+function buildTriStateSelection(
+  states: Record<string, boolean>,
+  names: string[],
+): string[] | null {
+  if (names.length === 0) {
+    return [];
+  }
+  const enabled = names.filter((name) => states[name] ?? true);
+  if (enabled.length === 0) {
+    return null;
+  }
+  if (enabled.length === names.length) {
+    return [];
+  }
+  return enabled;
 }
 
 export default function AgentDetailPage() {
@@ -39,11 +64,14 @@ export default function AgentDetailPage() {
   const agentId = params.id as string;
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'config' | 'files' | 'tools' | 'skills' | 'sessions'>('config');
+  const [activeTab, setActiveTab] = useState<'config' | 'files' | 'tools' | 'skills' | 'mcp' | 'sessions'>('config');
 
   // Tools / Skills 本地状态
   const [toolStates, setToolStates] = useState<Record<string, boolean>>({});
   const [skillStates, setSkillStates] = useState<Record<string, boolean>>({});
+  const [mcpServerStates, setMcpServerStates] = useState<Record<string, boolean>>({});
+  const [mcpToolStates, setMcpToolStates] = useState<Record<string, boolean>>({});
+  const [expandedMcpServers, setExpandedMcpServers] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
 
@@ -93,6 +121,19 @@ export default function AgentDetailPage() {
         const ss: Record<string, boolean> = {};
         (data.skillsDetail || []).forEach((s: SkillDetail) => { ss[s.name] = s.enabled; });
         setSkillStates(ss);
+        const ms: Record<string, boolean> = {};
+        (data.mcpServersDetail || []).forEach((server: McpServerDetail) => { ms[server.name] = server.enabled; });
+        setMcpServerStates(ms);
+        const mt: Record<string, boolean> = {};
+        (data.mcpToolsDetail || []).forEach((tool: McpToolDetail) => { mt[tool.name] = tool.enabled; });
+        setMcpToolStates(mt);
+        setExpandedMcpServers((prev) => {
+          const next = { ...prev };
+          (data.mcpServersDetail || []).forEach((server: McpServerDetail) => {
+            next[server.name] ??= false;
+          });
+          return next;
+        });
       })
       .catch(() => setAgent(null))
       .finally(() => setLoading(false));
@@ -211,11 +252,14 @@ export default function AgentDetailPage() {
   const savePreferences = async () => {
     setSaving(true); setSaveMsg('');
     try {
-      const enabledTools = Object.entries(toolStates).filter(([, v]) => v).map(([k]) => k);
-      const enabledSkills = Object.entries(skillStates).filter(([, v]) => v).map(([k]) => k);
+      const toolNames = (agent?.toolsDetail || []).map((tool) => tool.name);
+      const skillNames = (agent?.skillsDetail || []).map((skill) => skill.name);
       const res = await authFetch(`${API_BASE}/api/agents/${agentId}/config`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tools: enabledTools, skills: enabledSkills }),
+        body: JSON.stringify({
+          tools: buildTriStateSelection(toolStates, toolNames),
+          skills: buildTriStateSelection(skillStates, skillNames),
+        }),
       });
       if (res.ok) {
         setSaveMsg('已保存');
@@ -228,6 +272,47 @@ export default function AgentDetailPage() {
     finally { setSaving(false); setTimeout(() => setSaveMsg(''), 2000); }
   };
 
+  const saveMcpPreferences = async () => {
+    if (!agent) return;
+    const allServers = agent.mcpServersDetail || [];
+    const enabledServers = allServers.filter((server) => mcpServerStates[server.name] ?? true);
+    const relevantTools = (agent.mcpToolsDetail || []).filter((tool) => enabledServers.some((server) => server.name === tool.serverName));
+
+    setSaving(true);
+    setSaveMsg('');
+    try {
+      const serializedMcpTools = enabledServers.length === 0
+        ? null
+        : buildTriStateSelection(
+            mcpToolStates,
+            relevantTools.map((tool) => tool.name),
+          );
+      const payload = {
+        mcp_servers: buildTriStateSelection(
+          mcpServerStates,
+          allServers.map((server) => server.name),
+        ),
+        mcp_tools: serializedMcpTools,
+      };
+      const res = await authFetch(`${API_BASE}/api/agents/${agentId}/config`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        setSaveMsg('已保存');
+        loadAgent();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setSaveMsg(err.detail || '保存失败');
+      }
+    } catch {
+      setSaveMsg('保存失败');
+    } finally {
+      setSaving(false);
+      setTimeout(() => setSaveMsg(''), 2000);
+    }
+  };
+
   if (loading) {
     return <DashboardLayout><div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground"><Loader2 className="animate-spin text-primary" size={48} /><p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Loading agent details...</p></div></DashboardLayout>;
   }
@@ -237,6 +322,11 @@ export default function AgentDetailPage() {
 
   const enabledToolCount = Object.values(toolStates).filter(Boolean).length;
   const enabledSkillCount = Object.values(skillStates).filter(Boolean).length;
+  const enabledMcpServerCount = Object.values(mcpServerStates).filter(Boolean).length;
+  const enabledMcpToolCount = (agent?.mcpToolsDetail || []).filter((tool) => {
+    const serverEnabled = mcpServerStates[tool.serverName] ?? true;
+    return serverEnabled && (mcpToolStates[tool.name] ?? true);
+  }).length;
 
   return (
     <DashboardLayout>
@@ -297,7 +387,7 @@ export default function AgentDetailPage() {
         <Card className="shadow-xl border-border/80 overflow-hidden">
           <CardHeader className="bg-muted/30 border-b p-8">
             <div className="flex flex-wrap gap-2">
-              {(['config', 'files', 'tools', 'skills', 'sessions'] as const).map((tab) => (
+              {(['config', 'files', 'tools', 'skills', 'mcp', 'sessions'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)}
                   className={`px-6 py-3 text-base font-bold capitalize rounded-xl transition-all whitespace-nowrap ${
                     activeTab === tab
@@ -599,6 +689,121 @@ export default function AgentDetailPage() {
               </div>
             )}
 
+            {/* MCP Tab */}
+            {activeTab === 'mcp' && (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-bold text-foreground tracking-tight">MCP Servers & Tools</h2>
+                    <p className="text-base text-muted-foreground mt-1">按 Agent 单独控制可用的 MCP server 与其下游工具。</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm text-muted-foreground font-semibold">
+                      {enabledMcpServerCount}/{agent.mcpServersDetail?.length || 0} servers, {enabledMcpToolCount}/{agent.mcpToolsDetail?.length || 0} tools
+                    </span>
+                    {saveMsg && <span className="text-sm font-bold text-green-600 dark:text-green-400 bg-green-500/10 px-3 py-1 rounded-full border border-green-500/20">{saveMsg}</span>}
+                    <button onClick={saveMcpPreferences} disabled={saving}
+                      className="flex items-center gap-2.5 px-6 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:bg-primary/90 disabled:opacity-50 shadow-lg transition-all active:scale-95">
+                      {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                      Save Preferences
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {(agent.mcpServersDetail || []).map((server) => {
+                    const serverEnabled = mcpServerStates[server.name] ?? true;
+                    const serverTools = (agent.mcpToolsDetail || []).filter((tool) => tool.serverName === server.name);
+                    const expanded = expandedMcpServers[server.name] ?? false;
+                    const allServerToolsEnabled = serverTools.every((tool) => mcpToolStates[tool.name] ?? true);
+                    return (
+                      <div key={server.name} className={`rounded-2xl border bg-card shadow-sm transition-all ${serverEnabled ? 'border-primary/20' : 'border-border/60 opacity-80'}`}>
+                        <div className="flex items-center gap-4 px-6 py-5">
+                          <button
+                            type="button"
+                            data-testid={`mcp-server-expand-${server.name}`}
+                            onClick={() => setExpandedMcpServers((prev) => ({ ...prev, [server.name]: !expanded }))}
+                            className="p-2 rounded-xl border border-border hover:bg-muted/50 transition-all"
+                          >
+                            {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-3">
+                              <span className="text-base font-bold text-foreground truncate">{server.name}</span>
+                              <span className="rounded-full border border-border/60 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                                {server.transport}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-sm text-muted-foreground">{serverTools.length} tools</p>
+                          </div>
+                          <ToggleSwitch
+                            checked={serverEnabled}
+                            onChange={(value) => setMcpServerStates((prev) => ({ ...prev, [server.name]: value }))}
+                            testId={`mcp-server-toggle-${server.name}`}
+                          />
+                        </div>
+
+                        {expanded && (
+                          <div className="border-t border-border/40 px-6 py-5 space-y-3">
+                            {serverTools.length > 0 && (
+                              <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/10 px-4 py-3">
+                                <div>
+                                  <div className="text-sm font-bold text-foreground">Enable all tools</div>
+                                  <div className="text-xs text-muted-foreground mt-1">一键启用当前 MCP server 下的全部工具。</div>
+                                </div>
+                                <ToggleSwitch
+                                  checked={allServerToolsEnabled}
+                                  onChange={(value) => {
+                                    setMcpToolStates((prev) => {
+                                      const next = { ...prev };
+                                      serverTools.forEach((tool) => {
+                                        next[tool.name] = value;
+                                      });
+                                      return next;
+                                    });
+                                  }}
+                                  disabled={!serverEnabled}
+                                  testId={`mcp-tools-enable-all-${server.name}`}
+                                />
+                              </div>
+                            )}
+                            {serverTools.map((tool) => {
+                              const toolEnabled = (mcpToolStates[tool.name] ?? true) && serverEnabled;
+                              return (
+                                <div key={tool.name} className={`flex items-start gap-4 rounded-xl border px-4 py-4 ${toolEnabled ? 'border-primary/20 bg-primary/5' : 'border-border/60 bg-muted/10'}`}>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-bold text-foreground">{tool.toolName}</div>
+                                    <div className="text-xs text-muted-foreground font-mono mt-1">{tool.name}</div>
+                                    {tool.description && <p className="mt-2 text-sm text-muted-foreground">{tool.description}</p>}
+                                  </div>
+                                  <ToggleSwitch
+                                    checked={mcpToolStates[tool.name] ?? true}
+                                    onChange={(value) => setMcpToolStates((prev) => ({ ...prev, [tool.name]: value }))}
+                                    disabled={!serverEnabled}
+                                    testId={`mcp-tool-toggle-${tool.serverName}-${tool.toolName}`}
+                                  />
+                                </div>
+                              );
+                            })}
+                            {serverTools.length === 0 && (
+                              <div className="rounded-xl border border-dashed border-border/60 bg-muted/10 px-6 py-8 text-center text-sm text-muted-foreground">
+                                当前 server 没有发现可配置的 MCP tools。
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {(!agent.mcpServersDetail || agent.mcpServersDetail.length === 0) && (
+                    <div className="text-center py-20 bg-muted/10 border border-dashed rounded-2xl text-muted-foreground">
+                      <p className="text-lg font-bold">当前没有配置任何 MCP server。</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Sessions Tab */}
             {activeTab === 'sessions' && (
               <div className="space-y-8">
@@ -683,10 +888,10 @@ function CfgInput({ label, value, onChange, type = 'text', fullWidth = false, re
     </div>
   );
 }
-function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+function ToggleSwitch({ checked, onChange, disabled = false, testId }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; testId?: string }) {
   return (
-    <label className="relative inline-flex items-center cursor-pointer">
-      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="sr-only peer" />
+    <label data-testid={testId} className={`relative inline-flex items-center ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={e => onChange(e.target.checked)} className="sr-only peer" />
       <div className="w-10 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-[16px] peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-muted-foreground/50 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:after:bg-white shadow-inner active:after:w-5" />
     </label>
   );

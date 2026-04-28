@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Agent home：固定指向 PVC 挂载点 /sandbox/.sensenova-claw，实现跨 sandbox 重建持久化。
+# openshell 的 supervisor 会剥离 Dockerfile ENV，因此必须在启动脚本里显式 export。
+export SENSENOVA_CLAW_HOME="${SENSENOVA_CLAW_HOME:-/sandbox/.sensenova-claw}"
+CONFIG_DIR="$SENSENOVA_CLAW_HOME"
+CONFIG_FILE="$CONFIG_DIR/config.yml"
+mkdir -p "$CONFIG_DIR/data"
+
+# ── 1. 初始化 $HOME/.sensenova-claw（如不存在）──
+if [ ! -f "$CONFIG_FILE" ]; then
+    mkdir -p "$CONFIG_DIR"
+    cp /opt/sensenova-claw/default-config.yml "$CONFIG_FILE"
+    echo "[sensenova-claw] config.yml generated at $CONFIG_FILE"
+fi
+
+# 复制内置 agents 和 skills（不覆盖已有）
+cp -rn /etc/sensenova-claw/agents/ "$CONFIG_DIR/" 2>/dev/null || true
+cp -rn /etc/sensenova-claw/skills/ "$CONFIG_DIR/" 2>/dev/null || true
+
+# ── 2. 后台启动 Next.js frontend ──
+cd /opt/sensenova-claw/web
+PORT=3000 HOST=0.0.0.0 node server.js &
+FRONTEND_PID=$!
+echo "[sensenova-claw] frontend started (PID $FRONTEND_PID, port 3000)"
+
+# ── 3. 前台启动 FastAPI backend ──
+echo "[sensenova-claw] starting backend on port 8000..."
+exec sensenova-claw run --no-frontend --port 8000

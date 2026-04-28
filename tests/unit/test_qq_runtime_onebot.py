@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from sensenova_claw.adapters.plugins.qq.config import QQConfig, QQOfficialConfig, QQOneBotConfig
-from sensenova_claw.adapters.plugins.qq.runtime_onebot import QQOneBotRuntime
+from sensenova_claw.adapters.plugins.qq.runtime_onebot import QQOneBotRuntime, _SSL_CONTEXT
 
 
 def _make_config() -> QQConfig:
@@ -111,3 +111,36 @@ async def test_send_text_calls_group_message_api():
     client.post.assert_awaited_once()
     assert client.post.await_args.kwargs["json"]["group_id"] == 2001
     assert client.post.await_args.kwargs["json"]["message"] == "你好"
+
+
+@pytest.mark.asyncio
+async def test_start_uses_ssl_context_for_websocket():
+    runtime = QQOneBotRuntime(config=_make_config())
+
+    fake_ws = AsyncMock()
+    with patch("sensenova_claw.adapters.plugins.qq.runtime_onebot.websockets.connect", AsyncMock(return_value=fake_ws)) as connect_mock:
+        await runtime.start()
+
+    connect_mock.assert_awaited_once_with(
+        "ws://127.0.0.1:3001",
+        additional_headers={"Authorization": "Bearer token-1"},
+        ssl=_SSL_CONTEXT,
+    )
+    assert runtime._ws is fake_ws
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_send_text_uses_ssl_context_for_http_client():
+    runtime = QQOneBotRuntime(config=_make_config())
+    response = Mock()
+    response.json.return_value = {"status": "ok", "data": {"message_id": 123}}
+    response.raise_for_status.return_value = None
+    client = AsyncMock()
+    client.post.return_value = response
+
+    with patch("sensenova_claw.adapters.plugins.qq.runtime_onebot.httpx.AsyncClient") as client_cls:
+        client_cls.return_value.__aenter__.return_value = client
+        await runtime.send_text("group:2001", "你好")
+
+    assert client_cls.call_args.kwargs["verify"] is _SSL_CONTEXT

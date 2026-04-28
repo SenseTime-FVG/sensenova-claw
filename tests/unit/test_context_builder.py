@@ -21,6 +21,18 @@ class _MockTool(Tool):
     parameters = {"type": "object", "properties": {}}
 
 
+class _BashTool(Tool):
+    name = "bash_command"
+    description = "执行命令"
+    parameters = {"type": "object", "properties": {}}
+
+
+class _TodoTool(Tool):
+    name = "manage_todolist"
+    description = "管理待办事项"
+    parameters = {"type": "object", "properties": {}}
+
+
 class TestContextBuilder:
     def test_build_messages_basic(self):
         cb = ContextBuilder()
@@ -52,6 +64,29 @@ class TestContextBuilder:
         assert "read_file" in sys_prompt
         # bash_command 不应出现（除非被允许）
         # 注意 send_message 等保留工具也可能被自动加入
+
+    def test_build_messages_tools_filter_does_not_hide_mcp_tools(self):
+        class _Registry:
+            def as_llm_tools(self, **kwargs):
+                return [
+                    {"name": "bash_command", "description": "bash", "parameters": {}},
+                    {"name": "read_file", "description": "read", "parameters": {}},
+                    {"name": "mcp__browsermcp__browser_snapshot", "description": "snapshot", "parameters": {}},
+                ]
+
+        agent = AgentConfig(
+            id="lim",
+            name="L",
+            tools=["bash_command"],
+            mcp_servers=["browsermcp"],
+            mcp_tools=["browsermcp/browser_snapshot"],
+        )
+        cb = ContextBuilder(tool_registry=_Registry(), sensenova_claw_home="/tmp")
+        msgs = cb.build_messages("hi", agent_config=agent)
+        sys_prompt = msgs[0]["content"]
+        assert "bash_command" in sys_prompt
+        assert "mcp__browsermcp__browser_snapshot" in sys_prompt
+        assert "read_file" not in sys_prompt
 
     def test_build_messages_with_agent_system_prompt(self):
         agent = AgentConfig(id="custom", name="C", system_prompt="你是代码助手")
@@ -129,3 +164,79 @@ class TestContextBuilder:
         cb = ContextBuilder(skill_registry=sr)
         msgs = cb.build_messages("hi")
         assert "pdf_parse" in msgs[0]["content"]
+
+    def test_global_agents_md_renders_tool_condition_with_tool_names(self):
+        tr = ToolRegistry()
+        tr._tools = {"manage_todolist": _TodoTool()}
+        cb = ContextBuilder(tool_registry=tr)
+        msgs = cb.build_messages(
+            "hi",
+            context_files=[
+                type("CF", (), {
+                    "name": "AGENTS.md",
+                    "content": "{%- if 'manage_todolist' in tool_names %}\n使用 manage_todolist\n{% endif -%}",
+                })(),
+            ],
+        )
+        assert "使用 manage_todolist" in msgs[0]["content"]
+
+    def test_global_agents_md_hides_tool_condition_when_tool_missing(self):
+        tr = ToolRegistry()
+        tr._tools = {"mock_tool": _MockTool()}
+        cb = ContextBuilder(tool_registry=tr)
+        msgs = cb.build_messages(
+            "hi",
+            context_files=[
+                type("CF", (), {
+                    "name": "AGENTS.md",
+                    "content": "{%- if 'manage_todolist' in tool_names %}\n使用 manage_todolist\n{% endif -%}",
+                })(),
+            ],
+        )
+        assert "使用 manage_todolist" not in msgs[0]["content"]
+
+    def test_per_agent_agents_md_keeps_jinja_text_unrendered(self):
+        tr = ToolRegistry()
+        tr._tools = {"manage_todolist": _TodoTool()}
+        cb = ContextBuilder(tool_registry=tr)
+        msgs = cb.build_messages(
+            "hi",
+            context_files=[
+                type("CF", (), {
+                    "name": "researcher/AGENTS.md",
+                    "content": "{%- if 'manage_todolist' in tool_names %}\n使用 manage_todolist\n{% endif -%}",
+                })(),
+            ],
+        )
+        assert "{%- if 'manage_todolist' in tool_names %}" in msgs[0]["content"]
+
+    def test_global_agents_md_renders_nested_tool_conditions(self):
+        tr = ToolRegistry()
+        tr._tools = {
+            "bash_command": _BashTool(),
+            "read_file": type("ReadFileTool", (Tool,), {
+                "name": "read_file",
+                "description": "读取文件",
+                "parameters": {"type": "object", "properties": {}},
+            })(),
+        }
+        cb = ContextBuilder(tool_registry=tr)
+        msgs = cb.build_messages(
+            "hi",
+            context_files=[
+                type("CF", (), {
+                    "name": "AGENTS.md",
+                    "content": (
+                        "{%- if 'bash_command' in tool_names %}\n"
+                        "bash enabled\n"
+                        "{%- if 'read_file' in tool_names %}\n"
+                        "read enabled\n"
+                        "{% endif -%}\n"
+                        "{% endif -%}"
+                    ),
+                })(),
+            ],
+        )
+        assert "bash enabled" in msgs[0]["content"]
+        assert "read enabled" in msgs[0]["content"]
+        assert "{%- if 'read_file' in tool_names %}" not in msgs[0]["content"]

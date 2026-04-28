@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import {
   Settings, ChevronDown, Zap, Presentation, MessageCircle, Home,
   Search, Clock, Brain, Server, Wrench, Star, Shield, Users,
+  Boxes,
   type LucideIcon,
 } from 'lucide-react';
 import { useCustomPages } from '@/hooks/useCustomPages';
@@ -27,14 +28,31 @@ const iconMap: Record<string, LucideIcon> = {
   tool: Wrench,
   star: Star,
   shield: Shield,
+  boxes: Boxes,
 };
 
-interface NavItem {
+export interface NavItem {
   path: string;
   label: string;
   exact?: boolean;
   icon?: string;
 }
+
+export interface BuiltinFeatureNavItem extends NavItem {
+  kind: 'builtin';
+}
+
+export interface CustomFeatureNavItem extends NavItem {
+  kind: 'custom';
+  pageId: string;
+}
+
+export interface CreateFeatureNavItem extends NavItem {
+  kind: 'create';
+}
+
+export type FeatureNavItem = BuiltinFeatureNavItem | CustomFeatureNavItem | CreateFeatureNavItem;
+export type DashboardSubNavItem = NavItem | FeatureNavItem;
 
 const mainNavItemDefs: { path: string; labelKey: string; exact?: boolean; icon?: string }[] = [
   { path: '/', labelKey: 'nav.workspace', exact: true, icon: 'zap' },
@@ -57,26 +75,30 @@ const adminNavItemDefs: { path: string; labelKey: string; icon?: string }[] = [
   { path: '/gateway', labelKey: 'nav.adminItems.gateway', icon: 'server' },
   { path: '/tools', labelKey: 'nav.adminItems.tools', icon: 'tool' },
   { path: '/skills', labelKey: 'nav.adminItems.skills', icon: 'star' },
+  { path: '/mcp', labelKey: 'nav.adminItems.mcp', icon: 'boxes' },
   { path: '/acp', labelKey: 'nav.adminItems.acp', icon: 'shield' },
 ];
 
-export function useFeatureNavItems() {
+export function useFeatureNavItems(): FeatureNavItem[] {
   const { t } = useI18n();
   const { pages } = useCustomPages();
   return useMemo(() => {
-    const builtinItems = builtinFeatureNavItemDefs.map((item) => ({
+    const builtinItems: FeatureNavItem[] = builtinFeatureNavItemDefs.map((item) => ({
       path: item.path,
       label: t(item.labelKey),
       icon: item.icon,
+      kind: 'builtin',
     }));
-    const customItems = pages.map(p => ({
+    const customItems: FeatureNavItem[] = pages.map(p => ({
       path: `/features/${p.slug}`,
       label: p.name,
+      pageId: p.slug,
+      kind: 'custom',
     }));
     return [
       ...builtinItems,
       ...customItems,
-      { path: '/create-feature', label: t('nav.feature.create') },
+      { path: '/create-feature', label: t('nav.feature.create'), kind: 'create' },
     ];
   }, [pages, t]);
 }
@@ -90,6 +112,10 @@ export function useAdminNavItems(): NavItem[] {
       icon: item.icon,
     }))
   ), [t]);
+}
+
+export function isCustomFeatureNavItem(item: DashboardSubNavItem): item is CustomFeatureNavItem {
+  return 'kind' in item && item.kind === 'custom';
 }
 
 export function NavIcon({ name }: { name?: string }) {

@@ -335,7 +335,7 @@ class MiniAppService:
                 return page
         return None
 
-    async def delete_page(self, page_id: str) -> bool:
+    async def delete_page(self, page_id: str, *, delete_workspace: bool = False) -> bool:
         async with self._lock:
             pages = self.load_pages()
             deleted_page = next(
@@ -352,6 +352,9 @@ class MiniAppService:
             self.save_pages(new_pages)
         if deleted_page:
             await self._drop_preview_server(str(deleted_page.get("slug") or ""))
+            self._delete_dedicated_agent(deleted_page)
+            if delete_workspace:
+                self._delete_workspace_dir(deleted_page)
         return True
 
     def list_runs(self, page_id: str) -> list[dict[str, Any]]:
@@ -537,6 +540,32 @@ class MiniAppService:
 
     def _workspace_abs_dir(self, page: dict[str, Any]) -> Path:
         return self.sensenova_claw_home / "workdir" / str(page["workspace_root"])
+
+    def _delete_dedicated_agent(self, page: dict[str, Any]) -> None:
+        if not bool(page.get("create_dedicated_agent", False)):
+            return
+        agent_id = str(page.get("agent_id") or "").strip()
+        if not agent_id:
+            return
+        self.agent_registry.delete(agent_id)
+        prompt_path = self.sensenova_claw_home / "agents" / agent_id / "SYSTEM_PROMPT.md"
+        if prompt_path.exists():
+            prompt_path.unlink()
+
+    def _delete_workspace_dir(self, page: dict[str, Any]) -> None:
+        workspace_root = str(page.get("workspace_root") or "").strip()
+        if not workspace_root:
+            return
+
+        workdir_root = (self.sensenova_claw_home / "workdir").resolve()
+        workspace_dir = (workdir_root / workspace_root).resolve()
+        try:
+            workspace_dir.relative_to(workdir_root)
+        except ValueError as exc:
+            raise ValueError(f"unsafe workspace path: {workspace_root}") from exc
+
+        if workspace_dir.exists():
+            shutil.rmtree(workspace_dir)
 
     def _app_abs_dir(self, page: dict[str, Any]) -> Path:
         return self.sensenova_claw_home / "workdir" / str(page["app_dir"])

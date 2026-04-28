@@ -54,7 +54,7 @@ PLAN → DIVERGE → SEARCH → TRIAGE → READ → REASSESS → SYNTHESIZE
 | questions[] | 子问题列表，含 evidence_types 和 dimensions | — |
 | search_budget | min_queries / max_queries / max_iterations / min_sources_per_question | 15 / 40 / 3 / 2 |
 | success_criteria | min_total_sources / min_verified_claims / coverage_target | 8 / 5 / 0.8 |
-| source_plan | primary: serper_search + fetch_url; supplement: union-search-plus（仅主链不足时） | — |
+| source_plan | primary: serper_search + fetch_url; supplement: union-search-skill（仅主链不足时） | — |
 
 向用户展示时用简洁中文概括，只确认：范围、子问题、边界条件。确认后再进入下一阶段。
 
@@ -77,7 +77,7 @@ PLAN → DIVERGE → SEARCH → TRIAGE → READ → REASSESS → SYNTHESIZE
 
 尽可能并发执行所有 query（利用 tool_calls 并发能力）。超过单次并发上限时分 2-3 批，每批打满。
 
-搜索源优先级：`serper_search`（主链） > 内置搜索工具（brave/tavily 等） > `union-search-plus`（仅主链不足时）
+搜索源优先级：`serper_search`（主链） > 内置搜索工具（brave/tavily 等） > `union-search-skill`（仅主链不足时）
 
 本阶段目标：收集候选 URL 和摘要，不做深度阅读。
 
@@ -150,7 +150,7 @@ digraph reassess {
 
 **迭代约束**：最多 `max_iterations` 轮（默认 3），补充 query 递减（第2轮 ≤10，第3轮 ≤5），连续 2 轮无新信息则提前终止。
 
-**需要用户确认的情况**：研究范围需明显扩大、需启用 union-search-plus、发现前提假设可能有误。
+**需要用户确认的情况**：研究范围需明显扩大、需启用 union-search-skill、发现前提假设可能有误。
 
 ### 7. SYNTHESIZE（综合报告）
 
@@ -167,7 +167,7 @@ digraph reassess {
 
 ---
 
-## 与 union-search-plus 的衔接
+## 与 union-search-skill 的衔接
 
 定位：补充来源，不是默认主链。
 
@@ -189,7 +189,7 @@ digraph reassess {
 **禁止：**
 - 简单问题强行走复杂流程
 - PLAN 未确认就大规模搜索
-- union-search-plus 当默认主链
+- union-search-skill 当默认主链
 - 编造来源或伪造引用
 - "搜索到"等同于"已验证"
 - 省略关键结论的来源链接

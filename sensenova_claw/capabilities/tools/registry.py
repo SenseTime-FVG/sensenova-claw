@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from sensenova_claw.capabilities.tools.ask_user_tool import AskUserTool
-from sensenova_claw.capabilities.tools.apply_patch_tool import ApplyPatchTool
 from sensenova_claw.capabilities.tools.base import Tool
 from sensenova_claw.capabilities.tools.builtin import (
+    ApplyPatchTool,
     BaiduSearchTool,
     BashCommandTool,
     BraveSearchTool,
+    EditFileTool,
     FetchUrlTool,
     ImageSearchTool,
     ManageTodolistTool,
@@ -15,7 +16,6 @@ from sensenova_claw.capabilities.tools.builtin import (
     TavilySearchTool,
     WriteFileTool,
 )
-from sensenova_claw.capabilities.tools.edit_tool import EditTool
 from sensenova_claw.capabilities.tools.email import (
     DownloadAttachmentTool,
     ListEmailsTool,
@@ -34,6 +34,7 @@ from sensenova_claw.capabilities.tools.obsidian_tool import (
 )
 from sensenova_claw.capabilities.tools.orchestration import CreateAgentTool
 from sensenova_claw.capabilities.tools.secret_tools import GetSecretTool, WriteSecretTool
+from sensenova_claw.capabilities.mcp.runtime import McpSessionManager, McpToolAdapter
 from sensenova_claw.platform.config.config import config
 
 
@@ -42,7 +43,7 @@ from sensenova_claw.platform.config.config import config
 _TOOL_CONFIG_KEY_MAP: dict[str, str] = {
     "read_file": "tools.file_operations.enabled",
     "write_file": "tools.file_operations.enabled",
-    "edit": "tools.file_operations.enabled",
+    "edit_file": "tools.file_operations.enabled",
     "apply_patch": "tools.file_operations.enabled",
 }
 
@@ -60,6 +61,7 @@ def _is_tool_config_enabled(tool_name: str) -> bool:
 class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Tool] = {}
+        self._mcp_manager = McpSessionManager()
         self._register_builtin()
 
     def _register_builtin(self) -> None:
@@ -79,7 +81,7 @@ class ToolRegistry:
 
             ManageTodolistTool(),
             ApplyPatchTool(),
-            EditTool(),
+            EditFileTool(),
             CreateAgentTool(),
             AskUserTool(),
         ]:
@@ -111,8 +113,22 @@ class ToolRegistry:
         # 外部依赖：无（仅操作本地数据结构）。
         self._tools[tool.name] = tool
 
-    def get(self, name: str) -> Tool | None:
-        return self._tools.get(name)
+    def get(self, name: str, *, session_id: str | None = None) -> Tool | None:
+        tool = self._tools.get(name)
+        if tool is not None or not session_id:
+            return tool
+        descriptor = None
+        for item in self._mcp_manager.get_cached_tools(session_id):
+            if item.safe_name == name:
+                descriptor = item
+                break
+        return McpToolAdapter(self._mcp_manager, descriptor) if descriptor else None
+
+    async def ensure_mcp_session(self, session_id: str) -> None:
+        await self._mcp_manager.ensure_session(session_id)
+
+    async def dispose_mcp_session(self, session_id: str) -> None:
+        await self._mcp_manager.close_session(session_id)
 
     def _is_llm_exposed(self, tool: Tool) -> bool:
         # 全局 enabled 开关检查（来自 config.yml）
@@ -127,8 +143,8 @@ class ToolRegistry:
             return bool(config.get("tools.image_search.api_key", "") or config.get("tools.serper_search.api_key", ""))
         return True
 
-    def as_llm_tools(self) -> list[dict]:
-        return [
+    def as_llm_tools(self, *, session_id: str | None = None, agent_config: object | None = None) -> list[dict]:
+        tools = [
             {
                 "name": tool.name,
                 "description": tool.description,
@@ -137,3 +153,14 @@ class ToolRegistry:
             for tool in self._tools.values()
             if self._is_llm_exposed(tool)
         ]
+        if session_id:
+            for descriptor in self._mcp_manager.get_cached_tools(session_id, agent_config=agent_config):  # type: ignore[arg-type]
+                tools.append(
+                    {
+                        "name": descriptor.safe_name,
+                        "description": descriptor.description,
+                        "parameters": descriptor.input_schema,
+                    }
+                )
+        tools.sort(key=lambda item: item["name"])
+        return tools

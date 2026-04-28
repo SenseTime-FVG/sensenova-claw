@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { authFetch, API_BASE } from '@/lib/authFetch';
+import { useCustomPages } from '@/hooks/useCustomPages';
 
 interface Agent {
   id: string;
@@ -24,6 +25,7 @@ interface Agent {
 }
 
 export default function OrchestrationPage() {
+  const { refresh: refreshCustomPages } = useCustomPages();
   const [searchTerm, setSearchTerm] = useState('');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
@@ -67,6 +69,7 @@ export default function OrchestrationPage() {
         return;
       }
       setAgentToDelete(null);
+      await refreshCustomPages();
       loadAgents();
     } catch {
       setDeleteError('删除失败');
@@ -102,9 +105,12 @@ export default function OrchestrationPage() {
               <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent bg-primary text-primary-foreground shadow-lg shadow-primary/20">
                 <Bot className="h-5 w-5" /> Agents
               </button>
-              <button className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground opacity-60">
+              <Link
+                href="/agents/analytics"
+                className="flex items-center gap-3 font-bold justify-start w-full text-base px-5 py-3.5 rounded-xl transition-all border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
                 <Activity className="h-5 w-5" /> Analytics
-              </button>
+              </Link>
             </nav>
           </aside>
 

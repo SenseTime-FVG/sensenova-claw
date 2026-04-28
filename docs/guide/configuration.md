@@ -40,7 +40,7 @@ system:
   database_path: var/data/sensenova-claw.db
 
   # 日志级别: DEBUG / INFO / WARNING / ERROR
-  log_level: DEBUG
+  log_level: INFO
 
   # 授权路径列表，工具只能访问这些路径下的文件
   granted_paths:
@@ -52,7 +52,7 @@ system:
 |--------|------|--------|------|
 | `workspace_dir` | string | `workspace` | 工作区目录路径 |
 | `database_path` | string | `var/data/sensenova-claw.db` | SQLite 数据库文件路径 |
-| `log_level` | string | `DEBUG` | 日志输出级别 |
+| `log_level` | string | `INFO` | 日志输出级别 |
 | `granted_paths` | list | `[]` | 授权访问的文件系统路径列表 |
 
 ### agent 段 — Agent 配置
@@ -211,6 +211,50 @@ tools:
 | `fetch_url` | `max_response_mb` | int | `10` | 文本响应最大返回大小（MB） |
 | `file_operations` | `enabled` | bool | `true` | 是否启用文件读写 |
 
+### mcp 段 — 外部 MCP Server 配置
+
+一期 MCP 接入方式是“Agent 调用外部 MCP server”。当前支持 `stdio`、`sse`、`streamable-http` 三种 transport。
+
+```yaml
+mcp:
+  servers:
+    filesystem:
+      transport: stdio
+      command: python3
+      args: ["/absolute/path/to/server.py"]
+      env:
+        MCP_API_KEY: ${MCP_API_KEY}
+      cwd: /absolute/path/to/workspace
+      timeout: 15
+
+    docs-search:
+      transport: sse
+      url: http://127.0.0.1:3100/sse
+      headers:
+        Authorization: Bearer ${DOCS_MCP_TOKEN}
+      timeout: 15
+
+    browser:
+      transport: streamable-http
+      url: http://127.0.0.1:3101/mcp
+      headers:
+        Authorization: Bearer ${BROWSER_MCP_TOKEN}
+      timeout: 20
+```
+
+| 配置项 | 类型 | 说明 |
+|--------|------|------|
+| `mcp.servers.<name>.transport` | string | `stdio` / `sse` / `streamable-http` |
+| `mcp.servers.<name>.command` | string | `stdio` 模式下启动命令 |
+| `mcp.servers.<name>.args` | list | `stdio` 模式下命令参数 |
+| `mcp.servers.<name>.env` | dict | `stdio` 模式下传给子进程的环境变量 |
+| `mcp.servers.<name>.cwd` | string | `stdio` 模式下子进程工作目录 |
+| `mcp.servers.<name>.url` | string | HTTP MCP server 地址 |
+| `mcp.servers.<name>.headers` | dict | HTTP 请求头 |
+| `mcp.servers.<name>.timeout` | number | 建连和调用超时（秒） |
+
+MCP 工具进入模型前会被物化成普通 function-calling 工具，名称格式固定为 `mcp__<server_name>__<tool_name>`。
+
 #### 搜索工具 API Key 获取方式
 
 Sensenova-Claw 的 Tools 页面会直接展示以下步骤，用户不需要只依赖外部文档链接：
@@ -310,7 +354,7 @@ export ANTHROPIC_API_KEY=sk-ant-your-key
 export SERPER_API_KEY=your-serper-key
 
 # 系统配置
-export LOG_LEVEL=DEBUG
+export LOG_LEVEL=INFO
 ```
 
 环境变量命名规则：大写字母 + 下划线分隔，与 `config.yml` 中的顶层键名对应。
@@ -318,6 +362,23 @@ export LOG_LEVEL=DEBUG
 ## 多 Agent 配置
 
 Sensenova-Claw 支持配置多个 Agent，每个 Agent 拥有独立的模型、提示词和工具配置。
+
+Agent 还可以限制自己可见的 MCP 范围：
+
+```yaml
+agents:
+  researcher:
+    tools: []  # null = 全部禁用，[] = 全部启用，[...] = 显式白名单
+    mcp_servers: ["docs-search"]  # null = 全部禁用，[] = 全部启用
+    mcp_tools: ["docs-search/search_docs", "docs-search/fetch_page"]  # null = 全部禁用，[] = 全部启用
+```
+
+说明：
+
+- `mcp_servers` 非空时，仅启用这些 server；为空表示全部 server 默认启用。
+- `mcp_tools` 非空时，仅启用这些 MCP tool；为空表示全部 tool 默认启用。
+- `mcp_tools` 推荐使用 `server/tool` 写法，例如 `docs-search/search_docs`。
+- 如果 Agent 使用显式 `tools` 白名单，需要把对应的 `mcp__...` 工具名也加入进去。
 
 ### 在 config.yml 中配置
 
@@ -395,7 +456,7 @@ SERPER_API_KEY: your-serper-api-key
 system:
   workspace_dir: workspace
   database_path: var/data/sensenova-claw.db
-  log_level: DEBUG
+  log_level: INFO
   granted_paths:
     - /home/user/projects
 
