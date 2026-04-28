@@ -20,11 +20,10 @@ interface UseFileUploadOptions {
 export function useFileUpload({ selectedAgent, onUploadSuccess }: UseFileUploadOptions) {
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
 
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = e.target.files;
-    if (!selectedFiles || selectedFiles.length === 0) return;
-
+  const handleFiles = useCallback(async (selectedFiles: FileList | File[]) => {
     const fileList = Array.from(selectedFiles);
+    if (fileList.length === 0) return;
+
     const firstFile = fileList[0];
     const relPath = (firstFile as File & { webkitRelativePath?: string }).webkitRelativePath;
     const isFolder = Boolean(relPath);
@@ -99,13 +98,19 @@ export function useFileUpload({ selectedAgent, onUploadSuccess }: UseFileUploadO
     setTimeout(() => {
       setUploadItems(prev => prev.filter(it => it.status !== 'done'));
     }, 3000);
+  }, [selectedAgent, onUploadSuccess]);
 
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = e.target.files;
+    if (!selectedFiles || selectedFiles.length === 0) return;
+    await handleFiles(selectedFiles);
     // 重置 input value 以允许再次选择相同文件
     e.target.value = '';
-  }, [selectedAgent, onUploadSuccess]);
+  }, [handleFiles]);
 
   return {
     uploadItems,
+    handleFiles,
     handleFileSelect,
   };
 }

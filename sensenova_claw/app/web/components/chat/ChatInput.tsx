@@ -71,6 +71,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const { t } = useI18n();
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, SessionDraftState>>({});
   const [showUploadMenu, setShowUploadMenu] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const {
     currentSessionId,
     pendingPrefill,
@@ -202,7 +203,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }),
   }), [insertAtRef]);
 
-  const { uploadItems, handleFileSelect } = useFileUpload({
+  const { uploadItems, handleFiles, handleFileSelect } = useFileUpload({
     selectedAgent,
     onUploadSuccess: (item) => {
       if (item.isImage && !item.isFolder) {
@@ -223,6 +224,34 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       insertAtRef(item.path);
     },
   });
+
+  const isNativeFileDrag = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const types = Array.from(event.dataTransfer?.types || []);
+    return types.includes('Files');
+  }, []);
+
+  const handleNativeDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!isNativeFileDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    if (!isDraggingFiles) setIsDraggingFiles(true);
+  }, [isDraggingFiles, isNativeFileDrag]);
+
+  const handleNativeDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!isNativeFileDrag(event)) return;
+    const nextTarget = event.relatedTarget;
+    if (nextTarget && event.currentTarget.contains(nextTarget as Node)) return;
+    setIsDraggingFiles(false);
+  }, [isNativeFileDrag]);
+
+  const handleNativeDrop = useCallback(async (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isNativeFileDrag(event)) return;
+    event.preventDefault();
+    setIsDraggingFiles(false);
+    const files = event.dataTransfer.files;
+    if (!files || files.length === 0) return;
+    await handleFiles(files);
+  }, [handleFiles, isNativeFileDrag]);
 
   useImperativeHandle(ref, () => ({
     setInput: (text: string) => {
@@ -389,8 +418,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         <div
           ref={dropRef as unknown as React.Ref<HTMLDivElement>}
           className={`flex items-end gap-2 bg-background border rounded-[1.5rem] shadow-lg focus-within:ring-3 focus-within:ring-primary/10 focus-within:border-primary transition-all p-2 relative ${
-            isOver ? 'border-primary bg-primary/5 ring-3 ring-primary/20' : 'border-border/80'
+            (isOver || isDraggingFiles) ? 'border-primary bg-primary/5 ring-3 ring-primary/20' : 'border-border/80'
           }`}
+          onDragOver={handleNativeDragOver}
+          onDragLeave={handleNativeDragLeave}
+          onDrop={handleNativeDrop}
         >
           {/* 附件上传 */}
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
