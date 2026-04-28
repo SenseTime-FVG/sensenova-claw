@@ -183,19 +183,33 @@ class PluginLoader:
 ```python
 # sensenova_claw/platform/identity/identity.py
 from dataclasses import dataclass
+from typing import Literal
+
+IdentitySource = Literal["explicit", "env", "file", "default", "placeholder"]
 
 @dataclass
 class Identity:
     user_id: str
     team_id: str
     org_id: str
+    # 来源标记，仅用于诊断日志，不影响逻辑。
+    # 默认 "placeholder" 让 P3/P4 期间的临时占位实例可以无参构造而不会被错误地标记为 "explicit"；
+    # P5 的 resolve() / from_env() / from_file() / default_local() 会显式覆盖为正确值。
+    source: IdentitySource = "placeholder"
 
     @classmethod
     def default_local(cls) -> "Identity":
-        return cls(user_id="local-dev", team_id="local-team", org_id="local-org")
+        return cls(
+            user_id="local-dev",
+            team_id="local-team",
+            org_id="local-org",
+            source="default",
+        )
 ```
 
 P3 / P4 在 P5 上线前用 `Identity.default_local()` 作占位。
+
+**关于 `source` 字段**：仅诊断日志使用，下游业务逻辑不读它。P5 通过 `resolve()` 决定实际来源时显式赋值。新增此字段是"附加默认值的契约扩展"，对所有现有占位调用兼容。
 
 ### 3.5 Control Protocol message 形状（P3 定义；P4 引用）
 
