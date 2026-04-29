@@ -6,11 +6,21 @@ from sensenova_claw.platform.plugins.manifest import (
     load_manifest_from_yaml,
 )
 from sensenova_claw.platform.plugins.registry_entry import RegistryEntry
+from sensenova_claw.platform.plugins.sources import (
+    BuiltinPluginSource,
+    PluginSource,
+    SourceError,
+    UserPluginSource,
+)
 
 __all__ = [
+    "BuiltinPluginSource",
     "ManifestValidationError",
     "PluginManifest",
     "PluginPermissions",
+    "PluginSource",
     "RegistryEntry",
+    "SourceError",
+    "UserPluginSource",
     "load_manifest_from_yaml",
 ]
