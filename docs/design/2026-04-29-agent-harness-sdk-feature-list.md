@@ -1,112 +1,78 @@
-# Agent Harness SDK — 完整功能清单（不分排期）
+# Agent Harness SDK 功能清单
 
-> 配套 PRD：[2026-04-29-agent-harness-sdk-prd.md](2026-04-29-agent-harness-sdk-prd.md)
->
-> 本表把 PRD §5 中 M0-M4 所有**新增**功能拍平到一张大表，方便横向看清整个产品形态。
-> 仅列新增；现有 sensenova-claw 已有能力（编排循环、事件总线、SQLite、24 个 skill 等）不重复列出。
+> 立项稿配图，仅列**新增**功能，不分排期。简化版，便于领导评审。
+> 完整版（80 项细化）见 git 历史；本表为 30 项主功能。
 
-## 完整功能清单
+## 一句话定位
 
-| # | 功能域 | 功能 | 描述 | 用户可见性 |
-|---|---|---|---|---|
-| 1 | **Harness Core** | PluginLoader | 扫描 plugin source、读 manifest、校验 schema、注入 Registry；按 identity 过滤可见性 | 内部基础设施 |
-| 2 | Harness Core | RegistryEntry 抽象 | 所有 Registry 条目带 `owner_plugin / owner_team / visibility / namespace` | 内部基础设施 |
-| 3 | Harness Core | 7 类 Registry 统一接口 | Tool / Skill / LLMProvider / Channel / Agent / Hook / Command 全部支持 `register_from_plugin(entry)` | 内部基础设施 |
-| 4 | Harness Core | InstallReport | Plugin 加载失败不抛异常，进入 failures 列表，可观测 | 内部基础设施 |
-| 5 | Harness Core | PluginSource 抽象 | builtin / marketplace / team / user 四种来源；本期实现 builtin + user | 平台运维 |
-| 6 | **Plugin Manifest** | plugin.yaml schema | YAML 声明式清单：id / version / owner / visibility / permissions / config_schema | 业务团队主接触面 |
-| 7 | Plugin Manifest | 8 类 contribution | llm_providers / tools / channels / skills / agents / hooks / commands / mcp_servers | 业务团队主接触面 |
-| 8 | Plugin Manifest | Tool 三种接入方式 | python / mcp / http；Python 类、MCP server 引用、HTTP API 包装 | 业务团队 |
-| 9 | Plugin Manifest | LLM Provider 三种接入 | python / mcp / http；包含 model 列表声明 | 业务团队 |
-| 10 | Plugin Manifest | Hook 声明 | event 类型 + matcher + subprocess/python + blocking 策略 + on_failure | 业务团队 |
-| 11 | Plugin Manifest | MCP Server 声明 | transport（stdio/sse/http）+ command + auto_start + restart_policy + health_check | 业务团队 |
-| 12 | Plugin Manifest | Manifest 校验流程 | 读取 → schema → 兼容性 → visibility → permissions → config → 注入 Registry | 内部基础设施 |
-| 13 | Plugin Manifest | 命名空间引用规则 | 本地 short_id / 跨 plugin `owner/name::id` / 内置 `core::id` | 业务团队 |
-| 14 | **Control Protocol** | JSON-RPC 2.0 协议层 | Request / Response / Notification 编解码；id 关联 | 协议契约 |
-| 15 | Control Protocol | stdio 传输 | 行分隔 JSON over stdin/stdout；EOF 优雅退出 | 协议契约 |
-| 16 | Control Protocol | WebSocket 传输 | 同协议换 frame 格式；多 client 并发 | 云端 / 远程 |
-| 17 | Control Protocol | initialize 握手 | 协议版本协商、client info、identity 注入、capabilities 返回 | 协议契约 |
-| 18 | Control Protocol | Session 域 method | session.create / list / get_info / fork / delete / resume | 业务团队 |
-| 19 | Control Protocol | Turn 域 method | turn.send_input / cancel / get_messages | 业务团队 |
-| 20 | Control Protocol | Event 域 method | event.subscribe / unsubscribe；S→C `event` notification 流 | 业务团队 |
-| 21 | Control Protocol | Permission 双向 RPC | S→C permission.request / C→S permission.respond（allow/deny/edit） | 业务团队 |
-| 22 | Control Protocol | Plugin / Capability 域 | plugin.list/enable/disable/reload；tool.list / agent.list / skill.list | 业务团队 |
-| 23 | Control Protocol | Config 域 | config.get / set / subscribe；触发 config.updated 事件 | 业务团队 |
-| 24 | Control Protocol | MCP 反向 RPC | mcp.register_server（C→S）/ mcp.invoke（S→C） | SDK 内部 |
-| 25 | Control Protocol | 错误码体系 | -32000 ~ -32006 自定义错误码（permission_denied / plugin_not_loaded / ...） | 协议契约 |
-| 26 | Control Protocol | 进程生命周期 | EOF / SIGTERM 优雅退出；ping/pong 健康检查；崩溃恢复 + session.resume | 协议契约 |
-| 27 | Control Protocol | 协议版本演进 | protocol_version 协商；新增 method 走 minor；签名变更走 major | 协议契约 |
-| 28 | **Hook 子进程协议** | HookPipeline | 按 event 类型查 HookRegistry → matcher 过滤 → spawn 子进程 | 内部基础设施 |
-| 29 | Hook 子进程协议 | 9 个 hook event | OnSessionStart / OnSessionEnd / OnUserInput / PreLLM / PostLLM / PreTool / PostTool / OnError / OnConfigUpdated | 业务团队 |
-| 30 | Hook 子进程协议 | Input/Output envelope | hook_id / event / session_id / context / mutations / replacement / diagnostics | 业务团队 |
-| 31 | Hook 子进程协议 | 4 种 Decision | continue / block / mutate / replace | 业务团队 |
-| 32 | Hook 子进程协议 | Blocking vs fire-and-forget | 串行链式 mutation vs 并发不阻塞 | 业务团队 |
-| 33 | Hook 子进程协议 | 失败模型 | 非 0 退出 / 超时 / 非法 JSON / 子进程崩溃 + on_failure 策略 | 业务团队 |
-| 34 | Hook 子进程协议 | 跨语言 hook | 任何语言可读 stdin / 写 stdout JSON；bash/Go/Node/Rust 示例 | 业务团队 |
-| 35 | **MCP 三路径** | Path A: stdio MCP server | manifest 声明 command/args/env；spawn 子进程 | 业务团队 |
-| 36 | MCP 三路径 | Path B: SSE / HTTP MCP server | manifest 声明 url；HTTP 长连 | 业务团队 |
-| 37 | MCP 三路径 | Path C: in-process MCP server | SDK 起 server；通过 mcp.register_server / mcp.invoke 反向 RPC | Python 业务团队快速通道 |
-| 38 | MCP 三路径 | MCP 生命周期管理 | auto_start（always/on_demand/never）+ restart_policy + max_restarts + health_check | 平台运维 |
-| 39 | MCP 三路径 | 进程隔离与共享 | 单 server 进程被同 core 内多 session 共享；metadata 注入 session_id/identity | 内部基础设施 |
-| 40 | **Python SDK** | sensenova-claw-sdk 包 | `pip install sensenova-claw-sdk`；瘦客户端 | 业务团队 |
-| 41 | Python SDK | Harness 门面类 | spawn core CLI + Control Protocol 编解码；async with 上下文管理 | 业务团队 |
-| 42 | Python SDK | query() async iterator | `async for event in h.query("...")` 流式拿事件 | 业务团队 |
-| 43 | Python SDK | tool() 装饰器 | 业务用 Python 写 tool，自动包成 in-process MCP | 业务团队 |
-| 44 | Python SDK | create_sdk_mcp_server() | 一组 tool 打包成 in-process MCP server，通过反向 RPC 注册 | 业务团队 |
-| 45 | Python SDK | hello-world 示例 | `examples/sdk_minimal.py`，30 行跑通 | 业务团队 |
-| 46 | Python SDK | in-process tool 示例 | `examples/sdk_inprocess_tool.py`，演示自定义 tool 端到端 | 业务团队 |
-| 47 | **Node SDK** | @sensenova-claw/sdk 包 | npm 安装；TypeScript 类型定义齐全 | 业务团队（JS/TS） |
-| 48 | Node SDK | spawn / 远程双模式 | 本地 spawn core CLI 或远程连 wss:// | 业务团队（JS/TS） |
-| 49 | Node SDK | React hooks 封装 | sdk-react 子包：useSession / useTurnEvents / usePermissionDialog | 前端开发者 |
-| 50 | **Go SDK** | sensenova-claw-go 包 | `go get`；channel 风格事件流 | 业务团队（Go） |
-| 51 | **Rust SDK** | sensenova-claw-rs crate | crates.io；async Stream 事件流 | 业务团队（Rust） |
-| 52 | **多团队隔离** | Identity 三元组 | (user_id, team_id, org_id) 数据类 + 来源链解析 | 平台运维 |
-| 53 | 多团队隔离 | Identity 来源优先级 | 显式 > 环境变量 > ~/.sensenova-claw/identity.yaml > 默认 local | 平台运维 |
-| 54 | 多团队隔离 | Visibility 过滤 | public / internal+allowed_teams / private→owner-only | 平台运维 |
-| 55 | 多团队隔离 | Registry namespace 注入 | LLM 看到的 tool 名为 `team-a/plugin::tool` 全限定 | 平台运维 |
-| 56 | 多团队隔离 | DB team_id 列 | sessions/turns/messages/events/agent_messages 加列 + Repository 透明过滤 | 平台运维 |
-| 57 | 多团队隔离 | plugin_kv 表 | 按 (team_id, plugin_id, key) 隔离的 KV 存储 API | 业务团队 |
-| 58 | 多团队隔离 | 网络/文件/env 权限 | manifest permissions 声明 → core 强制校验 → permission_denied 错误 | 业务团队 |
-| 59 | 多团队隔离 | DB 迁移脚本 | `python3 -m sensenova_claw.adapters.storage.migrate up`；幂等 | 平台运维 |
-| 60 | **CLI 子命令** | sensenova-claw serve --stdio | SDK 用的 headless 后端；stdout 仅协议、日志走 stderr | 业务团队 / SDK |
-| 61 | CLI 子命令 | sensenova-claw serve --ws | WebSocket 模式；远程接入 | 云端 / 远程 |
-| 62 | CLI 子命令 | sensenova-claw serve --tcp | TCP 模式；保留蓝图 | 蓝图 |
-| 63 | **TUI 重构（可选）** | cli_client 改走 SDK | 现有 TUI 用 Python SDK 接 core，dogfood SDK | 平台运维 / 用户透明 |
-| 64 | **云端服务** | Cloud Gateway | 多租户鉴权（Token / mTLS）+ 路由 + 限流 + 计费 | 终端业务 |
-| 65 | 云端服务 | Core 进程池 | 一会话一进程或共享池；按 identity 隔离 | 平台运维 |
-| 66 | 云端服务 | PostgreSQL Repository | 替换 SQLite 实现；Repository 接口不变 | 平台运维 |
-| 67 | 云端服务 | 多租户三层隔离 | Org × Team × User 三层身份 + 数据分库 | 终端业务 |
-| 68 | 云端服务 | 计费 / 配额 | 按租户、按调用计量 | 商业化 |
-| 69 | **Plugin Marketplace** | 私有 Marketplace（基础） | 按 org 分发 plugin；签名校验 | 平台运维 |
-| 70 | Plugin Marketplace | Marketplace 服务化 | 注册、发现、版本管理、跨 org 公开 plugin | 业务团队 / 第三方 |
-| 71 | Plugin Marketplace | 协议开放 | 任何人可建私有 marketplace（开源协议） | 生态 |
-| 72 | **前端开源** | sensenova-claw-web 仓库 | 独立仓库或 monorepo 子包；Next.js 14 Dashboard | 开发者社区 |
-| 73 | 前端开源 | sdk-react 包 | React hooks + Provider | 前端开发者 |
-| 74 | 前端开源 | ui-kit 包 | 消息气泡、工具卡片等可复用组件 | 前端开发者 |
-| 75 | 前端开源 | 三个示例项目 | chat-minimal / plugin-showcase / multi-agent | 开发者社区 |
-| 76 | 前端开源 | 商业 vs 开源 Dashboard 区分 | 闭源云端 Dashboard 与开源 Dashboard 切分 | 商业化 |
-| 77 | **文档** | API 参考 | 每个 Control Protocol method 都有示例 | 业务团队 |
-| 78 | 文档 | Hook envelope schema | JSON Schema + 各语言类型生成 | 业务团队 |
-| 79 | 文档 | 接入教程 | 每类 contribution 都有 0→1 教程 | 业务团队 |
-| 80 | 文档 | 多语言 API 对照表 | 同一概念在 Python/Node/Go/Rust 中的写法对照 | 业务团队 |
+把 Sensenova-Claw 从"一个 Agent 应用"升级为"业务团队都能复用的 Agent Harness SDK + 平台"，跨语言、本地云端同源、不改源码即可扩展。
 
-## 按功能域汇总
+---
 
-| 功能域 | 数量 |
+## 新增功能总表
+
+| # | 功能 | 业务价值（一句话） |
+|---|---|---|
+| 1 | **Plugin Manifest 机制** | 业务团队用一份 YAML 声明所有扩展，不需要改 sensenova-claw 源码 |
+| 2 | **Plugin Loader + Registry 抽象** | core 启动时按 manifest 自动加载所有插件，支持 builtin/团队/用户多来源 |
+| 3 | **Control Protocol（JSON-RPC）** | SDK 和 Core 之间的统一协议，本地与云端共用同一份语义 |
+| 4 | **Python SDK（瘦客户端）** | `pip install sensenova-claw-sdk`，5 分钟跑通 hello world |
+| 5 | **Node.js SDK** | TypeScript/JavaScript 业务团队接入 |
+| 6 | **Go SDK** | Go 业务团队接入 |
+| 7 | **Rust SDK** | Rust 业务团队接入 |
+| 8 | **In-process MCP Server**（SDK 内嵌） | Python 团队写 tool 不用起独立子进程，性能与体验最佳 |
+| 9 | **MCP 三路径接入**（stdio / SSE / HTTP） | 任何语言写的工具都能接入，复用业内 MCP 生态 |
+| 10 | **Hook 子进程协议** | 任意语言写的 hook 脚本可在 LLM/Tool 调用前后介入（审计、脱敏、改写、缓存） |
+| 11 | **Hook 9 个触发点** | OnSessionStart/End、OnUserInput、PreLLM/PostLLM、PreTool/PostTool、OnError、OnConfigUpdated |
+| 12 | **Hook Decision 四态** | continue / block / mutate / replace，覆盖所有干预场景 |
+| 13 | **多团队 Identity 机制** | (user_id, team_id, org_id) 三元组贯穿全链路 |
+| 14 | **Plugin Visibility 隔离** | private / internal / public 三级，跨团队默认互不可见 |
+| 15 | **Registry Namespace 隔离** | LLM 看到的工具名带 `team-a/plugin::tool` 前缀，绝不串调 |
+| 16 | **存储 Namespace 隔离** | 数据库自动按 team_id / plugin_id 加 namespace，跨团队读不到 |
+| 17 | **Permission 双向 RPC** | 高风险工具调用前 Core 反向请求业务方确认，可 allow/deny/edit |
+| 18 | **Plugin 安全声明** | manifest 声明 network / filesystem / env 白名单，core 强制实施 |
+| 19 | **`sensenova-claw serve` 子命令** | 与现有 run/cli 并列的 SDK 后端入口（stdio/ws/tcp 三种传输），不影响现有体验 |
+| 20 | **WebSocket 传输** | Core 跑成远程服务，业务方仅切 URL 即可接入云端 |
+| 21 | **Cloud Gateway** | 鉴权、路由、限流、计费，支持多租户 |
+| 22 | **Core 进程池** | 一会话一进程或共享池，按 identity 隔离 |
+| 23 | **PostgreSQL Repository** | 替换 SQLite 实现，支撑云端规模化 |
+| 24 | **Plugin Marketplace 服务** | 注册、发现、版本管理、签名校验、跨 org 公开 |
+| 25 | **前端开源仓库** | Web Dashboard + sdk-react + ui-kit + 三个示例项目 |
+| 26 | **数据库迁移工具** | sessions/turns/messages/events 加 team_id 列；新 plugin_kv 表；幂等可回滚 |
+| 27 | **跨语言示例集** | Python / Go / Node / Rust / Bash 各一份完整 hook + tool 示例 |
+| 28 | **多团队混部审计日志** | 每条事件带 plugin_id / team_id，按团队维度可查 |
+| 29 | **Plugin 热重载（开发期）** | `plugin.reload` method，本地开发时无需重启 core |
+| 30 | **统一文档站** | API 参考 + 每类 contribution 0→1 教程 + 多语言对照 |
+
+---
+
+## 三大类归纳
+
+| 类别 | 功能编号 | 一句话总结 |
+|---|---|---|
+| **扩展机制**（让业务不改源码） | 1, 2, 8, 9, 10, 11, 12, 29 | Plugin manifest + Hook + MCP，统一三类扩展协议 |
+| **跨语言与跨形态**（SDK + 云端） | 3, 4, 5, 6, 7, 19, 20, 21, 22, 23, 25 | 一份 Core，N 种接入；本地与云端同协议 |
+| **多团队治理**（让平台可商用） | 13, 14, 15, 16, 17, 18, 24, 26, 27, 28, 30 | Identity → Visibility → Namespace → Audit 全链路 |
+
+---
+
+## 与现有产品的边界
+
+| 现状 | 本次新增 |
 |---|---|
-| Harness Core | 5 |
-| Plugin Manifest | 8 |
-| Control Protocol | 14 |
-| Hook 子进程协议 | 7 |
-| MCP 三路径 | 5 |
-| Python SDK | 7 |
-| Node SDK | 3 |
-| Go / Rust SDK | 2 |
-| 多团队隔离 | 8 |
-| CLI 子命令 | 3 |
-| TUI 重构 | 1 |
-| 云端服务 | 5 |
-| Plugin Marketplace | 3 |
-| 前端开源 | 5 |
-| 文档 | 4 |
-| **合计** | **80** |
+| 一个 Agent 应用，业务接入要改源码 | Plugin 机制，业务自包含 |
+| 仅 Python 业务可用 | Python/Node/Go/Rust 四语言 |
+| 单机 SQLite | 同时支持本地（SQLite）和云端（PostgreSQL） |
+| 工具只能写 Python | MCP 三路径 + Python 快速通道 |
+| 没有跨团队隔离 | Identity + Visibility + Namespace 三层隔离 |
+| 终端用户视角 | **保持 100% 兼容**（详见 spec §9） |
+
+---
+
+## 备注
+
+- 本表只列**新增**功能。现有 17+ tool / 24 skill / 4 LLM provider / 飞书 Channel 等不重写，由 Plugin Manifest 包装挂载（已在 spec §9.2 明确）。
+- 详细 80 项功能版本见 git 历史 `docs/design/2026-04-29-agent-harness-sdk-feature-list.md` 的早期 commit。
+- 完整设计：[2026-04-27-agent-harness-sdk-design.md](2026-04-27-agent-harness-sdk-design.md)
+- 立项 PRD：[2026-04-29-agent-harness-sdk-prd.md](2026-04-29-agent-harness-sdk-prd.md)
+- 实现拆分：[2026-04-27-plan-decomposition.md](2026-04-27-plan-decomposition.md)
