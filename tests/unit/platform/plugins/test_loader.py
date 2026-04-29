@@ -266,3 +266,33 @@ contributes:
     # 不算 installed、不算 failure；mcp_servers 全程沉默
     assert report.installed == 0
     assert report.failures == []
+
+
+# ── 端到端 ────────────────────────────────────────────────────
+
+
+def test_end_to_end_two_sources_two_plugins(tmp_path: Path):
+    builtin_root = tmp_path / "builtin"
+    user_root = tmp_path / "user"
+    builtin_root.mkdir()
+    user_root.mkdir()
+    _write_full_plugin(builtin_root, "core/builtin-tools", owner="core")
+    _write_full_plugin(user_root, "team-a/crm", owner="team-a")
+
+    loader = PluginLoader(
+        sources=[BuiltinPluginSource(builtin_root), UserPluginSource(user_root)]
+    )
+    manifests = loader.load_all(identity=None)
+    regs = _make_registries()
+    report = loader.install_into_registries(manifests, **regs)
+
+    assert report.ok
+    assert report.installed == 14   # 2 个 plugin × 7 contribution
+    # 不同 plugin 的 namespace 隔离：相同短名共存
+    assert regs["tool_registry"].get_plugin_entry("core/builtin-tools::send_email") is not None
+    assert regs["tool_registry"].get_plugin_entry("team-a/crm::send_email") is not None
+    # owner_team 正确传递
+    core_entry = regs["tool_registry"].get_plugin_entry("core/builtin-tools::send_email")
+    crm_entry = regs["tool_registry"].get_plugin_entry("team-a/crm::send_email")
+    assert core_entry.owner_team == "core"
+    assert crm_entry.owner_team == "team-a"
