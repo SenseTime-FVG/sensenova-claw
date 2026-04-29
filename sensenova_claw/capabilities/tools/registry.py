@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sensenova_claw.platform.plugins import RegistryEntry
+
 from sensenova_claw.capabilities.tools.ask_user_tool import AskUserTool
 from sensenova_claw.capabilities.tools.base import Tool
 from sensenova_claw.capabilities.tools.builtin import (
@@ -164,3 +169,21 @@ class ToolRegistry:
                 )
         tools.sort(key=lambda item: item["name"])
         return tools
+
+    # ── P1 plugin loader 接入（不动既有 register/get） ─────────────
+
+    def register_from_plugin(self, entry: "RegistryEntry") -> None:
+        """收下 plugin contribution。
+
+        P1 阶段：只存条目，不实例化 impl（P2 会在 install 时实例化 Tool 子类
+        并把实例放到 entry.impl，再统一调既有 self.register(tool)）。
+        """
+        if not hasattr(self, "_plugin_entries"):
+            self._plugin_entries = {}
+        self._plugin_entries[entry.id] = entry
+
+    def get_plugin_entry(self, entry_id: str) -> "RegistryEntry | None":
+        return getattr(self, "_plugin_entries", {}).get(entry_id)
+
+    def list_plugin_entries(self) -> "list[RegistryEntry]":
+        return list(getattr(self, "_plugin_entries", {}).values())

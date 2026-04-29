@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from sensenova_claw.platform.plugins import RegistryEntry
 
 from sensenova_claw.platform.config.config import config
 from sensenova_claw.adapters.llm.base import LLMProvider
@@ -109,3 +112,25 @@ class LLMFactory:
                 self._lazy.clear()
                 self._register_providers()
                 logger.info("LLMFactory: providers reloaded due to config change")
+
+    # ── P1 plugin loader 接入 ────────────────────────────────────
+
+    def register_from_plugin(self, entry: "RegistryEntry") -> None:
+        """收下 plugin LLM provider contribution。
+
+        P1 仅存条目；P2 在 install 时根据 metadata['type'] / metadata['python']
+        反射出 LLMProvider 子类并调既有 _PROVIDER_FACTORIES 路径接入。
+        """
+        if not hasattr(self, "_plugin_entries"):
+            self._plugin_entries = {}
+        self._plugin_entries[entry.id] = entry
+
+    def get_plugin_entry(self, entry_id: str) -> "RegistryEntry | None":
+        return getattr(self, "_plugin_entries", {}).get(entry_id)
+
+    def list_plugin_entries(self) -> "list[RegistryEntry]":
+        return list(getattr(self, "_plugin_entries", {}).values())
+
+
+# 兼容别名：plan-decomposition.md §3.3 引用名 LLMProviderRegistry。
+LLMProviderRegistry = LLMFactory

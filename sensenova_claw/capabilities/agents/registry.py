@@ -21,6 +21,7 @@ from sensenova_claw.capabilities.agents.config import AgentConfig, _parse_delega
 if TYPE_CHECKING:
     from sensenova_claw.kernel.events.bus import PublicEventBus
     from sensenova_claw.platform.config.config import Config
+    from sensenova_claw.platform.plugins import RegistryEntry
 
 logger = logging.getLogger(__name__)
 
@@ -178,3 +179,16 @@ class AgentRegistry:
                 setattr(agent, key, value)
         agent.updated_at = time.time()
         return agent
+
+    # ── P1 plugin loader 接入 ────────────────────────────────────
+
+    def register_from_plugin(self, entry: "RegistryEntry") -> None:
+        if not hasattr(self, "_plugin_entries"):
+            self._plugin_entries = {}
+        self._plugin_entries[entry.id] = entry
+
+    def get_plugin_entry(self, entry_id: str) -> "RegistryEntry | None":
+        return getattr(self, "_plugin_entries", {}).get(entry_id)
+
+    def list_plugin_entries(self) -> "list[RegistryEntry]":
+        return list(getattr(self, "_plugin_entries", {}).values())

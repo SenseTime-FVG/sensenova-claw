@@ -4,7 +4,10 @@ import json
 import shutil
 import yaml
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sensenova_claw.platform.plugins import RegistryEntry
 
 from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
 
@@ -283,3 +286,17 @@ class SkillRegistry:
     def get(self, name: str) -> Skill | None:
         """根据名称获取 skill"""
         return self._skills.get(name)
+
+    # ── P1 plugin loader 接入 ────────────────────────────────────
+
+    def register_from_plugin(self, entry: "RegistryEntry") -> None:
+        """收下 plugin contribution（不与 SKILL.md 文件加载冲突）。"""
+        if not hasattr(self, "_plugin_entries"):
+            self._plugin_entries = {}
+        self._plugin_entries[entry.id] = entry
+
+    def get_plugin_entry(self, entry_id: str) -> "RegistryEntry | None":
+        return getattr(self, "_plugin_entries", {}).get(entry_id)
+
+    def list_plugin_entries(self) -> "list[RegistryEntry]":
+        return list(getattr(self, "_plugin_entries", {}).values())
