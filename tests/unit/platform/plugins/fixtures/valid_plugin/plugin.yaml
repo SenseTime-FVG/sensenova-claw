@@ -1,0 +1,32 @@
+schema_version: "1"
+id: team-a/crm-assistant
+version: 1.2.0
+name: CRM Assistant
+description: 客服 CRM 工具集
+author: team-a@company.com
+owner: team-a
+visibility: private
+allowed_teams: []
+allowed_users: []
+sensenova_claw:
+  min_version: "1.2.0"
+  max_version: "2.0.0"
+permissions:
+  network:
+    - "https://api.crm.internal/**"
+  filesystem:
+    - read: ["./data/**"]
+    - write: ["./cache/**"]
+  env:
+    - CRM_API_TOKEN
+config:
+  schema:
+    type: object
+    required: [api_endpoint]
+    properties:
+      api_endpoint: { type: string }
+contributes:
+  tools:
+    - id: send_email
+      type: python
+      python: tools/email.py:SendEmailTool
