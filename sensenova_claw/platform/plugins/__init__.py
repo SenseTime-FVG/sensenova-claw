@@ -1,4 +1,9 @@
 """sensenova_claw plugin 基础设施（P1：Loader + Registry 抽象）。"""
+from sensenova_claw.platform.plugins.loader import (
+    InstallFailure,
+    InstallReport,
+    PluginLoader,
+)
 from sensenova_claw.platform.plugins.manifest import (
     ManifestValidationError,
     PluginManifest,
@@ -15,7 +20,10 @@ from sensenova_claw.platform.plugins.sources import (
 
 __all__ = [
     "BuiltinPluginSource",
+    "InstallFailure",
+    "InstallReport",
     "ManifestValidationError",
+    "PluginLoader",
     "PluginManifest",
     "PluginPermissions",
     "PluginSource",
