@@ -86,6 +86,13 @@ export interface ContextFileRef {
   path: string;
 }
 
+export interface ChatAttachmentRef {
+  kind: 'image';
+  name: string;
+  path: string;
+  mime_type: string;
+}
+
 export interface StepItem {
   label: string;
   status: 'done' | 'running' | 'pending';

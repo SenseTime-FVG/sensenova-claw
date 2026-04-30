@@ -206,6 +206,32 @@ class TestNormalizeMessages:
             {"role": "user", "content": "q2"},
         ]
 
+    def test_user_message_with_image_attachments_becomes_multimodal_blocks(self, local_provider) -> None:
+        result = local_provider._normalize_messages([
+            {
+                "role": "user",
+                "content": "请描述图片",
+                "attachments": [
+                    {
+                        "kind": "image",
+                        "mime_type": "image/png",
+                        "data": "ZmFrZQ==",
+                    }
+                ],
+            }
+        ])
+
+        assert result[0]["role"] == "user"
+        assert result[0]["content"][0] == {"type": "text", "text": "请描述图片"}
+        assert result[0]["content"][1] == {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "ZmFrZQ==",
+            },
+        }
+
 
 # ---------------------------------------------------------------------------
 # _convert_tool 纯逻辑测试（不需要 API 调用）

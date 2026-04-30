@@ -198,6 +198,9 @@ class OpenAIProvider(LLMProvider):
         normalized: list[dict[str, Any]] = []
         for message in messages:
             role = message.get("role")
+            if role == "user" and message.get("attachments"):
+                normalized.append(self._normalize_user_message(message))
+                continue
             if role == "assistant" and isinstance(message.get("tool_calls"), list):
                 normalized.append(self._normalize_assistant_message(message, has_thinking))
                 continue
@@ -206,6 +209,32 @@ class OpenAIProvider(LLMProvider):
                 continue
             normalized.append(dict(message))
         return self._align_tool_call_responses(normalized)
+
+    def _normalize_user_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(message)
+        attachments = normalized.pop("attachments", []) or []
+        blocks: list[dict[str, Any]] = []
+
+        content = normalized.get("content", "")
+        if isinstance(content, str) and content:
+            blocks.append({"type": "text", "text": content})
+
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+            if str(attachment.get("kind") or "") != "image":
+                continue
+            mime_type = str(attachment.get("mime_type") or "").strip()
+            data = str(attachment.get("data") or "").strip()
+            if not mime_type or not data:
+                continue
+            blocks.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime_type};base64,{data}"},
+            })
+
+        normalized["content"] = blocks or [{"type": "text", "text": ""}]
+        return normalized
 
     def _align_tool_call_responses(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """确保每个 assistant tool_calls 之后都有完整的 tool 响应。

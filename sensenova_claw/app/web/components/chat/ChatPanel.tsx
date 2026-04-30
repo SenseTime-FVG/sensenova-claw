@@ -8,7 +8,7 @@ import { MessageArea } from './MessageArea';
 import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { useSlideSet } from '@/components/ppt/PPTViewer';
 import { type FilePreviewType } from '@/components/files/fileTypes';
-import { type ContextFileRef, getAgentId } from '@/lib/chatTypes';
+import { type ChatAttachmentRef, type ContextFileRef, getAgentId } from '@/lib/chatTypes';
 import { fetchWorkdirRoot } from '@/lib/utils';
 import { useResizablePreview } from '@/hooks/useResizablePreview';
 import { InlinePreview } from './InlinePreview';
@@ -131,12 +131,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     content: string,
     contextFiles?: ContextFileRef[],
     recommendation?: RecommendationSendMeta | null,
+    attachments?: ChatAttachmentRef[],
   ) => {
     if (currentSessionQuestionInteraction) {
       sendCurrentSessionQuestionAnswer(content, false);
       return;
     }
-    sendMessage(content, contextFiles, selectedAgent, recommendation);
+    sendMessage(content, contextFiles, selectedAgent, recommendation, attachments);
   }, [currentSessionQuestionInteraction, sendCurrentSessionQuestionAnswer, sendMessage, selectedAgent]);
 
   const fillInput = useCallback((text: string) => {

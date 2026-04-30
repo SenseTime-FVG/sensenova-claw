@@ -74,6 +74,7 @@ class ContextBuilder:
         history: list[dict[str, Any]] | None = None,
         memory_context: str | None = None,
         context_files: list[ContextFile] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
         agent_config: AgentConfig | None = None,
         session_id: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -150,7 +151,10 @@ class ContextBuilder:
         # 在用户消息前添加当前时间
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         user_message = f"[{current_time}] {user_input}"
-        messages.append({"role": "user", "content": user_message})
+        message_payload: dict[str, Any] = {"role": "user", "content": user_message}
+        if attachments:
+            message_payload["attachments"] = attachments
+        messages.append(message_payload)
         return messages
 
     def append_tool_result(

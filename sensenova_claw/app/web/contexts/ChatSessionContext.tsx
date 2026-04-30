@@ -31,6 +31,7 @@ import type { GlobalAgentActivity, ProactiveResultItem, PrefillInputPayload, Rec
 import type { PendingInteraction, PendingQuestionInteraction } from '@/components/chat/QuestionDialog';
 import type {
   ChatMessage,
+  ChatAttachmentRef,
   SessionItem,
   TaskGroup,
   StepItem,
@@ -65,6 +66,7 @@ export interface ChatSessionContextValue {
     contextFiles?: ContextFileRef[],
     agentId?: string,
     recommendation?: RecommendationSendMeta | null,
+    attachments?: ChatAttachmentRef[],
   ) => void;
 
   // 任务列表
