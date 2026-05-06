@@ -1,5 +1,6 @@
 from pathlib import Path
 import tempfile
+import logging
 import pytest
 from sensenova_claw.capabilities.skills.registry import SkillRegistry
 
@@ -28,7 +29,7 @@ def test_load_skills():
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text("---\nname: skill1\ndescription: 技能1\n---\n内容1\n", encoding="utf-8")
 
-        registry = SkillRegistry(workspace_dir=Path(tmpdir))
+        registry = SkillRegistry(workspace_dir=Path(tmpdir), user_dir=Path(tmpdir) / "user-skills")
         registry.load_skills({})
 
         skills = registry.get_all()
@@ -44,10 +45,35 @@ def test_skill_disabled():
         (skill_dir / "SKILL.md").write_text("---\nname: skill1\ndescription: 技能1\n---\n内容\n", encoding="utf-8")
 
         config = {"skills": {"entries": {"skill1": {"enabled": False}}}}
-        registry = SkillRegistry(workspace_dir=Path(tmpdir))
+        registry = SkillRegistry(workspace_dir=Path(tmpdir), user_dir=Path(tmpdir) / "user-skills")
         registry.load_skills(config)
 
         assert len(registry.get_all()) == 0
+
+
+def test_load_skills_skips_malformed_sensenova_metadata(caplog):
+    """metadata.sensenova-claw 写错类型时跳过该 skill 但不影响启动"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        skill_dir = Path(tmpdir) / "skill1"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: skill1\n"
+            "description: 技能1\n"
+            "metadata:\n"
+            "  sensenova-claw: bad-metadata\n"
+            "---\n"
+            "内容\n",
+            encoding="utf-8",
+        )
+
+        registry = SkillRegistry(workspace_dir=Path(tmpdir), user_dir=Path(tmpdir) / "user-skills")
+        caplog.set_level(logging.ERROR)
+        registry.load_skills({})
+
+        assert registry.get("skill1") is None
+        assert "Skipping skill skill1" in caplog.text
+        assert "metadata.sensenova-claw must be a mapping" in caplog.text
 
 
 def test_workspace_overrides_user():
