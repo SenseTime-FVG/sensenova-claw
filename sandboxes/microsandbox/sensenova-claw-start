@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# microsandbox 版启动脚本。
+# 与 OpenShell 版差异：
+#   - 不依赖 /sandbox PVC；持久化通过 microsandbox volume 挂到 $SENSENOVA_CLAW_HOME 实现
+#   - 默认以 root 运行（libkrun 在 VM 边界做隔离，不依赖 in-VM uid 降权）
+#   - 不需要剥离 ENV，agentd 会保留 Dockerfile 中的环境变量
+
+export SENSENOVA_CLAW_HOME="${SENSENOVA_CLAW_HOME:-/root/.sensenova-claw}"
+CONFIG_DIR="$SENSENOVA_CLAW_HOME"
+CONFIG_FILE="$CONFIG_DIR/config.yml"
+mkdir -p "$CONFIG_DIR/data"
+
+# ── 1. 首次启动初始化 config / agents / skills ──
+if [ ! -f "$CONFIG_FILE" ]; then
+    cp /opt/sensenova-claw/default-config.yml "$CONFIG_FILE"
+    echo "[sensenova-claw] config.yml generated at $CONFIG_FILE"
+fi
+cp -rn /etc/sensenova-claw/agents/ "$CONFIG_DIR/" 2>/dev/null || true
+cp -rn /etc/sensenova-claw/skills/ "$CONFIG_DIR/" 2>/dev/null || true
+
+# ── 2. 后台启动 Next.js frontend ──
+cd /opt/sensenova-claw/web
+PORT=3000 HOST=0.0.0.0 node server.js &
+FRONTEND_PID=$!
+echo "[sensenova-claw] frontend started (PID $FRONTEND_PID, port 3000)"
+
+# 父进程退出时一并清理前端
+trap 'kill "$FRONTEND_PID" 2>/dev/null || true' EXIT
+
+# ── 3. 前台启动 FastAPI backend ──
+echo "[sensenova-claw] starting backend on port 8000..."
+exec sensenova-claw run --no-frontend --port 8000

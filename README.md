@@ -161,6 +161,10 @@ cp config_example.yml config.yml
 
 ## 🚀 Quick Start
 
+两种部署模式：**本地启动**（直接跑在宿主机）或 **沙箱启动**（隔离环境运行）。任选其一。
+
+### 本地启动
+
 **1. 启动服务**
 
 ```bash
@@ -187,9 +191,31 @@ npm run dev
 http://localhost:3000/?token=<your-token>
 ```
 
-**3. OpenShell 沙箱启动**
+**单组件启动（可选）**
 
-通过 [OpenShell](https://docs.openshell.dev) 在隔离沙箱中运行，无需本地安装 Python/Node.js 环境：
+```bash
+# 仅启动后端 API（http://localhost:8000）
+npm run dev:server
+
+# 仅启动 Web 前端
+npm run dev:web
+
+# CLI 客户端（需后端已运行）
+sensenova-claw cli
+```
+
+### 沙箱启动
+
+在隔离环境运行，无需本地安装 Python/Node.js。二选一即可，区别在隔离强度与平台支持：
+
+| | 隔离层级 | 平台 |
+|---|---|---|
+| **OpenShell**     | 进程级（Landlock + 出站策略）    | Linux |
+| **microsandbox**  | 硬件虚拟化级（libkrun microVM）  | macOS / Linux（需 `/dev/kvm`） |
+
+**A. OpenShell**
+
+通过 [OpenShell](https://docs.openshell.dev)：
 
 ```bash
 # 从社区仓库启动
@@ -230,18 +256,43 @@ openshell forward start 3000 <sandbox-name>
 
 </details>
 
-**4. 其他启动方式**
+**B. microsandbox**
+
+通过 [microsandbox](https://github.com/superradcompany/microsandbox) libkrun microVM：
 
 ```bash
-# 仅启动后端 API（http://localhost:8000）
-npm run dev:server
+# 1) 一次性安装 msb（装到 ~/.microsandbox/，无需 sudo）
+curl -fsSL https://install.microsandbox.dev | sh && source ~/.zshrc
 
-# 仅启动 Web 前端
-npm run dev:web
-
-# CLI 客户端（需后端已运行）
-sensenova-claw cli
+# 2) 启动（首次自动拉 153MB 镜像，约 30s；之后秒起）
+msb run -d --replace -n claw -c 2 -m 2048 \
+        -p 8000:8000 -p 3000:3000 \
+        ghcr.io/tsunamiblue/sensenova-claw:msb \
+        -- sensenova-claw-start
 ```
+
+访问 `http://localhost:3000`，带 token 的登录 URL 见：`msb exec claw -- grep token /tmp/claw.log`。
+
+管理 VM：`msb ps` / `msb stop claw` / `msb start claw` / `msb rm claw`。
+
+<details>
+<summary><b>从本地源码构建（自托管镜像）</b></summary>
+
+```bash
+# 推送到自有 registry
+IMAGE=ghcr.io/<your-account>/sensenova-claw:msb \
+  ./sandboxes/microsandbox/build.sh
+
+# 仅本地验证（不推送）
+./sandboxes/microsandbox/build.sh --no-push
+
+# 多架构（arm64 + amd64，需 Colima ≥ 4 GB RAM）
+./sandboxes/microsandbox/build.sh --multi-arch
+```
+
+`build.sh` 会按需自动安装 buildx、注册 binfmt 与创建 builder。Dockerfile 与启动脚本见 `sandboxes/microsandbox/`。
+
+</details>
 
 ## 🖥️ Web Dashboard
 
