@@ -168,7 +168,7 @@ export default function AgentDetailPage() {
       const body: Record<string, unknown> = {
         name: editName,
         description: editDesc,
-        model: editModel || undefined,
+        model: editModel,
         temperature: parseFloat(editTemp) || 1.0,
         systemPrompt: editPrompt,
         can_delegate_to: editDelegateTo.length > 0 ? editDelegateTo : null,
@@ -448,6 +448,7 @@ export default function AgentDetailPage() {
                         <label className="text-muted-foreground text-sm font-semibold">Model</label>
                         <select value={editModel} onChange={e => setEditModel(e.target.value)}
                           className="w-full bg-background border border-input rounded-xl px-4 py-2.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm appearance-none cursor-pointer">
+                          <option value="">默认</option>
                           {!availableModels.includes(editModel) && editModel && (
                             <option value={editModel}>{editModel}</option>
                           )}
