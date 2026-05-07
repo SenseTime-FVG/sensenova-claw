@@ -224,7 +224,7 @@ export default function OrchestrationPage() {
                               <span className="flex items-center gap-1.5" title="Sessions"><MessageSquare size={16}/> {agent.sessionCount || 0}</span>
                               <span className="flex items-center gap-1.5" title="Tools"><Wrench size={16}/> {agent.toolCount || 0}</span>
                             </div>
-                            <span className="text-xs font-mono font-black uppercase bg-muted text-muted-foreground/60 px-2.5 py-1 rounded-lg tracking-wider">{agent.model}</span>
+                            <span className="text-xs font-mono font-black uppercase bg-muted text-muted-foreground/60 px-2.5 py-1 rounded-lg tracking-wider">{agent.model || '默认'}</span>
                           </div>
                         </Link>
                       </div>
@@ -310,13 +310,11 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
         const models = llm?.models && typeof llm.models === 'object'
           ? Object.keys(llm.models).filter(key => key !== 'mock')
           : [];
-        const defaultModel = typeof llm?.default_model === 'string' ? llm.default_model : '';
 
         setAvailableModels(models);
         setFormModel(currentValue => {
           if (currentValue && models.includes(currentValue)) return currentValue;
-          if (defaultModel && models.includes(defaultModel)) return defaultModel;
-          return models[0] || '';
+          return '';
         });
       })
       .catch(() => {
@@ -400,7 +398,7 @@ function CreateAgentModal({ onClose, onCreated }: { onClose: () => void; onCreat
                 data-testid="agent-model-select"
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
-                <option value="">跟随系统默认模型</option>
+                <option value="">默认</option>
                 {availableModels.map(model => (
                   <option key={model} value={model}>{model}</option>
                 ))}
