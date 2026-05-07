@@ -47,6 +47,8 @@ export interface ChatMessage {
   /** 工具消息在没有 toolInfo 时展示的工具名。 */
   name?: string;
   toolInfo?: ToolInfo;
+  /** 用户消息携带的图片附件元数据，用于前端展示和历史恢复。 */
+  attachments?: ChatAttachmentRef[];
   /** Issue #211: assistant 最终回复时填充，表示从用户最近一条消息到该回复完成的耗时（ms）。 */
   durationMs?: number;
 }
@@ -404,6 +406,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
         content: String(payload.content || ''),
         timestamp: eventTimestampMs,
         turnId,
+        attachments: Array.isArray(payload.attachments) ? payload.attachments as ChatAttachmentRef[] : undefined,
       });
       continue;
     }

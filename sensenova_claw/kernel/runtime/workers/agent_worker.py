@@ -240,11 +240,16 @@ class AgentSessionWorker(SessionWorker):
         tool_calls_json = None
         if msg.get("tool_calls"):
             tool_calls_json = json.dumps(msg["tool_calls"], ensure_ascii=False)
+        attachments_json = None
+        persisted_attachments = self._persistable_attachments(msg.get("attachments"))
+        if persisted_attachments:
+            attachments_json = json.dumps(persisted_attachments, ensure_ascii=False)
         await self.rt.repo.save_message(
             session_id=session_id,
             turn_id=turn_id,
             role=role,
             content=msg.get("content"),
+            attachments=attachments_json,
             tool_calls=tool_calls_json,
             tool_call_id=msg.get("tool_call_id"),
             tool_name=msg.get("name"),
@@ -416,7 +421,11 @@ class AgentSessionWorker(SessionWorker):
 
         # 增量持久化：在 history 加载后保存 user 消息，避免重复
         await self._persist_message(
-            self.session_id, turn_id, {"role": "user", "content": content},
+            self.session_id, turn_id, {
+                "role": "user",
+                "content": content,
+                "attachments": event.payload.get("attachments", []),
+            },
         )
 
         await self.bus.publish(
@@ -535,6 +544,32 @@ class AgentSessionWorker(SessionWorker):
             })
 
         return loaded
+
+    def _persistable_attachments(self, attachments: Any) -> list[dict[str, Any]]:
+        """返回可写入消息日志的附件元数据，避免持久化 base64 data。"""
+        if not isinstance(attachments, list):
+            return []
+
+        persisted: list[dict[str, Any]] = []
+        for item in attachments:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("kind") or "") != "image":
+                continue
+            name = str(item.get("name") or "").strip()
+            path = str(item.get("path") or "").strip()
+            mime_type = str(item.get("mime_type") or "").strip()
+            if not name and path:
+                name = os.path.basename(path)
+            if not name or not path or not mime_type:
+                continue
+            persisted.append({
+                "kind": "image",
+                "name": name,
+                "path": path,
+                "mime_type": mime_type,
+            })
+        return persisted
 
     async def _handle_llm_completed(self, event: EventEnvelope) -> None:
         """处理 LLM 调用完成，决定下一步动作"""
