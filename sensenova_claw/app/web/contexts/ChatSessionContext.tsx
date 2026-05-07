@@ -93,6 +93,8 @@ export interface ChatSessionContextValue {
     cancelled: boolean;
   }) => void;
   sendConfirmationResponse: (approved: boolean) => void;
+  isToolAutoApproveEnabled: boolean;
+  setToolAutoApproveEnabled: (enabled: boolean) => void;
   handleInteractionTimeout: () => void;
 
   // 斜杠命令
@@ -195,6 +197,8 @@ export function useChatSession(): ChatSessionContextValue {
     sendCurrentSessionQuestionAnswer: interaction.sendCurrentSessionQuestionAnswer,
     submitQuestionResponse: interaction.submitQuestionResponse,
     sendConfirmationResponse: interaction.sendConfirmationResponse,
+    isToolAutoApproveEnabled: interaction.isToolAutoApproveEnabled,
+    setToolAutoApproveEnabled: interaction.setToolAutoApproveEnabled,
     handleInteractionTimeout: interaction.handleInteractionTimeout,
     resolveInteractionFromNotification: interaction.resolveInteractionFromNotification,
 

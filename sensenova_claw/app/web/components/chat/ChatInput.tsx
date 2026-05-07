@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect, useMemo } from 'react';
-import { Send, Square, Paperclip, File, FolderOpen, X } from 'lucide-react';
+import { Send, Square, Paperclip, File, FolderOpen, X, ShieldCheck } from 'lucide-react';
 import { useDrop } from 'react-dnd';
 import { TargetSelector } from './TargetSelector';
 import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
@@ -11,6 +11,7 @@ import { useFileUpload } from '@/hooks/useFileUpload';
 import { singleFileFlow } from '@/lib/fileUpload';
 import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 import { useI18n } from '@/contexts/I18nContext';
+import { cn } from '@/lib/utils';
 
 interface ChatInputProps {
   defaultAgentId: string;
@@ -80,6 +81,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     clearPendingPrefill,
     currentSessionQuestionInteraction,
     sendCurrentSessionQuestionAnswer,
+    isToolAutoApproveEnabled,
+    setToolAutoApproveEnabled,
   } = useChatSession();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isComposingRef = useRef(false);
@@ -420,6 +423,22 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               {t('chat.reconnect')}
             </button>
           )}
+          <button
+            type="button"
+            data-testid="tool-auto-approve-toggle"
+            onClick={() => setToolAutoApproveEnabled(!isToolAutoApproveEnabled)}
+            className={cn(
+              'ml-2 inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] font-medium transition-colors',
+              isToolAutoApproveEnabled
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
+                : 'border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground',
+            )}
+            aria-pressed={isToolAutoApproveEnabled}
+            title="开启后所有工具审批请求都会自动批准"
+          >
+            <ShieldCheck className="h-3 w-3" />
+            {isToolAutoApproveEnabled ? '自动批准已开' : '自动批准工具'}
+          </button>
         </div>
 
         <div

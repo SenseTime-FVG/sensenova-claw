@@ -95,10 +95,13 @@ def _build_frontend_prod_cmd(web_dir: Path, frontend_port: int) -> tuple[list[st
 
     # 优先使用 standalone 模式（体积最小，无需 node_modules）
     # standalone server.js 通过 PORT 环境变量指定端口，不接受 -p 参数
-    # cwd 必须设为 standalone 目录，server.js 从 cwd 查找 public/ 和 .next/static/
+    # cwd 必须设为 standalone 目录，server.js 从 cwd 查找 public/ 和 .next/static/。
+    # Next.js 不会自动把 .next/static 复制进 standalone；缺失时启动后页面 HTML
+    # 会返回但 JS chunks 404，浏览器会停在服务端初始加载态。
     standalone_dir = web_dir / ".next" / "standalone"
     standalone_server = standalone_dir / "server.js"
-    if node and standalone_server.exists():
+    standalone_static = standalone_dir / ".next" / "static"
+    if node and standalone_server.exists() and standalone_static.is_dir():
         return [node, str(standalone_server)], str(standalone_dir)
 
     # 回退到 next start（需要 node_modules）

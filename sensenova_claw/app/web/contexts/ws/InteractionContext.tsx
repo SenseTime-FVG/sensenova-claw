@@ -10,6 +10,8 @@ import { attachAskUserToLatestToolMessage, updateAskUserToolState } from '@/lib/
 import type { PendingInteraction, PendingQuestionInteraction } from '@/components/chat/QuestionDialog';
 import type { WsInboundEvent } from '@/lib/wsEvents';
 
+const TOOL_AUTO_APPROVE_STORAGE_KEY = 'sensenova_claw_tool_auto_approve_all';
+
 // ── Context 类型 ──
 
 export interface InteractionContextValue {
@@ -25,6 +27,9 @@ export interface InteractionContextValue {
     cancelled: boolean;
   }) => void;
   sendConfirmationResponse: (approved: boolean) => void;
+  isToolAutoApproveEnabled: boolean;
+  enableToolAutoApprove: () => void;
+  setToolAutoApproveEnabled: (enabled: boolean) => void;
   handleInteractionTimeout: () => void;
   /** 通知面板回答 ask_user 时同步解除阻塞 */
   resolveInteractionFromNotification?: (kind: 'question' | 'confirmation', interactionId: string) => void;
@@ -46,9 +51,45 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
   const [activeInteraction, setActiveInteraction] = useState<PendingInteraction | null>(null);
   const [currentSessionQuestionInteraction, setCurrentSessionQuestionInteraction] = useState<PendingQuestionInteraction | null>(null);
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
+  const [isToolAutoApproveEnabled, setIsToolAutoApproveEnabled] = useState(false);
 
   const interactionQueueRef = useRef<PendingInteraction[]>([]);
   const activeInteractionRef = useRef<PendingInteraction | null>(null);
+  const isToolAutoApproveEnabledRef = useRef(false);
+
+  useEffect(() => {
+    let enabled = false;
+    try {
+      enabled = window.localStorage.getItem(TOOL_AUTO_APPROVE_STORAGE_KEY) === 'true';
+    } catch {
+      enabled = false;
+    }
+    isToolAutoApproveEnabledRef.current = enabled;
+    setIsToolAutoApproveEnabled(enabled);
+  }, []);
+
+  const setToolAutoApproveEnabled = useCallback((enabled: boolean) => {
+    isToolAutoApproveEnabledRef.current = enabled;
+    setIsToolAutoApproveEnabled(enabled);
+    try {
+      window.localStorage.setItem(TOOL_AUTO_APPROVE_STORAGE_KEY, enabled ? 'true' : 'false');
+    } catch {
+      // localStorage may be unavailable in restricted browser contexts.
+    }
+  }, []);
+
+  const enableToolAutoApprove = useCallback(() => {
+    setToolAutoApproveEnabled(true);
+  }, [setToolAutoApproveEnabled]);
+
+  const approveToolConfirmation = useCallback((sourceSessionId: string, toolCallId: string) => {
+    wsSend({
+      type: 'tool_confirmation_response',
+      session_id: sourceSessionId,
+      payload: { tool_call_id: toolCallId, approved: true },
+      timestamp: Date.now() / 1000,
+    });
+  }, [wsSend]);
 
   // ── 队列管理 ──
 
@@ -162,6 +203,10 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
           const { tool_call_id: toolCallId, tool_name: toolName } = event.payload;
           const sourceSessionId = event.session_id || '';
           if (!toolCallId || !sourceSessionId) break;
+          if (isToolAutoApproveEnabledRef.current) {
+            approveToolConfirmation(sourceSessionId, toolCallId);
+            break;
+          }
           const isThisSession = sourceSessionId === currentSessionIdRef.current;
           if (isThisSession) {
             enqueueInteraction({
@@ -327,6 +372,10 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
           const { tool_call_id: toolCallId, tool_name: toolName } = event.payload;
           const sourceSessionId = event.session_id || '';
           if (!toolCallId || !sourceSessionId) break;
+          if (isToolAutoApproveEnabledRef.current) {
+            approveToolConfirmation(sourceSessionId, toolCallId);
+            break;
+          }
           // 仅为跨 session 事件创建弹窗（当前 session 已有内联对话框）
           if (sourceSessionId === currentSessionIdRef.current) break;
           const cardId = `confirm_${toolCallId}`;
@@ -479,6 +528,9 @@ export function InteractionProvider({ children }: { children: React.ReactNode })
     sendCurrentSessionQuestionAnswer,
     submitQuestionResponse,
     sendConfirmationResponse,
+    isToolAutoApproveEnabled,
+    enableToolAutoApprove,
+    setToolAutoApproveEnabled,
     handleInteractionTimeout,
     resolveInteractionFromNotification: resolveInteraction,
   };
