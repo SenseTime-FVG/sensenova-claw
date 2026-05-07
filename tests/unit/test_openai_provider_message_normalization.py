@@ -122,6 +122,38 @@ def test_normalize_messages_converts_user_image_attachments_to_multimodal_blocks
     }
 
 
+def test_normalize_messages_does_not_convert_tool_image_attachments_to_multimodal_tool_content() -> None:
+    provider = OpenAIProvider()
+
+    normalized = provider._normalize_messages([
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_img", "name": "read_file", "arguments": {"file_path": "shot.png"}},
+            ],
+        },
+        {
+            "role": "tool",
+            "name": "read_file",
+            "tool_call_id": "call_img",
+            "content": "read_file 返回了 1 张图片。",
+            "attachments": [
+                {
+                    "kind": "image",
+                    "mime_type": "image/png",
+                    "data": "ZmFrZQ==",
+                }
+            ],
+        },
+    ])
+
+    assert normalized[1]["role"] == "tool"
+    assert normalized[1]["tool_call_id"] == "call_img"
+    assert normalized[1]["content"] == "read_file 返回了 1 张图片。"
+    assert "attachments" not in normalized[1]
+
+
 @pytest.mark.asyncio
 async def test_call_does_not_restore_default_sampling_key_marked_as_none() -> None:
     provider = OpenAIProvider(source_type="openai-compatible")

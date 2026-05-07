@@ -582,6 +582,7 @@ class GeminiProvider(LLMProvider):
         normalized = dict(message)
         if "tool_call_id" not in normalized and normalized.get("name"):
             normalized["tool_call_id"] = str(normalized["name"])
+        normalized.pop("attachments", None)
         normalized.pop("provider_specific_fields", None)
         normalized.pop("__compressed__", None)
         normalized.pop("__phase2_compressed__", None)

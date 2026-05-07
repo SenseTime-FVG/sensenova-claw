@@ -384,4 +384,5 @@ class OpenAIProvider(LLMProvider):
         if "tool_call_id" not in normalized and normalized.get("name"):
             # 兼容老格式：缺失 tool_call_id 时退化为 name，避免请求直接被网关拒绝。
             normalized["tool_call_id"] = str(normalized["name"])
+        normalized.pop("attachments", None)
         return normalized

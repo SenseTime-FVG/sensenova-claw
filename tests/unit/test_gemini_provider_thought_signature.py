@@ -187,6 +187,37 @@ def test_clean_messages_converts_user_image_attachments_to_multimodal_blocks() -
     }
 
 
+def test_clean_messages_does_not_convert_tool_image_attachments_to_multimodal_tool_content() -> None:
+    provider = GeminiProvider()
+    cleaned = provider._clean_messages([
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_img", "name": "read_file", "arguments": {"file_path": "shot.png"}},
+            ],
+        },
+        {
+            "role": "tool",
+            "name": "read_file",
+            "tool_call_id": "call_img",
+            "content": "read_file 返回了 1 张图片。",
+            "attachments": [
+                {
+                    "kind": "image",
+                    "mime_type": "image/png",
+                    "data": "ZmFrZQ==",
+                }
+            ],
+        },
+    ])
+
+    assert cleaned[1]["role"] == "tool"
+    assert cleaned[1]["tool_call_id"] == "call_img"
+    assert cleaned[1]["content"] == "read_file 返回了 1 张图片。"
+    assert "attachments" not in cleaned[1]
+
+
 # ── 多轮对话场景 ──
 
 def test_clean_messages_multi_turn_mixed() -> None:
