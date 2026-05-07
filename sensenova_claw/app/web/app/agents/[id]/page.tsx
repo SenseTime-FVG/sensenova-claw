@@ -349,7 +349,7 @@ export default function AgentDetailPage() {
             </CardHeader>
             <CardContent>
               <div className={`text-4xl font-black capitalize ${agent.status === 'active' ? 'text-green-600 dark:text-green-500' : ''}`}>{agent.status}</div>
-              <p className="text-sm font-medium text-muted-foreground mt-2">{agent.model}</p>
+              <p className="text-sm font-medium text-muted-foreground mt-2">{agent.model || '默认'}</p>
             </CardContent>
           </Card>
           <Card className="shadow-lg border-border/60">
@@ -448,6 +448,7 @@ export default function AgentDetailPage() {
                         <label className="text-muted-foreground text-sm font-semibold">Model</label>
                         <select value={editModel} onChange={e => setEditModel(e.target.value)}
                           className="w-full bg-background border border-input rounded-xl px-4 py-2.5 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm appearance-none cursor-pointer">
+                          <option value="">默认</option>
                           {!availableModels.includes(editModel) && editModel && (
                             <option value={editModel}>{editModel}</option>
                           )}

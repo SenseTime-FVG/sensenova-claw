@@ -13,6 +13,7 @@ class TurnState:
     user_input: str
     messages: list[dict[str, Any]] = field(default_factory=list)
     pending_tool_calls: set[str] = field(default_factory=set)
+    pending_image_tool_messages: list[dict[str, Any]] = field(default_factory=list)
     tool_results: list[dict[str, Any]] = field(default_factory=list)
     final_response: str = ""
     history_offset: int = 0  # 本轮新消息在 messages 中的起始索引（跳过 system + 旧历史）

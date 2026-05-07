@@ -1,4 +1,6 @@
 """T06: 工具执行 + 结果截断"""
+import base64
+
 import pytest
 from sensenova_claw.capabilities.tools.builtin import ReadFileTool, WriteFileTool, BashCommandTool
 
@@ -11,6 +13,24 @@ class TestToolExecution:
         tool = ReadFileTool()
         result = await tool.execute(file_path=str(tmp_workspace / "test.md"))
         assert "hello world" in result.get("content", "")
+
+    async def test_read_image_file_returns_base64_multimodal_block(self, tmp_workspace):
+        image_bytes = b"\x89PNG\r\n\x1a\nfake-png-bytes"
+        image_path = tmp_workspace / "shot.png"
+        image_path.write_bytes(image_bytes)
+
+        result = await ReadFileTool().execute(file_path=str(image_path))
+
+        assert result == [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "data": base64.b64encode(image_bytes).decode("ascii"),
+                    "media_type": "image/png",
+                },
+            }
+        ]
 
     async def test_read_file_not_found(self, tmp_workspace):
         tool = ReadFileTool()

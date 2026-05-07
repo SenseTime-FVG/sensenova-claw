@@ -8,7 +8,7 @@ function readCurrentToken(): string {
   return fs.readFileSync(path.join(os.homedir(), '.sensenova-claw', 'token'), 'utf-8').trim();
 }
 
-test('agents 创建弹窗应提供模型下拉并提交选中模型', async ({ page }) => {
+test('agents 创建弹窗未指定模型时应显示默认并继承系统默认模型', async ({ page }) => {
   const token = readCurrentToken();
   await page.context().addCookies([{
     name: 'sensenova_claw_token',
@@ -77,9 +77,8 @@ test('agents 创建弹窗应提供模型下拉并提交选中模型', async ({ p
 
   const modelSelect = page.getByTestId('agent-model-select');
   await expect(modelSelect).toBeVisible();
-  await expect(modelSelect).toHaveValue('claude-3-5-haiku');
+  await expect(modelSelect).toHaveValue('');
 
-  await modelSelect.selectOption('gpt-4o-mini');
   await page.getByPlaceholder('research-agent').fill('research-agent');
   await page.getByPlaceholder('Research Agent').fill('Research Agent');
   await page.getByRole('button', { name: '创建' }).click();
@@ -95,6 +94,6 @@ test('agents 创建弹窗应提供模型下拉并提交选中模型', async ({ p
   expect(createBody).toMatchObject({
     id: 'research-agent',
     name: 'Research Agent',
-    model: 'gpt-4o-mini',
   });
+  expect(createBody).not.toHaveProperty('model');
 });

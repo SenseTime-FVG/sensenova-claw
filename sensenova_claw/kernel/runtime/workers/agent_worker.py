@@ -240,11 +240,16 @@ class AgentSessionWorker(SessionWorker):
         tool_calls_json = None
         if msg.get("tool_calls"):
             tool_calls_json = json.dumps(msg["tool_calls"], ensure_ascii=False)
+        attachments_json = None
+        persisted_attachments = self._persistable_attachments(msg.get("attachments"))
+        if persisted_attachments:
+            attachments_json = json.dumps(persisted_attachments, ensure_ascii=False)
         await self.rt.repo.save_message(
             session_id=session_id,
             turn_id=turn_id,
             role=role,
             content=msg.get("content"),
+            attachments=attachments_json,
             tool_calls=tool_calls_json,
             tool_call_id=msg.get("tool_call_id"),
             tool_name=msg.get("name"),
@@ -416,7 +421,11 @@ class AgentSessionWorker(SessionWorker):
 
         # 增量持久化：在 history 加载后保存 user 消息，避免重复
         await self._persist_message(
-            self.session_id, turn_id, {"role": "user", "content": content},
+            self.session_id, turn_id, {
+                "role": "user",
+                "content": content,
+                "attachments": event.payload.get("attachments", []),
+            },
         )
 
         await self.bus.publish(
@@ -535,6 +544,32 @@ class AgentSessionWorker(SessionWorker):
             })
 
         return loaded
+
+    def _persistable_attachments(self, attachments: Any) -> list[dict[str, Any]]:
+        """返回可写入消息日志的附件元数据，避免持久化 base64 data。"""
+        if not isinstance(attachments, list):
+            return []
+
+        persisted: list[dict[str, Any]] = []
+        for item in attachments:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("kind") or "") != "image":
+                continue
+            name = str(item.get("name") or "").strip()
+            path = str(item.get("path") or "").strip()
+            mime_type = str(item.get("mime_type") or "").strip()
+            if not name and path:
+                name = os.path.basename(path)
+            if not name or not path or not mime_type:
+                continue
+            persisted.append({
+                "kind": "image",
+                "name": name,
+                "path": path,
+                "mime_type": mime_type,
+            })
+        return persisted
 
     async def _handle_llm_completed(self, event: EventEnvelope) -> None:
         """处理 LLM 调用完成，决定下一步动作"""
@@ -711,25 +746,40 @@ class AgentSessionWorker(SessionWorker):
         tool_name = str(event.payload.get("tool_name"))
         result = event.payload.get("result")
         state.tool_results.append({"tool_name": tool_name, "result": result})
+        previous_message_count = len(state.messages)
         state.messages = self.rt.context_builder.append_tool_result(
             state.messages,
             tool_name=tool_name,
             result=result,
             tool_call_id=str(tool_call_id) if tool_call_id else None,
+            include_image_attachment_message=False,
         )
+        image_attachments = self.rt.context_builder.image_attachments_from_tool_result(tool_name, result)
+        if image_attachments:
+            state.pending_image_tool_messages.append({
+                "role": "user",
+                "content": (
+                    "[tool_result_image]\n"
+                    f"tool_name: {tool_name}\n"
+                    f"tool_call_id: {tool_call_id or ''}\n"
+                    f"下面的图片是该工具调用返回的图片内容，请将它视为 {tool_name} 的工具结果继续处理。"
+                ),
+                "attachments": image_attachments,
+            })
 
-        # 增量持久化：立即保存 tool 结果消息
-        tool_msg: dict[str, Any] = {
-            "role": "tool",
-            "content": result if isinstance(result, str) else json.dumps(result, ensure_ascii=False),
-            "name": tool_name,
-        }
-        if tool_call_id:
-            tool_msg["tool_call_id"] = str(tool_call_id)
-        await self._persist_message(event.session_id, event.turn_id, tool_msg)
+        # 增量持久化：立即保存 ContextBuilder 追加的消息。
+        for msg in state.messages[previous_message_count:]:
+            await self._persist_message(event.session_id, event.turn_id, msg)
 
         if state.pending_tool_calls:
             return
+
+        if state.pending_image_tool_messages:
+            image_messages = list(state.pending_image_tool_messages)
+            state.pending_image_tool_messages.clear()
+            for msg in image_messages:
+                state.messages.append(msg)
+                await self._persist_message(event.session_id, event.turn_id, msg)
 
         # 计数并检查工具调用限制（仅自治会话（proactive/delegation），每批工具完成后累计）
         if self._is_autonomous_session():
