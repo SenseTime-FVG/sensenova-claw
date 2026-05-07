@@ -8,6 +8,7 @@ import { type ChatMessage, formatArgs, groupMessages } from '@/lib/chatTypes';
 import { resolveAssistantDisplayContent } from '@/lib/assistantThink';
 import { useChatSession } from '@/contexts/ChatSessionContext';
 import { AskUserResponseForm } from '@/components/chat/AskUserResponseForm';
+import { API_BASE } from '@/lib/authFetch';
 
 const MAX_TOOL_CONTENT_HEIGHT = 240;
 
@@ -22,6 +23,10 @@ function formatDurationZh(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}分${seconds}秒`;
+}
+
+function attachmentPreviewUrl(path: string): string {
+  return `${API_BASE}/api/files/download?path=${encodeURIComponent(path)}&inline=true`;
 }
 
 function ToolContent({ value }: { value: unknown }) {
@@ -184,6 +189,27 @@ export const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMes
           <User size={20} className="text-secondary-foreground" />
         </div>
         <div className="flex-1 flex flex-col items-end pt-1 min-w-0">
+          {msg.attachments?.length ? (
+            <div className="mb-2 flex max-w-[85%] flex-wrap justify-end gap-2">
+              {msg.attachments.map((attachment) => (
+                <div
+                  key={attachment.path}
+                  className="overflow-hidden rounded-2xl border border-border bg-background shadow-md"
+                  title={attachment.path}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={attachmentPreviewUrl(attachment.path)}
+                    alt={attachment.name}
+                    className="max-h-56 max-w-72 object-contain"
+                  />
+                  <div className="max-w-72 truncate border-t border-border px-2 py-1 text-[11px] text-muted-foreground">
+                    {attachment.name}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="bg-primary text-primary-foreground text-sm p-4 rounded-3xl rounded-tr-sm max-w-[85%] min-w-0 leading-relaxed shadow-lg">
             <Markdown variant="user" content={msg.content} />
           </div>

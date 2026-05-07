@@ -194,8 +194,14 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
   // ── helpers ──
 
-  function addMsg(role: ChatMessage['role'], content: string) {
-    setMessages(prev => [...prev, { id: makeId(), role, content, timestamp: Date.now() }]);
+  function addMsg(role: ChatMessage['role'], content: string, attachments?: ChatAttachmentRef[]) {
+    setMessages(prev => [...prev, {
+      id: makeId(),
+      role,
+      content,
+      timestamp: Date.now(),
+      attachments: attachments?.length ? attachments : undefined,
+    }]);
   }
 
   function upsertAssistantMessage(message: {
@@ -673,7 +679,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
     emptySessionIdRef.current = null;
     resetTurnTracking();
-    addMsg('user', content || `[图片] ${attachments?.length || 0}`);
+    addMsg('user', content || `[图片] ${attachments?.length || 0}`, attachments);
 
     const filePaths = contextFiles?.map(f => f.path) || [];
 

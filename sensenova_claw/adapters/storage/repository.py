@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS messages (
     turn_id TEXT NOT NULL,
     role TEXT NOT NULL,
     content TEXT,
+    attachments TEXT,
     tool_calls TEXT,
     tool_call_id TEXT,
     tool_name TEXT,
@@ -206,6 +207,7 @@ class Repository:
         conn.executescript(SCHEMA_SQL)
         conn.commit()
         self._migrate_sessions_table(conn)
+        self._migrate_messages_table(conn)
         self._migrate_agent_messages_table(conn)
         self._migrate_cron_runs_table(conn)
 
@@ -886,6 +888,14 @@ class Repository:
                 conn.execute(sql)
         conn.commit()
 
+    def _migrate_messages_table(self, conn: sqlite3.Connection) -> None:
+        """为 messages 表补充新增列（兼容旧库）。"""
+        cursor = conn.execute("PRAGMA table_info(messages)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        if "attachments" not in existing_cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN attachments TEXT")
+        conn.commit()
+
     def _migrate_cron_runs_table(self, conn: sqlite3.Connection) -> None:
         """为 cron_runs 表补充 job_name / job_text 冗余列（兼容旧库）。"""
         cursor = conn.execute("PRAGMA table_info(cron_runs)")
@@ -917,6 +927,7 @@ class Repository:
         turn_id: str,
         role: str,
         content: str | None = None,
+        attachments: str | None = None,
         tool_calls: str | None = None,
         tool_call_id: str | None = None,
         tool_name: str | None = None,
@@ -924,7 +935,7 @@ class Repository:
         """保存单条消息到 messages 表"""
         await asyncio.to_thread(
             self._sync_save_message,
-            session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name,
+            session_id, turn_id, role, content, attachments, tool_calls, tool_call_id, tool_name,
         )
 
     def _sync_save_message(
@@ -933,15 +944,16 @@ class Repository:
         turn_id: str,
         role: str,
         content: str | None,
+        attachments: str | None,
         tool_calls: str | None,
         tool_call_id: str | None,
         tool_name: str | None,
     ) -> None:
         conn = self._conn()
         conn.execute(
-            """INSERT INTO messages (session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (session_id, turn_id, role, content, tool_calls, tool_call_id, tool_name, time.time()),
+            """INSERT INTO messages (session_id, turn_id, role, content, attachments, tool_calls, tool_call_id, tool_name, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, turn_id, role, content, attachments, tool_calls, tool_call_id, tool_name, time.time()),
         )
         conn.commit()
 
@@ -952,7 +964,7 @@ class Repository:
     def _sync_get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
         conn = self._conn()
         rows = conn.execute(
-            "SELECT role, content, tool_calls, tool_call_id, tool_name FROM messages WHERE session_id = ? ORDER BY created_at",
+            "SELECT role, content, attachments, tool_calls, tool_call_id, tool_name FROM messages WHERE session_id = ? ORDER BY created_at",
             (session_id,),
         ).fetchall()
         messages: list[dict[str, Any]] = []
@@ -961,11 +973,13 @@ class Repository:
             if row[1] is not None:
                 msg["content"] = row[1]
             if row[2] is not None:
-                msg["tool_calls"] = json.loads(row[2])
+                msg["attachments"] = json.loads(row[2])
             if row[3] is not None:
-                msg["tool_call_id"] = row[3]
+                msg["tool_calls"] = json.loads(row[3])
             if row[4] is not None:
-                msg["name"] = row[4]
+                msg["tool_call_id"] = row[4]
+            if row[5] is not None:
+                msg["name"] = row[5]
             messages.append(msg)
         return messages
 

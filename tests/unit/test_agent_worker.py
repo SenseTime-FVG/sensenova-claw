@@ -392,6 +392,38 @@ class TestHandleUserInput:
             }
         ]
 
+    async def test_user_input_persists_image_attachment_metadata_without_base64(self, private_bus, runtime, repo, tmp_path):
+        worker = AgentSessionWorker("s1", private_bus, runtime)
+        image_path = tmp_path / "pasted-image.png"
+        image_path.write_bytes(b"fake-image-bytes")
+
+        event = EventEnvelope(
+            type=USER_INPUT, session_id="s1", turn_id="t1",
+            payload={
+                "content": "描述图片",
+                "attachments": [
+                    {
+                        "kind": "image",
+                        "name": "pasted-image.png",
+                        "path": str(image_path),
+                        "mime_type": "image/png",
+                    }
+                ],
+            },
+        )
+        await worker._handle(event)
+
+        messages = await repo.get_session_messages("s1")
+        assert messages[0]["attachments"] == [
+            {
+                "kind": "image",
+                "name": "pasted-image.png",
+                "path": str(image_path),
+                "mime_type": "image/png",
+            }
+        ]
+        assert "data" not in messages[0]["attachments"][0]
+
 
 # ── LLM_CALL_RESULT 处理测试 ─────────────────────────────
 
