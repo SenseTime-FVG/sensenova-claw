@@ -746,25 +746,40 @@ class AgentSessionWorker(SessionWorker):
         tool_name = str(event.payload.get("tool_name"))
         result = event.payload.get("result")
         state.tool_results.append({"tool_name": tool_name, "result": result})
+        previous_message_count = len(state.messages)
         state.messages = self.rt.context_builder.append_tool_result(
             state.messages,
             tool_name=tool_name,
             result=result,
             tool_call_id=str(tool_call_id) if tool_call_id else None,
+            include_image_attachment_message=False,
         )
+        image_attachments = self.rt.context_builder.image_attachments_from_tool_result(tool_name, result)
+        if image_attachments:
+            state.pending_image_tool_messages.append({
+                "role": "user",
+                "content": (
+                    "[tool_result_image]\n"
+                    f"tool_name: {tool_name}\n"
+                    f"tool_call_id: {tool_call_id or ''}\n"
+                    f"下面的图片是该工具调用返回的图片内容，请将它视为 {tool_name} 的工具结果继续处理。"
+                ),
+                "attachments": image_attachments,
+            })
 
-        # 增量持久化：立即保存 tool 结果消息
-        tool_msg: dict[str, Any] = {
-            "role": "tool",
-            "content": result if isinstance(result, str) else json.dumps(result, ensure_ascii=False),
-            "name": tool_name,
-        }
-        if tool_call_id:
-            tool_msg["tool_call_id"] = str(tool_call_id)
-        await self._persist_message(event.session_id, event.turn_id, tool_msg)
+        # 增量持久化：立即保存 ContextBuilder 追加的消息。
+        for msg in state.messages[previous_message_count:]:
+            await self._persist_message(event.session_id, event.turn_id, msg)
 
         if state.pending_tool_calls:
             return
+
+        if state.pending_image_tool_messages:
+            image_messages = list(state.pending_image_tool_messages)
+            state.pending_image_tool_messages.clear()
+            for msg in image_messages:
+                state.messages.append(msg)
+                await self._persist_message(event.session_id, event.turn_id, msg)
 
         # 计数并检查工具调用限制（仅自治会话（proactive/delegation），每批工具完成后累计）
         if self._is_autonomous_session():

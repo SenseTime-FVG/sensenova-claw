@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import dataclass
 import difflib
 import json
@@ -1097,7 +1098,7 @@ class FetchUrlTool(Tool):
 
 class ReadFileTool(Tool):
     name = "read_file"
-    description = "从本地文件系统读取文件"
+    description = "从本地文件系统读取文件；读取图片时返回 base64 多模态内容块"
     parameters = {
         "type": "object",
         "properties": {
@@ -1126,6 +1127,19 @@ class ReadFileTool(Tool):
 
         if not file_path.exists():
             return {"success": False, "error": f"文件不存在: {file_path}"}
+
+        media_type, _ = mimetypes.guess_type(str(file_path))
+        if media_type and media_type.startswith("image/"):
+            return [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "data": base64.b64encode(file_path.read_bytes()).decode("ascii"),
+                        "media_type": media_type,
+                    },
+                }
+            ]
 
         encoding = str(kwargs.get("encoding", "utf-8"))
         start_line = int(kwargs.get("start_line", 1))

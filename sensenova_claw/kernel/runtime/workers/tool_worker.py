@@ -148,6 +148,9 @@ class ToolSessionWorker(SessionWorker):
 
     def _truncate_result(self, result: Any, tool_call_id: str, agent_id: str | None = None) -> Any:
         """Token 截断：统一控制传给 LLM 的结果长度"""
+        if self._is_image_block_result(result):
+            return result
+
         result_str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
 
         max_tokens = int(config.get("tools.result_truncation.max_tokens", 8000))
@@ -176,6 +179,23 @@ class ToolSessionWorker(SessionWorker):
         truncated += f"\n\n[内容已截断] 完整结果已保存到: {file_path}"
 
         return truncated
+
+    def _is_image_block_result(self, result: Any) -> bool:
+        if not isinstance(result, list) or not result:
+            return False
+        for item in result:
+            if not isinstance(item, dict) or item.get("type") != "image":
+                return False
+            source = item.get("source")
+            if not isinstance(source, dict):
+                return False
+            if source.get("type") != "base64":
+                return False
+            if not str(source.get("data") or "").strip():
+                return False
+            if not str(source.get("media_type") or "").startswith("image/"):
+                return False
+        return True
 
     def _needs_confirmation(self, tool: Tool) -> bool:
         """判断工具是否需要用户确认"""

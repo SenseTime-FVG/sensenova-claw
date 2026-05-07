@@ -54,6 +54,31 @@ def _render_global_context_files(context_files: list[ContextFile], tool_names: l
     return rendered
 
 
+def _image_attachments_from_tool_result(result: Any, *, tool_name: str) -> list[dict[str, str]]:
+    if not isinstance(result, list):
+        return []
+
+    attachments: list[dict[str, str]] = []
+    for index, item in enumerate(result, start=1):
+        if not isinstance(item, dict) or item.get("type") != "image":
+            continue
+        source = item.get("source")
+        if not isinstance(source, dict) or source.get("type") != "base64":
+            continue
+        data = str(source.get("data") or "").strip()
+        mime_type = str(source.get("media_type") or "").strip()
+        if not data or not mime_type.startswith("image/"):
+            continue
+        ext = mime_type.split("/", 1)[1].split(";", 1)[0] or "png"
+        attachments.append({
+            "kind": "image",
+            "name": f"{tool_name}_image_{index}.{ext}",
+            "mime_type": mime_type,
+            "data": data,
+        })
+    return attachments
+
+
 class ContextBuilder:
     def __init__(
         self,
@@ -163,9 +188,15 @@ class ContextBuilder:
         tool_name: str,
         result: Any,
         tool_call_id: str | None = None,
+        include_image_attachment_message: bool = False,
     ) -> list[dict[str, Any]]:
         next_messages = list(messages)
-        content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+        image_attachments = _image_attachments_from_tool_result(result, tool_name=tool_name)
+        content = (
+            f"{tool_name} 返回了 {len(image_attachments)} 张图片，图片内容已作为工具结果图片附件提供。"
+            if image_attachments
+            else result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+        )
         tool_message: dict[str, Any] = {
             "role": "tool",
             "name": tool_name,
@@ -173,8 +204,24 @@ class ContextBuilder:
         }
         if tool_call_id:
             tool_message["tool_call_id"] = tool_call_id
+        if image_attachments:
+            tool_message["attachments"] = image_attachments
         next_messages.append(tool_message)
+        if image_attachments and include_image_attachment_message:
+            next_messages.append({
+                "role": "user",
+                "content": (
+                    "[tool_result_image]\n"
+                    f"tool_name: {tool_name}\n"
+                    f"tool_call_id: {tool_call_id or ''}\n"
+                    f"下面的图片是该工具调用返回的图片内容，请将它视为 {tool_name} 的工具结果继续处理。"
+                ),
+                "attachments": image_attachments,
+            })
         return next_messages
+
+    def image_attachments_from_tool_result(self, tool_name: str, result: Any) -> list[dict[str, str]]:
+        return _image_attachments_from_tool_result(result, tool_name=tool_name)
 
     def _build_skills_section(self, agent_config: AgentConfig | None = None) -> str | None:
         """格式化 skills 列表为 prompt 文本（支持 agent_config 过滤）"""

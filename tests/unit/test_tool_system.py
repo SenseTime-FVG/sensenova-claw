@@ -282,6 +282,32 @@ class TestResultTruncation:
         finally:
             tw.config = original_config
 
+    def test_image_block_result_not_truncated(self, tmp_path):
+        """图片多模态结果不能按文本截断，否则后续无法识别为图片。"""
+        worker, cfg = _make_worker(tmp_path=tmp_path, config_overrides={
+            "tools.result_truncation.max_tokens": 1,
+            "tools.result_truncation.save_dir": "workspace",
+        })
+
+        import sensenova_claw.kernel.runtime.workers.tool_worker as tw
+        original_config = tw.config
+        try:
+            tw.config = cfg
+            result = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "data": "x" * 1000,
+                        "media_type": "image/png",
+                    },
+                }
+            ]
+            truncated = worker._truncate_result(result, "tc_image")
+            assert truncated == result
+        finally:
+            tw.config = original_config
+
 
 # ---------- 权限管理 ----------
 

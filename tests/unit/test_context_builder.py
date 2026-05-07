@@ -118,6 +118,82 @@ class TestContextBuilder:
         assert msgs[1]["tool_call_id"] == "tc_123"
         assert "ok" in msgs[1]["content"]
 
+    def test_append_image_tool_result_keeps_image_on_tool_message_without_user_message(self):
+        cb = ContextBuilder()
+        image_result = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "data": "ZmFrZQ==",
+                    "media_type": "image/png",
+                },
+            }
+        ]
+
+        msgs = cb.append_tool_result(
+            [{"role": "assistant", "content": "", "tool_calls": [{"id": "tc_img", "name": "read_file", "arguments": {}}]}],
+            "read_file",
+            image_result,
+            "tc_img",
+        )
+
+        assert len(msgs) == 2
+        assert msgs[1]["role"] == "tool"
+        assert msgs[1]["tool_call_id"] == "tc_img"
+        assert "图片" in msgs[1]["content"]
+        assert msgs[1]["attachments"] == [
+            {
+                "kind": "image",
+                "name": "read_file_image_1.png",
+                "mime_type": "image/png",
+                "data": "ZmFrZQ==",
+            }
+        ]
+
+    def test_append_image_tool_result_adds_attributed_user_image_message_when_enabled(self):
+        cb = ContextBuilder()
+        image_result = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "data": "ZmFrZQ==",
+                    "media_type": "image/png",
+                },
+            }
+        ]
+
+        msgs = cb.append_tool_result(
+            [{"role": "assistant", "content": "", "tool_calls": [{"id": "tc_img", "name": "read_file", "arguments": {}}]}],
+            "read_file",
+            image_result,
+            "tc_img",
+            include_image_attachment_message=True,
+        )
+
+        assert len(msgs) == 3
+        assert msgs[1]["role"] == "tool"
+        assert "tc_img" in msgs[2]["content"]
+        assert "read_file" in msgs[2]["content"]
+        assert msgs[2] == {
+            "role": "user",
+            "content": (
+                "[tool_result_image]\n"
+                "tool_name: read_file\n"
+                "tool_call_id: tc_img\n"
+                "下面的图片是该工具调用返回的图片内容，请将它视为 read_file 的工具结果继续处理。"
+            ),
+            "attachments": [
+                {
+                    "kind": "image",
+                    "name": "read_file_image_1.png",
+                    "mime_type": "image/png",
+                    "data": "ZmFrZQ==",
+                }
+            ],
+        }
+
     def test_delegation_prompt_injected(self, tmp_path):
         ar = AgentRegistry()
         ar.register(AgentConfig.create(id="main", name="Main"))

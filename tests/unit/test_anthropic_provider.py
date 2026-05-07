@@ -149,6 +149,36 @@ class TestNormalizeMessages:
         assert result["content"][0]["tool_use_id"] == "call_1"
         assert result["content"][0]["content"] == '{"result": "ok"}'
 
+    def test_tool_message_with_image_attachments_becomes_multimodal_tool_result(self, local_provider) -> None:
+        result = local_provider._normalize_tool_message({
+            "role": "tool",
+            "tool_call_id": "call_img",
+            "content": "read_file 返回了 1 张图片。",
+            "attachments": [
+                {
+                    "kind": "image",
+                    "mime_type": "image/png",
+                    "data": "ZmFrZQ==",
+                }
+            ],
+        })
+
+        assert result["role"] == "user"
+        tool_result = result["content"][0]
+        assert tool_result["type"] == "tool_result"
+        assert tool_result["tool_use_id"] == "call_img"
+        assert tool_result["content"] == [
+            {"type": "text", "text": "read_file 返回了 1 张图片。"},
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "ZmFrZQ==",
+                },
+            },
+        ]
+
     def test_tool_message_fallback_to_name(self, local_provider) -> None:
         """tool 消息无 tool_call_id 时应回退到 name 字段。"""
         result = local_provider._normalize_tool_message({

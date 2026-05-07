@@ -356,6 +356,31 @@ class AnthropicProvider(LLMProvider):
     def _normalize_tool_message(self, message: dict[str, Any]) -> dict[str, Any]:
         tool_call_id = message.get("tool_call_id") or message.get("name", "")
         content_str = message.get("content", "")
+        attachments = message.get("attachments")
+        content: Any = content_str
+        if isinstance(attachments, list):
+            blocks: list[dict[str, Any]] = []
+            if isinstance(content_str, str) and content_str:
+                blocks.append({"type": "text", "text": content_str})
+            for attachment in attachments:
+                if not isinstance(attachment, dict):
+                    continue
+                if str(attachment.get("kind") or "") != "image":
+                    continue
+                mime_type = str(attachment.get("mime_type") or "").strip()
+                data = str(attachment.get("data") or "").strip()
+                if not mime_type or not data:
+                    continue
+                blocks.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime_type,
+                        "data": data,
+                    },
+                })
+            if blocks:
+                content = blocks
 
         return {
             "role": "user",
@@ -363,7 +388,7 @@ class AnthropicProvider(LLMProvider):
                 {
                     "type": "tool_result",
                     "tool_use_id": tool_call_id,
-                    "content": content_str,
+                    "content": content,
                 }
             ],
         }
