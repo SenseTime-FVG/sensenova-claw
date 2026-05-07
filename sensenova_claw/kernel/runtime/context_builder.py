@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import platform
 import sys
 from datetime import datetime
 from typing import Any, TYPE_CHECKING
+from jinja2 import Environment
 
 from sensenova_claw.capabilities.agents.preferences import (
     load_preferences,
@@ -23,6 +25,33 @@ if TYPE_CHECKING:
     from sensenova_claw.capabilities.agents.registry import AgentRegistry
     from sensenova_claw.capabilities.skills.registry import SkillRegistry
     from sensenova_claw.capabilities.tools.registry import ToolRegistry
+
+
+logger = logging.getLogger(__name__)
+_GLOBAL_AGENTS_TEMPLATE_ENV = Environment(
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+
+
+def _render_global_agents_md_template(content: str, tool_names: list[str]) -> str:
+    """渲染全局 AGENTS.md 模板，仅注入 tool_names。"""
+    try:
+        template = _GLOBAL_AGENTS_TEMPLATE_ENV.from_string(content)
+        return template.render(tool_names=tool_names)
+    except Exception:
+        logger.warning("Failed to render global AGENTS.md template", exc_info=True)
+        return content
+
+
+def _render_global_context_files(context_files: list[ContextFile], tool_names: list[str]) -> list[ContextFile]:
+    rendered: list[ContextFile] = []
+    for cf in context_files:
+        if cf.name == "AGENTS.md":
+            rendered.append(ContextFile(name=cf.name, content=_render_global_agents_md_template(cf.content, tool_names)))
+        else:
+            rendered.append(cf)
+    return rendered
 
 
 class ContextBuilder:
@@ -45,6 +74,7 @@ class ContextBuilder:
         history: list[dict[str, Any]] | None = None,
         memory_context: str | None = None,
         context_files: list[ContextFile] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
         agent_config: AgentConfig | None = None,
         session_id: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -79,6 +109,8 @@ class ContextBuilder:
                 tool_names.append(t["name"])
                 tool_summaries[t["name"]] = t.get("description", "")
 
+        rendered_context_files = _render_global_context_files(context_files or [], tool_names)
+
         # 根据 agent_config 选择 system prompt
         base_prompt = (
             agent_config.system_prompt
@@ -103,7 +135,7 @@ class ContextBuilder:
             skills_prompt=self._build_skills_section(agent_config),
             delegation_prompt=delegation_prompt,
             memory_context=memory_context,
-            context_files=context_files or [],
+            context_files=rendered_context_files,
             extra_system_prompt=extra,
             runtime_info=self._collect_runtime_info(agent_config),
             workspace_dir=effective_workdir,
@@ -119,7 +151,10 @@ class ContextBuilder:
         # 在用户消息前添加当前时间
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         user_message = f"[{current_time}] {user_input}"
-        messages.append({"role": "user", "content": user_message})
+        message_payload: dict[str, Any] = {"role": "user", "content": user_message}
+        if attachments:
+            message_payload["attachments"] = attachments
+        messages.append(message_payload)
         return messages
 
     def append_tool_result(

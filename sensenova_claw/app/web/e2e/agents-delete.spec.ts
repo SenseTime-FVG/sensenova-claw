@@ -47,13 +47,29 @@ test('agents 页面应显示删除按钮并在确认后调用删除接口', asyn
         lastActive: 'never',
       },
     ];
+    const customPages = [
+      {
+        id: 'page-issue217',
+        slug: 'issue217-test',
+        name: 'issue217-test',
+        icon: 'Sparkles',
+      },
+    ];
 
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
       const method = init?.method?.toUpperCase() ?? 'GET';
+      const pathname = new URL(url, window.location.origin).pathname;
 
       if (url.includes('/api/auth/status')) {
         return new Response(JSON.stringify({ authenticated: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (pathname.endsWith('/api/custom-pages') && method === 'GET') {
+        return new Response(JSON.stringify({ pages: customPages }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -72,6 +88,10 @@ test('agents 页面应显示删除按钮并在确认后调用删除接口', asyn
         if (idx >= 0) {
           agents.splice(idx, 1);
         }
+        const pageIdx = customPages.findIndex((feature) => feature.slug === 'issue217-test');
+        if (pageIdx >= 0) {
+          customPages.splice(pageIdx, 1);
+        }
         (window as typeof window & { __deleteCalls?: string[] }).__deleteCalls = deleteCalls;
         return new Response(JSON.stringify({ status: 'deleted', agent_id: 'helper' }), {
           status: 200,
@@ -87,6 +107,8 @@ test('agents 页面应显示删除按钮并在确认后调用删除接口', asyn
   await page.goto('/agents');
 
   await expect(page.getByText('Helper Agent')).toBeVisible({ timeout: 10000 });
+  await page.getByRole('button', { name: /功能/i }).click();
+  await expect(page.getByRole('link', { name: 'issue217-test' })).toBeVisible();
   await expect(page.getByTestId('agent-delete-button-helper')).toBeVisible();
 
   await page.getByTestId('agent-delete-button-helper').click();
@@ -99,4 +121,5 @@ test('agents 页面应显示删除按钮并在确认后调用删除接口', asyn
   }).toBe(1);
 
   await expect(page.getByText('Helper Agent')).not.toBeVisible();
+  await expect(page.getByRole('link', { name: 'issue217-test' })).not.toBeVisible();
 });

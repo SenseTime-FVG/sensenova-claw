@@ -4,10 +4,16 @@ Heatmap Examples - matplotlib and seaborn
 Usage: python heatmap.py
 """
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
+
+# 输出目录
+OUTPUT_DIR = Path(__file__).parent.parent / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Set style
 sns.set_theme(style="white")
@@ -23,7 +29,7 @@ def simple_heatmap():
     plt.xlabel('Month', fontsize=12)
     plt.ylabel('Product', fontsize=12)
     plt.tight_layout()
-    plt.savefig('heatmap_simple.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'heatmap_simple.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: heatmap_simple.png")
 
 # Example 2: Correlation matrix
@@ -49,7 +55,7 @@ def correlation_heatmap():
                 cbar_kws={'shrink': 0.8, 'label': 'Correlation'})
     plt.title('Correlation Matrix', fontsize=16, fontweight='bold', pad=20)
     plt.tight_layout()
-    plt.savefig('heatmap_correlation.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'heatmap_correlation.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: heatmap_correlation.png")
 
 # Example 3: Custom labeled heatmap
@@ -69,7 +75,7 @@ def labeled_heatmap():
     plt.xlabel('Day of Week', fontsize=12)
     plt.ylabel('Time of Day', fontsize=12)
     plt.tight_layout()
-    plt.savefig('heatmap_labeled.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'heatmap_labeled.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: heatmap_labeled.png")
 
 # Example 4: Diverging heatmap
@@ -87,7 +93,7 @@ def diverging_heatmap():
     plt.xlabel('Region', fontsize=12)
     plt.ylabel('Quarter', fontsize=12)
     plt.tight_layout()
-    plt.savefig('heatmap_diverging.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'heatmap_diverging.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: heatmap_diverging.png")
 
 if __name__ == '__main__':

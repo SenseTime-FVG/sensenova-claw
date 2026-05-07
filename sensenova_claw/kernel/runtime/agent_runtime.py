@@ -67,7 +67,7 @@ class AgentRuntime:
         session_meta: dict | None = await self.repo.get_session_meta(session_id)
         if self.agent_registry:
             agent_id = (session_meta or {}).get("agent_id", "default")
-            logger.info(
+            logger.debug(
                 "Worker factory: session=%s, meta_agent_id=%s, registered_agents=%s",
                 session_id, agent_id,
                 list(self.agent_registry._agents.keys()),

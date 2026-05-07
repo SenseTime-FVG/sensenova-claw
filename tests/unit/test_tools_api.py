@@ -1,6 +1,5 @@
 """Tools API 端点单测 — 使用真实组件，无 mock"""
 import pytest
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -8,6 +7,9 @@ from fastapi.testclient import TestClient
 from sensenova_claw.interfaces.http.tools import router
 from sensenova_claw.capabilities.tools.registry import ToolRegistry
 from sensenova_claw.platform.config.config import Config
+from sensenova_claw.platform.config.config_manager import ConfigManager
+from sensenova_claw.platform.secrets.store import InMemorySecretStore
+from sensenova_claw.kernel.events.bus import PublicEventBus
 
 
 @pytest.fixture
@@ -22,14 +24,19 @@ def app(tmp_path):
     # 真实 Config
     config_path = tmp_path / "config.yml"
     config_path.write_text("", encoding="utf-8")
-    cfg = Config(config_path=config_path)
+    secret_store = InMemorySecretStore()
+    cfg = Config(config_path=config_path, secret_store=secret_store)
     cfg.set("system.workspace_dir", str(workspace_dir))
+    bus = PublicEventBus()
+    config_manager = ConfigManager(config=cfg, event_bus=bus, secret_store=secret_store)
 
     # 真实 ToolRegistry（自动注册 builtin 工具）
     tool_registry = ToolRegistry()
 
     app.state.tool_registry = tool_registry
     app.state.config = cfg
+    app.state.config_manager = config_manager
+    app.state.secret_store = secret_store
     app.state.sensenova_claw_home = str(workspace_dir)
     return app
 
@@ -51,7 +58,7 @@ def test_list_tools(client):
     assert len(data) >= 1
     names = [t["name"] for t in data]
     assert "bash_command" in names
-    assert "edit" in names
+    assert "edit_file" in names
     # 验证字段结构
     bash_tool = [t for t in data if t["name"] == "bash_command"][0]
     assert bash_tool["id"] == "tool-bash_command"

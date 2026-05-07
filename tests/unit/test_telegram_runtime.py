@@ -12,10 +12,37 @@ from telegram.error import Conflict
 from unittest.mock import AsyncMock, patch
 
 from sensenova_claw.adapters.plugins.telegram.config import TelegramConfig
-from sensenova_claw.adapters.plugins.telegram.runtime import TelegramRuntime
+from sensenova_claw.adapters.plugins.telegram.runtime import TelegramRuntime, _SSL_CONTEXT
 
 
 class TestPolling:
+    def test_runtime_builds_bot_with_certifi_requests(self):
+        request_kwargs: list[dict] = []
+        get_updates_request_kwargs: list[dict] = []
+
+        def _fake_httpx_request(**kwargs):
+            if not request_kwargs:
+                request_kwargs.append(kwargs)
+                return "request"
+            get_updates_request_kwargs.append(kwargs)
+            return "get_updates_request"
+
+        with (
+            patch("sensenova_claw.adapters.plugins.telegram.runtime.HTTPXRequest", side_effect=_fake_httpx_request),
+            patch("sensenova_claw.adapters.plugins.telegram.runtime.Bot") as bot_cls,
+        ):
+            TelegramRuntime(
+                config=TelegramConfig(enabled=True, bot_token="123:abc", polling_timeout_seconds=1),
+            )
+
+        bot_cls.assert_called_once_with(
+            token="123:abc",
+            request="request",
+            get_updates_request="get_updates_request",
+        )
+        assert request_kwargs[0]["httpx_kwargs"]["verify"] is _SSL_CONTEXT
+        assert get_updates_request_kwargs[0]["httpx_kwargs"]["verify"] is _SSL_CONTEXT
+
     @pytest.mark.asyncio
     async def test_handle_update_dispatches_text_message(self):
         dispatched: list[dict] = []

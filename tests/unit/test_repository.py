@@ -59,13 +59,72 @@ class TestRepository:
         assert "child_new" in ids
         assert "parent_old" in ids
 
+    async def test_list_sessions_page_returns_expected_page_metadata(self, test_repo):
+        await test_repo.create_session("page_s1", meta={"title": "Page 1"})
+        await test_repo.create_session("page_s2", meta={"title": "Page 2"})
+        await test_repo.create_session("page_s3", meta={"title": "Page 3"})
+        await test_repo.create_turn("turn_page_s1", "page_s1", "hello")
+        await test_repo.complete_turn("turn_page_s1", "done")
+        await test_repo.create_turn("turn_page_s2", "page_s2", "hello")
+        await test_repo.create_turn("turn_page_s3", "page_s3", "hello")
+        await test_repo.complete_turn("turn_page_s3", "done")
+
+        page_1 = await test_repo.list_sessions_page(page=1, page_size=2)
+        page_2 = await test_repo.list_sessions_page(page=2, page_size=2)
+
+        assert page_1["total"] == 3
+        assert page_1["active_total"] == 1
+        assert page_1["page"] == 1
+        assert page_1["page_size"] == 2
+        assert page_1["total_pages"] == 2
+        assert [item["session_id"] for item in page_1["sessions"]] == ["page_s3", "page_s2"]
+        assert [item["session_id"] for item in page_2["sessions"]] == ["page_s1"]
+        status_map = {item["session_id"]: item["status"] for item in [*page_1["sessions"], *page_2["sessions"]]}
+        assert status_map["page_s2"] == "active"
+        assert status_map["page_s1"] == "closed"
+        assert status_map["page_s3"] == "closed"
+
+    async def test_list_sessions_page_can_include_visible_ancestors(self, test_repo):
+        await test_repo.create_session("ancestor_parent", meta={"title": "Parent"})
+        await test_repo.create_session(
+            "ancestor_child",
+            meta={"title": "Child", "parent_session_id": "ancestor_parent"},
+        )
+        await test_repo.create_session("ancestor_sibling", meta={"title": "Sibling"})
+
+        await test_repo.update_session_activity("ancestor_child")
+        await test_repo.update_session_activity("ancestor_sibling")
+
+        page = await test_repo.list_sessions_page(page=1, page_size=2, include_ancestors=True)
+        ids = [item["session_id"] for item in page["sessions"]]
+
+        assert "ancestor_child" in ids
+        assert "ancestor_parent" in ids
+
+    async def test_list_sessions_derives_status_from_latest_turn_even_if_session_row_is_stale(self, test_repo):
+        await test_repo.create_session("status_s1", meta={"title": "Status"})
+        await test_repo.create_turn("status_turn_1", "status_s1", "hello")
+
+        conn = test_repo._conn()
+        conn.execute("UPDATE sessions SET status = 'closed' WHERE session_id = 'status_s1'")
+        conn.commit()
+        conn.close()
+
+        sessions = await test_repo.list_sessions()
+        session = next(item for item in sessions if item["session_id"] == "status_s1")
+        assert session["status"] == "active"
+
     async def test_create_turn_and_complete(self, test_repo):
         await test_repo.create_session("st")
         await test_repo.create_turn("t1", "st", "hello")
+        sessions = await test_repo.list_sessions()
+        assert next(s for s in sessions if s["session_id"] == "st")["status"] == "active"
         await test_repo.complete_turn("t1", "world")
         turns = await test_repo.get_session_turns("st")
         assert len(turns) >= 1
         assert turns[0]["status"] == "completed"
+        sessions = await test_repo.list_sessions()
+        assert next(s for s in sessions if s["session_id"] == "st")["status"] == "closed"
 
     async def test_save_and_get_messages(self, test_repo):
         await test_repo.create_session("sm")

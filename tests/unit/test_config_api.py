@@ -214,6 +214,30 @@ def test_update_sections_preserves_other_keys(client, app):
     assert written["custom_key"] == "keep_me"
 
 
+def test_update_llm_model_persists_missing_provider_placeholder(client, app):
+    """当模型引用尚未落盘的 provider 时，保存模型应同时保留该 provider 占位配置。"""
+    resp = client.put("/api/config/llm/models/test-model", json={
+        "name": "test-model",
+        "provider": "custom-openai",
+        "model_id": "gpt-4.1-mini",
+        "type": "chat",
+        "timeout": 60,
+        "max_tokens": 128000,
+        "max_output_tokens": 16384,
+    })
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert written["llm"]["providers"]["custom-openai"] == {
+        "source_type": "openai",
+        "base_url": "",
+        "timeout": 60,
+        "max_retries": 3,
+        "api_key": "",
+    }
+    assert written["llm"]["models"]["test-model"]["provider"] == "custom-openai"
+
+
 def test_list_models_accepts_openai_compatible_provider_keys(client, monkeypatch):
     """OpenAI 兼容 provider 应透传具体 key，后端仍按 OpenAI 兼容方式处理"""
     mocked = AsyncMock(return_value=[
@@ -369,6 +393,64 @@ def test_create_single_provider_when_missing(client, app):
     assert app.state.secret_store.get("sensenova_claw/llm.providers.deepseek.api_key") == "sk-deepseek"
 
 
+def test_delete_provider_removes_provider_models_and_defaults(client, app):
+    """删除 provider 时应同步删除其下模型，并清理相关默认模型引用。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["providers"]["deepseek"] = {
+        "source_type": "deepseek",
+        "api_key": "sk-deepseek",
+        "base_url": "https://api.deepseek.com/v1",
+        "timeout": 60,
+        "max_retries": 3,
+    }
+    raw["llm"]["models"]["deepseek-chat"] = {
+        "provider": "deepseek",
+        "model_id": "deepseek-chat",
+        "type": "chat",
+        "timeout": 60,
+        "max_tokens": 64000,
+        "max_output_tokens": 8192,
+    }
+    raw["llm"]["default_model"] = "deepseek-chat"
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.secret_store.set("sensenova_claw/llm.providers.deepseek.api_key", "sk-deepseek")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.request("DELETE", "/api/config/llm/providers/deepseek")
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert "deepseek" not in written["llm"]["providers"]
+    assert "deepseek-chat" not in written["llm"]["models"]
+    assert written["llm"]["default_model"] == ""
+    assert app.state.secret_store.get("sensenova_claw/llm.providers.deepseek.api_key") is None
+
+
+def test_delete_model_removes_model_and_related_defaults(client, app):
+    """删除 llm 时应同步清理相关默认模型引用。"""
+    raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    raw["llm"]["models"]["text-embedding-3-small"] = {
+        "provider": "openai",
+        "model_id": "text-embedding-3-small",
+        "type": "embedding",
+        "timeout": 60,
+        "max_tokens": 8192,
+        "max_output_tokens": 2048,
+    }
+    raw["llm"]["default_model"] = "gpt-5.4"
+    raw["llm"]["default_embedding_model"] = "text-embedding-3-small"
+    app.state.config._config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    app.state.config.data = app.state.config._load_config()
+
+    resp = client.request("DELETE", "/api/config/llm/models/text-embedding-3-small")
+
+    assert resp.status_code == 200
+    written = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
+    assert "text-embedding-3-small" not in written["llm"]["models"]
+    assert written["llm"]["default_model"] == "gpt-5.4"
+    assert written["llm"]["default_embedding_model"] == ""
+
+
 def test_update_single_model_and_rename_default_model(client, app):
     """单项更新 llm 时允许改名，并联动 default_model。"""
     raw = yaml.safe_load(app.state.config._config_path.read_text(encoding="utf-8"))
@@ -414,6 +496,7 @@ def test_create_single_model_when_missing(client, app):
     assert written["llm"]["models"]["deepseek-chat"] == {
         "provider": "openai",
         "model_id": "deepseek-chat",
+        "type": "chat",
         "timeout": 45,
         "max_tokens": 64000,
         "max_output_tokens": 8192,

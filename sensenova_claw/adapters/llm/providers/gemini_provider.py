@@ -29,6 +29,77 @@ def _extract_reasoning_details(message: dict[str, Any]) -> list[dict[str, Any]]:
     return rd if isinstance(rd, list) else []
 
 
+def _normalize_reasoning_details(reasoning_details: Any) -> list[dict[str, Any]]:
+    """归一化 Gemini reasoning_details，补出前端可展示的 thinking 条目。
+
+    Gemini / 兼容网关在工具调用场景下常返回两类 reasoning 数据：
+    1. `type=tool` 的内部签名元数据（用于后续请求续传 thought signature）
+    2. 带 `text` / `thinking` / `summary` / `content` 的可读文本
+
+    当前前端只会展示 `type=thinking` 的条目，因此这里在保留原始结构的同时，
+    把可读文本补成额外的 `type=thinking` 条目，避免改动事件协议或前端逻辑。
+    """
+    if not isinstance(reasoning_details, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    seen_thinking: set[str] = set()
+    text_keys = ("thinking", "text", "summary", "content")
+
+    for item in reasoning_details:
+        if not isinstance(item, dict):
+            continue
+        detail = deepcopy(item)
+        normalized.append(detail)
+
+        detail_type = str(detail.get("type", "") or "").strip().lower()
+        text_value = ""
+        for key in text_keys:
+            value = detail.get(key)
+            if isinstance(value, str) and value.strip():
+                text_value = value.strip()
+                break
+
+        if not text_value:
+            continue
+
+        if detail_type == "thinking":
+            seen_thinking.add(text_value)
+            continue
+
+        if detail_type == "tool":
+            # tool 条目主要是 thought signature 元数据；只有当它真的带了可读文本时，
+            # 才额外补一条 thinking 供 UI 展示。
+            pass
+
+        if text_value in seen_thinking:
+            continue
+        seen_thinking.add(text_value)
+        normalized.append({"type": "thinking", "thinking": text_value})
+
+    return normalized
+
+
+def _append_reasoning_content(
+    reasoning_details: list[dict[str, Any]],
+    reasoning_content: Any,
+) -> list[dict[str, Any]]:
+    """把 Gemini 返回的 reasoning_content 追加为可展示的 thinking 条目。"""
+    if not isinstance(reasoning_content, str) or not reasoning_content.strip():
+        return reasoning_details
+
+    text = reasoning_content.strip()
+    for item in reasoning_details:
+        if (
+            isinstance(item, dict)
+            and str(item.get("type", "") or "").strip().lower() == "thinking"
+            and str(item.get("thinking", "") or "").strip() == text
+        ):
+            return reasoning_details
+
+    return [*reasoning_details, {"type": "thinking", "thinking": text}]
+
+
 def _tool_call_has_thought_sig(tc: dict[str, Any]) -> bool:
     """检测单个 tool_call 是否包含 Chat Completions 格式的 thought signature。
 
@@ -161,15 +232,28 @@ class GeminiProvider(LLMProvider):
             psf = extra.get("provider_specific_fields") or {}
             reasoning_details = psf.get("reasoning_details")
 
-        if reasoning_details:
-            result["reasoning_details"] = reasoning_details
+        reasoning_content = extra.get("reasoning_content")
+        if not reasoning_content:
+            psf = extra.get("provider_specific_fields") or {}
+            reasoning_content = psf.get("reasoning_content")
+
+        normalized_reasoning_details = _normalize_reasoning_details(reasoning_details)
+        normalized_reasoning_details = _append_reasoning_content(
+            normalized_reasoning_details,
+            reasoning_content,
+        )
+
+        if normalized_reasoning_details:
+            result["reasoning_details"] = normalized_reasoning_details
             has_tool_sig = any(
                 isinstance(item, dict) and item.get("type") == "tool" and item.get("signature")
-                for item in reasoning_details
+                for item in normalized_reasoning_details
             )
             logger.debug(
-                "Gemini reasoning_details: %d items, has_tool_signature=%s",
-                len(reasoning_details), has_tool_sig,
+                "Gemini reasoning_details: raw=%d normalized=%d has_tool_signature=%s has_reasoning_content=%s",
+                len(reasoning_details) if isinstance(reasoning_details, list) else 0,
+                len(normalized_reasoning_details), has_tool_sig,
+                bool(isinstance(reasoning_content, str) and reasoning_content.strip()),
             )
 
         has_ec_sig = any(_tool_call_has_thought_sig(tc) for tc in tool_calls)
@@ -238,9 +322,12 @@ class GeminiProvider(LLMProvider):
         for msg in messages:
             if pending_google_tool_reply and msg.get("role") == "tool":
                 cleaned.append(self._normalize_tool_message_for_google(msg))
+                pending_google_tool_reply = False
                 continue
 
-            if msg.get("role") == "assistant" and has_thought_signature(msg):
+            if msg.get("role") == "user" and msg.get("attachments"):
+                cleaned.append(self._normalize_user_message(msg))
+            elif msg.get("role") == "assistant" and has_thought_signature(msg):
                 cleaned.append(self._rebuild_assistant_message(msg))
             elif msg.get("role") == "assistant":
                 cleaned.append(self._normalize_assistant_message(msg))
@@ -304,7 +391,13 @@ class GeminiProvider(LLMProvider):
             # 收集后续连续的 tool 消息
             found_ids: set[str] = set()
             tool_msgs: list[dict[str, Any]] = []
-            while i < len(messages) and messages[i].get("role") == "tool":
+            while i < len(messages) and (
+                messages[i].get("role") == "tool"
+                or (
+                    messages[i].get("role") == "user"
+                    and messages[i].get("tool_call_id")
+                )
+            ):
                 tool_msg = messages[i]
                 tid = tool_msg.get("tool_call_id", "")
                 found_ids.add(tid)
@@ -424,6 +517,32 @@ class GeminiProvider(LLMProvider):
             "tool_call_id": message.get("tool_call_id"),
             "content": message.get("content", ""),
         }
+
+    def _normalize_user_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(message)
+        attachments = normalized.pop("attachments", []) or []
+        blocks: list[dict[str, Any]] = []
+
+        content = normalized.get("content", "")
+        if isinstance(content, str) and content:
+            blocks.append({"type": "text", "text": content})
+
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+            if str(attachment.get("kind") or "") != "image":
+                continue
+            mime_type = str(attachment.get("mime_type") or "").strip()
+            data = str(attachment.get("data") or "").strip()
+            if not mime_type or not data:
+                continue
+            blocks.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime_type};base64,{data}"},
+            })
+
+        normalized["content"] = blocks or [{"type": "text", "text": ""}]
+        return normalized
 
     def _normalize_assistant_message(self, message: dict[str, Any]) -> dict[str, Any]:
         result = dict(message)

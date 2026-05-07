@@ -10,6 +10,7 @@ import { useEventDispatcher } from './EventDispatcherContext';
 import { extractThinkContentFromReasoningDetails } from '@/lib/assistantThink';
 import type { WsInboundEvent } from '@/lib/wsEvents';
 import {
+  type ChatAttachmentRef,
   type ChatMessage,
   type StepItem,
   type TaskProgressItem,
@@ -99,7 +100,13 @@ export interface MessageContextValue {
   prefillInput: (value: string | PrefillInputPayload) => void;
   clearPendingPrefill: () => void;
 
-  sendMessage: (content: string, contextFiles?: ContextFileRef[], agentId?: string, recommendation?: RecommendationSendMeta | null) => void;
+  sendMessage: (
+    content: string,
+    contextFiles?: ContextFileRef[],
+    agentId?: string,
+    recommendation?: RecommendationSendMeta | null,
+    attachments?: ChatAttachmentRef[],
+  ) => void;
   cancelTurn: () => void;
   handleSkillInvoke: (skillName: string, args: string) => void;
   setTyping: (typing: boolean) => void;
@@ -177,7 +184,12 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   const toolCallMapRef = useRef<Map<string, string>>(new Map());
   const cancelledTurnIdsRef = useRef<Set<string>>(new Set());
   const lastStreamingTurnIdRef = useRef<string | null>(null);
-  const pendingInputRef = useRef<{ content: string; contextFiles?: string[]; meta?: Record<string, string> } | null>(null);
+  const pendingInputRef = useRef<{
+    content: string;
+    contextFiles?: string[];
+    meta?: Record<string, string>;
+    attachments?: ChatAttachmentRef[];
+  } | null>(null);
   const pendingSessionBootstrapIdRef = useRef<string | null>(null);
 
   // ── helpers ──
@@ -388,26 +400,46 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
             if (lastStreamingTurnIdRef.current === completedTurnId) lastStreamingTurnIdRef.current = null;
           }
           setMessages((prev) => {
+            // Issue #211: 找最近一条 user 消息的 timestamp，计算从用户发送到 response 完成的耗时
+            let durationMs: number | undefined;
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i].role === 'user') {
+                const delta = Date.now() - prev[i].timestamp;
+                if (delta >= 0) durationMs = delta;
+                break;
+              }
+            }
+
             if (completedTurnId) {
               // 只更新最后一条同 turnId 的 assistant 消息，保留早期消息的 thinking 不变。
-              // 注意：不设置 thinkingState，思考过程默认展开显示。
-              return upsertAssistantTurnMessage(prev, completedTurnId, {
+              const afterUpsert = upsertAssistantTurnMessage(prev, completedTurnId, {
                 content: final,
                 keepExistingContentWhenEmpty: true,
               });
+              if (durationMs === undefined) return afterUpsert;
+              // 把 duration 写到最后一条同 turnId 的 assistant 消息上
+              for (let i = afterUpsert.length - 1; i >= 0; i--) {
+                const m = afterUpsert[i];
+                if (m.role === 'assistant' && m.turnId === completedTurnId) {
+                  const next = [...afterUpsert];
+                  next[i] = { ...m, durationMs };
+                  return next;
+                }
+              }
+              return afterUpsert;
             }
             for (let i = prev.length - 1; i >= 0; i--) {
               if (prev[i].role === 'assistant') {
                 const existing = prev[i];
-                // 如果 llm_result 已经设置了相同内容，保持不变
+                // 如果 llm_result 已经设置了相同内容，只补 durationMs
                 if (existing.content === final || !final) {
-                  return prev;
+                  if (durationMs === undefined) return prev;
+                  const next = [...prev]; next[i] = { ...existing, durationMs }; return next;
                 }
-                // 内容不同时才更新（不创建新消息）
-                const next = [...prev]; next[i] = { ...next[i], content: final }; return next;
+                const next = [...prev]; next[i] = { ...existing, content: final, durationMs }; return next;
               }
             }
-            if (final) return [...prev, { id: makeId(), role: 'assistant', content: final, timestamp: Date.now() }];
+            if (final) return [...prev, { id: makeId(), role: 'assistant', content: final, timestamp: Date.now(), durationMs }];
             return prev;
           });
           setIsTyping(false);
@@ -600,9 +632,9 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         const newSid = event.session_id;
         if (!newSid) return;
         if (pendingInputRef.current) {
-          const { content, contextFiles, meta } = pendingInputRef.current;
+          const { content, contextFiles, meta, attachments } = pendingInputRef.current;
           pendingSessionBootstrapIdRef.current = newSid;
-          const payload: Record<string, unknown> = { content, attachments: [], context_files: contextFiles || [] };
+          const payload: Record<string, unknown> = { content, attachments: attachments || [], context_files: contextFiles || [] };
           if (meta) payload.meta = meta;
           wsSend({
             type: 'user_input',
@@ -621,8 +653,14 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
   // ── 对外接口 ──
 
-  const sendMessage = useCallback((content: string, contextFiles?: ContextFileRef[], agentId?: string, recommendation?: RecommendationSendMeta | null) => {
-    if (!content.trim()) return;
+  const sendMessage = useCallback((
+    content: string,
+    contextFiles?: ContextFileRef[],
+    agentId?: string,
+    recommendation?: RecommendationSendMeta | null,
+    attachments?: ChatAttachmentRef[],
+  ) => {
+    if (!content.trim() && !attachments?.length) return;
 
     // 防止在 session 创建中重复发送：如果已有 pending input 且正在等待 session_created，忽略
     if (pendingInputRef.current && !sessionIdRef.current) return;
@@ -635,7 +673,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
     emptySessionIdRef.current = null;
     resetTurnTracking();
-    addMsg('user', content);
+    addMsg('user', content || `[图片] ${attachments?.length || 0}`);
 
     const filePaths = contextFiles?.map(f => f.path) || [];
 
@@ -646,9 +684,11 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         : undefined;
 
     if (!sessionIdRef.current) {
-      pendingInputRef.current = { content, contextFiles: filePaths, meta };
+      pendingInputRef.current = { content, contextFiles: filePaths, meta, attachments };
       markFrontendCreate();
-      const sessionMeta: Record<string, string> = { title: content.slice(0, 20) || '新对话' };
+      const sessionMeta: Record<string, string> = {
+        title: content.slice(0, 20) || attachments?.[0]?.name || '图片对话',
+      };
       const requestId = makeId();
       wsSend({
         type: 'create_session',
@@ -656,7 +696,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         timestamp: Date.now() / 1000,
       });
     } else {
-      const payload: Record<string, unknown> = { content, attachments: [], context_files: filePaths };
+      const payload: Record<string, unknown> = { content, attachments: attachments || [], context_files: filePaths };
       if (meta) payload.meta = meta;
       wsSend({
         type: 'user_input',
@@ -745,6 +785,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
       timestamp: Date.now() / 1000,
     });
     setIsTyping(false);
+    setTurnActive(false);
   }, [wsSend, sessionIdRef]);
 
   const updateMessages = useCallback((updater: (prev: ChatMessage[]) => ChatMessage[]) => {

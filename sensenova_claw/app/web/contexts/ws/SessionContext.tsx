@@ -13,6 +13,7 @@ import {
   getTitle,
   groupSessionsToTasks,
   makeId,
+  updateSessionMetaTitle,
 } from '@/lib/chatTypes';
 import type { WsInboundEvent } from '@/lib/wsEvents';
 
@@ -28,6 +29,7 @@ export interface SessionContextValue {
   createSession: (agentId: string, taskId?: string) => void;
   startNewChat: () => void;
   deleteSession: (sessionId: string, scope?: 'self' | 'self_and_descendants') => Promise<void>;
+  renameSession: (sessionId: string, title: string) => Promise<boolean>;
   resetIfNeeded: () => void;
   cleanupEmptySession: () => void;
   refreshTaskGroups: () => void;
@@ -79,7 +81,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const loadSessionList = useCallback(async () => {
     setLoadingSessions(true);
     try {
-      const res = await authFetch(`${API_BASE}/api/sessions`);
+      const params = new URLSearchParams({
+        all: '1',
+        include_ancestors: '1',
+      });
+      const res = await authFetch(`${API_BASE}/api/sessions?${params.toString()}`);
       const d = await res.json();
       setSessions(d.sessions || []);
     } catch {
@@ -189,6 +195,33 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setDeleteError('');
     setDeleteTargetId(sid);
   }, [performDeleteSession, sessions]);
+
+  const renameSession = useCallback(async (sid: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      return false;
+    }
+
+    try {
+      const res = await authFetch(`${API_BASE}/api/sessions/${sid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      if (!res.ok) {
+        return false;
+      }
+
+      setSessions((prev) => prev.map((session) => (
+        session.session_id === sid
+          ? { ...session, meta: updateSessionMetaTitle(session.meta, trimmed) }
+          : session
+      )));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   const resetIfNeeded = useCallback(() => {
     if (sessionIdRef.current) {
@@ -310,6 +343,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     createSession,
     startNewChat,
     deleteSession,
+    renameSession,
     resetIfNeeded,
     cleanupEmptySession: doCleanupEmptySession,
     refreshTaskGroups: loadSessionList,

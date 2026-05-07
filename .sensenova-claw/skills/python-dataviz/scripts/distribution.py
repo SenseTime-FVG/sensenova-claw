@@ -4,10 +4,16 @@ Distribution Plot Examples - matplotlib and seaborn
 Usage: python distribution.py
 """
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
+
+# 输出目录
+OUTPUT_DIR = Path(__file__).parent.parent / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Set style
 sns.set_theme(style="whitegrid")
@@ -28,7 +34,7 @@ def histogram():
     plt.legend(frameon=True, shadow=True)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('dist_histogram.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'dist_histogram.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: dist_histogram.png")
 
 # Example 2: KDE (Kernel Density Estimation)
@@ -47,7 +53,7 @@ def kde_plot():
     plt.legend(frameon=True, shadow=True)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('dist_kde.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'dist_kde.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: dist_kde.png")
 
 # Example 3: Box plot
@@ -69,7 +75,7 @@ def box_plot():
     plt.ylabel('Value', fontsize=12)
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
-    plt.savefig('dist_boxplot.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'dist_boxplot.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: dist_boxplot.png")
 
 # Example 4: Violin plot
@@ -92,7 +98,7 @@ def violin_plot():
     plt.ylabel('Sales (thousands)', fontsize=12)
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()
-    plt.savefig('dist_violin.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'dist_violin.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: dist_violin.png")
 
 # Example 5: Combined histogram + KDE
@@ -110,7 +116,7 @@ def hist_kde_combo():
     plt.ylabel('Count', fontsize=12)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('dist_hist_kde.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'dist_hist_kde.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: dist_hist_kde.png")
 
 if __name__ == '__main__':

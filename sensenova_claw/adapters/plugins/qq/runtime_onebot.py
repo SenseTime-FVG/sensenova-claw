@@ -11,12 +11,15 @@ from typing import Any
 import httpx
 import websockets
 
+from sensenova_claw.platform.security.ssl import CERTIFI_SSL_CONTEXT
+
 from .config import QQConfig
 from .models import QQInboundMessage
 
 logger = logging.getLogger(__name__)
 
 QQMessageHandler = Callable[[QQInboundMessage], Awaitable[None]]
+_SSL_CONTEXT = CERTIFI_SSL_CONTEXT
 
 
 class QQOneBotRuntime:
@@ -38,7 +41,11 @@ class QQOneBotRuntime:
         headers = {}
         if self._config.onebot.access_token:
             headers["Authorization"] = f"Bearer {self._config.onebot.access_token}"
-        self._ws = await websockets.connect(self._config.onebot.ws_url, additional_headers=headers or None)
+        self._ws = await websockets.connect(
+            self._config.onebot.ws_url,
+            additional_headers=headers or None,
+            ssl=_SSL_CONTEXT,
+        )
         self._recv_task = asyncio.create_task(self._recv_loop(), name="qq-onebot-recv")
         self._sensenova_claw_status = {"status": "connected", "error": None}
 
@@ -77,7 +84,7 @@ class QQOneBotRuntime:
         if self._config.onebot.access_token:
             headers["Authorization"] = f"Bearer {self._config.onebot.access_token}"
 
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=20, verify=_SSL_CONTEXT) as client:
             response = await client.post(f"{api_base}{path}", json=payload, headers=headers or None)
             response.raise_for_status()
             data = response.json()
@@ -155,4 +162,3 @@ class QQOneBotRuntime:
                 return True
         raw_message = str(data.get("raw_message", ""))
         return f"qq={self_id}" in raw_message
-

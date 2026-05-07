@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -267,7 +268,7 @@ class AgentSessionWorker(SessionWorker):
                 and event.type not in {USER_INPUT, USER_TURN_CANCEL_REQUESTED}
                 and self.rt.state_store.is_turn_cancelled(event.session_id, event.turn_id)
             ):
-                logger.info(
+                logger.debug(
                     "忽略已取消 turn 的事件 session=%s turn=%s type=%s",
                     event.session_id,
                     event.turn_id,
@@ -374,6 +375,8 @@ class AgentSessionWorker(SessionWorker):
             user_files = self._load_user_context_files(user_file_paths)
             context_files = (context_files or []) + user_files
 
+        attachments = self._load_user_image_attachments(event.payload.get("attachments", []))
+
         # 从内存或 SQLite 惰性加载历史消息（必须在 persist_message 之前，避免重复）
         history = await self.rt.state_store.load_session_history(
             self.session_id, self.rt.repo,
@@ -402,6 +405,7 @@ class AgentSessionWorker(SessionWorker):
             content, history,
             memory_context=memory_context,
             context_files=context_files,
+            attachments=attachments,
             agent_config=self.agent_config,
             session_id=self.session_id,
         )
@@ -497,6 +501,41 @@ class AgentSessionWorker(SessionWorker):
                 continue
         return files
 
+    def _load_user_image_attachments(self, attachments: Any) -> list[dict[str, Any]]:
+        """读取前端图片附件，转为 provider 可消费的 base64 载荷。"""
+        if not isinstance(attachments, list):
+            return []
+
+        loaded: list[dict[str, Any]] = []
+        for item in attachments:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("kind") or "") != "image":
+                continue
+
+            raw_path = str(item.get("path") or "").strip()
+            mime_type = str(item.get("mime_type") or "").strip()
+            if not raw_path or not mime_type.startswith("image/"):
+                continue
+
+            try:
+                real_path = os.path.realpath(raw_path)
+                if not os.path.isfile(real_path):
+                    continue
+                encoded = base64.b64encode(Path(real_path).read_bytes()).decode("ascii")
+            except (OSError, PermissionError):
+                logger.warning("无法读取 image attachment: %s", raw_path)
+                continue
+
+            loaded.append({
+                "kind": "image",
+                "name": str(item.get("name") or os.path.basename(real_path)),
+                "mime_type": mime_type,
+                "data": encoded,
+            })
+
+        return loaded
+
     async def _handle_llm_completed(self, event: EventEnvelope) -> None:
         """处理 LLM 调用完成，决定下一步动作"""
         if not event.turn_id:
@@ -584,10 +623,24 @@ class AgentSessionWorker(SessionWorker):
 
         # 后处理：将回复中的相对路径改写为绝对路径
         from sensenova_claw.platform.config.workspace import resolve_agent_workdir, resolve_sensenova_claw_home
-        from sensenova_claw.kernel.runtime.path_rewriter import rewrite_relative_paths
+        from sensenova_claw.kernel.runtime.path_rewriter import (
+            rewrite_absolute_path_references,
+            rewrite_file_link_hrefs,
+            rewrite_relative_paths,
+            sanitize_file_link_href,
+        )
         _home = str(resolve_sensenova_claw_home(config))
         _workdir = resolve_agent_workdir(_home, self.agent_config)
+        # 先把 file-link href 里会被 markdown 误解的字符规避（括号 + 反斜杠）：
+        # - `C:\Program Files (x86)\...` 的 `(` `)` 会截断 link
+        # - `C:\Users\foo\.sensenova-claw\...` 的 `\.` `\_` 会被 backslash-escape
+        #   吃掉反斜杠，得到少一级分隔符的错误路径
+        content = rewrite_absolute_path_references(content)
+        content = sanitize_file_link_href(content)
         content = rewrite_relative_paths(content, _workdir)
+        # 文件卡片 href（#sensenova-claw-file:）里 LLM 可能塞相对路径，
+        # 前端点击会 404。此处与 inline code 规范化互补。
+        content = rewrite_file_link_hrefs(content, _workdir)
 
         state.final_response = content
         await self.rt.repo.complete_turn(event.turn_id, agent_response=content)

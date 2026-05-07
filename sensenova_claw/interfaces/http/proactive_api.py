@@ -74,6 +74,7 @@ async def create_job(body: CreateJobRequest, request: Request):
             event_type=body.trigger.get("event_type", ""),
             filter=body.trigger.get("filter"),
             debounce_ms=body.trigger.get("debounce_ms", 5000),
+            exclude_payload=body.trigger.get("exclude_payload"),
         )
     else:
         raise HTTPException(400, f"不支持的 trigger kind: {trigger_kind}")
@@ -89,6 +90,7 @@ async def create_job(body: CreateJobRequest, request: Request):
         channels=delivery_data.get("channels", []),
         feishu_target=delivery_data.get("feishu_target"),
         summary_prompt=delivery_data.get("summary_prompt"),
+        recommendation_type=delivery_data.get("recommendation_type"),
     )
 
     safety_data = body.safety or {}

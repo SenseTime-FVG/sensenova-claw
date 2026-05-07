@@ -1,4 +1,5 @@
 import './globals.css';
+import 'katex/dist/katex.min.css';
 import type { Metadata } from 'next';
 import { DM_Sans } from "next/font/google";
 import { NotificationProvider } from '@/components/notification/NotificationProvider';

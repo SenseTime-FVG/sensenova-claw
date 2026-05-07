@@ -97,6 +97,31 @@ def test_normalize_messages_drops_orphan_tool_message() -> None:
     ]
 
 
+def test_normalize_messages_converts_user_image_attachments_to_multimodal_blocks() -> None:
+    provider = OpenAIProvider()
+
+    normalized = provider._normalize_messages([
+        {
+            "role": "user",
+            "content": "请描述图片",
+            "attachments": [
+                {
+                    "kind": "image",
+                    "mime_type": "image/png",
+                    "data": "ZmFrZQ==",
+                }
+            ],
+        }
+    ])
+
+    assert normalized[0]["role"] == "user"
+    assert normalized[0]["content"][0] == {"type": "text", "text": "请描述图片"}
+    assert normalized[0]["content"][1] == {
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64,ZmFrZQ=="},
+    }
+
+
 @pytest.mark.asyncio
 async def test_call_does_not_restore_default_sampling_key_marked_as_none() -> None:
     provider = OpenAIProvider(source_type="openai-compatible")

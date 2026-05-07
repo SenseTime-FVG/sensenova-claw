@@ -94,17 +94,10 @@ class ResearchPack:
 
 ## 关键原则
 
-- 必须先读取 `task-pack.json`。
-- research 不是默认第一步；是否运行取决于 `task-pack.json.research_required`。
-- 是否运行 research 取决于 `task-pack.json.research_required`。
-- 先进入 `ppt-task-pack`。
-- 上传报告、事实数据案例和长文档只是 `task-pack` 计算 `research_required` 的信号。
-- 由 `task-pack.json.research_required` 决定是否进入 `ppt-research-pack`。
-- 上传报告、事实数据案例、长文档等都只是 `ppt-task-pack` 的研究信号。
-- 这些稳定 ID 供 storyboard 的 `source_claim_ids` / `source_evidence_ids` 回指。
-- 研究包是内容依据，不是页面大纲。
-- research 不是摘要，而是"可上页内容池"。
-- `pageworthy_chunks` 是 `ppt-info-pack` 的上游输入。
+- 必须先读取 `task-pack.json`；research 不是默认第一步，是否运行取决于 `task-pack.json.research_required`。
+- 上传报告、事实数据案例和长文档只是 `ppt-task-pack` 计算 `research_required` 的信号，不是绕过 `ppt-task-pack` 的独立入口。
+- 稳定 ID 先供 `ppt-info-pack` 汇总，再供 storyboard 的 `source_claim_ids` / `source_evidence_ids` 回指。
+- research 不是摘要，而是带稳定 ID 的"可上页内容池"；`pageworthy_chunks` 是 `ppt-info-pack` 的上游输入。
 - `risks_or_uncertainties` 统一承接信息缺口与证据不确定性，不再额外拆成另一套"已知信息缺口"字段。
 
 ## 禁止事项

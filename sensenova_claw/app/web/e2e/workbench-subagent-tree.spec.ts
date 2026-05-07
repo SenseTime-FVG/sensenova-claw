@@ -1,10 +1,22 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { expect, test } from '@playwright/test';
 
+function readCurrentToken(): string {
+  return fs.readFileSync(path.join(os.homedir(), '.sensenova-claw', 'token'), 'utf-8').trim();
+}
+
 test('工作台最近对话应显示深度 2 的 subagent 会话', async ({ page }) => {
+  const token = readCurrentToken();
+  const sessionRequests: string[] = [];
+
   await page.context().addCookies([{
     name: 'sensenova_claw_token',
-    value: 'test-token',
-    url: 'http://localhost:3101',
+    value: token,
+    domain: 'localhost',
+    path: '/',
   }]);
 
   await page.route('**/api/auth/status', async (route) => {
@@ -51,7 +63,8 @@ test('工作台最近对话应显示深度 2 的 subagent 会话', async ({ page
     });
   });
 
-  await page.route('**/api/sessions', async (route) => {
+  await page.route('**/api/sessions**', async (route) => {
+    sessionRequests.push(route.request().url());
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -87,6 +100,11 @@ test('工作台最近对话应显示深度 2 的 subagent 会话', async ({ page
             status: 'idle',
           },
         ],
+        page: 1,
+        page_size: 50,
+        total: 3,
+        active_total: 0,
+        total_pages: 1,
       }),
     });
   });
@@ -140,7 +158,7 @@ test('工作台最近对话应显示深度 2 的 subagent 会话', async ({ page
 
     function MockWebSocket(url: string | URL, protocols?: string | string[]) {
       const urlString = String(url);
-      if (urlString.includes('localhost:8000/ws')) {
+      if (urlString.includes('/ws')) {
         return new FakeWebSocket(urlString);
       }
       return new NativeWebSocket(url, protocols);
@@ -160,9 +178,13 @@ test('工作台最近对话应显示深度 2 的 subagent 会话', async ({ page
     });
   });
 
-  await page.goto('/');
+  await page.goto(`/?token=${encodeURIComponent(token)}`);
 
+  await expect.poll(() => sessionRequests.at(-1) ?? '').toContain('all=1');
+  await expect.poll(() => sessionRequests.at(-1) ?? '').toContain('include_ancestors=1');
   await expect(page.getByText('最新大模型新闻调研')).toBeVisible();
+  await page.getByRole('button', { name: '1 个团队会话' }).first().click();
   await expect(page.getByText('[send_message] 请调研新闻源')).toBeVisible();
+  await page.getByRole('button', { name: '1 个团队会话' }).nth(1).click();
   await expect(page.getByText('[send_message] 请整理结论')).toBeVisible();
 });

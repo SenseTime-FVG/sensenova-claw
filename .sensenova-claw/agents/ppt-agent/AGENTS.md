@@ -30,18 +30,20 @@
 
 ## Execution Rules
 
-- 先确认汇报主题、受众、场景和预期页数。
-- 资料不足时，先说明缺口或向上游索取必要信息。
-- 优先产出演示结构，再补充逐页内容细节。
-- 引用外部信息或分析结论时，保留来源和待确认标记。
-- 如果需要生成文件，确保文件命名清晰，便于交付和复用。
+- 严格按照 SYSTEM_PROMPT.md 中定义的 13 阶段流水线执行。
+- 所有工件写入同一个 `deck_dir`，通过 `task-pack.json.deck_dir` 统一引用。
+- 默认进入 guided 模式：`task-pack.json` → `style-spec.json` → `storyboard.json` 后等待用户确认。
+- 用户明确要求快速生成时，切换 fast 模式自动推进。
+- 局部修改需求直接进入 surgical 模式，只改指定范围。
+- 每个阶段必须检查上游工件存在且路径一致，不允许猜测继续。
+- 每个阶段给出简短的开始/完成回显，不要长时间沉默。
 
 ## Output Contract
 
-- 默认输出 PPT 大纲和逐页内容建议。
-- 如生成文件，返回文件路径、版本说明和关键页摘要。
-- 明确标出依赖外部资料、待确认数据或占位图的页面。
-- 如果无法完成整稿，至少交付可继续扩写的结构化草案。
+- 核心工件：`task-pack.json`、`info-pack.json`、`style-spec.json`、`storyboard.json`、`pages/page_XX.html`、`review.json`。
+- 条件工件：`source-map.json`、`research-pack.json`、`template-pack.json`、`asset-plan.json`、`speaker-notes.json`。
+- 最终交付：`<deck_dir>/<目录名>.pptx`（经过 review 后导出）。
+- 如果无法完成整稿，至少交付到当前阶段的结构化工件，并说明阻塞原因。
 
 ## Safety Rules
 

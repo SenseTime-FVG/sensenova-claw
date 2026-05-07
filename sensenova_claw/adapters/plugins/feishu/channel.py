@@ -26,12 +26,33 @@ from sensenova_claw.kernel.events.types import (
 )
 from sensenova_claw.adapters.channels.base import Channel
 from sensenova_claw.adapters.plugins.feishu.text import chunk_text
+from sensenova_claw.platform.security.ssl import CERTIFI_SSL_CONTEXT
 
 if TYPE_CHECKING:
     from sensenova_claw.adapters.plugins.base import PluginApi
     from sensenova_claw.adapters.plugins.feishu.config import FeishuConfig
 
 logger = logging.getLogger(__name__)
+
+_SSL_CONTEXT = CERTIFI_SSL_CONTEXT
+
+
+def _patch_lark_ws_ssl_context(ws_module) -> None:
+    """给飞书 SDK 的 WebSocket 连接补充 certifi CA，避免系统证书链缺失时握手失败。"""
+    websockets_module = getattr(ws_module, "websockets", None)
+    if websockets_module is None:
+        return
+
+    connect = getattr(websockets_module, "connect", None)
+    if connect is None or getattr(connect, "_sensenova_claw_ssl_patched", False):
+        return
+
+    async def _connect_with_ssl(*args, **kwargs):
+        kwargs.setdefault("ssl", _SSL_CONTEXT)
+        return await connect(*args, **kwargs)
+
+    _connect_with_ssl._sensenova_claw_ssl_patched = True  # type: ignore[attr-defined]
+    websockets_module.connect = _connect_with_ssl
 
 
 @dataclass
@@ -154,6 +175,7 @@ class FeishuChannel(Channel):
 
         import lark_oapi.ws.client as _ws_mod
         _ws_mod.loop = thread_loop
+        _patch_lark_ws_ssl_context(_ws_mod)
 
         try:
             self._ws_client.start()

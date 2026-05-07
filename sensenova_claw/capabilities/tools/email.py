@@ -20,6 +20,13 @@ from typing import Any
 from sensenova_claw.capabilities.tools.base import Tool, ToolRiskLevel
 from sensenova_claw.platform.config.config import config
 
+_IMAP_IDENTITY = {
+    "name": "sensenova-claw",
+    "version": "0.5.0",
+    "vendor": "sensenova-claw",
+    "support-email": "support@sensenova-claw.local",
+}
+
 
 def _decode_email_header(header: str) -> str:
     """解码邮件头部（RFC 2047 编码）"""
@@ -48,6 +55,63 @@ def _convert_date_to_imap(date_str: str) -> str:
     """
     dt = datetime.strptime(date_str.strip(), "%Y-%m-%d")
     return dt.strftime("%d-%b-%Y")
+
+
+def _normalize_folder(folder: str | None) -> str:
+    """将空值/空白 folder 统一回退到 IMAP 默认收件箱。"""
+    if folder is None:
+        return "INBOX"
+    normalized = folder.strip()
+    return normalized or "INBOX"
+
+
+def _should_send_imap_id(host: str | None) -> bool:
+    """仅对 163 IMAP 主机发送 ID，避免影响其他邮箱提供商。"""
+    return (host or "").strip().lower() == "imap.163.com"
+
+
+def _build_imap_id_args(identity: dict[str, str]) -> str:
+    """构造 RFC 2971 的 IMAP ID 参数。"""
+    pairs = []
+    for key, value in identity.items():
+        escaped_key = key.replace("\\", "\\\\").replace('"', '\\"')
+        escaped_value = value.replace("\\", "\\\\").replace('"', '\\"')
+        pairs.append(f'"{escaped_key}" "{escaped_value}"')
+    return f"({' '.join(pairs)})"
+
+
+def _send_imap_id_if_needed(mail: imaplib.IMAP4_SSL, host: str | None) -> None:
+    """163 邮箱在 LOGIN 后要求客户端发送 IMAP ID。"""
+    if not _should_send_imap_id(host):
+        return
+
+    imaplib.Commands.setdefault("ID", ("AUTH", "SELECTED"))
+    status, data = mail._simple_command("ID", _build_imap_id_args(_IMAP_IDENTITY))
+    if status != "OK":
+        detail = ""
+        if data:
+            detail = "; ".join(
+                item.decode("utf-8", errors="ignore") if isinstance(item, bytes) else str(item)
+                for item in data
+                if item
+            )
+        raise ValueError("发送 IMAP ID 失败" + (f": {detail}" if detail else ""))
+
+
+def _select_folder_or_raise(mail: imaplib.IMAP4_SSL, folder: str | None) -> str:
+    """选择 IMAP 文件夹，并在失败时抛出明确错误。"""
+    mailbox = _normalize_folder(folder)
+    status, data = mail.select(mailbox)
+    if status != "OK":
+        detail = ""
+        if data:
+            detail = "; ".join(
+                item.decode("utf-8", errors="ignore") if isinstance(item, bytes) else str(item)
+                for item in data
+                if item
+            )
+        raise ValueError(f"选择邮箱文件夹失败: {mailbox}" + (f" ({detail})" if detail else ""))
+    return mailbox
 
 
 class SendEmailTool(Tool):
@@ -181,7 +245,8 @@ class ListEmailsTool(Tool):
     def _fetch_emails(self, host, port, username, password, folder, limit, unread_only, from_email, subject_contains, since_date):
         with imaplib.IMAP4_SSL(host, port) as mail:
             mail.login(username, password)
-            mail.select(folder)
+            _send_imap_id_if_needed(mail, host)
+            _select_folder_or_raise(mail, folder)
 
             criteria = []
             if unread_only:
@@ -252,7 +317,8 @@ class ReadEmailTool(Tool):
     def _read_email(self, host, port, username, password, folder, email_id, mark_as_read):
         with imaplib.IMAP4_SSL(host, port) as mail:
             mail.login(username, password)
-            mail.select(folder)
+            _send_imap_id_if_needed(mail, host)
+            _select_folder_or_raise(mail, folder)
 
             _, msg_data = mail.fetch(email_id, "(RFC822)")
             msg = email.message_from_bytes(msg_data[0][1])
@@ -336,7 +402,8 @@ class DownloadAttachmentTool(Tool):
     def _download_attachment(self, host, port, username, password, folder, email_id, filename, save_path, max_size_mb):
         with imaplib.IMAP4_SSL(host, port) as mail:
             mail.login(username, password)
-            mail.select(folder)
+            _send_imap_id_if_needed(mail, host)
+            _select_folder_or_raise(mail, folder)
 
             _, msg_data = mail.fetch(email_id, "(RFC822)")
             msg = email.message_from_bytes(msg_data[0][1])
@@ -404,7 +471,8 @@ class MarkEmailTool(Tool):
     def _mark_email(self, host, port, username, password, folder, email_id, action):
         with imaplib.IMAP4_SSL(host, port) as mail:
             mail.login(username, password)
-            mail.select(folder)
+            _send_imap_id_if_needed(mail, host)
+            _select_folder_or_raise(mail, folder)
 
             if action == "read":
                 mail.store(email_id, "+FLAGS", "\\Seen")
@@ -459,7 +527,8 @@ class SearchEmailsTool(Tool):
     def _search_emails(self, host, port, username, password, folder, query, since_date, limit):
         with imaplib.IMAP4_SSL(host, port) as mail:
             mail.login(username, password)
-            mail.select(folder)
+            _send_imap_id_if_needed(mail, host)
+            _select_folder_or_raise(mail, folder)
 
             criteria = [f'TEXT "{_sanitize_imap_string(query)}"']
             if since_date:

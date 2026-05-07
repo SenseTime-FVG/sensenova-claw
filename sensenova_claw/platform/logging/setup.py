@@ -8,8 +8,8 @@ from sensenova_claw.platform.config.config import config
 
 
 def setup_logging() -> None:
-    level_name = str(config.get("system.log_level", "DEBUG")).upper()
-    level = getattr(logging, level_name, logging.DEBUG)
+    level_name = str(config.get("system.log_level", "INFO")).upper()
+    level = getattr(logging, level_name, logging.INFO)
 
     from sensenova_claw.platform.config.workspace import resolve_sensenova_claw_home
     home = resolve_sensenova_claw_home(config)

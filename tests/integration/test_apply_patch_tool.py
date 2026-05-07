@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from sensenova_claw.capabilities.tools.apply_patch_tool import ApplyPatchTool
+from sensenova_claw.capabilities.tools.builtin import ApplyPatchTool
 from sensenova_claw.platform.security.path_policy import PathPolicy
 
 pytestmark = pytest.mark.asyncio

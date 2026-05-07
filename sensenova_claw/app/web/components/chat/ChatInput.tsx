@@ -1,13 +1,14 @@
 'use client';
 
-import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect } from 'react';
-import { Send, Square, Paperclip, File, FolderOpen } from 'lucide-react';
+import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect, useMemo } from 'react';
+import { Send, Square, Paperclip, File, FolderOpen, X } from 'lucide-react';
 import { useDrop } from 'react-dnd';
 import { TargetSelector } from './TargetSelector';
 import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
-import { type ContextFileRef } from '@/lib/chatTypes';
+import { type ChatAttachmentRef, type ContextFileRef } from '@/lib/chatTypes';
 import { UploadProgress } from './UploadProgress';
 import { useFileUpload } from '@/hooks/useFileUpload';
+import { singleFileFlow } from '@/lib/fileUpload';
 import { useChatSession, type RecommendationSendMeta } from '@/contexts/ChatSessionContext';
 import { useI18n } from '@/contexts/I18nContext';
 
@@ -19,6 +20,7 @@ interface ChatInputProps {
     content: string,
     contextFiles?: ContextFileRef[],
     recommendation?: RecommendationSendMeta | null,
+    attachments?: ChatAttachmentRef[],
   ) => void;
   onSlashSubmit: (content: string) => boolean;
   onStop?: () => void;
@@ -34,6 +36,22 @@ interface ChatInputProps {
 
 export interface ChatInputHandle {
   setInput: (text: string) => void;
+}
+
+interface SessionDraftState {
+  text: string;
+  recommendation: RecommendationSendMeta | null;
+  attachments: ChatAttachmentRef[];
+}
+
+const EMPTY_DRAFT: SessionDraftState = {
+  text: '',
+  recommendation: null,
+  attachments: [],
+};
+
+function getDraftKey(sessionId: string | null): string {
+  return sessionId ?? '__new__';
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
@@ -53,9 +71,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onReconnect,
 }, ref) {
   const { t } = useI18n();
-  const [inputValue, setInputValue] = useState('');
-  const [draftRecommendation, setDraftRecommendation] = useState<RecommendationSendMeta | null>(null);
+  const [sessionDrafts, setSessionDrafts] = useState<Record<string, SessionDraftState>>({});
   const [showUploadMenu, setShowUploadMenu] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const {
     currentSessionId,
     pendingPrefill,
@@ -69,6 +87,42 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const uploadMenuRef = useRef<HTMLDivElement>(null);
+  const currentDraftKey = useMemo(() => getDraftKey(currentSessionId), [currentSessionId]);
+  const currentDraft = sessionDrafts[currentDraftKey] ?? EMPTY_DRAFT;
+  const inputValue = currentDraft.text;
+  const draftRecommendation = currentDraft.recommendation;
+  const draftAttachments = currentDraft.attachments;
+
+  const setCurrentDraft = useCallback((updater: (prev: SessionDraftState) => SessionDraftState) => {
+    setSessionDrafts(prev => {
+      const current = prev[currentDraftKey] ?? EMPTY_DRAFT;
+      const nextDraft = updater(current);
+      if (!nextDraft.text && !nextDraft.recommendation && !nextDraft.attachments.length) {
+        if (!(currentDraftKey in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[currentDraftKey];
+        return next;
+      }
+      return {
+        ...prev,
+        [currentDraftKey]: nextDraft,
+      };
+    });
+  }, [currentDraftKey]);
+
+  const setCurrentInputValue = useCallback((text: string) => {
+    setCurrentDraft(prev => ({
+      text,
+      recommendation: text.trim() ? prev.recommendation : null,
+      attachments: prev.attachments,
+    }));
+  }, [setCurrentDraft]);
+
+  const clearCurrentDraft = useCallback(() => {
+    setCurrentDraft(() => EMPTY_DRAFT);
+  }, [setCurrentDraft]);
 
   // 当前轮次结束或 stop 按钮隐藏后，允许再次发送
   useEffect(() => {
@@ -88,8 +142,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   useEffect(() => {
     if (!pendingPrefill) return;
-    setInputValue(pendingPrefill.text);
-    setDraftRecommendation(pendingPrefill.recommendation || null);
+    setCurrentDraft(() => ({
+      text: pendingPrefill.text,
+      recommendation: pendingPrefill.recommendation || null,
+      attachments: [],
+    }));
     clearPendingPrefill();
     setTimeout(() => {
       if (textareaRef.current) {
@@ -98,13 +155,22 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         textareaRef.current.focus();
       }
     });
-  }, [pendingPrefill, clearPendingPrefill]);
+  }, [pendingPrefill, clearPendingPrefill, setCurrentDraft]);
 
   useEffect(() => {
     if (draftRecommendation && currentSessionId && draftRecommendation.sourceSessionId !== currentSessionId) {
-      setDraftRecommendation(null);
+      setCurrentDraft(prev => ({
+        ...prev,
+        recommendation: null,
+      }));
     }
-  }, [currentSessionId, draftRecommendation]);
+  }, [currentSessionId, draftRecommendation, setCurrentDraft]);
+
+  useEffect(() => {
+    if (!textareaRef.current) return;
+    textareaRef.current.style.height = 'auto';
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 96)}px`;
+  }, [currentDraftKey, inputValue]);
 
   const resizeTextarea = useCallback(() => {
     setTimeout(() => {
@@ -117,12 +183,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, []);
 
   const insertAtRef = useCallback((path: string) => {
-    setInputValue(prev => {
-      const prefix = prev === '' || prev.endsWith(' ') || prev.endsWith('\n') ? prev : prev + ' ';
-      return prefix + `@${path} `;
+    setCurrentDraft(prev => {
+      const baseText = prev.text;
+      const prefix = baseText === '' || baseText.endsWith(' ') || baseText.endsWith('\n') ? baseText : baseText + ' ';
+      return {
+        text: prefix + `@${path} `,
+        recommendation: null,
+        attachments: prev.attachments,
+      };
     });
     resizeTextarea();
-  }, [resizeTextarea]);
+  }, [resizeTextarea, setCurrentDraft]);
 
   const [{ isOver }, dropRef] = useDrop(() => ({
     accept: 'FILE',
@@ -134,20 +205,69 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }),
   }), [insertAtRef]);
 
-  const { uploadItems, handleFileSelect } = useFileUpload({
+  const { uploadItems, handleFiles, handleFileSelect } = useFileUpload({
     selectedAgent,
-    onUploadSuccess: insertAtRef,
+    onUploadSuccess: (item) => {
+      if (item.isImage && !item.isFolder) {
+        setCurrentDraft(prev => ({
+          text: prev.text,
+          recommendation: null,
+          attachments: prev.attachments.some(att => att.path === item.path)
+            ? prev.attachments
+            : [...prev.attachments, {
+              kind: 'image',
+              name: item.name,
+              path: item.path,
+              mime_type: item.mimeType,
+            }],
+        }));
+        return;
+      }
+      insertAtRef(item.path);
+    },
   });
+
+  const isNativeFileDrag = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const types = Array.from(event.dataTransfer?.types || []);
+    return types.includes('Files');
+  }, []);
+
+  const handleNativeDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!isNativeFileDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    if (!isDraggingFiles) setIsDraggingFiles(true);
+  }, [isDraggingFiles, isNativeFileDrag]);
+
+  const handleNativeDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!isNativeFileDrag(event)) return;
+    const nextTarget = event.relatedTarget;
+    if (nextTarget && event.currentTarget.contains(nextTarget as Node)) return;
+    setIsDraggingFiles(false);
+  }, [isNativeFileDrag]);
+
+  const handleNativeDrop = useCallback(async (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isNativeFileDrag(event)) return;
+    event.preventDefault();
+    setIsDraggingFiles(false);
+    const files = event.dataTransfer.files;
+    if (!files || files.length === 0) return;
+    await handleFiles(files);
+  }, [handleFiles, isNativeFileDrag]);
 
   useImperativeHandle(ref, () => ({
     setInput: (text: string) => {
-      setInputValue(text);
+      setCurrentDraft(() => ({
+        text,
+        recommendation: null,
+        attachments: [],
+      }));
       resizeTextarea();
     },
-  }), [resizeTextarea]);
+  }), [resizeTextarea, setCurrentDraft]);
 
   const { showMenu, skills, handleSelect: handleSlashSelect, handleSubmit: handleSlashSubmitHook } = useSlashCommand(
-    inputValue, setInputValue, handleSkillInvoke,
+    inputValue, setCurrentInputValue, handleSkillInvoke,
   );
 
   const parseAtRefs = useCallback((content: string): ContextFileRef[] => {
@@ -167,26 +287,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const handleSend = useCallback(() => {
     const content = inputValue.trim();
     const isQuestionReply = Boolean(currentSessionQuestionInteraction);
-    if (!content || !wsConnected || disabled || isSubmitting || (!isQuestionReply && showStopButton)) return;
+    const hasAttachments = draftAttachments.length > 0;
+    if ((!content && !hasAttachments) || !wsConnected || disabled || isSubmitting || (!isQuestionReply && showStopButton)) return;
 
     if (handleSlashSubmitHook(content)) {
-      setDraftRecommendation(null);
-      setInputValue('');
+      clearCurrentDraft();
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
 
     if (onSlashSubmit(content)) {
-      setDraftRecommendation(null);
-      setInputValue('');
+      clearCurrentDraft();
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
 
     if (isQuestionReply) {
       sendCurrentSessionQuestionAnswer(content, false);
-      setDraftRecommendation(null);
-      setInputValue('');
+      clearCurrentDraft();
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
       return;
     }
@@ -195,12 +313,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       setIsSubmitting(true);
     }
     const contextFiles = parseAtRefs(content);
-    onSend(content, contextFiles.length > 0 ? contextFiles : undefined, draftRecommendation);
-    setDraftRecommendation(null);
-    setInputValue('');
+    onSend(
+      content,
+      contextFiles.length > 0 ? contextFiles : undefined,
+      draftRecommendation,
+      hasAttachments ? draftAttachments : undefined,
+    );
+    clearCurrentDraft();
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   }, [
     inputValue,
+    draftAttachments,
     wsConnected,
     disabled,
     isSubmitting,
@@ -212,6 +335,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     draftRecommendation,
     currentSessionQuestionInteraction,
     sendCurrentSessionQuestionAnswer,
+    clearCurrentDraft,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -220,14 +344,55 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputValue(e.target.value);
-    if (!e.target.value.trim()) {
-      setDraftRecommendation(null);
-    }
+    setCurrentInputValue(e.target.value);
     const ta = e.target;
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 96) + 'px';
   };
+
+  // 截图粘贴：检测剪贴板中的图片并上传
+  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageItems: DataTransferItem[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        imageItems.push(items[i]);
+      }
+    }
+    if (imageItems.length === 0) return;
+    // 有图片时阻止默认粘贴行为
+    e.preventDefault();
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      try {
+        const result = await singleFileFlow(file, selectedAgent);
+        setCurrentDraft(prev => ({
+          text: prev.text,
+          recommendation: null,
+          attachments: prev.attachments.some(att => att.path === result.path)
+            ? prev.attachments
+            : [...prev.attachments, {
+              kind: 'image',
+              name: file.name || 'pasted-image.png',
+              path: result.path,
+              mime_type: file.type || 'image/png',
+            }],
+        }));
+      } catch {
+        // 上传失败静默忽略
+      }
+    }
+  }, [selectedAgent, setCurrentDraft]);
+
+  const removeAttachment = useCallback((path: string) => {
+    setCurrentDraft(prev => ({
+      text: prev.text,
+      recommendation: prev.recommendation,
+      attachments: prev.attachments.filter(att => att.path !== path),
+    }));
+  }, [setCurrentDraft]);
 
   const isQuestionReply = Boolean(currentSessionQuestionInteraction);
   const inputDisabled = !wsConnected || disabled || (showStopButton && !isQuestionReply);
@@ -260,8 +425,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         <div
           ref={dropRef as unknown as React.Ref<HTMLDivElement>}
           className={`flex items-end gap-2 bg-background border rounded-[1.5rem] shadow-lg focus-within:ring-3 focus-within:ring-primary/10 focus-within:border-primary transition-all p-2 relative ${
-            isOver ? 'border-primary bg-primary/5 ring-3 ring-primary/20' : 'border-border/80'
+            (isOver || isDraggingFiles) ? 'border-primary bg-primary/5 ring-3 ring-primary/20' : 'border-border/80'
           }`}
+          onDragOver={handleNativeDragOver}
+          onDragLeave={handleNativeDragLeave}
+          onDrop={handleNativeDrop}
         >
           {/* 附件上传 */}
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
@@ -299,6 +467,26 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
           <div className="flex-1">
             <UploadProgress items={uploadItems} />
+            {draftAttachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2 px-2 pt-1">
+                {draftAttachments.map((attachment) => (
+                  <div
+                    key={attachment.path}
+                    className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-muted/60 px-3 py-1 text-xs text-foreground"
+                  >
+                    <span className="max-w-[220px] truncate">{attachment.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(attachment.path)}
+                      className="rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                      aria-label={`移除附件 ${attachment.name}`}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <SlashCommandMenu inputValue={inputValue} skills={skills} onSelect={handleSlashSelect} visible={showMenu} />
             <textarea
               data-testid="chat-input"
@@ -306,6 +494,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               value={inputValue}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               onCompositionStart={() => { isComposingRef.current = true; }}
               onCompositionEnd={() => { isComposingRef.current = false; }}
               placeholder={
@@ -335,7 +524,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             <button
               data-testid="send-button"
               onClick={handleSend}
-              disabled={!inputValue.trim() || inputDisabled || isSubmitting || stopPending}
+              disabled={(!inputValue.trim() && draftAttachments.length === 0) || inputDisabled || isSubmitting || stopPending}
               title={t('chat.sendMessage')}
               aria-label={t('chat.sendMessage')}
               className="w-11 h-11 mb-0.5 mr-0.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center shrink-0 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed shadow-md shadow-primary/20"

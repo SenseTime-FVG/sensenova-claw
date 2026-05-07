@@ -4,19 +4,26 @@ import { useState, useCallback } from 'react';
 import { singleFileFlow, dirUploadFlow, type ProgressCallback } from '@/lib/fileUpload';
 import { type UploadProgressItem } from '@/components/chat/UploadProgress';
 
+export interface UploadedItem {
+  path: string;
+  name: string;
+  mimeType: string;
+  isImage: boolean;
+  isFolder: boolean;
+}
+
 interface UseFileUploadOptions {
   selectedAgent: string;
-  onUploadSuccess: (path: string) => void;
+  onUploadSuccess: (item: UploadedItem) => void;
 }
 
 export function useFileUpload({ selectedAgent, onUploadSuccess }: UseFileUploadOptions) {
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
 
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = e.target.files;
-    if (!selectedFiles || selectedFiles.length === 0) return;
-
+  const handleFiles = useCallback(async (selectedFiles: FileList | File[]) => {
     const fileList = Array.from(selectedFiles);
+    if (fileList.length === 0) return;
+
     const firstFile = fileList[0];
     const relPath = (firstFile as File & { webkitRelativePath?: string }).webkitRelativePath;
     const isFolder = Boolean(relPath);
@@ -41,7 +48,13 @@ export function useFileUpload({ selectedAgent, onUploadSuccess }: UseFileUploadO
           : undefined;
 
         const result = await dirUploadFlow(topFolder, fileList, selectedAgent, onProgress);
-        onUploadSuccess(result.path);
+        onUploadSuccess({
+          path: result.path,
+          name: topFolder,
+          mimeType: 'inode/directory',
+          isImage: false,
+          isFolder: true,
+        });
         setUploadItems(prev => prev.map(it => it.id === itemId ? { ...it, status: 'done', percent: 100 } : it));
       } catch (err) {
         setUploadItems(prev => prev.map(it => it.id === itemId
@@ -66,7 +79,13 @@ export function useFileUpload({ selectedAgent, onUploadSuccess }: UseFileUploadO
             : undefined;
 
           const result = await singleFileFlow(file, selectedAgent, onProgress);
-          onUploadSuccess(result.path);
+          onUploadSuccess({
+            path: result.path,
+            name: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            isImage: file.type.startsWith('image/'),
+            isFolder: false,
+          });
           setUploadItems(prev => prev.map(it => it.id === itemId ? { ...it, status: 'done', percent: 100 } : it));
         } catch (err) {
           setUploadItems(prev => prev.map(it => it.id === itemId
@@ -79,13 +98,19 @@ export function useFileUpload({ selectedAgent, onUploadSuccess }: UseFileUploadO
     setTimeout(() => {
       setUploadItems(prev => prev.filter(it => it.status !== 'done'));
     }, 3000);
+  }, [selectedAgent, onUploadSuccess]);
 
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = e.target.files;
+    if (!selectedFiles || selectedFiles.length === 0) return;
+    await handleFiles(selectedFiles);
     // 重置 input value 以允许再次选择相同文件
     e.target.value = '';
-  }, [selectedAgent, onUploadSuccess]);
+  }, [handleFiles]);
 
   return {
     uploadItems,
+    handleFiles,
     handleFileSelect,
   };
 }

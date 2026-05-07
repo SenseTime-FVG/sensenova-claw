@@ -4,10 +4,16 @@ Scatter Plot Examples - matplotlib and seaborn
 Usage: python scatter_plot.py
 """
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
+
+# 输出目录
+OUTPUT_DIR = Path(__file__).parent.parent / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Set style
 sns.set_theme(style="whitegrid")
@@ -25,7 +31,7 @@ def simple_scatter():
     plt.ylabel('Y Variable', fontsize=12)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('scatter_simple.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'scatter_simple.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: scatter_simple.png")
 
 # Example 2: Scatter with regression line
@@ -44,7 +50,7 @@ def scatter_with_regression():
     plt.title('Study Hours vs Test Score', fontsize=16, fontweight='bold', pad=20)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('scatter_regression.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'scatter_regression.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: scatter_regression.png")
 
 # Example 3: Colored by category
@@ -71,7 +77,7 @@ def scatter_by_category():
     plt.legend(title='Category', frameon=True, shadow=True)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('scatter_category.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'scatter_category.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: scatter_category.png")
 
 # Example 4: Bubble chart (size variation)
@@ -92,7 +98,7 @@ def bubble_chart():
     plt.ylabel('Y Variable', fontsize=12)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('scatter_bubble.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'scatter_bubble.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: scatter_bubble.png")
 
 if __name__ == '__main__':

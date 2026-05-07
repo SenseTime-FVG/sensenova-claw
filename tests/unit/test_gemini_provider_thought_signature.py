@@ -163,6 +163,30 @@ def test_clean_messages_no_signature_keeps_tool_role() -> None:
     assert "provider_specific_fields" not in cleaned[1]
 
 
+def test_clean_messages_converts_user_image_attachments_to_multimodal_blocks() -> None:
+    provider = GeminiProvider()
+    cleaned = provider._clean_messages([
+        {
+            "role": "user",
+            "content": "请描述图片",
+            "attachments": [
+                {
+                    "kind": "image",
+                    "mime_type": "image/png",
+                    "data": "ZmFrZQ==",
+                }
+            ],
+        }
+    ])
+
+    assert cleaned[0]["role"] == "user"
+    assert cleaned[0]["content"][0] == {"type": "text", "text": "请描述图片"}
+    assert cleaned[0]["content"][1] == {
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64,ZmFrZQ=="},
+    }
+
+
 # ── 多轮对话场景 ──
 
 def test_clean_messages_multi_turn_mixed() -> None:

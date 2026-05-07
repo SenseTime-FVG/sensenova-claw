@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 
 from sensenova_claw.adapters.channels.base import Channel
@@ -36,6 +37,7 @@ class DingtalkChannel(Channel):
 
     _session_meta_model = DingtalkSessionMeta
     _pending_question_model = DingtalkPendingQuestion
+    _max_recent_message_ids = 1024
 
     def __init__(
         self,
@@ -51,6 +53,7 @@ class DingtalkChannel(Channel):
         self._chat_sessions: dict[str, str] = {}
         self._session_meta: dict[str, DingtalkSessionMeta] = {}
         self._pending_questions: dict[str, DingtalkPendingQuestion] = {}
+        self._recent_inbound_message_ids: OrderedDict[str, None] = OrderedDict()
 
     def get_channel_id(self) -> str:
         return "dingtalk"
@@ -80,6 +83,13 @@ class DingtalkChannel(Channel):
 
     async def handle_incoming_message(self, message: DingtalkInboundMessage) -> None:
         if not message.text.strip():
+            return
+        if self._is_duplicate_incoming_message(message):
+            logger.info(
+                "Ignore duplicate DingTalk message: conversation_id=%s message_id=%s",
+                message.conversation_id,
+                message.message_id,
+            )
             return
         if not self._should_respond(message):
             logger.info(
@@ -189,6 +199,21 @@ class DingtalkChannel(Channel):
         if message.conversation_type == "p2p":
             return f"dm:{message.sender_staff_id or message.sender_id}"
         return f"group:{message.conversation_id}"
+
+    def _is_duplicate_incoming_message(self, message: DingtalkInboundMessage) -> bool:
+        message_id = str(message.message_id or "").strip()
+        if not message_id:
+            return False
+
+        dedup_key = f"{message.conversation_id}:{message_id}"
+        if dedup_key in self._recent_inbound_message_ids:
+            self._recent_inbound_message_ids.move_to_end(dedup_key)
+            return True
+
+        self._recent_inbound_message_ids[dedup_key] = None
+        if len(self._recent_inbound_message_ids) > self._max_recent_message_ids:
+            self._recent_inbound_message_ids.popitem(last=False)
+        return False
 
     def _should_respond(self, message: DingtalkInboundMessage) -> bool:
         if message.conversation_type == "p2p":

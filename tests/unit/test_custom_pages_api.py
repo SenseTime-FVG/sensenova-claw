@@ -330,3 +330,92 @@ def test_preview_endpoint_proxies_standalone_workspace_server(app: FastAPI, clie
     state = state_resp.json()
     assert state["workspace_slug"] == page["slug"]
     assert isinstance(state["prepared_units"], list)
+
+
+def test_delete_custom_page_keeps_shared_agent(app: FastAPI, client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/custom-pages",
+        json={
+            "name": "共享助手功能",
+            "description": "复用 default agent 的功能",
+            "agent_id": "default",
+            "create_dedicated_agent": False,
+            "workspace_mode": "scratch",
+            "builder_type": "builtin",
+            "generation_prompt": "创建一个复用 default agent 的功能",
+        },
+    )
+    page = create_resp.json()
+
+    resp = client.delete(f"/api/custom-pages/{page['slug']}")
+
+    assert resp.status_code == 200
+    assert app.state.agent_registry.get("default") is not None
+    assert client.get("/api/custom-pages").json()["pages"] == []
+
+
+def test_delete_custom_page_removes_dedicated_agent(app: FastAPI, client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/custom-pages",
+        json={
+            "name": "专属助手功能",
+            "description": "创建专属 agent 的功能",
+            "agent_id": "default",
+            "create_dedicated_agent": True,
+            "workspace_mode": "scratch",
+            "builder_type": "builtin",
+            "generation_prompt": "创建一个带专属 agent 的功能",
+        },
+    )
+    page = create_resp.json()
+    prompt_path = Path(app.state.sensenova_claw_home) / "agents" / page["agent_id"] / "SYSTEM_PROMPT.md"
+
+    resp = client.delete(f"/api/custom-pages/{page['slug']}")
+
+    assert resp.status_code == 200
+    assert app.state.agent_registry.get(page["agent_id"]) is None
+    assert not prompt_path.exists()
+
+
+def test_delete_custom_page_preserves_workspace_by_default(app: FastAPI, client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/custom-pages",
+        json={
+            "name": "保留目录功能",
+            "description": "默认删除不应物理删除目录",
+            "agent_id": "default",
+            "create_dedicated_agent": False,
+            "workspace_mode": "scratch",
+            "builder_type": "builtin",
+            "generation_prompt": "默认删除时保留 workspace 目录",
+        },
+    )
+    page = create_resp.json()
+    workspace_path = Path(app.state.sensenova_claw_home) / "workdir" / page["workspace_root"]
+
+    resp = client.delete(f"/api/custom-pages/{page['slug']}")
+
+    assert resp.status_code == 200
+    assert workspace_path.exists()
+
+
+def test_delete_custom_page_with_delete_workspace_removes_workspace_dir(app: FastAPI, client: TestClient) -> None:
+    create_resp = client.post(
+        "/api/custom-pages",
+        json={
+            "name": "删除目录功能",
+            "description": "勾选后应删除目录",
+            "agent_id": "default",
+            "create_dedicated_agent": False,
+            "workspace_mode": "scratch",
+            "builder_type": "builtin",
+            "generation_prompt": "删除功能时物理删除 workspace 目录",
+        },
+    )
+    page = create_resp.json()
+    workspace_path = Path(app.state.sensenova_claw_home) / "workdir" / page["workspace_root"]
+
+    resp = client.delete(f"/api/custom-pages/{page['slug']}?delete_workspace=true")
+
+    assert resp.status_code == 200
+    assert not workspace_path.exists()

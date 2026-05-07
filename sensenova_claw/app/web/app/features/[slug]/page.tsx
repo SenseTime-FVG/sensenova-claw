@@ -6,6 +6,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { WorkbenchShell } from '@/components/workbench/WorkbenchShell';
 import { MiniAppBuildFeed } from '@/components/workbench/MiniAppBuildFeed';
 import { ChatPanel } from '@/components/chat/ChatPanel';
+import { FeatureDeleteDialog } from '@/components/features/FeatureDeleteDialog';
 import { useSession, useMessages } from '@/contexts/ws';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -235,6 +236,7 @@ export default function DynamicFeaturePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [buildPrompt, setBuildPrompt] = useState('');
   const [buildSubmitting, setBuildSubmitting] = useState(false);
   const [localEvents, setLocalEvents] = useState<LocalEvent[]>([]);
@@ -839,6 +841,14 @@ export default function DynamicFeaturePage() {
             </div>
 
             <div className="flex items-center gap-2">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setDeleteDialogOpen(true)}
+                data-testid="feature-delete-button"
+              >
+                删除功能
+              </Button>
               <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
                 {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                 <span className="ml-1">刷新</span>
@@ -873,6 +883,13 @@ export default function DynamicFeaturePage() {
           </div>
         </div>
       </WorkbenchShell>
+      <FeatureDeleteDialog
+        open={deleteDialogOpen}
+        featureId={page.slug}
+        featureName={page.name}
+        onOpenChange={setDeleteDialogOpen}
+        onDeleted={() => router.replace('/create-feature')}
+      />
     </DashboardLayout>
   );
 }

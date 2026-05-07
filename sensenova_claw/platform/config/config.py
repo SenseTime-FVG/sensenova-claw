@@ -57,7 +57,7 @@ DEFAULT_CONFIG_PATH = get_default_config_path()
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "system": {
-        "log_level": "DEBUG",
+        "log_level": "INFO",
         "workspace_dir": "",                          # 已废弃，由 sensenova_claw_home 替代
         "database_path": "",                          # 空=自动用 {sensenova_claw_home}/data/sensenova-claw.db
         "max_concurrent_sessions": 10,

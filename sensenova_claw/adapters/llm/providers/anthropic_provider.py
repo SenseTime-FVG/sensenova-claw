@@ -177,13 +177,43 @@ class AnthropicProvider(LLMProvider):
         normalized: list[dict[str, Any]] = []
         for message in messages:
             role = message.get("role")
-            if role == "assistant":
+            if role == "user" and message.get("attachments"):
+                normalized.append(self._normalize_user_message(message))
+            elif role == "assistant":
                 normalized.append(self._normalize_assistant_message(message))
             elif role == "tool":
                 normalized.append(self._normalize_tool_message(message))
             else:
                 normalized.append({"role": role, "content": message.get("content", "")})
         return self._align_tool_results(normalized)
+
+    def _normalize_user_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        attachments = message.get("attachments") or []
+        blocks: list[dict[str, Any]] = []
+
+        content = message.get("content", "")
+        if isinstance(content, str) and content:
+            blocks.append({"type": "text", "text": content})
+
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+            if str(attachment.get("kind") or "") != "image":
+                continue
+            mime_type = str(attachment.get("mime_type") or "").strip()
+            data = str(attachment.get("data") or "").strip()
+            if not mime_type or not data:
+                continue
+            blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime_type,
+                    "data": data,
+                },
+            })
+
+        return {"role": "user", "content": blocks or [{"type": "text", "text": ""}]}
 
     def _align_tool_results(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """确保每个 assistant tool_use 后面都有对应的 tool_result。"""

@@ -1,10 +1,10 @@
-# Python Data Visualization Skill for OpenClaw
+# Python Data Visualization Skill
 
 Professional data visualization using Python's leading visualization libraries (matplotlib, seaborn, plotly).
 
 ## Overview
 
-Create publication-quality static charts, statistical visualizations, and interactive plots for OpenClaw agents. This skill provides comprehensive examples and best practices for data-driven graphics.
+Create publication-quality static charts, statistical visualizations, and interactive plots. This skill provides comprehensive examples and best practices for data-driven graphics.
 
 ## Features
 
@@ -24,37 +24,17 @@ Create publication-quality static charts, statistical visualizations, and intera
 ### Included Resources
 - **6 example scripts** - Ready-to-run demonstrations
 - **2 reference guides** - Color theory and statistical visualization best practices
-- **SKILL.md** - Comprehensive OpenClaw skill guide
+- **SKILL.md** - Comprehensive skill guide
 
 ## Installation
 
-### For OpenClaw Users
-
-```bash
-# Via ClawHub
-clawhub install python-dataviz
-
-# Or manually
-cd ~/.openclaw/workspace/skills
-unzip python-dataviz.skill
-```
-
 ### Setup Environment
 
-**With pip:**
 ```bash
-cd ~/.openclaw/workspace/skills/python-dataviz
+cd .sensenova-claw/skills/python-dataviz
 python3 -m venv .venv
 source .venv/bin/activate
 pip install .
-```
-
-**With uv (faster):**
-```bash
-cd ~/.openclaw/workspace/skills/python-dataviz
-uv venv
-source .venv/bin/activate
-uv pip install .
 ```
 
 ## Quick Start
@@ -62,7 +42,7 @@ uv pip install .
 ### Run Example Scripts
 
 ```bash
-cd ~/.openclaw/workspace/skills/python-dataviz
+cd .sensenova-claw/skills/python-dataviz
 source .venv/bin/activate
 
 # Generate all bar chart variations
@@ -127,7 +107,7 @@ See `scripts/` directory for complete examples.
 
 ## Documentation
 
-- **SKILL.md** - OpenClaw skill guide (library comparison, chart selection, troubleshooting)
+- **SKILL.md** - Skill guide (library comparison, chart selection, troubleshooting)
 - **references/colors.md** - Color palettes, accessibility, best practices
 - **references/statistical.md** - Statistical visualization patterns and anti-patterns
 
@@ -140,24 +120,6 @@ See `scripts/` directory for complete examples.
 - numpy >= 1.26.0
 - kaleido >= 0.2.1
 
-## Contributing
-
-This is an OpenClaw skill designed for AI agents. For issues or improvements:
-
-1. Open an issue on GitHub
-2. Publish improvements via ClawHub
-3. Submit a pull request
-
 ## License
 
-MIT License - See LICENSE file for details
-
-## Author
-
-Created for the OpenClaw ecosystem. Published on [ClawHub](https://clawhub.com).
-
-## Links
-
-- [OpenClaw Documentation](https://docs.openclaw.ai)
-- [ClawHub](https://clawhub.com)
-- [OpenClaw Discord](https://discord.com/invite/clawd)
+MIT License

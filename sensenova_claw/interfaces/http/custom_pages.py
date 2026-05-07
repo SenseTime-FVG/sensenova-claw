@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from sensenova_claw.capabilities.miniapps.service import MiniAppService
@@ -161,9 +161,13 @@ async def update_custom_page(request: Request, page_id: str, body: CustomPageUpd
 
 
 @router.delete("/{page_id}")
-async def delete_custom_page(request: Request, page_id: str):
+async def delete_custom_page(
+    request: Request,
+    page_id: str,
+    delete_workspace: bool = Query(False),
+):
     service = _get_service(request)
-    deleted = await service.delete_page(page_id)
+    deleted = await service.delete_page(page_id, delete_workspace=delete_workspace)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"custom page not found: {page_id}")
     return {"ok": True}

@@ -144,7 +144,7 @@ async def test_on_timer_calls_on_trigger_for_due_jobs():
 
     await scheduler._on_timer()
 
-    on_trigger.assert_awaited_once_with(job)
+    on_trigger.assert_awaited_once_with(job, None)
 
 
 @pytest.mark.asyncio

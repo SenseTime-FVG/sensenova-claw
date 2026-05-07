@@ -31,6 +31,7 @@ import type { GlobalAgentActivity, ProactiveResultItem, PrefillInputPayload, Rec
 import type { PendingInteraction, PendingQuestionInteraction } from '@/components/chat/QuestionDialog';
 import type {
   ChatMessage,
+  ChatAttachmentRef,
   SessionItem,
   TaskGroup,
   StepItem,
@@ -52,6 +53,7 @@ export interface ChatSessionContextValue {
   createSession: (agentId: string, taskId?: string) => void;
   startNewChat: () => void;
   deleteSession: (sessionId: string) => Promise<void>;
+  renameSession: (sessionId: string, title: string) => Promise<boolean>;
   resetIfNeeded: () => void;
   cleanupEmptySession: () => void;
 
@@ -65,6 +67,7 @@ export interface ChatSessionContextValue {
     contextFiles?: ContextFileRef[],
     agentId?: string,
     recommendation?: RecommendationSendMeta | null,
+    attachments?: ChatAttachmentRef[],
   ) => void;
 
   // 任务列表
@@ -163,6 +166,7 @@ export function useChatSession(): ChatSessionContextValue {
     createSession: session.createSession,
     startNewChat: session.startNewChat,
     deleteSession: session.deleteSession,
+    renameSession: session.renameSession,
     resetIfNeeded: session.resetIfNeeded,
     cleanupEmptySession: session.cleanupEmptySession,
     sessions: session.sessions,

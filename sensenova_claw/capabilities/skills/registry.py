@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import yaml
 from pathlib import Path
 from typing import Any
 
 from sensenova_claw.platform.config.workspace import default_sensenova_claw_home
+
+
+logger = logging.getLogger(__name__)
 
 
 class Skill:
@@ -232,8 +236,51 @@ class SkillRegistry:
     def _check_binary_deps(self, skill: Skill) -> bool:
         """检查 skill 所需的二进制依赖是否可用"""
         metadata = self._parse_metadata(skill)
-        requires = (metadata.get("sensenova-claw") or metadata.get("sensenova_claw") or {}).get("requires", {})
+        if not isinstance(metadata, dict):
+            logger.error(
+                "Skipping skill %s: metadata must be a mapping, got %s (%s)",
+                skill.name,
+                type(metadata).__name__,
+                skill.path / "SKILL.md",
+            )
+            return False
+
+        if "sensenova-claw" in metadata:
+            sensenova_metadata = metadata["sensenova-claw"]
+        elif "sensenova_claw" in metadata:
+            sensenova_metadata = metadata["sensenova_claw"]
+        else:
+            sensenova_metadata = {}
+
+        if not isinstance(sensenova_metadata, dict):
+            logger.error(
+                "Skipping skill %s: metadata.sensenova-claw must be a mapping, got %s (%s)",
+                skill.name,
+                type(sensenova_metadata).__name__,
+                skill.path / "SKILL.md",
+            )
+            return False
+
+        requires = sensenova_metadata.get("requires", {})
+        if not isinstance(requires, dict):
+            logger.error(
+                "Skipping skill %s: metadata.sensenova-claw.requires must be a mapping, got %s (%s)",
+                skill.name,
+                type(requires).__name__,
+                skill.path / "SKILL.md",
+            )
+            return False
+
         bins = requires.get("bins", [])
+        if not isinstance(bins, list):
+            logger.error(
+                "Skipping skill %s: metadata.sensenova-claw.requires.bins must be a list, got %s (%s)",
+                skill.name,
+                type(bins).__name__,
+                skill.path / "SKILL.md",
+            )
+            return False
+
         for bin_name in bins:
             if not shutil.which(bin_name):
                 return False

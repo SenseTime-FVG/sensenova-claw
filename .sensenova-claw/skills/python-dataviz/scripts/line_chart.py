@@ -4,10 +4,16 @@ Line Chart Examples - matplotlib and seaborn
 Usage: python line_chart.py
 """
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
+
+# 输出目录
+OUTPUT_DIR = Path(__file__).parent.parent / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Set style
 sns.set_theme(style="whitegrid")
@@ -24,7 +30,7 @@ def simple_line():
     plt.ylabel('Revenue ($)', fontsize=12)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('line_simple.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'line_simple.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: line_simple.png")
 
 # Example 2: Multiple lines
@@ -45,7 +51,7 @@ def multiple_lines():
     plt.legend(frameon=True, shadow=True, fontsize=10)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('line_multiple.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'line_multiple.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: line_multiple.png")
 
 # Example 3: Time series with pandas
@@ -65,7 +71,7 @@ def time_series():
     plt.grid(alpha=0.3)
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig('line_timeseries.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'line_timeseries.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: line_timeseries.png")
 
 # Example 4: Line with confidence interval
@@ -93,7 +99,7 @@ def confidence_interval():
     plt.legend(frameon=True, shadow=True)
     plt.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig('line_confidence.png', dpi=300, bbox_inches='tight')
+    plt.savefig(OUTPUT_DIR / 'line_confidence.png', dpi=300, bbox_inches='tight')
     print("✓ Saved: line_confidence.png")
 
 if __name__ == '__main__':

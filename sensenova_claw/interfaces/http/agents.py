@@ -61,6 +61,37 @@ def _agent_prompt_path(request: Request, agent_id: str) -> Path:
     return _sensenova_claw_home_path(request) / "agents" / agent_id / SYSTEM_PROMPT_FILENAME
 
 
+def _remove_dedicated_miniapp_pages(request: Request, agent_id: str) -> None:
+    custom_pages_path = _sensenova_claw_home_path(request) / "custom_pages.json"
+    if not custom_pages_path.exists():
+        return
+
+    try:
+        raw_pages = json.loads(custom_pages_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("读取 custom_pages.json 失败，跳过 mini-app 清理", exc_info=True)
+        return
+
+    if not isinstance(raw_pages, list):
+        return
+
+    filtered_pages = [
+        page for page in raw_pages
+        if not (
+            isinstance(page, dict)
+            and str(page.get("agent_id") or "") == agent_id
+            and bool(page.get("create_dedicated_agent", False))
+        )
+    ]
+    if len(filtered_pages) == len(raw_pages):
+        return
+
+    custom_pages_path.write_text(
+        json.dumps(filtered_pages, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 async def _get_agent_detail_mcp_runtime(request: Request, servers: dict[str, Any]) -> SessionMcpRuntime:
     fingerprint = build_mcp_servers_fingerprint(servers)
     runtime = getattr(request.app.state, "_agent_detail_mcp_runtime", None)
@@ -348,6 +379,73 @@ async def list_agents(request: Request):
     return result
 
 
+_ANALYTICS_RANGE_SECONDS: dict[str, int | None] = {
+    "1d": 86400,
+    "7d": 7 * 86400,
+    "30d": 30 * 86400,
+    "all": None,
+}
+
+
+@router.get("/analytics")
+async def get_agents_analytics(request: Request, range: str = "7d"):
+    """按 agent 维度返回使用聚合：会话/轮次/LLM 调用/工具调用。
+
+    range 取值：1d / 7d / 30d / all；sessions 与 last_active 统计的是全量，
+    turns / llm_calls / tool_calls 受 range 过滤。
+    """
+    if range not in _ANALYTICS_RANGE_SECONDS:
+        raise HTTPException(status_code=400, detail=f"Invalid range: {range}")
+    seconds = _ANALYTICS_RANGE_SECONDS[range]
+    since_ts = 0.0 if seconds is None else time.time() - seconds
+
+    registry = _get_agent_registry(request)
+    services = _get_services(request)
+    by_agent_raw = await services.repo.get_agent_analytics(since_ts)
+
+    rows: list[dict[str, Any]] = []
+    totals = {"sessions": 0, "turns": 0, "llm_calls": 0, "tool_calls": 0}
+    seen: set[str] = set()
+
+    def _append_row(agent_id: str, name: str, info: dict[str, Any]) -> None:
+        row = {
+            "agent_id": agent_id,
+            "name": name,
+            "sessions": int(info.get("sessions", 0)),
+            "turns": int(info.get("turns", 0)),
+            "llm_calls": int(info.get("llm_calls", 0)),
+            "tool_calls": int(info.get("tool_calls", 0)),
+            "last_active": float(info.get("last_active", 0.0) or 0.0),
+        }
+        rows.append(row)
+        totals["sessions"] += row["sessions"]
+        totals["turns"] += row["turns"]
+        totals["llm_calls"] += row["llm_calls"]
+        totals["tool_calls"] += row["tool_calls"]
+
+    # 先按注册表顺序输出（保证所有已注册 agent 都出现，哪怕无使用）
+    for cfg in registry.list_all():
+        info = by_agent_raw.get(cfg.id, {})
+        _append_row(cfg.id, cfg.name, info)
+        seen.add(cfg.id)
+
+    # 再补上已删除但还有历史会话的 agent（例如 default 回退等）
+    for agent_id, info in by_agent_raw.items():
+        if agent_id in seen:
+            continue
+        _append_row(agent_id, agent_id, info)
+
+    # 排序：按 sessions desc，其次 turns desc
+    rows.sort(key=lambda r: (r["sessions"], r["turns"]), reverse=True)
+
+    return {
+        "range": range,
+        "since_ts": since_ts,
+        "totals": totals,
+        "agents": rows,
+    }
+
+
 @router.get("/{agent_id}")
 async def get_agent(agent_id: str, request: Request):
     """获取 Agent 详情"""
@@ -466,6 +564,7 @@ async def delete_agent(agent_id: str, request: Request):
     if not registry.get(agent_id):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
+    _remove_dedicated_miniapp_pages(request, agent_id)
     await _persist_agent_record(request, agent_id, None)
     _persist_agent_prompt(request, agent_id, "")
     registry.delete(agent_id)

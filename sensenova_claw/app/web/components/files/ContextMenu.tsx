@@ -8,6 +8,7 @@ export interface ContextMenuItem {
   onClick: () => void;
   disabled?: boolean;
   loading?: boolean;
+  testId?: string;
 }
 
 interface ContextMenuProps {
@@ -15,9 +16,10 @@ interface ContextMenuProps {
   y: number;
   items: ContextMenuItem[];
   onClose: () => void;
+  testId?: string;
 }
 
-export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
+export function ContextMenu({ x, y, items, onClose, testId }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -56,12 +58,14 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   return (
     <div
       ref={menuRef}
+      data-testid={testId}
       className="fixed z-[9999] min-w-[160px] rounded-lg border border-border/60 bg-popover shadow-lg py-1 animate-in fade-in-0 zoom-in-95 duration-100"
       style={{ left: x, top: y }}
     >
       {items.map((item, i) => (
         <button
           key={i}
+          data-testid={item.testId}
           className="flex w-full items-center gap-2 px-3 py-2 text-xs text-popover-foreground hover:bg-muted/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           onClick={() => { item.onClick(); onClose(); }}
           disabled={item.disabled || item.loading}

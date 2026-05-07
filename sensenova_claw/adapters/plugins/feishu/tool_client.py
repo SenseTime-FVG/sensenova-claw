@@ -11,6 +11,10 @@ from typing import Any
 import httpx
 from lark_oapi.core.token import TokenManager
 
+from sensenova_claw.platform.security.ssl import CERTIFI_SSL_CONTEXT
+
+_SSL_CONTEXT = CERTIFI_SSL_CONTEXT
+
 
 class FeishuToolError(RuntimeError):
     """飞书工具调用错误。"""
@@ -48,7 +52,7 @@ class FeishuToolClient:
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json; charset=utf-8",
         }
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=60, verify=_SSL_CONTEXT) as client:
             response = await client.request(
                 method=method,
                 url=f"https://open.feishu.cn{path}",
@@ -76,7 +80,7 @@ class FeishuToolClient:
         files = {
             file_field: (file_name, file_bytes, mime),
         }
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=120, verify=_SSL_CONTEXT) as client:
             response = await client.post(
                 f"https://open.feishu.cn{path}",
                 headers=headers,
@@ -86,7 +90,7 @@ class FeishuToolClient:
         return self._parse_json_response(response)
 
     async def download(self, url: str, *, max_bytes: int = 30 * 1024 * 1024) -> tuple[bytes, str]:
-        async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=120, follow_redirects=True, verify=_SSL_CONTEXT) as client:
             response = await client.get(url)
         response.raise_for_status()
         content = response.content

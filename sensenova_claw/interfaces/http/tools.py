@@ -12,7 +12,7 @@ import httpx
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
-from sensenova_claw.capabilities.tools.registry import _is_tool_config_enabled
+from sensenova_claw.capabilities.tools.registry import _TOOL_CONFIG_KEY_MAP
 from sensenova_claw.platform.secrets.refs import is_secret_ref
 
 logger = logging.getLogger(__name__)
@@ -181,6 +181,12 @@ VALIDATORS = {
 }
 
 
+def _is_tool_enabled_in_request_config(request: Request, tool_name: str) -> bool:
+    cfg = request.app.state.config
+    config_key = _TOOL_CONFIG_KEY_MAP.get(tool_name, f"tools.{tool_name}.enabled")
+    return bool(cfg.get(config_key, True))
+
+
 class EnablePayload(BaseModel):
     enabled: bool
 
@@ -197,7 +203,7 @@ async def list_tools(request: Request):
 
     tools = []
     for name, tool in tool_registry._tools.items():
-        enabled = _is_tool_config_enabled(name)
+        enabled = _is_tool_enabled_in_request_config(request, name)
         api_key_spec = TOOL_API_KEY_SPECS.get(name)
         tools.append({
             "id": f"tool-{name}",
@@ -223,8 +229,8 @@ async def toggle_tool(tool_name: str, body: EnablePayload, request: Request):
         raise HTTPException(404, f"Tool 不存在: {tool_name}")
 
     config_manager = request.app.state.config_manager
-    # file_operations 分组：read_file/write_file/edit/apply_patch 共享一个开关
-    FILE_OPS_TOOLS = {"read_file", "write_file", "edit", "apply_patch"}
+    # file_operations 分组：read_file/write_file/edit_file/apply_patch 共享一个开关
+    FILE_OPS_TOOLS = {"read_file", "write_file", "edit_file", "apply_patch"}
     if tool_name in FILE_OPS_TOOLS:
         await config_manager.update("tools", {"file_operations": {"enabled": body.enabled}})
     else:

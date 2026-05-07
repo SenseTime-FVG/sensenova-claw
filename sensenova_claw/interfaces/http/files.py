@@ -11,10 +11,13 @@ import platform
 import re
 import string
 import subprocess
+import tempfile
 import time
+import zipfile
 from pathlib import Path
 from urllib.parse import unquote
 
+from starlette.background import BackgroundTask
 from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -316,6 +319,56 @@ async def list_workdir_slides(
                     })
 
     return {"dir": dir, "slides": slides}
+
+
+@router.get("/files/workdir-archive")
+async def download_workdir_archive(
+    request: Request,
+    dir: str = Query(..., description="相对于 workdir 的目录路径"),
+):
+    """将指定 workdir 子目录打包为 zip 并下载。"""
+    workspace = _resolve_workspace_dir(request)
+    workdir = workspace / "workdir"
+    target = workdir / dir
+
+    try:
+        resolved = target.resolve()
+    except (OSError, ValueError):
+        raise HTTPException(400, f"无效路径: {dir}")
+
+    try:
+        resolved.relative_to(workdir.resolve())
+    except ValueError:
+        raise HTTPException(403, "路径越界")
+
+    if not resolved.exists() or not resolved.is_dir():
+        raise HTTPException(404, f"目录不存在: {dir}")
+
+    if not any(resolved.iterdir()):
+        raise HTTPException(400, f"目录为空: {dir}")
+
+    deck_name = resolved.name or "deck"
+    temp_zip = tempfile.NamedTemporaryFile(prefix=f"{deck_name}_", suffix=".zip", delete=False)
+    temp_zip_path = Path(temp_zip.name)
+    temp_zip.close()
+
+    try:
+        with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for file_path in resolved.rglob("*"):
+                if not file_path.is_file():
+                    continue
+                arcname = file_path.relative_to(resolved)
+                zf.write(file_path, arcname=str(arcname))
+    except Exception:
+        temp_zip_path.unlink(missing_ok=True)
+        raise
+
+    return FileResponse(
+        path=str(temp_zip_path),
+        filename=f"{deck_name}.zip",
+        media_type="application/zip",
+        background=BackgroundTask(lambda: temp_zip_path.unlink(missing_ok=True)),
+    )
 
 
 def _encode_dir_token(dir_path: str) -> str:

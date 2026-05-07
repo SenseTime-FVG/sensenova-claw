@@ -1,11 +1,16 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, renameSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 function readJsonIfExists(filePath) {
   if (!existsSync(filePath)) {
     return null;
   }
-  return JSON.parse(readFileSync(filePath, 'utf-8'));
+  try {
+    return JSON.parse(readFileSync(filePath, 'utf-8'));
+  } catch (e) {
+    process.stderr.write(`[WARN] 无法解析 ${filePath}，跳过校验: ${e.message}\n`);
+    return null;
+  }
 }
 
 function parsePageNumberFromFile(htmlFile) {
@@ -47,12 +52,18 @@ function collectMotifMarkers(html) {
   return markers;
 }
 
-function ensureReviewArtifact(deckDir) {
+function ensureReviewArtifact(deckDir, opts = {}) {
+  const reviewMd = resolve(deckDir, 'review.md');
   const reviewJson = resolve(deckDir, 'review.json');
+  const hasReviewMd = existsSync(reviewMd);
   const hasReviewJson = existsSync(reviewJson);
 
-  if (!hasReviewJson) {
-    throw new Error('缺少 review 工件：必须先生成 review.json，才能继续导出');
+  if (!hasReviewMd && !hasReviewJson) {
+    if (opts.force) {
+      process.stderr.write('[WARN] 缺少 review 工件，但 --force 已设置，继续导出\n');
+      return;
+    }
+    throw new Error('缺少 review 工件：必须先生成 review.md 或 review.json，才能继续导出');
   }
 
   let isBlocked = false;
@@ -73,7 +84,21 @@ function ensureReviewArtifact(deckDir) {
     }
   }
 
+  if (hasReviewMd && !isBlocked) {
+    const reviewText = readFileSync(reviewMd, 'utf-8');
+    if (
+      /status:\s*(block|blocked|fail|failed|reject|rejected)/i.test(reviewText) ||
+      /阻塞|不可交付|不能直接交付/.test(reviewText)
+    ) {
+      isBlocked = true;
+    }
+  }
+
   if (isBlocked) {
+    if (opts.force) {
+      process.stderr.write('[WARN] review 标记为阻塞，但 --force 已设置，继续导出\n');
+      return;
+    }
     throw new Error('review 标记为阻塞，必须先修复 review 中的问题，不能继续导出');
   }
 }
@@ -168,7 +193,7 @@ function shouldRequireVisibleTitle(variant) {
   return !/(hidden|none|no-header|no_header|titleless)/.test(strategy);
 }
 
-function ensureVisibleTitles(deckDir, htmlFiles) {
+function ensureVisibleTitles(deckDir, htmlFiles, opts = {}) {
   const styleSpec = readJsonIfExists(resolve(deckDir, 'style-spec.json'));
   const storyboard = readJsonIfExists(resolve(deckDir, 'storyboard.json'));
   if (!styleSpec || !storyboard) {
@@ -213,11 +238,15 @@ function ensureVisibleTitles(deckDir, htmlFiles) {
   }
 
   if (errors.length > 0) {
+    if (opts.force) {
+      process.stderr.write(`[WARN] 页面标题层级校验未通过，但 --force 已设置，继续导出:\n- ${errors.join('\n- ')}\n`);
+      return;
+    }
     throw new Error(`页面标题层级校验失败:\n- ${errors.join('\n- ')}`);
   }
 }
 
-function ensureRealPhotoCoverage(deckDir, htmlFiles) {
+function ensureRealPhotoCoverage(deckDir, htmlFiles, opts = {}) {
   const storyboard = readJsonIfExists(resolve(deckDir, 'storyboard.json'));
   if (!storyboard) {
     return;
@@ -273,6 +302,10 @@ function ensureRealPhotoCoverage(deckDir, htmlFiles) {
   }
 
   if (errors.length > 0) {
+    if (opts.force) {
+      process.stderr.write(`[WARN] 页面真实图片校验未通过，但 --force 已设置，继续导出:\n- ${errors.join('\n- ')}\n`);
+      return;
+    }
     throw new Error(`页面真实图片校验失败:\n- ${errors.join('\n- ')}`);
   }
 }
@@ -290,7 +323,7 @@ function ensureDecorativeMarkers(deckDir, htmlFiles) {
   const pages = new Map(
     (storyboard.pages || []).map(page => [Number(page.page_number), page]),
   );
-  const errors = [];
+  const warnings = [];
 
   for (const htmlFile of htmlFiles) {
     const fileName = htmlFile.split('/').pop() || '';
@@ -315,10 +348,21 @@ function ensureDecorativeMarkers(deckDir, htmlFiles) {
       if (!Array.isArray(recipe) || recipe.length === 0) {
         continue;
       }
+      const oppositeLayer = layer === 'bg-motif' ? 'fg-motif' : 'bg-motif';
       if (markers[layer].size === 0) {
-        errors.push(
-          `${fileName} 缺少 ${layer} 标记；请按 recipe 落地元素并写上 data-layer="${layer}" / data-motif-key`,
-        );
+        const crossLayerMatches = recipe
+          .map(item => item?.motif_key)
+          .filter(Boolean)
+          .filter(motifKey => markers[oppositeLayer].has(motifKey));
+        if (crossLayerMatches.length > 0) {
+          warnings.push(
+            `${fileName} 的 ${crossLayerMatches.join('、')} 落在 ${oppositeLayer} 而非 ${layer}；按降级模式继续导出`,
+          );
+        } else {
+          warnings.push(
+            `${fileName} 缺少 ${layer} 标记；recipe 仅作装饰性校验，按降级模式继续导出`,
+          );
+        }
         continue;
       }
       for (const item of recipe) {
@@ -327,20 +371,76 @@ function ensureDecorativeMarkers(deckDir, htmlFiles) {
           continue;
         }
         if (!markers[layer].has(motifKey)) {
-          errors.push(
-            `${fileName} 缺少 data-layer="${layer}" data-motif-key="${motifKey}"，无法证明已按 recipe 落地`,
-          );
+          if (markers[oppositeLayer].has(motifKey)) {
+            warnings.push(
+              `${fileName} 的 ${motifKey} 落在 ${oppositeLayer} 而非 ${layer}；按降级模式继续导出`,
+            );
+          } else {
+            warnings.push(
+              `${fileName} 缺少 data-layer="${layer}" data-motif-key="${motifKey}"；recipe 仅作装饰性校验，按降级模式继续导出`,
+            );
+          }
         }
       }
     }
   }
 
-  if (errors.length > 0) {
-    throw new Error(`页面装饰层校验失败:\n- ${errors.join('\n- ')}`);
+  if (warnings.length > 0) {
+    process.stderr.write(`警告: 页面装饰层校验未完全通过，继续导出:\n- ${warnings.join('\n- ')}\n`);
   }
 }
 
-export function ensureDeckPreconditions(deckDir) {
+/**
+ * 规范化 deck 目录结构：确保 page_*.html 位于 pages/ 子目录下。
+ * 如果 HTML 文件直接在 deckDir 下，则创建 pages/ 并移动文件，
+ * 同时重写文件内的相对资源路径（src / url(...)）。
+ */
+function normalizeDeckPages(deckDir) {
+  const pagesDir = resolve(deckDir, 'pages');
+  if (existsSync(pagesDir)) {
+    return;
+  }
+
+  const files = readdirSync(deckDir).filter(f => /^page_\d+\.html$/.test(f));
+  if (files.length === 0) {
+    return;
+  }
+
+  mkdirSync(pagesDir, { recursive: true });
+
+  for (const file of files) {
+    const srcPath = resolve(deckDir, file);
+    const destPath = resolve(pagesDir, file);
+    let content = readFileSync(srcPath, 'utf-8');
+
+    // 将相对资源路径提升一级（因为文件从 deckDir 移到了 pages/）
+    const attrPattern = /(src|href)\s*=\s*["']([^"']+)["']/g;
+    const urlPattern = /url\((["']?)([^"')]+)\1\)/g;
+
+    const rewrite = (match, p1, p2) => {
+      const val = p2;
+      if (
+        val.startsWith('http://') ||
+        val.startsWith('https://') ||
+        val.startsWith('/') ||
+        val.startsWith('data:') ||
+        val.startsWith('#') ||
+        val.startsWith('../')
+      ) {
+        return match;
+      }
+      return match.replace(val, `../${val}`);
+    };
+
+    content = content.replace(attrPattern, rewrite);
+    content = content.replace(urlPattern, rewrite);
+
+    writeFileSync(destPath, content, 'utf-8');
+    // 不删除原文件，避免破坏其他引用
+  }
+}
+
+export function ensureDeckPreconditions(deckDir, opts = {}) {
   if (!deckDir) {
     throw new Error('必须指定 --deck-dir 参数');
   }
@@ -348,11 +448,20 @@ export function ensureDeckPreconditions(deckDir) {
     throw new Error(`deck_dir 不存在: ${deckDir}`);
   }
 
-  ensureReviewArtifact(deckDir);
+  if (!opts.batch) {
+    ensureReviewArtifact(deckDir, opts);
+  }
 
-  const pagesDir = resolve(deckDir, 'pages');
+  let pagesDir;
+  if (opts.pagesDir) {
+    pagesDir = opts.pagesDir;
+  } else {
+    normalizeDeckPages(deckDir);
+    pagesDir = resolve(deckDir, 'pages');
+  }
+
   if (!existsSync(pagesDir)) {
-    throw new Error(`pages/ 目录不存在: ${pagesDir}`);
+    throw new Error(`pages 目录不存在: ${pagesDir}`);
   }
 
   const htmlFiles = readdirSync(pagesDir)
@@ -361,12 +470,14 @@ export function ensureDeckPreconditions(deckDir) {
     .map(f => resolve(pagesDir, f));
 
   if (htmlFiles.length === 0) {
-    throw new Error('pages/ 目录中没有 page_*.html 文件');
+    throw new Error(`pages 目录中没有 page_*.html 文件: ${pagesDir}`);
   }
 
-  ensureDecorativeMarkers(deckDir, htmlFiles);
-  ensureVisibleTitles(deckDir, htmlFiles);
-  ensureRealPhotoCoverage(deckDir, htmlFiles);
+  if (!opts.batch) {
+    ensureDecorativeMarkers(deckDir, htmlFiles);
+    ensureVisibleTitles(deckDir, htmlFiles, opts);
+    ensureRealPhotoCoverage(deckDir, htmlFiles, opts);
+  }
 
   return {
     pagesDir,

@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import ssl
 import types
 
+import aiohttp
 import pytest
 
 from sensenova_claw.adapters.plugins.discord.config import DiscordConfig
-from sensenova_claw.adapters.plugins.discord.runtime import DiscordRuntime, build_discord_intents, format_discord_runtime_error
+from sensenova_claw.adapters.plugins.discord.runtime import (
+    DiscordRuntime,
+    _SSL_CONTEXT,
+    build_discord_intents,
+    format_discord_runtime_error,
+)
 
 
 class _FakeIntents:
@@ -55,10 +62,12 @@ def test_runtime_initial_status_is_idle():
 @pytest.mark.asyncio
 async def test_runtime_start_returns_after_launching_connect_task(monkeypatch):
     events: list[str] = []
+    connector_values: list[aiohttp.BaseConnector | None] = []
 
     class _FakeClient:
-        def __init__(self, *, intents):
+        def __init__(self, *, intents, connector=None):
             self.intents = intents
+            connector_values.append(connector)
             self.user = types.SimpleNamespace(id="bot-1")
             self.close_called = False
 
@@ -88,6 +97,10 @@ async def test_runtime_start_returns_after_launching_connect_task(monkeypatch):
     assert runtime._sensenova_claw_status["status"] == "connecting"
     assert runtime._connect_task is not None
     assert runtime._connect_task.done() is False
+    assert connector_values
+    assert isinstance(connector_values[0], aiohttp.TCPConnector)
+    assert connector_values[0]._ssl is _SSL_CONTEXT  # type: ignore[attr-defined]
+    assert isinstance(_SSL_CONTEXT, ssl.SSLContext)
 
     await runtime.stop()
     assert "close" in events
