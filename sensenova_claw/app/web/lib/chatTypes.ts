@@ -221,6 +221,42 @@ export function parseEventPayload(event: Record<string, unknown>): Record<string
   return (event.payload || {}) as Record<string, unknown>;
 }
 
+function getEventTimestampMs(event: Record<string, unknown>): number {
+  const rawTimestamp = event.timestamp;
+  if (typeof rawTimestamp !== 'number' || !Number.isFinite(rawTimestamp)) {
+    return Date.now();
+  }
+  return rawTimestamp > 1_000_000_000_000 ? Math.round(rawTimestamp) : Math.round(rawTimestamp * 1000);
+}
+
+function resolvePersistedDurationMs(
+  payload: Record<string, unknown>,
+  {
+    turnId,
+    completedAtMs,
+    userTurnTimestampMs,
+    lastUserTimestampMs,
+  }: {
+    turnId?: string;
+    completedAtMs: number;
+    userTurnTimestampMs: Map<string, number>;
+    lastUserTimestampMs?: number;
+  },
+): number | undefined {
+  const rawDurationMs = payload.duration_ms;
+  if (typeof rawDurationMs === 'number' && Number.isFinite(rawDurationMs) && rawDurationMs >= 0) {
+    return rawDurationMs;
+  }
+
+  const startedAtMs = turnId ? userTurnTimestampMs.get(turnId) : lastUserTimestampMs;
+  if (typeof startedAtMs !== 'number' || !Number.isFinite(startedAtMs)) {
+    return undefined;
+  }
+
+  const delta = completedAtMs - startedAtMs;
+  return delta >= 0 ? delta : undefined;
+}
+
 export function findLatestAssistantTurnMessage(messages: ChatMessage[], turnId: string): ChatMessage | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
@@ -348,18 +384,26 @@ export function finalizePendingToolMessages(
 export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): ChatMessage[] {
   let rebuilt: ChatMessage[] = [];
   const toolMessageMap = new Map<string, string>();
+  const userTurnTimestampMs = new Map<string, number>();
+  let lastUserTimestampMs: number | undefined;
 
   for (const event of events) {
     const payload = parseEventPayload(event);
     const eventType = String(event.event_type || '');
     const turnId = typeof event.turn_id === 'string' ? event.turn_id : undefined;
+    const eventTimestampMs = getEventTimestampMs(event);
 
     if (eventType === 'user.input') {
+      lastUserTimestampMs = eventTimestampMs;
+      if (turnId) {
+        userTurnTimestampMs.set(turnId, eventTimestampMs);
+      }
       rebuilt.push({
         id: makeId(),
         role: 'user',
         content: String(payload.content || ''),
-        timestamp: Date.now(),
+        timestamp: eventTimestampMs,
+        turnId,
       });
       continue;
     }
@@ -383,7 +427,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
             id: makeId(),
             role: 'assistant',
             content,
-            timestamp: Date.now(),
+            timestamp: eventTimestampMs,
             thinkingContent: thinkingContent || undefined,
             thinkingState: thinkingContent ? 'streaming' : undefined,
           });
@@ -402,7 +446,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
         id: makeId(),
         role: 'tool',
         content: `Executing tool: ${payload.tool_name || ''}`,
-        timestamp: Date.now(),
+        timestamp: eventTimestampMs,
         turnId,
         toolInfo,
       };
@@ -456,12 +500,35 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
 
     if (eventType === 'agent.step_completed') {
       const response = String(payload.final_response || '') || String(((payload.result as Record<string, unknown> | undefined)?.content) || '');
+      const durationMs = resolvePersistedDurationMs(payload, {
+        turnId,
+        completedAtMs: eventTimestampMs,
+        userTurnTimestampMs,
+        lastUserTimestampMs,
+      });
       if (response) {
         if (turnId) {
-          rebuilt = upsertAssistantTurnMessage(rebuilt, turnId, {
+          const afterUpsert = upsertAssistantTurnMessage(rebuilt, turnId, {
             content: response,
             keepExistingContentWhenEmpty: true,
           });
+          if (durationMs === undefined) {
+            rebuilt = afterUpsert;
+          } else {
+            let attached = false;
+            for (let i = afterUpsert.length - 1; i >= 0; i--) {
+              const message = afterUpsert[i];
+              if (message.role === 'assistant' && message.turnId === turnId) {
+                rebuilt = [...afterUpsert];
+                rebuilt[i] = { ...message, durationMs };
+                attached = true;
+                break;
+              }
+            }
+            if (!attached) {
+              rebuilt = afterUpsert;
+            }
+          }
         } else {
           let lastAssistantIdx = -1;
           for (let i = rebuilt.length - 1; i >= 0; i--) {
@@ -473,10 +540,13 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
 
           if (lastAssistantIdx !== -1 && rebuilt[lastAssistantIdx].content === response) {
             // 内容相同，保持不变（thinking 默认展开）
+            if (durationMs !== undefined) {
+              rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], durationMs };
+            }
           } else if (lastAssistantIdx !== -1 && !rebuilt[lastAssistantIdx].content) {
-            rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], content: response };
+            rebuilt[lastAssistantIdx] = { ...rebuilt[lastAssistantIdx], content: response, durationMs };
           } else {
-            rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: Date.now() });
+            rebuilt.push({ id: makeId(), role: 'assistant', content: response, timestamp: eventTimestampMs, durationMs });
           }
         }
       }
@@ -495,7 +565,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
           id: makeId(),
           role: 'system',
           content: errorMessage || errorType,
-          timestamp: Date.now(),
+          timestamp: eventTimestampMs,
         });
       }
       continue;
@@ -505,7 +575,7 @@ export function rebuildMessagesFromEvents(events: Record<string, unknown>[]): Ch
       const metadata = (payload.metadata || {}) as Record<string, unknown>;
       const body = String(payload.body || payload.text || '');
       if (body && metadata.append_to_chat !== false) {
-        rebuilt.push({ id: makeId(), role: 'system', content: body, timestamp: Date.now() });
+        rebuilt.push({ id: makeId(), role: 'system', content: body, timestamp: eventTimestampMs });
       }
     }
   }
