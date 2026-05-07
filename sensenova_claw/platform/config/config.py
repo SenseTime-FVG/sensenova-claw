@@ -343,8 +343,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "temperature": 0.2,
             "tools": ["send_message", "ask_user", "write_file", "read_file"],
             "skills": [],
-            "can_send_message_to": ["plan-agent", "research-agent", "review-agent", "report-agent"],
+            "can_send_message_to": ["scout-agent", "plan-agent", "research-agent", "review-agent", "report-agent"],
             "max_send_depth": 3,
+        },
+        "scout-agent": {
+            "name": "Scout Agent",
+            "description": "快速侦察研究领域地形，建立领域认知，通过预研和用户澄清为后续规划提供认知基础",
+            "temperature": 0.3,
+            "tools": ["serper_search", "fetch_url", "ask_user", "write_file"],
+            "skills": ["search-code", "search-academic", "search-social-cn", "search-social-en"],
+            "can_send_message_to": None,
+            "enabled": True,
         },
         "plan-agent": {
             "name": "Plan Agent",

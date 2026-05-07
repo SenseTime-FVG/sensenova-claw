@@ -61,6 +61,18 @@ class TestConfig:
         assert cfg.get("agent.temperature") == 1.0
         assert cfg.get("agent.extra_body") == {"top_p": 0.95, "top_k": 20}
 
+    def test_default_config_includes_scout_agent(self):
+        scout = DEFAULT_CONFIG["agents"].get("scout-agent")
+
+        assert scout is not None
+        assert scout["name"] == "Scout Agent"
+        assert scout["description"] == "快速侦察研究领域地形，建立领域认知，通过预研和用户澄清为后续规划提供认知基础"
+        assert scout["temperature"] == 0.3
+        assert scout["tools"] == ["serper_search", "fetch_url", "ask_user", "write_file"]
+        assert scout["skills"] == ["search-code", "search-academic", "search-social-cn", "search-social-en"]
+        assert scout["can_send_message_to"] is None
+        assert scout["enabled"] is True
+
     def test_set_runtime(self, tmp_path):
         cfg = Config(config_path=tmp_path / "nonexist.yml")
         cfg.set("agent.model", "claude-opus")

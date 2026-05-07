@@ -40,6 +40,16 @@ class TestAgentRegistry:
         assert r.get("default") is not None
         assert r.get("res") is not None
 
+    def test_load_from_default_config_includes_scout_agent(self, tmp_path):
+        cfg = Config(config_path=tmp_path / "nonexist.yml")
+        r = AgentRegistry()
+        r.load_from_config(cfg.data)
+
+        scout = r.get("scout-agent")
+        assert scout is not None
+        assert scout.name == "Scout Agent"
+        assert scout.can_send_message_to is None
+
     def test_get_delegatable_all(self):
         r = AgentRegistry()
         r.register(AgentConfig.create(id="main", name="M", can_delegate_to=[]))
