@@ -59,8 +59,12 @@ COPY sensenova_claw/ sensenova_claw/
 RUN rm -rf sensenova_claw/app/web sensenova_claw/app/cli \
     && pip install --no-cache-dir . \
     && pip uninstall -y pip setuptools \
-    && rm -rf /usr/local/lib/python3.12/site-packages/lark_oapi/api/*/v* \
     && find /usr/local/lib/python3.12/site-packages -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+# 注意：不要 `rm -rf .../lark_oapi/api/*/v*` —— lark_oapi 有 55 个服务的
+# __init__.py 里写了 `from . import v1` 等 eager import，删掉版本目录会
+# 触发 ImportError（如 Feishu plugin 报 "cannot import name 'v1' from
+# partially initialized module 'lark_oapi.api.event'"）。代价 ~30MB，
+# 没办法精准 trim。
 
 # 前端构建产物
 COPY --from=frontend-build /build/.next/standalone /opt/sensenova-claw/web
