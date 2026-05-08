@@ -12,6 +12,7 @@ class TurnState:
     turn_id: str
     user_input: str
     messages: list[dict[str, Any]] = field(default_factory=list)
+    disable_tool_result_truncation: bool = False
     pending_tool_calls: set[str] = field(default_factory=set)
     pending_image_tool_messages: list[dict[str, Any]] = field(default_factory=list)
     tool_results: list[dict[str, Any]] = field(default_factory=list)

@@ -414,7 +414,12 @@ class AgentSessionWorker(SessionWorker):
             agent_config=self.agent_config,
             session_id=self.session_id,
         )
-        state = TurnState(turn_id=turn_id, user_input=content, messages=messages)
+        state = TurnState(
+            turn_id=turn_id,
+            user_input=content,
+            messages=messages,
+            disable_tool_result_truncation=bool(event.payload.get("disable_tool_result_truncation")),
+        )
         # 记录新消息的起始位置：跳过 system prompt(1条) + 旧历史
         state.history_offset = 1 + len(history)
         self.rt.state_store.set_turn(self.session_id, state)
@@ -615,6 +620,7 @@ class AgentSessionWorker(SessionWorker):
                             "arguments": call.get("arguments", {}),
                             "_agent_workdir": agent_workdir,
                             "_source_agent_id": self.agent_config.id if self.agent_config else "default",
+                            "_disable_result_truncation": state.disable_tool_result_truncation,
                         },
                     )
                 )

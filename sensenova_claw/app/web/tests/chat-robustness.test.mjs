@@ -120,6 +120,18 @@ test('聊天页面应提供自动批准所有工具开关并由 InteractionConte
   assert.match(interactionSource, /payload:\s*\{\s*tool_call_id:\s*toolCallId,\s*approved:\s*true\s*\}/);
 });
 
+test('聊天页面应提供关闭工具结果截断开关并随 user_input 发送', () => {
+  const chatInputSource = readSource('components/chat/ChatInput.tsx');
+  const chatContextSource = readSource('contexts/ChatSessionContext.tsx');
+  const messageSource = readSource('contexts/ws/MessageContext.tsx');
+
+  assert.match(chatInputSource, /data-testid="tool-result-truncation-toggle"/);
+  assert.match(chatInputSource, /关闭截断/);
+  assert.match(chatContextSource, /isToolResultTruncationDisabled/);
+  assert.match(messageSource, /TOOL_RESULT_TRUNCATION_STORAGE_KEY/);
+  assert.match(messageSource, /disable_tool_result_truncation: isToolResultTruncationDisabledRef\.current/);
+});
+
 test('历史恢复判断 turnActive 时应把 error.raised 视为终结事件', () => {
   const source = readSource('contexts/ws/MessageContext.tsx');
 

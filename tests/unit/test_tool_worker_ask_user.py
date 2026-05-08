@@ -133,6 +133,18 @@ async def test_truncate_result_saves_under_agent_session_dir(tmp_path, mock_bus,
     assert str(saved_files[0]) in result
 
 
+def test_disable_result_truncation_returns_full_result(worker):
+    """当前 turn 关闭截断时，超长工具结果应原样返回。"""
+    result = worker._truncate_result(
+        "x" * 100,
+        "call_no_truncate",
+        disable_truncation=True,
+    )
+
+    assert result == "x" * 100
+    assert "[内容已截断]" not in result
+
+
 @pytest.mark.asyncio
 async def test_ask_user_handler_publishes_source_agent_id(worker, mock_bus):
     """ask_user 事件应携带来源 agent_id。"""

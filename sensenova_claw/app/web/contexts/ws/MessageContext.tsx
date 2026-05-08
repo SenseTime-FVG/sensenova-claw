@@ -31,6 +31,8 @@ const AGENT_PAGE_MAP: Record<string, string> = {
   'ppt-agent': '/ppt',
 };
 
+const TOOL_RESULT_TRUNCATION_STORAGE_KEY = 'sensenova_claw_tool_result_truncation_disabled';
+
 /** 检查事件列表中 turn 是否仍在进行中：
  *  有 user_input 开启了 turn，但尚未收到终结事件。
  *  兼容两种事件格式：
@@ -91,6 +93,8 @@ export interface MessageContextValue {
   turnActive: boolean;
   /** 已发送终止请求，等待后端确认终态。 */
   turnCancelling: boolean;
+  isToolResultTruncationDisabled: boolean;
+  setToolResultTruncationDisabled: (disabled: boolean) => void;
   steps: StepItem[];
   taskProgress: TaskProgressItem[];
   proactiveResults: ProactiveResultItem[];
@@ -153,6 +157,8 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
   // turnActive: 从发送消息起为 true，仅在 turn_completed/turn_cancelled/error 时才变 false
   const [turnActive, setTurnActive] = useState(false);
   const [turnCancelling, setTurnCancelling] = useState(false);
+  const [isToolResultTruncationDisabled, setIsToolResultTruncationDisabled] = useState(false);
+  const isToolResultTruncationDisabledRef = useRef(false);
 
   // 步骤/进度
   const [rightSteps, setRightSteps] = useState<StepItem[]>([]);
@@ -164,6 +170,27 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
 
   // 推荐卡片预填输入
   const [pendingPrefill, setPendingPrefill] = useState<PrefillInputPayload | null>(null);
+
+  useEffect(() => {
+    let disabled = false;
+    try {
+      disabled = window.localStorage.getItem(TOOL_RESULT_TRUNCATION_STORAGE_KEY) === 'true';
+    } catch {
+      disabled = false;
+    }
+    isToolResultTruncationDisabledRef.current = disabled;
+    setIsToolResultTruncationDisabled(disabled);
+  }, []);
+
+  const setToolResultTruncationDisabled = useCallback((disabled: boolean) => {
+    isToolResultTruncationDisabledRef.current = disabled;
+    setIsToolResultTruncationDisabled(disabled);
+    try {
+      window.localStorage.setItem(TOOL_RESULT_TRUNCATION_STORAGE_KEY, disabled ? 'true' : 'false');
+    } catch {
+      // localStorage may be unavailable in restricted browser contexts.
+    }
+  }, []);
 
   const prefillInput = useCallback((value: string | PrefillInputPayload) => {
     if (typeof value === 'string') {
@@ -189,6 +216,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     contextFiles?: string[];
     meta?: Record<string, string>;
     attachments?: ChatAttachmentRef[];
+    disableToolResultTruncation?: boolean;
   } | null>(null);
   const pendingSessionBootstrapIdRef = useRef<string | null>(null);
 
@@ -638,9 +666,14 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         const newSid = event.session_id;
         if (!newSid) return;
         if (pendingInputRef.current) {
-          const { content, contextFiles, meta, attachments } = pendingInputRef.current;
+          const { content, contextFiles, meta, attachments, disableToolResultTruncation } = pendingInputRef.current;
           pendingSessionBootstrapIdRef.current = newSid;
-          const payload: Record<string, unknown> = { content, attachments: attachments || [], context_files: contextFiles || [] };
+          const payload: Record<string, unknown> = {
+            content,
+            attachments: attachments || [],
+            context_files: contextFiles || [],
+            disable_tool_result_truncation: Boolean(disableToolResultTruncation),
+          };
           if (meta) payload.meta = meta;
           wsSend({
             type: 'user_input',
@@ -682,6 +715,7 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     addMsg('user', content || `[图片] ${attachments?.length || 0}`, attachments);
 
     const filePaths = contextFiles?.map(f => f.path) || [];
+    const disableToolResultTruncation = isToolResultTruncationDisabledRef.current;
 
     // 构造 meta：当有 recommendation 信息时，附加 recommendation_id 供后端消费标记
     const meta: Record<string, string> | undefined =
@@ -690,7 +724,13 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         : undefined;
 
     if (!sessionIdRef.current) {
-      pendingInputRef.current = { content, contextFiles: filePaths, meta, attachments };
+      pendingInputRef.current = {
+        content,
+        contextFiles: filePaths,
+        meta,
+        attachments,
+        disableToolResultTruncation,
+      };
       markFrontendCreate();
       const sessionMeta: Record<string, string> = {
         title: content.slice(0, 20) || attachments?.[0]?.name || '图片对话',
@@ -702,7 +742,12 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
         timestamp: Date.now() / 1000,
       });
     } else {
-      const payload: Record<string, unknown> = { content, attachments: attachments || [], context_files: filePaths };
+      const payload: Record<string, unknown> = {
+        content,
+        attachments: attachments || [],
+        context_files: filePaths,
+        disable_tool_result_truncation: isToolResultTruncationDisabledRef.current,
+      };
       if (meta) payload.meta = meta;
       wsSend({
         type: 'user_input',
@@ -803,6 +848,8 @@ export function MessageProvider({ children }: { children: React.ReactNode }) {
     isTyping,
     turnActive,
     turnCancelling,
+    isToolResultTruncationDisabled,
+    setToolResultTruncationDisabled,
     steps: rightSteps,
     taskProgress: rightTaskProgress,
     proactiveResults,

@@ -146,8 +146,16 @@ class ToolSessionWorker(SessionWorker):
             return False
         return state_store.is_turn_cancelled(event.session_id, event.turn_id)
 
-    def _truncate_result(self, result: Any, tool_call_id: str, agent_id: str | None = None) -> Any:
+    def _truncate_result(
+        self,
+        result: Any,
+        tool_call_id: str,
+        agent_id: str | None = None,
+        disable_truncation: bool = False,
+    ) -> Any:
         """Token 截断：统一控制传给 LLM 的结果长度"""
+        if disable_truncation:
+            return result
         if self._is_image_block_result(result):
             return result
 
@@ -722,7 +730,12 @@ class ToolSessionWorker(SessionWorker):
                 tool.execute(**exec_kwargs, _session_id=event.session_id),
                 timeout=timeout,
             )
-            result = self._truncate_result(result, tool_call_id, agent_id=source_agent_id)
+            result = self._truncate_result(
+                result,
+                tool_call_id,
+                agent_id=source_agent_id,
+                disable_truncation=bool(event.payload.get("_disable_result_truncation")),
+            )
         except Exception as exc:  # noqa: BLE001
             success = False
             error = str(exc).strip() or type(exc).__name__

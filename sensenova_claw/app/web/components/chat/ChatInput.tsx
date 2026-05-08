@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback, forwardRef, useImperativeHandle, useEffect, useMemo } from 'react';
-import { Send, Square, Paperclip, File, FolderOpen, X, ShieldCheck } from 'lucide-react';
+import { Send, Square, Paperclip, File, FolderOpen, X, ShieldCheck, FileText } from 'lucide-react';
 import { useDrop } from 'react-dnd';
 import { TargetSelector } from './TargetSelector';
 import { SlashCommandMenu, useSlashCommand } from './SlashCommandMenu';
@@ -83,6 +83,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     sendCurrentSessionQuestionAnswer,
     isToolAutoApproveEnabled,
     setToolAutoApproveEnabled,
+    isToolResultTruncationDisabled,
+    setToolResultTruncationDisabled,
   } = useChatSession();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isComposingRef = useRef(false);
@@ -438,6 +440,22 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           >
             <ShieldCheck className="h-3 w-3" />
             {isToolAutoApproveEnabled ? '自动批准已开' : '自动批准工具'}
+          </button>
+          <button
+            type="button"
+            data-testid="tool-result-truncation-toggle"
+            onClick={() => setToolResultTruncationDisabled(!isToolResultTruncationDisabled)}
+            className={cn(
+              'ml-2 inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] font-medium transition-colors',
+              isToolResultTruncationDisabled
+                ? 'border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-900/30 dark:text-sky-300'
+                : 'border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground',
+            )}
+            aria-pressed={isToolResultTruncationDisabled}
+            title="开启后，本浏览器发送的新消息会要求工具返回完整结果"
+          >
+            <FileText className="h-3 w-3" />
+            {isToolResultTruncationDisabled ? '截断已关' : '关闭截断'}
           </button>
         </div>
 
