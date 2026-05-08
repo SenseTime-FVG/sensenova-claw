@@ -3,6 +3,7 @@
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_search-common"))
@@ -10,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_search-
 from search_utils import get_client, make_item, print_json
 
 API_BASE = "https://api.semanticscholar.org/graph/v1/paper"
+MAX_429_ATTEMPTS = 4
+BASE_429_DELAY_SECONDS = 1.0
 
 # paper-level fields（嵌套在 citedPaper/citingPaper 下）
 # 注意: tldr 在 nested 请求中容易触发 rate limit，不请求
@@ -21,6 +24,29 @@ PAPER_FIELDS = [
 
 # edge-level fields（引用关系本身的属性）
 EDGE_FIELDS = ["contexts", "intents"]
+
+
+def _retry_after_delay(response, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return max(0.0, float(retry_after))
+        except ValueError:
+            pass
+    return BASE_429_DELAY_SECONDS * (2 ** attempt)
+
+
+def _get_with_429_retry(client, url: str, *, params: dict) -> object:
+    for attempt in range(MAX_429_ATTEMPTS):
+        resp = client.get(url, params=params)
+        if getattr(resp, "status_code", None) != 429:
+            resp.raise_for_status()
+            return resp
+        if attempt == MAX_429_ATTEMPTS - 1:
+            resp.raise_for_status()
+            return resp
+        time.sleep(_retry_after_delay(resp, attempt))
+    raise RuntimeError("unreachable")
 
 
 def resolve_paper_id(identifier: str) -> str:
@@ -94,16 +120,18 @@ def fetch_refs(
     }
 
     with get_client(timeout=30, headers=headers) as client:
-        resp = client.get(endpoint, params=params)
-        resp.raise_for_status()
+        resp = _get_with_429_retry(client, endpoint, params=params)
         data = resp.json()
 
     # 获取论文本体信息（用于输出上下文）
     paper_resp = None
     with get_client(timeout=15, headers=headers) as client:
         try:
-            r = client.get(f"{API_BASE}/{resolved}", params={"fields": "title,year,citationCount"})
-            r.raise_for_status()
+            r = _get_with_429_retry(
+                client,
+                f"{API_BASE}/{resolved}",
+                params={"fields": "title,year,citationCount"},
+            )
             paper_resp = r.json()
         except Exception:
             pass

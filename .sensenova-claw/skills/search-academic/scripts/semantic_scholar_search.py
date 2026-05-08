@@ -2,6 +2,7 @@
 """Semantic Scholar 论文搜索。通过 Semantic Scholar Graph API。"""
 
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_search-common"))
@@ -9,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_search-
 from search_utils import build_parser, get_client, make_item, make_result, print_json
 
 API_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+MAX_429_ATTEMPTS = 4
+BASE_429_DELAY_SECONDS = 1.0
 
 FIELDS = ",".join([
     "title", "abstract", "tldr", "year", "venue", "publicationVenue", "publicationDate",
@@ -16,6 +19,29 @@ FIELDS = ",".join([
     "referenceCount", "isOpenAccess", "openAccessPdf",
     "externalIds", "fieldsOfStudy", "publicationTypes", "journal",
 ])
+
+
+def _retry_after_delay(response, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return max(0.0, float(retry_after))
+        except ValueError:
+            pass
+    return BASE_429_DELAY_SECONDS * (2 ** attempt)
+
+
+def _get_with_429_retry(client, url: str, *, params: dict) -> object:
+    for attempt in range(MAX_429_ATTEMPTS):
+        resp = client.get(url, params=params)
+        if getattr(resp, "status_code", None) != 429:
+            resp.raise_for_status()
+            return resp
+        if attempt == MAX_429_ATTEMPTS - 1:
+            resp.raise_for_status()
+            return resp
+        time.sleep(_retry_after_delay(resp, attempt))
+    raise RuntimeError("unreachable")
 
 
 def search(query: str, limit: int, api_key: str | None = None) -> list[dict]:
@@ -31,8 +57,7 @@ def search(query: str, limit: int, api_key: str | None = None) -> list[dict]:
     }
 
     with get_client(timeout=30, headers=headers) as client:
-        resp = client.get(API_URL, params=params)
-        resp.raise_for_status()
+        resp = _get_with_429_retry(client, API_URL, params=params)
         data = resp.json()
 
     items = []
