@@ -367,9 +367,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "name": "Research Agent",
             "description": "按指定维度搜集证据，输出带引用的子报告",
             "temperature": 0.2,
-            "tools": ["serper_search", "brave_search", "tavily_search", "fetch_url", "image_search"],
-            "skills": ["union-search-skill"],
+            "tools": ["serper_search", "brave_search", "tavily_search", "fetch_url", "image_search", "read_file", "write_file", "bash_command"],
+            "skills": ["search-code", "search-academic", "search-social-cn", "search-social-en", "mineru-document-extractor"],
             "can_send_message_to": None,
+            "enabled": True,
         },
         "review-agent": {
             "name": "Review Agent",

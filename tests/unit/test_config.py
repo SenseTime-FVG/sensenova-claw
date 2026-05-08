@@ -73,6 +73,33 @@ class TestConfig:
         assert scout["can_send_message_to"] is None
         assert scout["enabled"] is True
 
+    def test_default_config_includes_research_agent_yaml_settings(self):
+        research = DEFAULT_CONFIG["agents"].get("research-agent")
+
+        assert research is not None
+        assert research["name"] == "Research Agent"
+        assert research["description"] == "按指定维度搜集证据，输出带引用的子报告"
+        assert research["temperature"] == 0.2
+        assert research["tools"] == [
+            "serper_search",
+            "brave_search",
+            "tavily_search",
+            "fetch_url",
+            "image_search",
+            "read_file",
+            "write_file",
+            "bash_command",
+        ]
+        assert research["skills"] == [
+            "search-code",
+            "search-academic",
+            "search-social-cn",
+            "search-social-en",
+            "mineru-document-extractor",
+        ]
+        assert research["can_send_message_to"] is None
+        assert research["enabled"] is True
+
     def test_set_runtime(self, tmp_path):
         cfg = Config(config_path=tmp_path / "nonexist.yml")
         cfg.set("agent.model", "claude-opus")
