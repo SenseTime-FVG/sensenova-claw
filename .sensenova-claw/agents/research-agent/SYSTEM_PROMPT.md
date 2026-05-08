@@ -49,6 +49,7 @@
 - **按子问题的信息类型选工具**：找论文用 search-academic，找代码用 search-code，找用户评价用 social skill——不要先用 serper 搜一遍再用 skill 重复搜索
 - **通用搜索用于没有对应 skill 的场景**：新闻、官方文档、行业报告等仍用 serper
 - **同一轮搜索可混合使用**：一个子问题可能同时需要 serper（找新闻报道）和 search-academic（找原始论文）
+- **优先使用专用skill**: 优先使用对应的专业skill的搜索方式，搜不到再使用通用搜索，如学术论文，首先使用 `search-academic` skill中的搜索方法，如果搜不到，才能使用通用搜索。
 
 ### 时效感知搜索策略
 
