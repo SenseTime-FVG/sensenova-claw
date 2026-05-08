@@ -19,6 +19,15 @@ description: 搜索学术论文和百科知识：ArXiv 预印本、Semantic Scho
 | `pmc_paper.py` | PMC | 按章节读取 PMC 开放获取论文全文 | 无需（有 key 限额更高） |
 | `wikipedia_search.py` | Wikipedia | 百科文章搜索，支持多语言 | 无需 |
 
+## 执行约定
+
+本技能的脚本都在当前技能目录的 `scripts/` 子目录下。执行脚本前，先进入本 `SKILL.md` 所在目录：
+
+```bash
+cd <skill dir>
+```
+其中 <skill dir> 表示当前技能目录，也就是包含本 SKILL.md 的目录。
+
 ## 参数说明
 
 ### arxiv_search.py
@@ -186,6 +195,18 @@ python3 scripts/wikipedia_search.py <query> [选项]
 python3 scripts/wikipedia_search.py "machine learning" --limit 5
 python3 scripts/wikipedia_search.py "深度学习" --lang zh --limit 5
 ```
+
+## 并发与限流约定
+
+这些脚本会访问外部学术服务，必须控制请求频率。
+
+执行本技能脚本时：
+
+- 不要并发运行多个搜索脚本。
+- 不要使用并行工具同时调用多个 `python3 scripts/...` 命令。
+- 一次只运行一个脚本命令，等待结果返回后再运行下一个。
+- 批量查询时，优先使用脚本自带的 `--limit`、`--id-list` 等参数，而不是启动多个进程。
+- 如果需要连续调用多个平台，按顺序执行，并在必要时等待数秒。
 
 ## 全文阅读工作流
 
