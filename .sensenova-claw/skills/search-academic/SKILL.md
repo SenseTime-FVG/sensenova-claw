@@ -11,7 +11,7 @@ description: 搜索学术论文和百科知识：ArXiv 预印本、Semantic Scho
 
 | 脚本 | 平台 | 用途 | API key |
 |------|------|------|---------|
-| `arxiv_search.py` | ArXiv | 预印本搜索，支持作者/标题/ID查询 | 无需 |
+| `arxiv_search.py` | ArXiv | 预印本搜索，基于 `arxiv` Python 包，支持作者/标题/ID查询 | 无需 |
 | `arxiv_paper.py` | ArXiv HTML | 按章节读取 ArXiv 论文全文 | 无需 |
 | `semantic_scholar_search.py` | Semantic Scholar | 全学科搜索，含引用数和 TLDR | 无需（有 key 限额更高） |
 | `semantic_scholar_refs.py` | Semantic Scholar | 引用追溯：查论文的参考文献（backward）或被引论文（forward） | 无需（有 key 限额更高） |
@@ -32,6 +32,9 @@ cd <skill dir>
 
 ### arxiv_search.py
 
+基于 `arxiv>=2.0.0` Python 包封装。输出仍保持本 skill 的标准 JSON：顶层为 `success`, `query`, `provider`, `items`, `error`，每篇论文位于 `items[]`。
+如依赖缺失，使用`pip3/pip install arxiv>=2.0.0`安装依赖
+
 ```bash
 python3 scripts/arxiv_search.py <query> [选项]
 ```
@@ -41,7 +44,7 @@ python3 scripts/arxiv_search.py <query> [选项]
 | `query` | 搜索关键词（使用 `--id-list` 时可省略） | — |
 | `--limit`, `-n` | 返回结果数量 | 10 |
 | `--category`, `-c` | ArXiv 分类过滤（见下方"ArXiv 分类速查"） | — |
-| `--sort` | 排序方式：`relevance`, `date`, `submitted` | relevance |
+| `--sort` | 排序方式：`relevance`, `date`, `submitted`；`date`/`submitted` 按提交日期倒序 | relevance |
 | `--author`, `-a` | 按作者过滤，多个用逗号分隔 | — |
 | `--title-only` | 仅在标题中搜索 | — |
 | `--id-list` | 直接按 arXiv ID 获取元数据，逗号分隔 | — |
