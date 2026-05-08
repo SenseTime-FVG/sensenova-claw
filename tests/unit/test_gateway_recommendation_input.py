@@ -56,3 +56,22 @@ async def test_send_user_input_preserves_attachments():
     publisher.publish.assert_awaited_once()
     event = publisher.publish.await_args.args[0]
     assert event.payload["attachments"] == attachments
+
+
+@pytest.mark.asyncio
+async def test_send_user_input_preserves_disable_tool_result_truncation():
+    publisher = MagicMock()
+    publisher.publish = AsyncMock()
+
+    gateway = Gateway(publisher=publisher, repo=MagicMock())
+
+    await gateway.send_user_input(
+        session_id="sess_no_truncate_001",
+        content="运行 bash 并返回完整结果",
+        source="websocket",
+        disable_tool_result_truncation=True,
+    )
+
+    publisher.publish.assert_awaited_once()
+    event = publisher.publish.await_args.args[0]
+    assert event.payload["disable_tool_result_truncation"] is True

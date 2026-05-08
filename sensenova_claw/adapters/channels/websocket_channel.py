@@ -196,6 +196,7 @@ class WebSocketChannel(Channel):
                 attachments=payload.get("attachments", []),
                 context_files=payload.get("context_files", []),
                 meta=payload.get("meta") if isinstance(payload.get("meta"), dict) else None,
+                disable_tool_result_truncation=bool(payload.get("disable_tool_result_truncation")),
                 source="websocket",
             )
             return

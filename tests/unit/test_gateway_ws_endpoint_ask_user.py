@@ -60,6 +60,7 @@ class _FakeGateway:
         attachments: list | None = None,
         context_files: list | None = None,
         meta: dict | None = None,
+        disable_tool_result_truncation: bool = False,
         source: str = "websocket",
     ) -> str:
         _ = (attachments, context_files, source)
@@ -70,6 +71,7 @@ class _FakeGateway:
                 source="test",
                 payload={
                     "content": content,
+                    "disable_tool_result_truncation": disable_tool_result_truncation,
                     **({"meta": meta} if meta else {}),
                 },
             )
@@ -186,6 +188,29 @@ async def test_user_input_with_existing_session_auto_binds_websocket(ws_env):
     assert ("sess_old", "websocket") in ws_env.gateway.bind_calls
     # WebSocket 断开后，session 绑定已被清理，这里只验证绑定操作发生过
     assert any(e.type == USER_INPUT and e.session_id == "sess_old" for e in ws_env.gateway.published)
+
+
+@pytest.mark.asyncio
+async def test_user_input_preserves_disable_tool_result_truncation(ws_env):
+    ws = _FakeWebSocket(
+        messages=[
+            {
+                "type": "user_input",
+                "session_id": "sess_old",
+                "payload": {
+                    "content": "run bash",
+                    "attachments": [],
+                    "context_files": [],
+                    "disable_tool_result_truncation": True,
+                },
+            }
+        ]
+    )
+
+    await gateway_main.websocket_endpoint(ws)
+
+    user_input = next(e for e in ws_env.gateway.published if e.type == USER_INPUT)
+    assert user_input.payload["disable_tool_result_truncation"] is True
 
 
 @pytest.mark.asyncio

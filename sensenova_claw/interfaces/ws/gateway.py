@@ -139,6 +139,7 @@ class Gateway:
         self, session_id: str, content: str,
         attachments: list | None = None, context_files: list | None = None,
         meta: dict | None = None,
+        disable_tool_result_truncation: bool = False,
         source: str = "websocket",
     ) -> str:
         """发送用户输入，返回 turn_id"""
@@ -147,6 +148,7 @@ class Gateway:
             "content": content,
             "attachments": attachments or [],
             "context_files": context_files or [],
+            "disable_tool_result_truncation": disable_tool_result_truncation,
         }
         if meta:
             payload["meta"] = meta
