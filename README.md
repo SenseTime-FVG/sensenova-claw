@@ -264,16 +264,23 @@ openshell forward start 3000 <sandbox-name>
 # 1) 一次性安装 msb（装到 ~/.microsandbox/，无需 sudo）
 curl -fsSL https://install.microsandbox.dev | sh && source ~/.zshrc
 
-# 2) 启动（首次自动拉 153MB 镜像，约 30s；之后秒起）
+# 2) 一次性创建持久化卷（保存 token、会话、SQLite 数据）
+msb volume create claw-data --size 1G
+
+# 3) 启动 VM（首次自动拉 153MB 镜像，约 30s；之后秒起）
 msb run -d --replace -n claw -c 2 -m 2048 \
         -p 8000:8000 -p 3000:3000 \
-        ghcr.io/tsunamiblue/sensenova-claw:msb \
-        -- sensenova-claw-start
+        -v claw-data:/root/.sensenova-claw \
+        ghcr.io/tsunamiblue/sensenova-claw:msb
+
+# 4) 在 VM 内拉起服务（--detach 不会自动跑 CMD，必须 exec）
+msb exec claw -- sh -c 'nohup sensenova-claw-start > /tmp/claw.log 2>&1 &'
 ```
 
 访问 `http://localhost:3000`，带 token 的登录 URL 见：`msb exec claw -- grep token /tmp/claw.log`。
 
 管理 VM：`msb ps` / `msb stop claw` / `msb start claw` / `msb rm claw`。
+> 由于状态保存在 `claw-data` 卷里，`msb rm claw` 不会丢 token / 会话；要彻底重置：`msb rm claw && msb volume rm claw-data`。
 
 <details>
 <summary><b>从本地源码构建（自托管镜像）</b></summary>

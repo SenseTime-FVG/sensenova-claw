@@ -54,6 +54,10 @@ async def main() -> None:
         cpus=2,
         memory=2048,
         ports={8000: 8000, 3000: 3000},  # host:guest，dict 形式
+        # 持久化：把 token、会话、SQLite 数据放到 host 端的 claw-data 卷里。
+        # 卷不存在时 SDK 会自动创建（等价于 `msb volume create claw-data`）。
+        # value 是 dict，可选 named / bind / tmpfs / disk —— 此处用命名卷。
+        volumes={"/root/.sensenova-claw": {"named": "claw-data"}},
         secrets=_build_secrets(),
         replace=True,
         log_level=LogLevel.INFO,
