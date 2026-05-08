@@ -101,7 +101,7 @@ def test_build_frontend_prod_cmd_requires_build_id(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(app_main, "_find_node", lambda: "/usr/bin/node")
     monkeypatch.setattr(app_main, "_find_npm", lambda: "/usr/bin/npm")
 
-    assert _build_frontend_prod_cmd(web_dir, 3000) == []
+    assert _build_frontend_prod_cmd(web_dir, 3000) == ([], str(web_dir))
 
 
 def test_build_frontend_prod_cmd_uses_direct_next_when_build_id_exists(
@@ -119,13 +119,41 @@ def test_build_frontend_prod_cmd_uses_direct_next_when_build_id_exists(
     monkeypatch.setattr(app_main, "_find_node", lambda: "/usr/bin/node")
     monkeypatch.setattr(app_main, "_find_npm", lambda: "/usr/bin/npm")
 
-    assert _build_frontend_prod_cmd(web_dir, 3000) == [
-        "/usr/bin/node",
-        str(next_cli / "next"),
-        "start",
-        "-p",
-        "3000",
-    ]
+    assert _build_frontend_prod_cmd(web_dir, 3000) == (
+        [
+            "/usr/bin/node",
+            str(next_cli / "next"),
+            "start",
+            "-p",
+            "3000",
+        ],
+        str(web_dir),
+    )
+
+
+def test_build_frontend_prod_cmd_skips_stale_build_when_freshness_required(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    web_dir = tmp_path / "web"
+    next_cli = web_dir / "node_modules" / "next" / "dist" / "bin"
+    next_cli.mkdir(parents=True)
+    (next_cli / "next").write_text("", encoding="utf-8")
+    build_id = web_dir / ".next" / "BUILD_ID"
+    build_id.parent.mkdir(parents=True)
+    build_id.write_text("build-123", encoding="utf-8")
+    source_file = web_dir / "app" / "llms" / "page.tsx"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text("export default function Page() { return null; }\n", encoding="utf-8")
+    old_time = time.time() - 60
+    new_time = time.time()
+    os.utime(build_id, (old_time, old_time))
+    os.utime(source_file, (new_time, new_time))
+
+    monkeypatch.setattr(app_main, "_find_node", lambda: "/usr/bin/node")
+    monkeypatch.setattr(app_main, "_find_npm", lambda: "/usr/bin/npm")
+
+    assert _build_frontend_prod_cmd(web_dir, 3000, require_fresh=True) == ([], str(web_dir))
 
 
 def test_wait_for_port_listen_fails_when_process_exits_early(monkeypatch: pytest.MonkeyPatch):

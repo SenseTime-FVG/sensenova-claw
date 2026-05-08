@@ -193,3 +193,36 @@ def test_test_llm_connection_returns_error_hint_for_max_tokens(monkeypatch: pyte
         "error": "Range of max_tokens should be [1, 65536]",
         "error_hint": "max tokens 超限",
     }
+
+
+def test_test_llm_connection_uses_chatgpt_backend_for_openai_codex_oauth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+
+    async def fake_codex_test(*, model_id: str, timeout_seconds: int = 90):
+        calls.append({"model_id": model_id, "timeout_seconds": timeout_seconds})
+        return {"model": model_id, "message": "连接成功"}
+
+    async def fake_test_openai_compatible(**_kwargs):
+        raise AssertionError("OpenAI-Codex-OAuth should not use chat completions")
+
+    monkeypatch.setattr(config_api, "_test_openai_codex_oauth", fake_codex_test)
+    monkeypatch.setattr(config_api, "_test_openai_compatible", fake_test_openai_compatible)
+
+    app = FastAPI()
+    app.include_router(config_api.router)
+    client = TestClient(app)
+
+    response = client.post("/api/config/test-llm", json={
+        "provider": "openai-codex-oauth",
+        "api_key": "",
+        "base_url": "",
+        "model_id": "gpt-5.5",
+        "max_tokens": 128000,
+        "max_output_tokens": 16384,
+    })
+
+    assert response.status_code == 200
+    assert response.json() == {"success": True, "model": "gpt-5.5", "message": "连接成功"}
+    assert calls == [{"model_id": "gpt-5.5", "timeout_seconds": 90}]

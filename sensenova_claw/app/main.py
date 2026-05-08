@@ -79,7 +79,51 @@ def _build_frontend_dev_cmd(web_dir: Path, frontend_port: int) -> list[str]:
     return []
 
 
-def _build_frontend_prod_cmd(web_dir: Path, frontend_port: int) -> tuple[list[str], str]:
+def _frontend_build_is_stale(web_dir: Path, build_id: Path) -> bool:
+    """Return True when frontend source files are newer than the production build marker."""
+    try:
+        build_mtime = build_id.stat().st_mtime
+    except OSError:
+        return True
+    source_roots = [
+        web_dir / "app",
+        web_dir / "components",
+        web_dir / "contexts",
+        web_dir / "hooks",
+        web_dir / "lib",
+        web_dir / "types",
+    ]
+    source_files = [
+        web_dir / "package.json",
+        web_dir / "next.config.mjs",
+        web_dir / "tailwind.config.ts",
+        web_dir / "tsconfig.json",
+    ]
+    for root in source_roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".css"}:
+                try:
+                    if path.stat().st_mtime > build_mtime:
+                        return True
+                except OSError:
+                    continue
+    for path in source_files:
+        try:
+            if path.exists() and path.stat().st_mtime > build_mtime:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _build_frontend_prod_cmd(
+    web_dir: Path,
+    frontend_port: int,
+    *,
+    require_fresh: bool = False,
+) -> tuple[list[str], str]:
     """生产模式：优先使用 standalone server.js，回退到 next start。
 
     返回 (命令列表, 工作目录)。命令列表为空表示无可用的生产模式启动方式。
@@ -89,6 +133,8 @@ def _build_frontend_prod_cmd(web_dir: Path, frontend_port: int) -> tuple[list[st
     if not build_id.exists():
         return [], str(web_dir)
     if not build_id.read_text(encoding="utf-8").strip():
+        return [], str(web_dir)
+    if require_fresh and _frontend_build_is_stale(web_dir, build_id):
         return [], str(web_dir)
 
     node = _find_node()
@@ -303,7 +349,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
 
     # 启动后端：仅在前端存在有效生产构建时才视为生产模式。
-    _prod_cmd, _prod_cwd = _build_frontend_prod_cmd(web_dir, frontend_port)
+    _prod_cmd, _prod_cwd = _build_frontend_prod_cmd(web_dir, frontend_port, require_fresh=True)
     is_production = bool(_prod_cmd)
     backend_cmd = [
         sys.executable, "-m", "uvicorn",
@@ -332,7 +378,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     frontend_cwd = str(web_dir)
     is_prod_frontend = False
     if not no_frontend:
-        frontend_cmd, frontend_cwd = _build_frontend_prod_cmd(web_dir, frontend_port)
+        frontend_cmd, frontend_cwd = _build_frontend_prod_cmd(
+            web_dir,
+            frontend_port,
+            require_fresh=True,
+        )
         if frontend_cmd:
             print("检测到前端预构建产物，使用生产模式启动")
             is_prod_frontend = True
@@ -455,6 +505,18 @@ def cmd_migrate_secrets(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_auth(args: argparse.Namespace) -> int:
+    if getattr(args, "auth_provider", None) == "openai-codex" and getattr(args, "auth_action", None) == "login":
+        from sensenova_claw.platform.auth.openai_codex_oauth import login_openai_codex_oauth
+
+        credential = login_openai_codex_oauth(is_remote=args.remote)
+        label = credential.email or "OpenAI Codex"
+        print(f"OpenAI Codex OAuth profile saved for {label}")
+        return 0
+    print("Unsupported auth command", file=sys.stderr)
+    return 2
+
+
 def _default_config_path() -> Path:
     local = Path.cwd() / "config.yml"
     if local.exists():
@@ -492,6 +554,13 @@ def main() -> int:
     migrate_parser = subparsers.add_parser("migrate-secrets", help="迁移 config.yml 中的明文 secret 到 keyring")
     migrate_parser.add_argument("--config", default=None, help="指定 config.yml 路径")
 
+    auth_parser = subparsers.add_parser("auth", help="登录和管理 provider OAuth 凭据")
+    auth_subparsers = auth_parser.add_subparsers(dest="auth_provider")
+    codex_auth_parser = auth_subparsers.add_parser("openai-codex", help="OpenAI Codex OAuth")
+    codex_auth_subparsers = codex_auth_parser.add_subparsers(dest="auth_action")
+    codex_login_parser = codex_auth_subparsers.add_parser("login", help="登录 OpenAI Codex OAuth")
+    codex_login_parser.add_argument("--remote", action="store_true", help="远程/VPS 环境：打印 URL 并手动粘贴回调")
+
     args = parser.parse_args()
 
     if args.command == "run":
@@ -502,6 +571,8 @@ def main() -> int:
         return cmd_version(args)
     elif args.command == "migrate-secrets":
         return cmd_migrate_secrets(args)
+    elif args.command == "auth":
+        return cmd_auth(args)
     else:
         parser.print_help()
         return 0

@@ -13,6 +13,7 @@ from sensenova_claw.platform.config.config import Config
 from sensenova_claw.platform.config.config_manager import ConfigManager
 from sensenova_claw.platform.secrets.store import InMemorySecretStore
 from sensenova_claw.kernel.events.bus import PublicEventBus
+from sensenova_claw.platform.auth.openai_codex_oauth import OpenAICodexOAuthError
 
 
 @pytest.fixture
@@ -284,6 +285,96 @@ def test_get_secret_rejects_non_secret_path(client):
     """非敏感路径不能通过 reveal API 读取。"""
     resp = client.get("/api/config/secret", params={"path": "agent.model"})
     assert resp.status_code == 400
+
+
+def test_openai_codex_oauth_status_reports_not_logged_in(client, monkeypatch):
+    """OpenAI-Codex-OAuth 未登录时应返回可供前端渲染 login 状态的信息。"""
+    monkeypatch.setattr(config_api, "get_openai_codex_oauth_status", lambda: {
+        "logged_in": False,
+        "email": None,
+        "expires": None,
+    })
+
+    resp = client.get("/api/config/oauth/openai-codex/status")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"logged_in": False, "email": None, "expires": None}
+
+
+def test_openai_codex_oauth_login_returns_status_and_can_relogin(client, monkeypatch):
+    """OpenAI-Codex-OAuth login 应可重复调用，前端据此支持重新 login。"""
+    calls = 0
+    validation_calls: list[str] = []
+
+    class Credential:
+        email = "user@example.com"
+        expires = 1893456000000
+
+    def fake_relogin(*, is_remote: bool = False):
+        assert is_remote is False
+        nonlocal calls
+        calls += 1
+        return Credential()
+
+    monkeypatch.setattr(config_api, "relogin_openai_codex_oauth", fake_relogin)
+    async def fake_validation_success(*, model_id, timeout_seconds=90):
+        validation_calls.append(model_id)
+        return {
+            "model": model_id,
+            "message": "连接成功",
+        }
+
+    monkeypatch.setattr(config_api, "_test_openai_codex_oauth", fake_validation_success)
+
+    first = client.post("/api/config/oauth/openai-codex/login")
+    second = client.post("/api/config/oauth/openai-codex/login")
+
+    assert first.status_code == 200
+    assert first.json() == {"logged_in": True, "email": "user@example.com", "expires": 1893456000000}
+    assert second.status_code == 200
+    assert second.json()["logged_in"] is True
+    assert calls == 2
+    assert validation_calls == ["gpt-5.5", "gpt-5.5"]
+
+
+def test_openai_codex_oauth_login_returns_detail_on_failure(client, monkeypatch):
+    """Web login 失败时应把后端具体原因返回给前端展示。"""
+    def fake_relogin(*, is_remote: bool = False):
+        raise OpenAICodexOAuthError("未找到本地 Codex OAuth 凭据")
+
+    monkeypatch.setattr(config_api, "relogin_openai_codex_oauth", fake_relogin)
+
+    resp = client.post("/api/config/oauth/openai-codex/login")
+
+    assert resp.status_code == 400
+    assert resp.json() == {"detail": "未找到本地 Codex OAuth 凭据"}
+
+
+def test_openai_codex_oauth_login_validates_imported_credentials(client, monkeypatch):
+    """Web login 不应在导入已失效 token 时显示成功。"""
+    class Credential:
+        email = "user@example.com"
+        expires = 1893456000000
+
+    monkeypatch.setattr(config_api, "relogin_openai_codex_oauth", lambda *, is_remote=False: Credential())
+
+    async def fake_validation(*, model_id: str, timeout_seconds: int = 90):
+        raise OpenAICodexOAuthError(
+            "OpenAI-Codex-OAuth 凭据已失效：refresh token 已被使用。"
+            "请点击重新 Login，完成浏览器授权后再试。"
+        )
+
+    monkeypatch.setattr(config_api, "_test_openai_codex_oauth", fake_validation)
+
+    resp = client.post("/api/config/oauth/openai-codex/login")
+
+    assert resp.status_code == 400
+    assert resp.json() == {
+        "detail": (
+            "OpenAI-Codex-OAuth 凭据已失效：refresh token 已被使用。"
+            "请点击重新 Login，完成浏览器授权后再试。"
+        )
+    }
 
 
 def test_update_single_provider_and_rename_models(client, app):

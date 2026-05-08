@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
+import platform
+import uuid
 from typing import Any, AsyncIterator
 
+import httpx
 from openai import AsyncOpenAI
 
 from sensenova_claw.platform.config.config import config
+from sensenova_claw.platform.auth.openai_codex_oauth import resolve_openai_codex_access_token
 from sensenova_claw.adapters.llm.base import (
     DEFAULT_LLM_TEMPERATURE,
     LLMProvider,
@@ -16,15 +20,22 @@ from sensenova_claw.adapters.llm.base import (
 logger = logging.getLogger(__name__)
 
 
+OPENAI_CODEX_BACKEND_API_BASE_URL = "https://chatgpt.com/backend-api"
+
+
 class OpenAIProvider(LLMProvider):
     def __init__(self, provider_id: str = "openai", source_type: str | None = None):
         provider_cfg = config.get(f"llm.providers.{provider_id}", {})
         self.provider_id = provider_id
         self.source_type = source_type or str(provider_cfg.get("source_type", "openai") or "openai")
+        self.timeout = int(provider_cfg.get("timeout", 60) or 60)
+        if self.source_type == "openai-codex-oauth":
+            self.client = None
+            return
         self.client = AsyncOpenAI(
             api_key=provider_cfg.get("api_key"),
             base_url=provider_cfg.get("base_url") or None,
-            timeout=provider_cfg.get("timeout", 60),
+            timeout=self.timeout,
         )
 
     async def call(
@@ -36,6 +47,15 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if self.source_type == "openai-codex-oauth":
+            return await self._call_openai_codex_responses(
+                model=model,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+
         normalized_messages = self._normalize_messages(messages)
         merged_extra_body = merge_sampling_extra_body(extra_body)
         req: dict[str, Any] = {
@@ -91,6 +111,25 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        if self.source_type == "openai-codex-oauth":
+            result = await self.call(
+                model=model,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                extra_body=extra_body,
+            )
+            if result.get("content"):
+                yield {"type": "delta", "content": result["content"]}
+            yield {
+                "type": "finish",
+                "finish_reason": result.get("finish_reason", "stop"),
+                "usage": result.get("usage", {}),
+                "tool_calls": result.get("tool_calls", []),
+            }
+            return
+
         normalized_messages = self._normalize_messages(messages)
         merged_extra_body = merge_sampling_extra_body(extra_body)
         req: dict[str, Any] = {
@@ -180,6 +219,327 @@ class OpenAIProvider(LLMProvider):
             "finish_reason": finish_reason,
             "usage": usage,
             "tool_calls": assembled_tool_calls,
+        }
+
+    def _openai_codex_responses_url(self) -> str:
+        return f"{OPENAI_CODEX_BACKEND_API_BASE_URL}/codex/responses"
+
+    def _build_openai_codex_headers(self, access_token: str, session_id: str | None = None) -> dict[str, str]:
+        account_id = self._extract_openai_codex_account_id(access_token)
+        request_id = session_id or str(uuid.uuid4())
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "chatgpt-account-id": account_id,
+            "originator": "pi",
+            "User-Agent": f"pi ({platform.system().lower()} {platform.release()}; {platform.machine()})",
+            "OpenAI-Beta": "responses=experimental",
+            "accept": "text/event-stream",
+            "content-type": "application/json",
+            "x-client-request-id": request_id,
+        }
+        if session_id:
+            headers["session_id"] = session_id
+        return headers
+
+    def _extract_openai_codex_account_id(self, access_token: str) -> str:
+        payload = self._decode_jwt_payload(access_token)
+        auth = payload.get("https://api.openai.com/auth")
+        if isinstance(auth, dict):
+            for key in ("chatgpt_account_id", "id"):
+                value = auth.get(key)
+                if isinstance(value, str) and value:
+                    return value
+        raise RuntimeError("OpenAI-Codex-OAuth access token 缺少 chatgpt account id，请重新 Login")
+
+    def _decode_jwt_payload(self, token: str) -> dict[str, Any]:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        import base64
+        import binascii
+
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        try:
+            decoded = base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8")
+            value = json.loads(decoded)
+        except (UnicodeDecodeError, ValueError, binascii.Error):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    async def _call_openai_codex_responses(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        temperature: float,
+        max_tokens: int | None,
+    ) -> dict[str, Any]:
+        req: dict[str, Any] = {
+            "model": model,
+            "input": self._normalize_responses_input(messages),
+            "stream": True,
+            "store": False,
+            "text": {"verbosity": "medium"},
+            "include": ["reasoning.encrypted_content"],
+            "tool_choice": "auto",
+            "parallel_tool_calls": True,
+        }
+        if temperature is not None:
+            req["temperature"] = temperature
+        if max_tokens:
+            req["max_output_tokens"] = max_tokens
+        if tools:
+            req["tools"] = [self._normalize_responses_tool(tool) for tool in tools]
+
+        response = await self._post_openai_codex_responses(req)
+        tool_calls = response["tool_calls"]
+        return {
+            "content": response["content"],
+            "tool_calls": tool_calls,
+            "finish_reason": "tool_calls" if tool_calls else response["finish_reason"],
+            "usage": response["usage"],
+        }
+
+    async def _post_openai_codex_responses(self, payload: dict[str, Any]) -> dict[str, Any]:
+        access_token = resolve_openai_codex_access_token()
+        content_parts: list[str] = []
+        usage: dict[str, int] = {}
+        tool_calls: list[dict[str, Any]] = []
+        finish_reason = "stop"
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with client.stream(
+                "POST",
+                self._openai_codex_responses_url(),
+                headers=self._build_openai_codex_headers(access_token),
+                json=payload,
+            ) as response:
+                if not response.is_success:
+                    body = (await response.aread()).decode("utf-8", errors="replace")
+                    raise RuntimeError(self._format_openai_codex_http_error(response.status_code, body))
+                async for event in self._iter_openai_codex_sse_events(response):
+                    event_type = str(event.get("type") or "")
+                    if event_type == "response.output_text.delta" and isinstance(event.get("delta"), str):
+                        content_parts.append(event["delta"])
+                    elif event_type == "response.completed":
+                        finish_reason = "stop"
+                        response_obj = event.get("response")
+                        if isinstance(response_obj, dict):
+                            usage = self._extract_responses_usage_dict(response_obj.get("usage"))
+                    elif event_type in {"response.done", "response.incomplete"}:
+                        response_obj = event.get("response")
+                        if isinstance(response_obj, dict):
+                            usage = self._extract_responses_usage_dict(response_obj.get("usage"))
+                    elif event_type == "response.failed":
+                        response_obj = event.get("response")
+                        if isinstance(response_obj, dict):
+                            error = response_obj.get("error")
+                            if isinstance(error, dict) and isinstance(error.get("message"), str):
+                                raise RuntimeError(error["message"])
+                        raise RuntimeError("OpenAI-Codex-OAuth response failed")
+                    elif event_type == "error":
+                        message = event.get("message")
+                        raise RuntimeError(str(message or event))
+                    elif event_type == "response.output_item.done":
+                        item = event.get("item")
+                        if isinstance(item, dict) and item.get("type") == "function_call":
+                            tool_calls.append(self._normalize_responses_function_call(item))
+
+        return {
+            "content": "".join(content_parts),
+            "tool_calls": tool_calls,
+            "finish_reason": finish_reason,
+            "usage": usage,
+        }
+
+    async def _iter_openai_codex_sse_events(self, response: httpx.Response) -> AsyncIterator[dict[str, Any]]:
+        data_lines: list[str] = []
+        async for line in response.aiter_lines():
+            if not line:
+                if data_lines:
+                    data = "\n".join(data_lines).strip()
+                    data_lines = []
+                    if data and data != "[DONE]":
+                        try:
+                            parsed = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(parsed, dict):
+                            yield parsed
+                continue
+            if line.startswith("data:"):
+                data_lines.append(line[5:].strip())
+        if data_lines:
+            data = "\n".join(data_lines).strip()
+            if data and data != "[DONE]":
+                try:
+                    parsed = json.loads(data)
+                except json.JSONDecodeError:
+                    return
+                if isinstance(parsed, dict):
+                    yield parsed
+
+    def _format_openai_codex_http_error(self, status_code: int, body: str) -> str:
+        stripped = body.strip()
+        if stripped.startswith("<html") or "<html" in stripped[:200].lower():
+            return (
+                f"OpenAI-Codex-OAuth HTTP 请求被 chatgpt.com 拦截（HTTP {status_code}）。"
+                "请确认使用的是 /backend-api/codex/responses transport，并重新 Login 后再试。"
+            )
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return stripped or f"OpenAI-Codex-OAuth HTTP 请求失败（HTTP {status_code}）"
+        error = parsed.get("error") if isinstance(parsed, dict) else None
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"]
+        return stripped or f"OpenAI-Codex-OAuth HTTP 请求失败（HTTP {status_code}）"
+
+    def _extract_responses_usage_dict(self, usage: Any) -> dict[str, int]:
+        if not isinstance(usage, dict):
+            return {}
+        input_tokens = usage.get("input_tokens") or 0
+        output_tokens = usage.get("output_tokens") or 0
+        total_tokens = usage.get("total_tokens") or (int(input_tokens) + int(output_tokens))
+        return {
+            "prompt_tokens": int(input_tokens),
+            "completion_tokens": int(output_tokens),
+            "total_tokens": int(total_tokens),
+        }
+
+    def _normalize_responses_function_call(self, item: dict[str, Any]) -> dict[str, Any]:
+        arguments = item.get("arguments")
+        try:
+            parsed_arguments = json.loads(arguments) if isinstance(arguments, str) else (arguments or {})
+        except json.JSONDecodeError:
+            parsed_arguments = arguments
+        return {
+            "id": str(item.get("call_id") or item.get("id") or ""),
+            "name": str(item.get("name") or ""),
+            "arguments": parsed_arguments,
+        }
+
+    def _normalize_responses_input(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for message in self._normalize_messages(messages):
+            role = str(message.get("role") or "user")
+            if role == "tool":
+                normalized.append({
+                    "role": "user",
+                    "content": self._stringify_responses_content(message.get("content")),
+                })
+                continue
+            if role not in {"user", "assistant", "system", "developer"}:
+                role = "user"
+            normalized.append({
+                "role": role,
+                "content": self._normalize_responses_content(message.get("content")),
+            })
+        return normalized
+
+    def _normalize_responses_content(self, content: Any) -> Any:
+        if not isinstance(content, list):
+            return content if isinstance(content, str) else self._stringify_responses_content(content)
+
+        blocks: list[dict[str, Any]] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type in {"text", "input_text"} and isinstance(item.get("text"), str):
+                blocks.append({"type": "input_text", "text": item["text"]})
+            elif item_type in {"image_url", "input_image"}:
+                image_url = item.get("image_url")
+                if isinstance(image_url, dict):
+                    image_url = image_url.get("url")
+                if isinstance(image_url, str) and image_url:
+                    blocks.append({"type": "input_image", "image_url": image_url, "detail": "auto"})
+        return blocks if blocks else ""
+
+    def _stringify_responses_content(self, content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if content is None:
+            return ""
+        return json.dumps(content, ensure_ascii=False)
+
+    def _normalize_responses_tool(self, tool: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "name": str(tool.get("name") or ""),
+            "description": str(tool.get("description") or ""),
+            "parameters": tool.get("parameters") if isinstance(tool.get("parameters"), dict) else {},
+            "strict": False,
+        }
+
+    def _extract_responses_text(self, response: Any) -> str:
+        output_text = getattr(response, "output_text", None)
+        if isinstance(output_text, str) and output_text:
+            return output_text
+
+        parts: list[str] = []
+        for item in getattr(response, "output", []) or []:
+            content = getattr(item, "content", None)
+            if content is None and isinstance(item, dict):
+                content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                text = getattr(block, "text", None)
+                if text is None and isinstance(block, dict):
+                    text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+
+    def _extract_responses_tool_calls(self, response: Any) -> list[dict[str, Any]]:
+        tool_calls: list[dict[str, Any]] = []
+        for item in getattr(response, "output", []) or []:
+            item_type = getattr(item, "type", None)
+            if item_type is None and isinstance(item, dict):
+                item_type = item.get("type")
+            if item_type != "function_call":
+                continue
+            name = getattr(item, "name", None)
+            if name is None and isinstance(item, dict):
+                name = item.get("name")
+            arguments = getattr(item, "arguments", None)
+            if arguments is None and isinstance(item, dict):
+                arguments = item.get("arguments")
+            try:
+                parsed_arguments = json.loads(arguments) if isinstance(arguments, str) else (arguments or {})
+            except json.JSONDecodeError:
+                parsed_arguments = arguments
+            call_id = getattr(item, "call_id", None) or getattr(item, "id", None)
+            if call_id is None and isinstance(item, dict):
+                call_id = item.get("call_id") or item.get("id")
+            tool_calls.append({
+                "id": str(call_id or ""),
+                "name": str(name or ""),
+                "arguments": parsed_arguments,
+            })
+        return tool_calls
+
+    def _extract_responses_finish_reason(self, response: Any) -> str:
+        status = getattr(response, "status", None)
+        if status == "completed":
+            return "stop"
+        if isinstance(status, str) and status:
+            return status
+        return "stop"
+
+    def _extract_responses_usage(self, response: Any) -> dict[str, int]:
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return {}
+        input_tokens = getattr(usage, "input_tokens", None)
+        output_tokens = getattr(usage, "output_tokens", None)
+        total_tokens = getattr(usage, "total_tokens", None)
+        return {
+            "prompt_tokens": int(input_tokens or 0),
+            "completion_tokens": int(output_tokens or 0),
+            "total_tokens": int(total_tokens or ((input_tokens or 0) + (output_tokens or 0))),
         }
 
     # 默认启用 thinking 的 source_type（这些模型的 API 要求 assistant tool_call 消息携带 reasoning_content）

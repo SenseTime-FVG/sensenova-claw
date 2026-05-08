@@ -26,6 +26,12 @@ llm:
       max_retries: 3
       source_type: openai
 
+    openai-codex:
+      base_url: https://api.openai.com/v1
+      timeout: 180
+      max_retries: 3
+      source_type: openai-codex-oauth
+
     gemini:
       api_key: ${GEMINI_API_KEY}
       base_url: ${GEMINI_BASE_URL}
@@ -101,6 +107,13 @@ llm:
     # ── OpenAI ──
     gpt-5.4:
       provider: openai
+      model_id: gpt-5.4
+      timeout: 180
+      max_tokens: 128000
+      max_output_tokens: 16384
+
+    gpt-5.4-codex:
+      provider: openai-codex
       model_id: gpt-5.4
       timeout: 180
       max_tokens: 128000

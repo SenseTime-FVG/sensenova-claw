@@ -18,6 +18,8 @@ def _provider_config(provider_id: str) -> dict:
 def _has_api_key(provider_id: str) -> bool:
     """检查 provider_id 是否配置了有效的 api_key"""
     cfg = _provider_config(provider_id)
+    if str(cfg.get("source_type", "")).strip() == "openai-codex-oauth":
+        return True
     key = str(cfg.get("api_key", ""))
     return bool(key) and not key.startswith("${")
 
@@ -43,6 +45,7 @@ class LLMFactory:
 
         self._PROVIDER_FACTORIES = {
             "openai": lambda provider_id: OpenAIProvider(provider_id, "openai"),
+            "openai-codex-oauth": lambda provider_id: OpenAIProvider(provider_id, "openai-codex-oauth"),
             "qwen": lambda provider_id: OpenAIProvider(provider_id, "qwen"),
             "deepseek": lambda provider_id: OpenAIProvider(provider_id, "deepseek"),
             "minimax": lambda provider_id: OpenAIProvider(provider_id, "minimax"),

@@ -9,6 +9,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { authFetch, API_BASE } from '@/lib/authFetch';
 import { buildDeleteConfirmationConfig, type DeleteTargetType } from './deleteConfirmation';
 import { getExistingModelValidationError, getNewModelValidationError } from './newModelValidation';
+import {
+  OPENAI_CODEX_OAUTH_SOURCE_TYPE,
+  isOpenAICodexOAuthSourceType,
+  openAICodexOAuthSourceLabel,
+  shouldShowProviderSecretFields,
+} from './providerAuth';
 import { getExistingProviderValidationError, getNewProviderValidationError } from './providerValidation';
 
 interface SecretValueStatus {
@@ -74,12 +80,19 @@ interface DeleteDialogState {
   relatedModelCount?: number;
 }
 
+interface OpenAICodexOAuthStatus {
+  logged_in: boolean;
+  email?: string | null;
+  expires?: number | null;
+}
+
 const MAX_BULK_TEST_CONCURRENCY = 10;
 const TEST_TOOLTIP_DELAY_MS = 1000;
 const TEST_TOOLTIP_MESSAGE = '连接测试会消耗少量token';
 
 const PROVIDER_SOURCE_TYPE_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
+  { value: OPENAI_CODEX_OAUTH_SOURCE_TYPE, label: openAICodexOAuthSourceLabel() },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'gemini', label: 'Gemini' },
   { value: 'qwen', label: 'Qwen' },
@@ -144,6 +157,52 @@ export default function LlmsPage() {
   const [showBulkTestTooltip, setShowBulkTestTooltip] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
   const [deletingTarget, setDeletingTarget] = useState(false);
+  const [openAICodexOAuthStatus, setOpenAICodexOAuthStatus] = useState<OpenAICodexOAuthStatus | null>(null);
+  const [openAICodexOAuthLoading, setOpenAICodexOAuthLoading] = useState(false);
+  const [openAICodexOAuthMessage, setOpenAICodexOAuthMessage] = useState('');
+
+  const loadOpenAICodexOAuthStatus = async () => {
+    try {
+      const res = await authFetch(`${API_BASE}/api/config/oauth/openai-codex/status`);
+      if (!res.ok) {
+        setOpenAICodexOAuthStatus({ logged_in: false, email: null, expires: null });
+        return;
+      }
+      const data = await res.json();
+      setOpenAICodexOAuthStatus({
+        logged_in: Boolean(data.logged_in),
+        email: typeof data.email === 'string' ? data.email : null,
+        expires: typeof data.expires === 'number' ? data.expires : null,
+      });
+    } catch {
+      setOpenAICodexOAuthStatus({ logged_in: false, email: null, expires: null });
+    }
+  };
+
+  const loginOpenAICodexOAuth = async () => {
+    setOpenAICodexOAuthLoading(true);
+    setOpenAICodexOAuthMessage('');
+    try {
+      const res = await authFetch(`${API_BASE}/api/config/oauth/openai-codex/login`, {
+        method: 'POST',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setOpenAICodexOAuthMessage(typeof data.detail === 'string' ? data.detail : 'Login 失败');
+        return;
+      }
+      setOpenAICodexOAuthStatus({
+        logged_in: Boolean(data.logged_in),
+        email: typeof data.email === 'string' ? data.email : null,
+        expires: typeof data.expires === 'number' ? data.expires : null,
+      });
+      setOpenAICodexOAuthMessage('Login 成功');
+    } catch (error) {
+      setOpenAICodexOAuthMessage(error instanceof Error ? error.message : 'Login 失败');
+    } finally {
+      setOpenAICodexOAuthLoading(false);
+    }
+  };
 
   const loadConfig = async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
@@ -197,12 +256,13 @@ export default function LlmsPage() {
         setBulkTesting(false);
         setBulkTestDialogOpen(false);
         setBulkTestResults({});
-        setOpenBulkTestErrorModel(null);
-        setHasBulkTestResults(false);
-        setNewProviderError('');
-        setProviderNameErrors({});
-        setNewModelErrors({});
-        setModelNameErrors({});
+      setOpenBulkTestErrorModel(null);
+      setHasBulkTestResults(false);
+      setNewProviderError('');
+      setProviderNameErrors({});
+      setNewModelErrors({});
+      setModelNameErrors({});
+      void loadOpenAICodexOAuthStatus();
     } catch {
       setSaveMsg('读取配置失败');
     } finally {
@@ -881,6 +941,7 @@ export default function LlmsPage() {
 
     try {
       const apiKey = await resolveProviderApiKey(providerName, provider, apiKeyCache);
+      const usesOpenAICodexOAuth = isOpenAICodexOAuthSourceType(provider.source_type);
       if (isSecretRefLike(apiKey)) {
         return {
           success: false,
@@ -888,7 +949,7 @@ export default function LlmsPage() {
           detail: 'Secret store 中保存的是占位符，请重新填写真实 API Key',
         };
       }
-      if (!apiKey) {
+      if (!apiKey && !usesOpenAICodexOAuth) {
         return { success: false, message: '连接失败', detail: '未配置 API Key' };
       }
 
@@ -957,11 +1018,13 @@ export default function LlmsPage() {
     const payload: Record<string, unknown> = {
       name: draft.name,
       source_type: draft.source_type,
-      base_url: draft.base_url,
       timeout: draft.timeout,
-      max_retries: draft.max_retries,
     };
-    if (draft.api_key_touched) {
+    if (!isOpenAICodexOAuthSourceType(draft.source_type)) {
+      payload.base_url = draft.base_url;
+      payload.max_retries = draft.max_retries;
+    }
+    if (!isOpenAICodexOAuthSourceType(draft.source_type) && draft.api_key_touched) {
       payload.api_key = draft.api_key;
     }
     const res = await authFetch(`${API_BASE}/api/config/llm/providers/${encodeURIComponent(name)}`, {
@@ -1584,6 +1647,11 @@ export default function LlmsPage() {
 
                 {expandedProviders[providerName] && (
                   <div data-testid={`provider-body-${providerName}`} className="space-y-6 p-6">
+                    {(() => {
+                      const providerDraft = getProviderDraft(providerName);
+                      const showProviderSecretFields = shouldShowProviderSecretFields(providerDraft.source_type);
+                      const isCodexOAuthProvider = isOpenAICodexOAuthSourceType(providerDraft.source_type);
+                      return (
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-1.5">
                         <label className="text-xs font-semibold text-muted-foreground">Provider 名称</label>
@@ -1632,7 +1700,7 @@ export default function LlmsPage() {
                       </div>
                       <FieldSelect
                         label="Provider 来源"
-                        value={getProviderDraft(providerName).source_type || 'openai'}
+                        value={providerDraft.source_type || 'openai'}
                         dataTestId={`provider-source-type-select-${providerName}`}
                         disabled={!isProviderEditable(providerName)}
                         options={PROVIDER_SOURCE_TYPE_OPTIONS.map((option) => ({
@@ -1641,57 +1709,97 @@ export default function LlmsPage() {
                         }))}
                         onChange={(value) => updateProviderField(providerName, 'source_type', value)}
                       />
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-muted-foreground">API Key</label>
-                        <div className="flex gap-2">
-                          <input
-                            type={apiKeyVisibility[providerName] ? 'text' : 'password'}
-                            value={providerApiKeyValue(providerName)}
-                            data-testid={`provider-api-key-input-${providerName}`}
-                            onChange={(e) => updateProviderField(providerName, 'api_key', e.target.value)}
-                            disabled={!isProviderEditable(providerName)}
-                            className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                          />
-                          <button
-                            type="button"
-                            data-testid={`provider-api-key-toggle-${providerName}`}
-                            onClick={() => void toggleProviderApiKey(providerName)}
-                            className="flex h-10 w-10 items-center justify-center rounded-xl border border-input bg-background text-muted-foreground transition-colors hover:text-foreground"
-                          >
-                            {apiKeyLoading[providerName] ? (
-                              <Loader2 size={16} className="animate-spin" />
-                            ) : apiKeyVisibility[providerName] ? (
-                              <EyeOff size={16} />
-                            ) : (
-                              <Eye size={16} />
-                            )}
-                          </button>
+                      {isCodexOAuthProvider ? (
+                        <div
+                          data-testid={`provider-openai-codex-oauth-login-${providerName}`}
+                          className="rounded-xl border border-border bg-muted/20 p-4 md:col-span-2"
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="text-sm font-bold text-foreground">
+                                {openAICodexOAuthStatus?.logged_in ? '已 Login' : '未 Login'}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {openAICodexOAuthStatus?.logged_in
+                                  ? openAICodexOAuthStatus.email || 'OpenAI Codex OAuth 已授权'
+                                  : '使用浏览器完成 OpenAI Codex OAuth 登录。'}
+                              </div>
+                              {openAICodexOAuthMessage ? (
+                                <div className="mt-2 text-xs font-medium text-muted-foreground">{openAICodexOAuthMessage}</div>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              data-testid={`provider-openai-codex-oauth-login-button-${providerName}`}
+                              onClick={() => void loginOpenAICodexOAuth()}
+                              disabled={openAICodexOAuthLoading}
+                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-foreground transition-all hover:bg-primary/90 disabled:opacity-60"
+                            >
+                              {openAICodexOAuthLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                              {openAICodexOAuthStatus?.logged_in ? '重新 Login' : 'Login'}
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                      <FieldInput
-                        label="Base URL"
-                        value={getProviderDraft(providerName).base_url || ''}
-                        dataTestId={`provider-base-url-input-${providerName}`}
-                        disabled={!isProviderEditable(providerName)}
-                        onChange={(value) => updateProviderField(providerName, 'base_url', value)}
-                      />
+                      ) : null}
+                      {showProviderSecretFields ? (
+                        <>
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-muted-foreground">API Key</label>
+                            <div className="flex gap-2">
+                              <input
+                                type={apiKeyVisibility[providerName] ? 'text' : 'password'}
+                                value={providerApiKeyValue(providerName)}
+                                data-testid={`provider-api-key-input-${providerName}`}
+                                onChange={(e) => updateProviderField(providerName, 'api_key', e.target.value)}
+                                disabled={!isProviderEditable(providerName)}
+                                className="w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                              />
+                              <button
+                                type="button"
+                                data-testid={`provider-api-key-toggle-${providerName}`}
+                                onClick={() => void toggleProviderApiKey(providerName)}
+                                className="flex h-10 w-10 items-center justify-center rounded-xl border border-input bg-background text-muted-foreground transition-colors hover:text-foreground"
+                              >
+                                {apiKeyLoading[providerName] ? (
+                                  <Loader2 size={16} className="animate-spin" />
+                                ) : apiKeyVisibility[providerName] ? (
+                                  <EyeOff size={16} />
+                                ) : (
+                                  <Eye size={16} />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                          <FieldInput
+                            label="Base URL"
+                            value={providerDraft.base_url || ''}
+                            dataTestId={`provider-base-url-input-${providerName}`}
+                            disabled={!isProviderEditable(providerName)}
+                            onChange={(value) => updateProviderField(providerName, 'base_url', value)}
+                          />
+                        </>
+                      ) : null}
                       <FieldInput
                         label="Timeout (s)"
                         type="number"
-                        value={String(getProviderDraft(providerName).timeout || 60)}
+                        value={String(providerDraft.timeout || 60)}
                         dataTestId={`provider-timeout-input-${providerName}`}
                         disabled={!isProviderEditable(providerName)}
                         onChange={(value) => updateProviderField(providerName, 'timeout', parseInt(value, 10) || 60)}
                       />
-                      <FieldInput
-                        label="Max Retries"
-                        type="number"
-                        value={String(getProviderDraft(providerName).max_retries || 3)}
-                        dataTestId={`provider-max-retries-input-${providerName}`}
-                        disabled={!isProviderEditable(providerName)}
-                        onChange={(value) => updateProviderField(providerName, 'max_retries', parseInt(value, 10) || 3)}
-                      />
+                      {showProviderSecretFields ? (
+                        <FieldInput
+                          label="Max Retries"
+                          type="number"
+                          value={String(providerDraft.max_retries || 3)}
+                          dataTestId={`provider-max-retries-input-${providerName}`}
+                          disabled={!isProviderEditable(providerName)}
+                          onChange={(value) => updateProviderField(providerName, 'max_retries', parseInt(value, 10) || 3)}
+                        />
+                      ) : null}
                     </div>
+                      );
+                    })()}
 
                     <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/20 p-5">
                       <div className="flex items-center justify-between gap-4">
@@ -2353,13 +2461,15 @@ function buildProviderPayloads(providers: Record<string, ProviderConfig>): Recor
     Object.entries(providers).map(([name, provider]) => {
       const payload: Record<string, unknown> = {
         source_type: provider.source_type || 'openai',
-        base_url: provider.base_url,
         timeout: provider.timeout,
-        max_retries: provider.max_retries,
       };
-      if (provider.api_key_touched) {
+      if (!isOpenAICodexOAuthSourceType(provider.source_type)) {
+        payload.base_url = provider.base_url;
+        payload.max_retries = provider.max_retries;
+      }
+      if (!isOpenAICodexOAuthSourceType(provider.source_type) && provider.api_key_touched) {
         payload.api_key = provider.api_key;
-      } else if (!provider.api_key_meta?.configured) {
+      } else if (!isOpenAICodexOAuthSourceType(provider.source_type) && !provider.api_key_meta?.configured) {
         payload.api_key = provider.api_key;
       }
       return [name, payload];

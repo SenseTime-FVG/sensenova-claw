@@ -30,6 +30,26 @@ def test_factory_routes_openai_compatible_by_provider_id():
         config.data = original
 
 
+def test_factory_routes_openai_codex_without_static_api_key():
+    original = deepcopy(config.data)
+    try:
+        config.data["llm"]["providers"]["codex"] = {
+            "source_type": "openai-codex-oauth",
+            "timeout": 45,
+            "max_retries": 2,
+        }
+
+        factory = LLMFactory()
+        provider = factory.get_provider("codex")
+
+        assert isinstance(provider, OpenAIProvider)
+        assert provider.provider_id == "codex"
+        assert provider.source_type == "openai-codex-oauth"
+        assert provider.client is None
+    finally:
+        config.data = original
+
+
 def test_factory_routes_anthropic_compatible_by_provider_id():
     original = deepcopy(config.data)
     try:

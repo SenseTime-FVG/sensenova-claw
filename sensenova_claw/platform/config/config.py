@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 KNOWN_LLM_SOURCE_TYPES = {
     "mock",
     "openai",
+    "openai-codex-oauth",
     "anthropic",
     "gemini",
     "qwen",
@@ -34,6 +35,7 @@ KNOWN_LLM_SOURCE_TYPES = {
 LEGACY_PROVIDER_SOURCE_TYPES = {
     "mock",
     "openai",
+    "openai-codex-oauth",
     "anthropic",
     "gemini",
     "qwen",

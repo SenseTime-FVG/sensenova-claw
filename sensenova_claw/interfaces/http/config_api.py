@@ -13,6 +13,13 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, Field
 
 from sensenova_claw.capabilities.miniapps.acp_wizard import ACPWizardInstallError, ACPWizardService
+from sensenova_claw.platform.auth.openai_codex_oauth import (
+    OpenAICodexOAuthError,
+    get_openai_codex_oauth_status,
+    relogin_openai_codex_oauth,
+    resolve_openai_codex_access_token,
+)
+from sensenova_claw.adapters.llm.providers.openai_provider import OpenAIProvider
 from sensenova_claw.platform.config.llm_presets import check_llm_configured, LLM_PROVIDER_CATEGORIES
 from sensenova_claw.platform.secrets.migration import migrate_plaintext_secrets
 from sensenova_claw.platform.secrets.registry import is_secret_path
@@ -120,6 +127,30 @@ async def get_secret_value(path: str, request: Request):
 
     cfg = request.app.state.config
     return {"path": path, "value": cfg.get(path, "") or ""}
+
+
+@router.get("/oauth/openai-codex/status")
+async def get_openai_codex_oauth_status_endpoint():
+    return get_openai_codex_oauth_status()
+
+
+@router.post("/oauth/openai-codex/login")
+async def login_openai_codex_oauth_endpoint():
+    try:
+        credential = await asyncio.to_thread(relogin_openai_codex_oauth, is_remote=False)
+        await _test_openai_codex_oauth(
+            model_id="gpt-5.5",
+            timeout_seconds=90,
+        )
+    except OpenAICodexOAuthError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "logged_in": True,
+        "email": credential.email,
+        "expires": credential.expires,
+    }
 
 
 @router.post("/migrate-secrets")
@@ -544,9 +575,16 @@ async def test_llm_connection(body: TestLLMBody):
                 max_output_tokens=body.max_output_tokens,
             )
             return {"success": True, **result}
-        if provider in ("openai", "openai-compatible"):
+        if provider in ("openai", "openai-compatible", "openai-codex-oauth"):
+            if provider == "openai-codex-oauth":
+                result = await _test_openai_codex_oauth(
+                    model_id=body.model_id,
+                    timeout_seconds=90,
+                )
+                return {"success": True, **result}
+            api_key = body.api_key
             result = await _test_openai_compatible(
-                api_key=body.api_key,
+                api_key=api_key,
                 base_url=body.base_url,
                 model_id=body.model_id,
                 max_tokens=body.max_tokens,
@@ -637,3 +675,26 @@ async def _test_gemini(
         extra_body={"max_output_tokens": max_output_tokens},
     )
     return {"model": response.model, "message": "连接成功"}
+
+
+async def _test_openai_codex_oauth(
+    *,
+    model_id: str,
+    timeout_seconds: int = 90,
+) -> dict:
+    """通过 ChatGPT backend-api Responses transport 测试 OpenAI-Codex-OAuth。"""
+    _ = resolve_openai_codex_access_token()
+    provider = OpenAIProvider(source_type="openai-codex-oauth")
+    provider.timeout = timeout_seconds
+    await provider._post_openai_codex_responses({
+        "model": model_id,
+        "input": [{"role": "user", "content": "连接测试，只输出 hi"}],
+        "stream": True,
+        "store": False,
+        "max_output_tokens": 16,
+        "text": {"verbosity": "medium"},
+        "include": ["reasoning.encrypted_content"],
+        "tool_choice": "auto",
+        "parallel_tool_calls": True,
+    })
+    return {"model": model_id, "message": "连接成功"}

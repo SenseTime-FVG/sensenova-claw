@@ -6,6 +6,109 @@ from types import SimpleNamespace
 import pytest
 
 from sensenova_claw.adapters.llm.providers.openai_provider import OpenAIProvider
+from sensenova_claw.platform.config.config import config
+
+
+def test_openai_codex_provider_uses_codex_backend_url_and_headers(monkeypatch) -> None:
+    original = json.loads(json.dumps(config.data))
+    access_token = (
+        "header."
+        "eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC0xIn19."
+        "signature"
+    )
+
+    try:
+        config.data["llm"]["providers"]["codex"] = {
+            "source_type": "openai-codex-oauth",
+            "timeout": 30,
+        }
+        monkeypatch.setattr(
+            "sensenova_claw.adapters.llm.providers.openai_provider.resolve_openai_codex_access_token",
+            lambda: access_token,
+        )
+
+        provider = OpenAIProvider(provider_id="codex", source_type="openai-codex-oauth")
+        headers = provider._build_openai_codex_headers(access_token)
+
+        assert provider.source_type == "openai-codex-oauth"
+        assert provider._openai_codex_responses_url() == "https://chatgpt.com/backend-api/codex/responses"
+        assert headers["Authorization"] == f"Bearer {access_token}"
+        assert headers["chatgpt-account-id"] == "acct-1"
+        assert headers["originator"] == "pi"
+        assert headers["OpenAI-Beta"] == "responses=experimental"
+        assert headers["accept"] == "text/event-stream"
+    finally:
+        config.data = original
+
+
+@pytest.mark.asyncio
+async def test_openai_codex_call_uses_chatgpt_backend_responses_api(monkeypatch) -> None:
+    calls: list[dict] = []
+    access_token = (
+        "header."
+        "eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC0xIn19."
+        "signature"
+    )
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        async def aread(self):
+            return b""
+
+        async def aiter_lines(self):
+            yield 'data: {"type":"response.output_text.delta","delta":"ok"}'
+            yield ""
+            yield 'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}'
+            yield ""
+
+    class FakeStreamContext:
+        async def __aenter__(self):
+            return FakeResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            calls.append({"client": kwargs})
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, **kwargs):
+            calls.append({"method": method, "url": url, **kwargs})
+            return FakeStreamContext()
+
+    monkeypatch.setattr("sensenova_claw.adapters.llm.providers.openai_provider.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        "sensenova_claw.adapters.llm.providers.openai_provider.resolve_openai_codex_access_token",
+        lambda: access_token,
+    )
+    provider = OpenAIProvider(provider_id="codex", source_type="openai-codex-oauth")
+
+    result = await provider.call(
+        model="gpt-5.5",
+        messages=[{"role": "user", "content": "hi"}],
+        temperature=1.0,
+        max_tokens=128000,
+    )
+
+    assert result["content"] == "ok"
+    assert result["usage"] == {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}
+    request = calls[1]
+    assert request["method"] == "POST"
+    assert request["url"] == "https://chatgpt.com/backend-api/codex/responses"
+    assert request["headers"]["chatgpt-account-id"] == "acct-1"
+    assert request["json"]["model"] == "gpt-5.5"
+    assert request["json"]["input"] == [{"role": "user", "content": "hi"}]
+    assert request["json"]["stream"] is True
+    assert request["json"]["max_output_tokens"] == 128000
 
 
 def test_normalize_messages_adds_function_type_and_tool_call_id() -> None:
