@@ -197,6 +197,7 @@ class AgentMessageCoordinator:
         timeout_seconds = float(payload.get("timeout_seconds", 300))
         max_attempts = max(int(payload.get("max_retries", 0)) + 1, 1)
         send_chain = list(payload.get("send_chain", []))
+        disable_tool_result_truncation = bool(payload.get("disable_tool_result_truncation"))
         child_session_id = (
             str(requested_session_id)
             if requested_session_id
@@ -259,6 +260,7 @@ class AgentMessageCoordinator:
                         "record_id": record.id,
                         "attempt_count": record.attempt_count,
                         "max_attempts": record.max_attempts,
+                        "disable_tool_result_truncation": disable_tool_result_truncation,
                     },
                 )
             else:
@@ -270,6 +272,7 @@ class AgentMessageCoordinator:
                     "parent_turn_id": parent_turn_id,
                     "parent_tool_call_id": parent_tool_call_id,
                     "message_trace_id": record.id,
+                    "disable_tool_result_truncation": disable_tool_result_truncation,
                     "max_tool_calls": int(
                         event.payload.get("max_tool_calls", 0)
                     ) or None,

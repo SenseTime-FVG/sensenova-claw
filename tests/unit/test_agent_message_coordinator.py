@@ -109,6 +109,77 @@ class TestAgentMessageCoordinator:
         assert runtime.spawn_calls[0]["trace_id"] == "record_1"
         await coordinator.stop()
 
+    async def test_requested_propagates_disable_tool_result_truncation_to_spawned_child(self, test_repo):
+        bus = PublicEventBus()
+        runtime = _FakeAgentRuntime()
+        coordinator = AgentMessageCoordinator(
+            bus=bus,
+            repo=test_repo,
+            agent_runtime=runtime,
+            retry_backoff_seconds=[0],
+        )
+
+        event = EventEnvelope(
+            type=AGENT_MESSAGE_REQUESTED,
+            session_id="parent",
+            trace_id="record_no_truncate",
+            payload={
+                "record_id": "record_no_truncate",
+                "target_id": "helper",
+                "message": "请运行 bash 并返回完整结果",
+                "mode": "sync",
+                "depth": 1,
+                "send_chain": ["default"],
+                "parent_session_id": "parent",
+                "parent_turn_id": "turn_parent",
+                "parent_tool_call_id": "tool_1",
+                "timeout_seconds": 30,
+                "max_retries": 0,
+                "disable_tool_result_truncation": True,
+            },
+        )
+
+        await coordinator._handle_message_requested(event)
+
+        assert runtime.spawn_calls
+        assert runtime.spawn_calls[0]["meta"]["disable_tool_result_truncation"] is True
+        await coordinator.stop()
+
+    async def test_requested_propagates_disable_tool_result_truncation_to_reused_child(self, test_repo):
+        bus = PublicEventBus()
+        runtime = _FakeAgentRuntime()
+        coordinator = AgentMessageCoordinator(
+            bus=bus,
+            repo=test_repo,
+            agent_runtime=runtime,
+            retry_backoff_seconds=[0],
+        )
+
+        event = EventEnvelope(
+            type=AGENT_MESSAGE_REQUESTED,
+            session_id="parent",
+            trace_id="record_reuse_no_truncate",
+            payload={
+                "record_id": "record_reuse_no_truncate",
+                "target_id": "helper",
+                "message": "继续运行 bash 并返回完整结果",
+                "mode": "sync",
+                "session_id": "agent2agent_existing",
+                "depth": 1,
+                "send_chain": ["default"],
+                "parent_session_id": "parent",
+                "timeout_seconds": 30,
+                "max_retries": 0,
+                "disable_tool_result_truncation": True,
+            },
+        )
+
+        await coordinator._handle_message_requested(event)
+
+        assert runtime.send_calls
+        assert runtime.send_calls[0]["extra_payload"]["disable_tool_result_truncation"] is True
+        await coordinator.stop()
+
     async def test_retry_ignores_stale_completion_and_succeeds(self, test_repo):
         bus = PublicEventBus()
         runtime = _FakeAgentRuntime()

@@ -155,6 +155,7 @@ class SendMessageTool(Tool):
         current_session_id = str(kwargs.get("_session_id", "")).strip()
         current_turn_id = kwargs.get("_turn_id")
         current_tool_call_id = kwargs.get("_tool_call_id")
+        disable_tool_result_truncation = bool(kwargs.get("_disable_result_truncation"))
 
         if not target_id or not message:
             return "send_message 执行失败：target_agent 和 message 为必填项。"
@@ -275,6 +276,7 @@ class SendMessageTool(Tool):
                     "max_retries": max_retries,
                     "max_tool_calls": self._max_tool_calls,
                     "max_llm_calls": self._max_llm_calls,
+                    "disable_tool_result_truncation": disable_tool_result_truncation,
                 },
             )
         )

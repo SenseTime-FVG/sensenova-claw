@@ -130,6 +130,52 @@ class TestSendMessageTool:
         await runtime.stop()
         await bus_router.stop()
 
+    async def test_send_message_propagates_disable_tool_result_truncation(self, test_repo, tmp_path):
+        bus, bus_router, registry, runtime, coordinator = await _build_runtime(test_repo, tmp_path)
+        await test_repo.create_session("parent", meta={"agent_id": "default"})
+
+        child_payload: dict[str, object] = {}
+
+        async def fake_child_agent():
+            async for event in bus.subscribe():
+                if event.type == USER_INPUT and event.session_id.startswith("agent2agent_"):
+                    child_payload.update(event.payload)
+                    await bus.publish(
+                        EventEnvelope(
+                            type=AGENT_STEP_COMPLETED,
+                            session_id=event.session_id,
+                            source="test",
+                            payload={"result": {"content": "done"}},
+                        )
+                    )
+                    return
+
+        fake_task = asyncio.create_task(fake_child_agent())
+        await asyncio.sleep(0)
+
+        tool = SendMessageTool(
+            agent_registry=registry,
+            bus=bus,
+            repo=test_repo,
+            coordinator=coordinator,
+            timeout=5,
+        )
+        await tool.execute(
+            target_agent="helper",
+            message="请处理",
+            _session_id="parent",
+            _turn_id="turn_parent",
+            _tool_call_id="tool_1",
+            _disable_result_truncation=True,
+        )
+
+        assert child_payload["disable_tool_result_truncation"] is True
+
+        fake_task.cancel()
+        await coordinator.stop()
+        await runtime.stop()
+        await bus_router.stop()
+
     async def test_async_send_message_publishes_completion_event(self, test_repo, tmp_path):
         bus, bus_router, registry, runtime, coordinator = await _build_runtime(test_repo, tmp_path)
         await test_repo.create_session("parent", meta={"agent_id": "default"})

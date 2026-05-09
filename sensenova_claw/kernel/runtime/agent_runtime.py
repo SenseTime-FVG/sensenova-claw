@@ -133,7 +133,7 @@ class AgentRuntime:
             extra_payload={
                 key: value
                 for key, value in session_meta.items()
-                if key in {"send_depth", "send_chain"}
+                if key in {"send_depth", "send_chain", "disable_tool_result_truncation"}
             },
             trace_id=trace_id,
         )
