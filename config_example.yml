@@ -382,6 +382,9 @@ tools:
     timeout: 30
     top_k: 10
 
+  mcp:
+    default_timeout: 60                 # MCP tools 作为普通 tool 执行时的默认超时（秒）
+
 # Skills 配置
 skills:
   extra_dirs: []

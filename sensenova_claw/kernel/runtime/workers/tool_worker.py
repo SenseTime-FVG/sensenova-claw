@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _PATH_POLICY_TOOLS = {"read_file", "write_file", "edit_file", "apply_patch", "bash_command"}
+_MCP_TOOL_PREFIX = "mcp__"
 
 
 class ToolSessionWorker(SessionWorker):
@@ -698,6 +699,8 @@ class ToolSessionWorker(SessionWorker):
             default_timeout = 600
         elif tool_name == "ask_user":
             default_timeout = 300
+        elif str(tool_name).startswith(_MCP_TOOL_PREFIX):
+            default_timeout = float(config.get("tools.mcp.default_timeout", 60))
         else:
             default_timeout = 15
         timeout = float(config.get(f"tools.{tool_name}.timeout", default_timeout))

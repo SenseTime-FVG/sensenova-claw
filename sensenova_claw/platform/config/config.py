@@ -176,6 +176,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "remote": [],                             # 远程 vault 列表，如 [{"name": "xx", "url": "http://...", "api_key": "..."}]
         },
         "ask_user": {"enabled": True, "timeout": 300},
+        "mcp": {"default_timeout": 60},
         "result_truncation": {
             "max_tokens": 8000,
             "save_dir": "workspace",

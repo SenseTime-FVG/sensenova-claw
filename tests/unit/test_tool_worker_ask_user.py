@@ -316,6 +316,96 @@ async def test_tool_requested_ask_user_uses_300s_default_timeout(worker, mock_ru
 
 
 @pytest.mark.asyncio
+async def test_tool_requested_mcp_tool_uses_60s_default_timeout(worker, mock_runtime):
+    """MCP tool 未显式配置 timeout 时，默认超时应为 60 秒。"""
+    mock_runtime.registry.get.return_value = _QuickTool()
+    mock_runtime.state_store = None
+    worker._is_tool_enabled_for_agent = lambda agent_id, name: True
+    tool_name = "mcp__browser_use__browser_navigate"
+
+    event = EventEnvelope(
+        type="tool.call_requested",
+        session_id="test_session",
+        turn_id="turn1",
+        source="test",
+        payload={
+            "tool_call_id": "call_mcp",
+            "tool_name": tool_name,
+            "arguments": {"url": "https://example.com"},
+        },
+    )
+
+    captured_timeout: list[float] = []
+    original_wait_for = tool_worker_module.asyncio.wait_for
+    original_get = tool_worker_module.config.get
+
+    async def fake_wait_for(awaitable, timeout):
+        captured_timeout.append(float(timeout))
+        return await awaitable
+
+    def fake_get(key, default=None):
+        if key == f"tools.{tool_name}.timeout":
+            return default
+        return original_get(key, default)
+
+    tool_worker_module.asyncio.wait_for = fake_wait_for
+    tool_worker_module.config.get = fake_get
+    try:
+        await worker._handle_tool_requested(event)
+    finally:
+        tool_worker_module.asyncio.wait_for = original_wait_for
+        tool_worker_module.config.get = original_get
+
+    assert captured_timeout
+    assert captured_timeout[0] == 60
+
+
+@pytest.mark.asyncio
+async def test_tool_requested_mcp_tool_timeout_can_be_overridden(worker, mock_runtime):
+    """显式 tools.<mcp_tool>.timeout 应覆盖 MCP 默认超时。"""
+    mock_runtime.registry.get.return_value = _QuickTool()
+    mock_runtime.state_store = None
+    worker._is_tool_enabled_for_agent = lambda agent_id, name: True
+    tool_name = "mcp__browser_use__browser_navigate"
+
+    event = EventEnvelope(
+        type="tool.call_requested",
+        session_id="test_session",
+        turn_id="turn1",
+        source="test",
+        payload={
+            "tool_call_id": "call_mcp_override",
+            "tool_name": tool_name,
+            "arguments": {"url": "https://example.com"},
+        },
+    )
+
+    captured_timeout: list[float] = []
+    original_wait_for = tool_worker_module.asyncio.wait_for
+    original_get = tool_worker_module.config.get
+
+    async def fake_wait_for(awaitable, timeout):
+        captured_timeout.append(float(timeout))
+        return await awaitable
+
+    def fake_get(key, default=None):
+        if key == f"tools.{tool_name}.timeout":
+            return 90
+        return original_get(key, default)
+
+    tool_worker_module.asyncio.wait_for = fake_wait_for
+    tool_worker_module.config.get = fake_get
+    try:
+        await worker._handle_tool_requested(event)
+    finally:
+        tool_worker_module.asyncio.wait_for = original_wait_for
+        tool_worker_module.config.get = original_get
+
+    assert captured_timeout
+    assert captured_timeout[0] == 90
+
+
+@pytest.mark.asyncio
 async def test_tool_requested_timeout_error_message_not_empty(worker, mock_runtime, mock_bus):
     """TimeoutError 无文案时，应回落为异常类型名，避免前端显示 Unknown Error。"""
     mock_runtime.registry.get.return_value = _TimeoutTool()
