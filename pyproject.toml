@@ -35,6 +35,8 @@ dependencies = [
   "deepxiv-sdk>=0.2.5",
   "semanticscholar>=0.12.0",
   "playwright>=1.59.0",
+  "pypdf>=6.4.0",
+  "pdftotext>=3.0.0",
 ]
 
 [project.optional-dependencies]
