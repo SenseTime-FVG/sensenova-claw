@@ -104,8 +104,8 @@ def normalize_space(value: str | None) -> str:
 
 
 def title_matches(title: str | None, query: str) -> bool:
-    """Exact, case-sensitive title match after whitespace normalization."""
-    return normalize_space(title) == normalize_space(query)
+    """Exact title match after whitespace normalization, ignoring case."""
+    return normalize_space(title).casefold() == normalize_space(query).casefold()
 
 
 def absolute_url(href: str | None) -> str | None:
@@ -210,10 +210,11 @@ async def find_exact_search_result(page, query: str) -> dict[str, Any]:
     result = await page.evaluate(
         """(query) => {
             const normalize = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+            const titleMatches = (title, expected) => normalize(title).toLocaleLowerCase() === normalize(expected).toLocaleLowerCase();
             const anchors = [...document.querySelectorAll('a[href*="/paper/"]')];
             for (const a of anchors) {
                 const title = normalize(a.innerText || a.textContent);
-                if (title === normalize(query)) {
+                if (titleMatches(title, query)) {
                     return {
                         title,
                         href: a.getAttribute('href'),
@@ -450,8 +451,9 @@ async def crawl(query: str, output: Path, headless: bool, limit: int | None, max
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-        return result
+        cleaned_result = strip_raw_text(result)
+        output.write_text(json.dumps(cleaned_result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return cleaned_result
     finally:
         if browser is not None:
             await browser.close()
@@ -481,7 +483,7 @@ async def crawl_section(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Crawl Semantic Scholar citations and references for an exact paper title.")
-    parser.add_argument("--query", default=DEFAULT_QUERY, help="Case-sensitive exact paper title to match.")
+    parser.add_argument("--query", default=DEFAULT_QUERY, help="Exact paper title to match, ignoring case.")
     parser.add_argument("--output", default=".tmp/semantic_scholar_output.json", help="JSON output path.")
     parser.add_argument("--limit", default="10", help="Maximum papers per list, or 'all'. Defaults to 10.")
     parser.add_argument("--max-pages", type=int, default=None, help="Maximum pages to collect per list.")
@@ -491,6 +493,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def format_stdout_result(result: dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+def strip_raw_text(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: strip_raw_text(item) for key, item in value.items() if key != "raw_text"}
+    if isinstance(value, list):
+        return [strip_raw_text(item) for item in value]
+    return value
+
+
+def format_cli_stdout(result: dict[str, Any], output_path: str) -> str:
+    return json.dumps(
+        {
+            "output": str(Path(output_path).resolve()),
+            "result": result,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -504,7 +525,7 @@ def main(argv: list[str] | None = None) -> int:
             max_pages=args.max_pages,
         )
     )
-    print(format_stdout_result(result))
+    print(format_cli_stdout(result, args.output))
     return 0
 
 
