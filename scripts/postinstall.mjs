@@ -49,6 +49,12 @@ export function getInstallTasks(rootDir = ROOT_DIR) {
       cwd: rootDir,
     },
     {
+      title: '安装 Playwright Firefox 浏览器',
+      command: 'uv',
+      args: ['run', 'python', '-m', 'playwright', 'install', 'firefox'],
+      cwd: rootDir,
+    },
+    {
       title: '安装前端依赖',
       command: 'npm',
       args: ['install'],

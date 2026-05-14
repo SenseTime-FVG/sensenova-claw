@@ -15,5 +15,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2"
+  },
+  "dependencies": {
+    "camoufox-js": "^0.8.5"
   }
 }
