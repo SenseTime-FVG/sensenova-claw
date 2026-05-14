@@ -4,11 +4,17 @@
 import argparse
 import sys
 import time
+from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_search-common"))
 
 from search_utils import get_client, make_item, print_json
+
+try:
+    from semanticscholar import SemanticScholar
+except ImportError:  # SDK 是优先路径；缺失时仍可使用 HTTP fallback。
+    SemanticScholar = None
 
 API_BASE = "https://api.semanticscholar.org/graph/v1/paper"
 MAX_429_ATTEMPTS = 4
@@ -24,6 +30,7 @@ PAPER_FIELDS = [
 
 # edge-level fields（引用关系本身的属性）
 EDGE_FIELDS = ["contexts", "intents"]
+SDK_FIELDS = EDGE_FIELDS + PAPER_FIELDS
 
 
 def _retry_after_delay(response, attempt: int) -> float:
@@ -88,7 +95,206 @@ def resolve_paper_id(identifier: str) -> str:
     return identifier
 
 
+def _value(obj, key: str, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _names(items) -> list[str]:
+    names = []
+    for item in items or []:
+        name = _value(item, "name")
+        if name:
+            names.append(name)
+        elif isinstance(item, str):
+            names.append(item)
+    return names
+
+
+def _date_string(value):
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _external_ids(paper) -> dict:
+    external_ids = _value(paper, "externalIds") or {}
+    return external_ids if isinstance(external_ids, dict) else {}
+
+
+def _open_access_pdf_url(paper) -> str | None:
+    pdf = _value(paper, "openAccessPdf")
+    return _value(pdf, "url")
+
+
+def _paper_item_from_entry(entry, paper, *, min_citations: int, year_min: int | None, year_max: int | None) -> dict | None:
+    if not paper or not _value(paper, "title"):
+        return None
+
+    year = _value(paper, "year")
+    citation_count = _value(paper, "citationCount") or 0
+
+    if citation_count < min_citations:
+        return None
+    if year_min and year and year < year_min:
+        return None
+    if year_max and year and year > year_max:
+        return None
+
+    external_ids = _external_ids(paper)
+    s2_id = _value(paper, "paperId") or ""
+    url = _value(paper, "url") or (f"https://www.semanticscholar.org/paper/{s2_id}" if s2_id else "")
+    contexts = _value(entry, "contexts") or []
+    intents = _value(entry, "intents") or []
+
+    return make_item(
+        title=_value(paper, "title") or "",
+        url=url,
+        snippet=_value(paper, "abstract") or "",
+        authors=_names(_value(paper, "authors")),
+        year=year,
+        venue=_value(paper, "venue") or None,
+        publication_date=_date_string(_value(paper, "publicationDate")),
+        citation_count=citation_count,
+        influential_citation_count=_value(paper, "influentialCitationCount"),
+        is_open_access=_value(paper, "isOpenAccess"),
+        open_access_pdf=_open_access_pdf_url(paper),
+        fields_of_study=_names(_value(paper, "fieldsOfStudy")) or None,
+        doi=external_ids.get("DOI"),
+        arxiv_id=external_ids.get("ArXiv"),
+        paper_id=s2_id,
+        citation_contexts=contexts[:3] if contexts else None,
+        citation_intents=intents if intents else None,
+    )
+
+
+def _make_result(
+    *,
+    resolved: str,
+    direction: str,
+    items: list[dict],
+    total_available: int,
+    source_paper=None,
+) -> dict:
+    items.sort(key=lambda x: x.get("citation_count", 0), reverse=True)
+
+    result = {
+        "success": True,
+        "paper_id": resolved,
+        "direction": direction,
+        "provider": "semantic_scholar",
+        "items": items,
+        "total_available": total_available,
+        "returned": len(items),
+        "error": None,
+    }
+    if source_paper:
+        result["source_paper"] = {
+            "title": _value(source_paper, "title"),
+            "year": _value(source_paper, "year"),
+            "citation_count": _value(source_paper, "citationCount"),
+        }
+    return result
+
+
+def _build_sdk_client(api_key: str | None):
+    if SemanticScholar is None:
+        raise ImportError("缺少依赖 semanticscholar")
+    if api_key:
+        return SemanticScholar(api_key=api_key)
+    return SemanticScholar()
+
+
+def _sdk_entries(results) -> list:
+    items = _value(results, "items")
+    if items is not None:
+        return list(items)
+    return list(results)
+
+
+def _fetch_refs_with_sdk(
+    paper_id: str,
+    direction: str,
+    limit: int,
+    min_citations: int,
+    year_min: int | None,
+    year_max: int | None,
+    api_key: str | None = None,
+) -> dict:
+    resolved = resolve_paper_id(paper_id)
+    sch = _build_sdk_client(api_key)
+
+    fetch_method = (
+        sch.get_paper_references if direction == "references" else sch.get_paper_citations
+    )
+    entries = _sdk_entries(fetch_method(resolved, fields=SDK_FIELDS, limit=1000))
+
+    source_paper = None
+    try:
+        source_paper = sch.get_paper(resolved, fields=["title", "year", "citationCount"])
+    except Exception:
+        pass
+
+    items = []
+    for entry in entries:
+        item = _paper_item_from_entry(
+            entry,
+            _value(entry, "paper"),
+            min_citations=min_citations,
+            year_min=year_min,
+            year_max=year_max,
+        )
+        if item:
+            items.append(item)
+
+    items.sort(key=lambda x: x.get("citation_count", 0), reverse=True)
+    return _make_result(
+        resolved=resolved,
+        direction=direction,
+        items=items[:limit],
+        total_available=len(entries),
+        source_paper=source_paper,
+    )
+
+
 def fetch_refs(
+    paper_id: str,
+    direction: str,
+    limit: int,
+    min_citations: int,
+    year_min: int | None,
+    year_max: int | None,
+    api_key: str | None = None,
+) -> dict:
+    """获取论文的 references 或 citations：SDK 优先，失败时使用原 HTTP Graph API。"""
+    try:
+        return _fetch_refs_with_sdk(
+            paper_id,
+            direction,
+            limit,
+            min_citations,
+            year_min,
+            year_max,
+            api_key,
+        )
+    except Exception:
+        return _fetch_refs_with_http(
+            paper_id,
+            direction,
+            limit,
+            min_citations,
+            year_min,
+            year_max,
+            api_key,
+        )
+
+
+def _fetch_refs_with_http(
     paper_id: str,
     direction: str,
     limit: int,

@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""Semantic Scholar 论文搜索。通过 Semantic Scholar Graph API。"""
+"""Semantic Scholar 论文搜索。优先使用 semanticscholar SDK，失败时回退 Graph API HTTP。"""
 
 import sys
 import time
+from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_search-common"))
 
 from search_utils import build_parser, get_client, make_item, make_result, print_json
+
+try:
+    from semanticscholar import SemanticScholar
+except ImportError:  # SDK 是优先路径；缺失时仍可使用 HTTP fallback。
+    SemanticScholar = None
 
 API_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 MAX_429_ATTEMPTS = 4
@@ -19,6 +25,7 @@ FIELDS = ",".join([
     "referenceCount", "isOpenAccess", "openAccessPdf",
     "externalIds", "fieldsOfStudy", "publicationTypes", "journal",
 ])
+SDK_FIELDS = FIELDS.split(",")
 
 
 def _retry_after_delay(response, attempt: int) -> float:
@@ -44,8 +51,121 @@ def _get_with_429_retry(client, url: str, *, params: dict) -> object:
     raise RuntimeError("unreachable")
 
 
-def search(query: str, limit: int, api_key: str | None = None) -> list[dict]:
-    """执行 Semantic Scholar 搜索。"""
+def _value(obj, key: str, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _names(items) -> list[str]:
+    names = []
+    for item in items or []:
+        name = _value(item, "name")
+        if name:
+            names.append(name)
+        elif isinstance(item, str):
+            names.append(item)
+    return names
+
+
+def _text(obj) -> str | None:
+    if obj is None:
+        return None
+    if isinstance(obj, str):
+        return obj
+    return _value(obj, "text")
+
+
+def _date_string(value):
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _open_access_pdf_url(paper) -> str | None:
+    pdf = _value(paper, "openAccessPdf")
+    return _value(pdf, "url")
+
+
+def _publication_venue(paper) -> dict | None:
+    pub_venue = _value(paper, "publicationVenue") or {}
+    publication_venue = {
+        k: _value(pub_venue, k)
+        for k in ("id", "name", "type", "url")
+        if _value(pub_venue, k)
+    }
+    return publication_venue or None
+
+
+def _external_ids(paper) -> dict:
+    external_ids = _value(paper, "externalIds") or {}
+    return external_ids if isinstance(external_ids, dict) else {}
+
+
+def _item_from_paper(paper, fallback_paper_id: str = "") -> dict:
+    authors = _names(_value(paper, "authors"))
+    external_ids = _external_ids(paper)
+
+    paper_id = _value(paper, "paperId") or fallback_paper_id
+    url = _value(paper, "url") or (f"https://www.semanticscholar.org/paper/{paper_id}" if paper_id else "")
+
+    abstract = _value(paper, "abstract") or ""
+    tldr = _text(_value(paper, "tldr"))
+    snippet = abstract or tldr or ""
+
+    journal = _value(paper, "journal") or {}
+    venue = _value(paper, "venue") or _value(journal, "name")
+
+    return make_item(
+        title=_value(paper, "title") or "",
+        url=url,
+        snippet=snippet,
+        tldr=tldr,
+        authors=authors,
+        year=_value(paper, "year"),
+        venue=venue if venue else None,
+        publication_venue=_publication_venue(paper),
+        publication_date=_date_string(_value(paper, "publicationDate")),
+        citation_count=_value(paper, "citationCount"),
+        influential_citation_count=_value(paper, "influentialCitationCount"),
+        reference_count=_value(paper, "referenceCount"),
+        is_open_access=_value(paper, "isOpenAccess"),
+        open_access_pdf=_open_access_pdf_url(paper),
+        fields_of_study=_names(_value(paper, "fieldsOfStudy")) or None,
+        publication_types=_value(paper, "publicationTypes") or None,
+        doi=_value(paper, "doi") or external_ids.get("DOI"),
+        arxiv_id=external_ids.get("ArXiv"),
+        paper_id=paper_id,
+    )
+
+
+def _build_sdk_client(api_key: str | None):
+    if SemanticScholar is None:
+        raise ImportError("缺少依赖 semanticscholar")
+    if api_key:
+        return SemanticScholar(api_key=api_key)
+    return SemanticScholar()
+
+
+def _search_with_sdk(query: str, limit: int, api_key: str | None = None) -> list[dict]:
+    sch = _build_sdk_client(api_key)
+    results = sch.search_paper(query, limit=min(limit, 100))
+
+    items = []
+    for paper in results:
+        paper_id = _value(paper, "paperId")
+        details = sch.get_paper(paper_id, fields=SDK_FIELDS) if paper_id else paper
+        items.append(_item_from_paper(details, fallback_paper_id=paper_id))
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _search_with_http(query: str, limit: int, api_key: str | None = None) -> list[dict]:
     headers: dict[str, str] = {}
     if api_key:
         headers["x-api-key"] = api_key
@@ -62,56 +182,17 @@ def search(query: str, limit: int, api_key: str | None = None) -> list[dict]:
 
     items = []
     for paper in data.get("data", [])[:limit]:
-        authors = [a.get("name", "") for a in paper.get("authors", [])]
-
-        open_access_pdf = None
-        if paper.get("openAccessPdf"):
-            open_access_pdf = paper["openAccessPdf"].get("url")
-
-        external_ids = paper.get("externalIds") or {}
-        doi = external_ids.get("DOI")
-        arxiv_id = external_ids.get("ArXiv")
-
-        paper_id = paper.get("paperId", "")
-        url = f"https://www.semanticscholar.org/paper/{paper_id}"
-
-        # 摘要：优先用 abstract，缺失时降级用 tldr
-        abstract = paper.get("abstract") or ""
-        tldr = (paper.get("tldr") or {}).get("text")
-        snippet = abstract or tldr or ""
-
-        # 期刊/会议：venue（脏字符串）+ publicationVenue（结构化）
-        venue = paper.get("venue") or (paper.get("journal") or {}).get("name")
-        pub_venue = paper.get("publicationVenue") or {}
-        publication_venue = {
-            k: pub_venue[k]
-            for k in ("id", "name", "type", "url")
-            if pub_venue.get(k)
-        } or None
-
-        items.append(make_item(
-            title=paper.get("title") or "",
-            url=url,
-            snippet=snippet,
-            tldr=tldr,
-            authors=authors,
-            year=paper.get("year"),
-            venue=venue if venue else None,
-            publication_venue=publication_venue,
-            publication_date=paper.get("publicationDate"),
-            citation_count=paper.get("citationCount"),
-            influential_citation_count=paper.get("influentialCitationCount"),
-            reference_count=paper.get("referenceCount"),
-            is_open_access=paper.get("isOpenAccess"),
-            open_access_pdf=open_access_pdf,
-            fields_of_study=paper.get("fieldsOfStudy") or None,
-            publication_types=paper.get("publicationTypes") or None,
-            doi=doi,
-            arxiv_id=arxiv_id,
-            paper_id=paper_id,
-        ))
+        items.append(_item_from_paper(paper))
 
     return items
+
+
+def search(query: str, limit: int, api_key: str | None = None) -> list[dict]:
+    """执行 Semantic Scholar 搜索：SDK 优先，失败时使用原 HTTP Graph API。"""
+    try:
+        return _search_with_sdk(query, limit, api_key)
+    except Exception:
+        return _search_with_http(query, limit, api_key)
 
 
 def main():
