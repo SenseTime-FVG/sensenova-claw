@@ -8,6 +8,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "_search-
 
 from search_utils import build_parser, get_client, make_item, make_result, print_json
 
+WIKIPEDIA_USER_AGENT = (
+    "sensenova-claw search-academic "
+    "(https://github.com/SenseTime-FVG/sensenova-claw)"
+)
+
 
 def _api_url(lang: str) -> str:
     return f"https://{lang}.wikipedia.org/w/api.php"
@@ -25,7 +30,7 @@ def search(query: str, limit: int, lang: str = "en") -> list[dict]:
         "utf8": 1,
     }
 
-    with get_client() as client:
+    with get_client(headers={"User-Agent": WIKIPEDIA_USER_AGENT}) as client:
         resp = client.get(_api_url(lang), params=params)
         resp.raise_for_status()
         data = resp.json()
