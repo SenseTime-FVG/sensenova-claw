@@ -3,11 +3,13 @@
 ArXiv 论文章节阅读器。
 
 通过解析 arXiv HTML 版本（LaTeXML 转换），支持：
+  - 读取论文全文
   - 列出论文所有章节结构
   - 按章节名称提取正文内容（大小写不敏感，支持部分匹配）
 
 用法：
-  python3 arxiv_paper.py 2409.05591                        # 列出章节
+  python3 arxiv_paper.py 2409.05591                        # 读取全文
+  python3 arxiv_paper.py 2409.05591 --list-sections         # 列出章节
   python3 arxiv_paper.py 2409.05591 --section introduction  # 读取指定章节
   python3 arxiv_paper.py 2409.05591 --section method
 """
@@ -32,6 +34,8 @@ except ImportError:
 HTML_BASE = "https://arxiv.org/html"
 ABS_BASE = "https://arxiv.org/abs"
 PDF_BASE = "https://arxiv.org/pdf"
+SECTION_CLASS_RE = re.compile(r"\bltx_(section|subsection|subsubsection|appendix|bibliography)\b")
+SECTION_HEADING_TAGS = ["h2", "h3", "h4"]
 
 # ── HTML 获取 ─────────────────────────────────────────────────────────────────
 
@@ -108,14 +112,52 @@ def _elem_to_text(elem: Tag) -> str:
 
 # ── 章节提取 ──────────────────────────────────────────────────────────────────
 
+def _is_extractable_section(tag: Tag) -> bool:
+    """Return whether a tag is a section-like content block we expose."""
+    if tag.name != "section":
+        return False
+    return any(SECTION_CLASS_RE.search(class_name) for class_name in tag.get("class") or [])
+
+
+def _find_section_heading(sec: Tag) -> Tag | None:
+    # 找本层标题（不要子 section 的标题）
+    for h_tag in SECTION_HEADING_TAGS:
+        candidate = sec.find(h_tag, class_=re.compile(r"\bltx_title\b"), recursive=False)
+        if candidate:
+            return candidate
+
+    # 有些 section 标题在首个 div 里
+    for h_tag in SECTION_HEADING_TAGS:
+        candidate = sec.find(h_tag, class_=re.compile(r"\bltx_title\b"))
+        if candidate:
+            return candidate
+
+    return None
+
+
+def _section_text(sec: Tag, include_child_sections: bool) -> str:
+    sec_copy = BeautifulSoup(str(sec), "html.parser").find("section")
+    if sec_copy is None:
+        return ""
+
+    if not include_child_sections:
+        for child_sec in sec_copy.find_all(_is_extractable_section, recursive=False):
+            child_sec.decompose()
+
+    for h in sec_copy.find_all(SECTION_HEADING_TAGS, class_=re.compile(r"\bltx_title\b"), recursive=False):
+        h.decompose()
+
+    return _elem_to_text(sec_copy)
+
+
 def extract_sections(html: str) -> list[dict[str, Any]]:
     """
     从 arXiv HTML 提取所有章节（含摘要）。
 
     返回列表，每项：
       name   - 章节标题（含编号，如 "1 Introduction"）
-      level  - 层级（0=摘要, 1=h2, 2=h3）
-      text   - 正文文本
+      level  - 层级（0=摘要, 1=h2, 2=h3, 3=h4）
+      text   - 本章节正文文本（不含可单独抽取的子章节）
     """
     soup = BeautifulSoup(html, "html.parser")
     sections: list[dict[str, Any]] = []
@@ -131,23 +173,8 @@ def extract_sections(html: str) -> list[dict[str, Any]]:
             sections.append({"name": "Abstract", "level": 0, "text": abstract_text})
 
     # ── 正文各 section ──
-    for sec in soup.find_all("section", class_=re.compile(r"\bltx_section\b|\bltx_appendix\b")):
-        # 找本层标题（不要子 section 的标题）
-        heading: Tag | None = None
-        for h_tag in ["h2", "h3", "h4"]:
-            candidate = sec.find(h_tag, class_=re.compile(r"\bltx_title\b"), recursive=False)
-            if candidate:
-                heading = candidate
-                break
-
-        if heading is None:
-            # 有些 section 标题在首个 div 里
-            for h_tag in ["h2", "h3", "h4"]:
-                candidate = sec.find(h_tag, class_=re.compile(r"\bltx_title\b"))
-                if candidate:
-                    heading = candidate
-                    break
-
+    for sec in soup.find_all(_is_extractable_section):
+        heading = _find_section_heading(sec)
         if heading is None:
             continue
 
@@ -156,21 +183,15 @@ def extract_sections(html: str) -> list[dict[str, Any]]:
         heading_text = re.sub(r"\s+", " ", heading_text)
         level = {"h2": 1, "h3": 2, "h4": 3}.get(heading.name, 1)
 
-        # 提取本 section 的文本（排除子 section，避免重复）
-        sec_copy = BeautifulSoup(str(sec), "html.parser").find("section")
-        # 移除子 section
-        for child_sec in sec_copy.find_all("section", recursive=False):
-            child_sec.decompose()
-        # 移除标题自身
-        for h in sec_copy.find_all(["h2", "h3", "h4"], class_=re.compile(r"\bltx_title\b"), recursive=False):
-            h.decompose()
+        # text 排除可单独抽取的子 section，全文拼接时避免重复。
+        # full_text 保留子 section，用于读取只有子章节正文的父章节。
+        text = _section_text(sec, include_child_sections=False)
+        full_text = _section_text(sec, include_child_sections=True)
 
-        text = _elem_to_text(sec_copy)
-
-        if not text.strip():
+        if not text.strip() and not full_text.strip():
             continue
 
-        sections.append({"name": heading_text, "level": level, "text": text})
+        sections.append({"name": heading_text, "level": level, "text": text, "full_text": full_text})
 
     return sections
 
@@ -200,6 +221,47 @@ def _match_section(sections: list[dict], query: str) -> dict | None:
 
 # ── 对外接口 ──────────────────────────────────────────────────────────────────
 
+def _section_summaries(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{"name": s["name"], "level": s["level"]} for s in sections]
+
+
+def _top_level_section_summaries(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _section_summaries([s for s in sections if s["level"] <= 1])
+
+
+def _join_sections(sections: list[dict[str, Any]]) -> str:
+    blocks = []
+    for section in sections:
+        name = str(section.get("name", "")).strip()
+        text = str(section.get("text", "")).strip()
+        if name and text:
+            blocks.append(f"{name}\n{text}")
+        elif name:
+            blocks.append(name)
+        elif text:
+            blocks.append(text)
+    return "\n\n".join(blocks).strip()
+
+
+def cmd_read_full_text(arxiv_id: str) -> dict[str, Any]:
+    """读取整篇论文的正文内容。"""
+    html = fetch_html(arxiv_id)
+    sections = extract_sections(html)
+    content = _join_sections(sections)
+    return {
+        "success": True,
+        "arxiv_id": arxiv_id,
+        "abs_url": f"{ABS_BASE}/{arxiv_id}",
+        "html_url": f"{HTML_BASE}/{arxiv_id}",
+        "pdf_url": f"{PDF_BASE}/{arxiv_id}",
+        "content": content,
+        "char_count": len(content),
+        "section_count": len(sections),
+        "sections": _top_level_section_summaries(sections),
+        "error": None,
+    }
+
+
 def cmd_list_sections(arxiv_id: str) -> dict[str, Any]:
     """列出论文所有章节（不含正文）。"""
     html = fetch_html(arxiv_id)
@@ -211,7 +273,7 @@ def cmd_list_sections(arxiv_id: str) -> dict[str, Any]:
         "html_url": f"{HTML_BASE}/{arxiv_id}",
         "pdf_url": f"{PDF_BASE}/{arxiv_id}",
         "section_count": len(sections),
-        "sections": [{"name": s["name"], "level": s["level"]} for s in sections],
+        "sections": _section_summaries(sections),
         "error": None,
     }
 
@@ -232,14 +294,16 @@ def cmd_read_section(arxiv_id: str, section_name: str) -> dict[str, Any]:
             "error": f"未找到章节 '{section_name}'，可用章节：{available}",
         }
 
+    content = matched["text"] or matched.get("full_text", "")
+
     return {
         "success": True,
         "arxiv_id": arxiv_id,
         "abs_url": f"{ABS_BASE}/{arxiv_id}",
         "section": matched["name"],
         "level": matched["level"],
-        "content": matched["text"],
-        "char_count": len(matched["text"]),
+        "content": content,
+        "char_count": len(content),
         "error": None,
     }
 
@@ -252,7 +316,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例：
-  python3 arxiv_paper.py 2409.05591                          列出所有章节
+  python3 arxiv_paper.py 2409.05591                          读取全文
+  python3 arxiv_paper.py 2409.05591 --list-sections           列出所有章节
   python3 arxiv_paper.py 2409.05591 --section introduction   读取 Introduction
   python3 arxiv_paper.py 2409.05591 --section method         读取 Method/Methods
   python3 arxiv_paper.py 2409.05591 --section conclusion     读取 Conclusion
@@ -262,15 +327,18 @@ def main():
     parser.add_argument(
         "--section", "-s",
         metavar="SECTION_NAME",
-        help="要读取的章节名（大小写不敏感，支持部分匹配）。不指定则列出所有章节。",
+        help="要读取的章节名（大小写不敏感，支持部分匹配）。不指定则读取全文。",
     )
+    parser.add_argument("--list-sections", action="store_true", help="仅列出章节结构，不返回正文")
     args = parser.parse_args()
 
     try:
-        if args.section:
+        if args.list_sections:
+            result = cmd_list_sections(args.arxiv_id.strip())
+        elif args.section:
             result = cmd_read_section(args.arxiv_id.strip(), args.section.strip())
         else:
-            result = cmd_list_sections(args.arxiv_id.strip())
+            result = cmd_read_full_text(args.arxiv_id.strip())
         print_json(result)
     except Exception as e:
         print_json({
