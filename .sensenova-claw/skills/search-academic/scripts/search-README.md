@@ -7,13 +7,13 @@
 ## 基本用法
 
 ```bash
-uv run python .sensenova-claw/skills/search-academic/scripts/search.py "NSA"
+python3 .sensenova-claw/skills/search-academic/scripts/search.py "NSA"
 ```
 
 指定搜索源：
 
 ```bash
-uv run python .sensenova-claw/skills/search-academic/scripts/search.py "NSA" \
+python3 .sensenova-claw/skills/search-academic/scripts/search.py "NSA" \
   --source arxiv,semantic,wikipedia \
   --limit 5
 ```
@@ -21,7 +21,7 @@ uv run python .sensenova-claw/skills/search-academic/scripts/search.py "NSA" \
 写入 JSON 文件：
 
 ```bash
-uv run python .sensenova-claw/skills/search-academic/scripts/search.py "NSA" \
+python3 .sensenova-claw/skills/search-academic/scripts/search.py "NSA" \
   --source arxiv,semantic \
   --limit 5 \
   --output results/search.json
@@ -104,7 +104,7 @@ arxiv,semantic,google_scholar,pubmed,wikipedia
 示例：
 
 ```bash
-uv run python .sensenova-claw/skills/search-academic/scripts/search.py "transformer" \
+python3 .sensenova-claw/skills/search-academic/scripts/search.py "transformer" \
   --source all \
   --provider-timeout 30
 ```

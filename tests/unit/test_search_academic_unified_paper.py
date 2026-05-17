@@ -206,3 +206,39 @@ def test_main_outputs_unified_json(monkeypatch, capsys):
         "content": "Intro text",
         "error": None,
     }
+
+
+def test_main_writes_json_output_file(monkeypatch, capsys, tmp_path):
+    module = load_module()
+    output_path = tmp_path / "nested" / "paper.json"
+
+    def fake_read_paper(paper_id, source="arxiv", section=None):
+        return {
+            "success": True,
+            "arxiv_id": paper_id,
+            "source": source,
+            "provider": "arxiv_html",
+            "provider_rating": None,
+            "content": "Full text",
+            "error": None,
+        }
+
+    monkeypatch.setattr(module, "read_paper", fake_read_paper)
+    monkeypatch.setattr(sys, "argv", ["paper.py", "2603.00729", "--output", str(output_path)])
+
+    module.main()
+
+    stdout_json = json.loads(capsys.readouterr().out)
+    file_json = json.loads(output_path.read_text(encoding="utf-8"))
+    expected = {
+        "success": True,
+        "arxiv_id": "2603.00729",
+        "source": "arxiv",
+        "provider": "arxiv_html",
+        "provider_rating": None,
+        "content": "Full text",
+        "error": None,
+        "output_path": str(output_path.resolve()),
+    }
+    assert stdout_json == expected
+    assert file_json == expected
