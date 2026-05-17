@@ -150,6 +150,16 @@ def _section_text(sec: Tag, include_child_sections: bool) -> str:
     return _elem_to_text(sec_copy)
 
 
+def extract_title(html: str) -> str | None:
+    """从 arXiv HTML 提取论文标题。"""
+    soup = BeautifulSoup(html, "html.parser")
+    title = soup.find("h1", class_=re.compile(r"\bltx_title_document\b"))
+    if title is None:
+        return None
+    text = title.get_text(" ", strip=True)
+    return re.sub(r"\s+", " ", text).strip() or None
+
+
 def extract_sections(html: str) -> list[dict[str, Any]]:
     """
     从 arXiv HTML 提取所有章节（含摘要）。
@@ -246,11 +256,13 @@ def _join_sections(sections: list[dict[str, Any]]) -> str:
 def cmd_read_full_text(arxiv_id: str) -> dict[str, Any]:
     """读取整篇论文的正文内容。"""
     html = fetch_html(arxiv_id)
+    title = extract_title(html)
     sections = extract_sections(html)
     content = _join_sections(sections)
     return {
         "success": True,
         "arxiv_id": arxiv_id,
+        "title": title,
         "abs_url": f"{ABS_BASE}/{arxiv_id}",
         "html_url": f"{HTML_BASE}/{arxiv_id}",
         "pdf_url": f"{PDF_BASE}/{arxiv_id}",
@@ -265,10 +277,12 @@ def cmd_read_full_text(arxiv_id: str) -> dict[str, Any]:
 def cmd_list_sections(arxiv_id: str) -> dict[str, Any]:
     """列出论文所有章节（不含正文）。"""
     html = fetch_html(arxiv_id)
+    title = extract_title(html)
     sections = extract_sections(html)
     return {
         "success": True,
         "arxiv_id": arxiv_id,
+        "title": title,
         "abs_url": f"{ABS_BASE}/{arxiv_id}",
         "html_url": f"{HTML_BASE}/{arxiv_id}",
         "pdf_url": f"{PDF_BASE}/{arxiv_id}",
@@ -281,6 +295,7 @@ def cmd_list_sections(arxiv_id: str) -> dict[str, Any]:
 def cmd_read_section(arxiv_id: str, section_name: str) -> dict[str, Any]:
     """读取指定章节的正文内容。"""
     html = fetch_html(arxiv_id)
+    title = extract_title(html)
     sections = extract_sections(html)
     matched = _match_section(sections, section_name)
 
@@ -299,6 +314,7 @@ def cmd_read_section(arxiv_id: str, section_name: str) -> dict[str, Any]:
     return {
         "success": True,
         "arxiv_id": arxiv_id,
+        "title": title,
         "abs_url": f"{ABS_BASE}/{arxiv_id}",
         "section": matched["name"],
         "level": matched["level"],

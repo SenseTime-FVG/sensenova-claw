@@ -17,6 +17,7 @@ SCRIPT_PATH = (
 SAMPLE_HTML = """
 <html>
   <body>
+    <h1 class="ltx_title ltx_title_document">Sample Paper Title</h1>
     <div class="ltx_abstract">
       <h6 class="ltx_title">Abstract</h6>
       <p>Abstract text.</p>
@@ -37,6 +38,7 @@ SAMPLE_HTML = """
 NESTED_HTML = """
 <html>
   <body>
+    <h1 class="ltx_title ltx_title_document">Nested Paper Title</h1>
     <div class="ltx_abstract">
       <h6 class="ltx_title ltx_title_abstract">Abstract</h6>
       <p>Abstract text.</p>
@@ -83,6 +85,7 @@ def test_cmd_read_full_text_returns_all_sections_in_order(monkeypatch):
     assert result == {
         "success": True,
         "arxiv_id": "2409.05591",
+        "title": "Sample Paper Title",
         "abs_url": "https://arxiv.org/abs/2409.05591",
         "html_url": "https://arxiv.org/html/2409.05591",
         "pdf_url": "https://arxiv.org/pdf/2409.05591",
@@ -117,6 +120,7 @@ def test_main_without_section_outputs_full_text(monkeypatch, capsys):
     assert output["content"].startswith("Abstract\nAbstract text.")
     assert output["content"].endswith("2 Method\nMethod text.")
     assert output["section_count"] == 3
+    assert output["title"] == "Sample Paper Title"
 
 
 def test_extract_sections_keeps_child_only_parents_and_bibliography():
@@ -145,6 +149,7 @@ def test_cmd_read_section_matches_references(monkeypatch):
     result = module.cmd_read_section("2603.00729v1", "references")
 
     assert result["success"] is True
+    assert result["title"] == "Nested Paper Title"
     assert result["section"] == "References"
     assert result["content"] == "Reference one."
 
@@ -181,3 +186,13 @@ def test_cmd_read_full_text_sections_only_include_abstract_and_top_level(monkeyp
         {"name": "References", "level": 1},
         {"name": "Appendix A Appendix", "level": 1},
     ]
+
+
+def test_cmd_list_sections_includes_title(monkeypatch):
+    module = load_module()
+    monkeypatch.setattr(module, "fetch_html", lambda arxiv_id: NESTED_HTML)
+
+    result = module.cmd_list_sections("2603.00729v1")
+
+    assert result["success"] is True
+    assert result["title"] == "Nested Paper Title"
