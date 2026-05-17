@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import re
 import sys
 from pathlib import Path
@@ -351,7 +352,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("paper_id", metavar="id", help="论文 ID，如 arXiv:2603.00729 或 PMC11119143")
     parser.add_argument("--source", choices=sorted(PROVIDER_GROUPS), default="arxiv", help="搜索源：arxiv 或 pmc（默认 arxiv）")
     parser.add_argument("--section", "-s", help="要读取的章节；不填则返回全文")
+    parser.add_argument("--output", "-o", help="将最终 JSON 结果写入指定文件")
     return parser
+
+
+def _write_output_file(result: dict[str, Any], output_path: str) -> None:
+    path = Path(output_path).expanduser().resolve()
+    result["output_path"] = str(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -376,8 +385,18 @@ def main(argv: list[str] | None = None) -> None:
         if getattr(args, "section", None):
             result["section"] = args.section
 
-    print_json(result)
-    if not result["success"]:
+    output_result = dict(result)
+    if args.output:
+        try:
+            _write_output_file(output_result, args.output)
+        except Exception as exc:
+            output_result = dict(result)
+            output_result["success"] = False
+            output_result["error"] = f"Failed to write output file: {exc}"
+            output_result["output_path"] = str(Path(args.output).expanduser().resolve())
+
+    print_json(output_result)
+    if not output_result["success"]:
         sys.exit(1)
 
 

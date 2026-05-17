@@ -9,29 +9,36 @@
 读取 arXiv 论文全文，默认 source 为 `arxiv`：
 
 ```bash
-uv run python .sensenova-claw/skills/search-academic/scripts/paper.py 2603.00729
+python3 .sensenova-claw/skills/search-academic/scripts/paper.py 2603.00729
 ```
 
 读取 arXiv 指定章节：
 
 ```bash
-uv run python .sensenova-claw/skills/search-academic/scripts/paper.py 2603.00729 \
+python3 .sensenova-claw/skills/search-academic/scripts/paper.py 2603.00729 \
   --section introduction
 ```
 
 读取 PMC 论文全文：
 
 ```bash
-uv run python .sensenova-claw/skills/search-academic/scripts/paper.py PMC11119143 \
+python3 .sensenova-claw/skills/search-academic/scripts/paper.py PMC11119143 \
   --source pmc
 ```
 
 读取 PMC 指定章节：
 
 ```bash
-uv run python .sensenova-claw/skills/search-academic/scripts/paper.py PMC11119143 \
+python3 .sensenova-claw/skills/search-academic/scripts/paper.py PMC11119143 \
   --source pmc \
   --section methods
+```
+
+写入 JSON 文件：
+
+```bash
+python3 .sensenova-claw/skills/search-academic/scripts/paper.py 2603.00729 \
+  --output results/paper.json
 ```
 
 ## 参数
@@ -41,6 +48,7 @@ uv run python .sensenova-claw/skills/search-academic/scripts/paper.py PMC1111914
 | `id` | 论文 ID，必填位置参数。arXiv 支持原始 ID、`arXiv:` 前缀、abs/pdf URL；PMC 支持 `PMC11119143`、`11119143`、PMC URL | 无 |
 | `--source` | 论文来源；支持 `arxiv`、`pmc` | `arxiv` |
 | `--section`, `-s` | 要读取的章节名；不填则返回全文。只有支持章节读取的 provider 才会收到该参数 | 无 |
+| `--output`, `-o` | 将最终 JSON 结果写入指定文件，会自动创建父目录 | 无 |
 
 ## Provider 回退链
 
@@ -109,6 +117,21 @@ PMC source 会返回 `pmc_id`：
 ```
 
 如果传入 `--section`，输出会包含 `section` 字段；未传入时不会包含该字段。
+
+如果传入 `--output`，stdout 和文件使用同一份 JSON，输出中会额外包含 `output_path`：
+
+```json
+{
+  "success": true,
+  "arxiv_id": "2603.00729",
+  "source": "arxiv",
+  "provider": "arxiv_html",
+  "provider_rating": null,
+  "content": "<全文/章节内容>",
+  "output_path": "/absolute/path/to/results/paper.json",
+  "error": null
+}
+```
 
 失败时返回统一错误对象，并保留每个 provider 的尝试结果：
 
