@@ -42,7 +42,7 @@
 - 适合：新闻报道、官方公告、公开网页、跨领域发现
 - 本质：Google 索引 + PageRank 排序，返回标题和摘要片段
 
-**专业搜索 skill** 提供通用搜索**做不到**的能力（通过 Bash 调用 `{plugin_skills_dir}` 下的脚本）：
+**专业搜索 skill** 提供通用搜索**做不到**的能力（通过 Bash 调用 `{skills_dir}` 下的脚本）：
 
 | skill | 独有能力 | 适用场景 |
 |-------|----------|----------|
@@ -108,7 +108,7 @@
 输出前先读取 schema 文档：
 
 ```
-{plugin_skills_dir}/deep-research/schemas/evidence.schema.md
+{skills_dir}/deep-research/schemas/evidence.schema.md
 ```
 
 完整的字段定义、约束规则、完整示例都在里面。**严格遵守**。
