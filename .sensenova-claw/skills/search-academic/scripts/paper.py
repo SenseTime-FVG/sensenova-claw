@@ -28,6 +28,7 @@ class ProviderConfig(NamedTuple):
     source: str
     full_function: str | None
     section_function: str | None = None
+    list_function: str | None = None
     supports_section: bool = False
     custom_full: str | None = None
 
@@ -40,6 +41,7 @@ PROVIDER_GROUPS: dict[str, list[ProviderConfig]] = {
             source="arxiv",
             full_function="cmd_read_full_text",
             section_function="cmd_read_section",
+            list_function="cmd_list_sections",
             supports_section=True,
         ),
         ProviderConfig(
@@ -48,6 +50,7 @@ PROVIDER_GROUPS: dict[str, list[ProviderConfig]] = {
             source="arxiv",
             full_function="cmd_read_raw",
             section_function="cmd_read_section",
+            list_function="cmd_list_sections",
             supports_section=True,
         ),
         ProviderConfig(
@@ -65,6 +68,7 @@ PROVIDER_GROUPS: dict[str, list[ProviderConfig]] = {
             source="pmc",
             full_function=None,
             section_function="cmd_read_section",
+            list_function="cmd_list_sections",
             supports_section=True,
             custom_full="pmc_full_text",
         ),
@@ -72,7 +76,12 @@ PROVIDER_GROUPS: dict[str, list[ProviderConfig]] = {
 }
 
 
-def read_paper(paper_id: str, source: str = "arxiv", section: str | None = None) -> dict[str, Any]:
+def read_paper(
+    paper_id: str,
+    source: str = "arxiv",
+    section: str | None = None,
+    list_section: bool = False,
+) -> dict[str, Any]:
     """Read a paper or one section using the configured source fallback chain."""
     clean_source = _normalize_source(source)
     clean_id = _normalize_paper_id(paper_id, clean_source)
@@ -80,24 +89,37 @@ def read_paper(paper_id: str, source: str = "arxiv", section: str | None = None)
     attempts: list[dict[str, Any]] = []
 
     for provider in PROVIDER_GROUPS[clean_source]:
+        if list_section and not provider.list_function:
+            continue
         if clean_section and not provider.supports_section:
             continue
 
         try:
-            raw_result = _call_provider(provider, clean_id, clean_section)
+            if list_section:
+                raw_result = _call_provider(provider, clean_id, None, list_section=True)
+            else:
+                raw_result = _call_provider(provider, clean_id, clean_section)
         except (Exception, SystemExit) as exc:
             attempts.append({"provider": provider.provider, "success": False, "error": _error_message(exc)})
             continue
 
-        success = _provider_succeeded(raw_result)
+        success = _provider_succeeded(raw_result, list_section=list_section)
         attempts.append(
             {
                 "provider": provider.provider,
                 "success": success,
-                "error": None if success else _provider_error(raw_result),
+                "error": None if success else _provider_error(raw_result, list_section=list_section),
             }
         )
         if success:
+            if list_section:
+                return _normalize_list_result(
+                    raw_result,
+                    clean_id=clean_id,
+                    source=clean_source,
+                    provider=provider.provider,
+                    attempts=attempts,
+                )
             return _normalize_success_result(
                 raw_result,
                 clean_id=clean_id,
@@ -112,11 +134,22 @@ def read_paper(paper_id: str, source: str = "arxiv", section: str | None = None)
         source=clean_source,
         requested_section=clean_section,
         attempts=attempts,
+        list_section=list_section,
     )
 
 
-def _call_provider(provider: ProviderConfig, paper_id: str, section: str | None) -> dict[str, Any]:
+def _call_provider(
+    provider: ProviderConfig,
+    paper_id: str,
+    section: str | None,
+    list_section: bool = False,
+) -> dict[str, Any]:
     module = importlib.import_module(provider.module_name)
+
+    if list_section:
+        if not provider.list_function:
+            raise ValueError(f"{provider.provider} does not support listing sections")
+        return getattr(module, provider.list_function)(paper_id)
 
     if section:
         if not provider.section_function:
@@ -179,11 +212,37 @@ def _normalize_success_result(
     return result
 
 
+def _normalize_list_result(
+    raw_result: dict[str, Any],
+    clean_id: str,
+    source: str,
+    provider: str,
+    attempts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    result = dict(raw_result)
+    sections = result.get("sections")
+    if not isinstance(sections, list):
+        sections = []
+    result["success"] = True
+    result[_id_key(source)] = _display_id(clean_id, source)
+    result["source"] = source
+    result["provider"] = provider
+    result["provider_rating"] = None
+    result["sections"] = sections
+    result["section_count"] = result.get("section_count", len(sections))
+    result.pop("content", None)
+    result.pop("section", None)
+    result["attempts"] = list(attempts)
+    result["error"] = None
+    return result
+
+
 def _failure_result(
     clean_id: str,
     source: str,
     requested_section: str | None,
     attempts: list[dict[str, Any]],
+    list_section: bool = False,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "success": False,
@@ -195,23 +254,32 @@ def _failure_result(
         "attempts": list(attempts),
         "error": _combined_error(source, attempts),
     }
+    if list_section:
+        result.pop("content", None)
+        result["sections"] = []
+        result["section_count"] = 0
     if requested_section is not None:
         result["section"] = requested_section
     return result
 
 
-def _provider_succeeded(result: dict[str, Any]) -> bool:
+def _provider_succeeded(result: dict[str, Any], list_section: bool = False) -> bool:
     if not isinstance(result, dict) or result.get("success") is not True:
         return False
+    if list_section:
+        sections = result.get("sections")
+        return isinstance(sections, list) and bool(sections)
     content = result.get("content")
     return isinstance(content, str) and bool(content.strip())
 
 
-def _provider_error(result: dict[str, Any]) -> str:
+def _provider_error(result: dict[str, Any], list_section: bool = False) -> str:
     if isinstance(result, dict):
         error = result.get("error")
         if error:
             return str(error)
+    if list_section:
+        return "provider returned no sections"
     return "provider returned no content"
 
 
@@ -352,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("paper_id", metavar="id", help="论文 ID，如 arXiv:2603.00729 或 PMC11119143")
     parser.add_argument("--source", choices=sorted(PROVIDER_GROUPS), default="arxiv", help="搜索源：arxiv 或 pmc（默认 arxiv）")
     parser.add_argument("--section", "-s", help="要读取的章节；不填则返回全文")
+    parser.add_argument("--list_section", "--list-section", action="store_true", help="列出论文可用章节，不返回正文")
     parser.add_argument("--output", "-o", help="将最终 JSON 结果写入指定文件")
     return parser
 
@@ -366,9 +435,14 @@ def _write_output_file(result: dict[str, Any], output_path: str) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.list_section and args.section:
+        parser.error("--list_section 不能和 --section 同时使用")
 
     try:
-        result = read_paper(args.paper_id, source=args.source, section=args.section)
+        if args.list_section:
+            result = read_paper(args.paper_id, source=args.source, list_section=True)
+        else:
+            result = read_paper(args.paper_id, source=args.source, section=args.section)
     except Exception as exc:
         source = getattr(args, "source", "arxiv")
         paper_id = getattr(args, "paper_id", "")

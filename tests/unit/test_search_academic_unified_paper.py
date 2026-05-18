@@ -86,6 +86,54 @@ def test_read_arxiv_section_skips_pdf_provider(monkeypatch):
     assert "deepxiv failed" in result["error"]
 
 
+def test_list_arxiv_sections_skips_pdf_provider(monkeypatch):
+    module = load_module()
+    calls = []
+
+    def fake_call_provider(provider, paper_id, section, list_section=False):
+        calls.append((provider.provider, paper_id, section, list_section))
+        assert provider.provider != "arxiv_pdf"
+        assert list_section is True
+        if provider.provider == "arxiv_html":
+            return {"success": True, "arxiv_id": paper_id, "sections": [], "section_count": 0, "error": None}
+        return {
+            "success": True,
+            "arxiv_id": paper_id,
+            "title": "Sectioned Paper",
+            "sections": [
+                {"name": "Abstract", "level": 0},
+                {"name": "1 Introduction", "level": 1},
+            ],
+            "section_count": 2,
+            "error": None,
+        }
+
+    monkeypatch.setattr(module, "_call_provider", fake_call_provider)
+
+    result = module.read_paper("2603.00729", list_section=True)
+
+    assert calls == [
+        ("arxiv_html", "2603.00729", None, True),
+        ("deepxiv", "2603.00729", None, True),
+    ]
+    assert result["success"] is True
+    assert result["arxiv_id"] == "2603.00729"
+    assert result["source"] == "arxiv"
+    assert result["provider"] == "deepxiv"
+    assert result["provider_rating"] is None
+    assert result["title"] == "Sectioned Paper"
+    assert result["sections"] == [
+        {"name": "Abstract", "level": 0},
+        {"name": "1 Introduction", "level": 1},
+    ]
+    assert result["section_count"] == 2
+    assert "content" not in result
+    assert result["attempts"] == [
+        {"provider": "arxiv_html", "success": False, "error": "provider returned no sections"},
+        {"provider": "deepxiv", "success": True, "error": None},
+    ]
+
+
 def test_read_pmc_full_text_builds_content_from_pmc_sections(monkeypatch):
     module = load_module()
     fake_root = types.SimpleNamespace()
@@ -149,6 +197,13 @@ def test_call_provider_uses_provider_specific_functions_without_extra_args(monke
             "content": "Intro text",
             "error": None,
         },
+        cmd_list_sections=lambda arxiv_id: calls.append(("list", arxiv_id)) or {
+            "success": True,
+            "arxiv_id": arxiv_id,
+            "sections": [{"name": "Abstract", "level": 0}],
+            "section_count": 1,
+            "error": None,
+        },
     )
     fake_pdf = types.SimpleNamespace(
         cmd_read_pdf=lambda arxiv_id: calls.append(("pdf", arxiv_id)) or {
@@ -167,10 +222,12 @@ def test_call_provider_uses_provider_specific_functions_without_extra_args(monke
 
     assert module._call_provider(arxiv_html, "2603.00729", None)["content"] == "HTML full text"
     assert module._call_provider(arxiv_html, "2603.00729", "intro")["content"] == "Intro text"
+    assert module._call_provider(arxiv_html, "2603.00729", None, list_section=True)["section_count"] == 1
     assert module._call_provider(arxiv_pdf, "2603.00729", None)["content"] == "PDF full text"
     assert calls == [
         ("full", "2603.00729"),
         ("section", "2603.00729", "intro"),
+        ("list", "2603.00729"),
         ("pdf", "2603.00729"),
     ]
 
@@ -242,3 +299,39 @@ def test_main_writes_json_output_file(monkeypatch, capsys, tmp_path):
     }
     assert stdout_json == expected
     assert file_json == expected
+
+
+def test_main_outputs_list_sections_json(monkeypatch, capsys):
+    module = load_module()
+    seen = {}
+
+    def fake_read_paper(paper_id, source="arxiv", section=None, list_section=False):
+        seen["list_section"] = list_section
+        return {
+            "success": True,
+            "arxiv_id": paper_id,
+            "source": source,
+            "provider": "arxiv_html",
+            "provider_rating": None,
+            "sections": [{"name": "Abstract", "level": 0}],
+            "section_count": 1,
+            "error": None,
+        }
+
+    monkeypatch.setattr(module, "read_paper", fake_read_paper)
+    monkeypatch.setattr(sys, "argv", ["paper.py", "2603.00729", "--list_section"])
+
+    module.main()
+
+    output = json.loads(capsys.readouterr().out)
+    assert seen == {"list_section": True}
+    assert output == {
+        "success": True,
+        "arxiv_id": "2603.00729",
+        "source": "arxiv",
+        "provider": "arxiv_html",
+        "provider_rating": None,
+        "sections": [{"name": "Abstract", "level": 0}],
+        "section_count": 1,
+        "error": None,
+    }
