@@ -33,7 +33,6 @@ cd <skill dir>
 
 调用约定：
 
-- 优先使用 `python3 scripts/search.py`、`python3 scripts/paper.py`、`python3 scripts/refTree.py`。
 - 不要并行启动多个本技能脚本；`search.py` 和 `refTree.py` 内部已经处理并发、超时和 provider fallback。
 - 长结果优先加 `--output <path>` 写入文件，再读取必要字段，避免终端输出过长。
 - `--provider-timeout` 表示单个 provider 超时；默认使用脚本内置超时。
@@ -268,6 +267,15 @@ CLI 输出的顶层不包含 `items`，论文条目在 `source_results[*].items`
 ```
 
 如果使用 `--output`，三个脚本都会在 JSON 中额外加入 `output_path`。
+
+## 并发与限流约定
+这些脚本会访问外部学术服务，必须控制请求频率。
+执行本技能脚本时：
+- 不要并发运行多个搜索脚本。
+- 不要使用并行工具同时调用多个 `python3 scripts/...` 命令。
+- 一次只运行一个脚本命令，等待结果返回后再运行下一个。
+- 批量查询时，优先使用脚本自带的 `--limit`、`--id-list` 等参数，而不是启动多个进程。
+- 如果需要连续调用，按顺序执行，并在必要时等待数秒。
 
 ## 全文阅读工作流
 
