@@ -21,7 +21,7 @@ REFS_SCRIPT_PATH = (
     / "skills"
     / "search-academic"
     / "scripts"
-    / "semantic_scholar_refs.py"
+    / "semantic_scholar_refTree.py"
 )
 
 
