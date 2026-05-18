@@ -2,7 +2,7 @@
 """Fixed-flow Semantic Scholar crawler.
 
 Usage:
-    python3 semantic_scholar_crawler_refTree.py --query "Qwen Technical Report"
+    python3 semantic_scholar_crawler_refTree.py --title "Qwen Technical Report"
 
 The script intentionally uses deterministic selectors and DOM extraction instead
 of an LLM agent. It requires Playwright:
@@ -26,7 +26,6 @@ from urllib.parse import quote_plus, urljoin
 
 
 BASE_URL = "https://www.semanticscholar.org"
-DEFAULT_QUERY = "qwen technial report"
 
 
 def parse_limit(value: str | None) -> int | None:
@@ -200,8 +199,8 @@ async def dismiss_popups(page) -> None:
             pass
 
 
-async def find_exact_search_result(page, query: str) -> dict[str, Any]:
-    search_url = f"{BASE_URL}/search?q={quote_plus(query)}&sort=relevance"
+async def find_exact_search_result(page, title: str) -> dict[str, Any]:
+    search_url = f"{BASE_URL}/search?q={quote_plus(title)}&sort=relevance"
     await page.goto(search_url, wait_until="domcontentloaded")
     await page.wait_for_load_state("networkidle", timeout=30000)
     await dismiss_popups(page)
@@ -225,7 +224,7 @@ async def find_exact_search_result(page, query: str) -> dict[str, Any]:
             }
             return null;
         }""",
-        query,
+        title,
     )
     if not result:
         visible_titles = await page.evaluate(
@@ -235,10 +234,18 @@ async def find_exact_search_result(page, query: str) -> dict[str, Any]:
                 .slice(0, 20)"""
         )
         raise RuntimeError(
-            f'No search result title exactly matched "{query}". '
+            f'No search result title exactly matched "{title}". '
             f"Visible paper titles: {visible_titles}"
         )
     return result
+
+
+async def extract_paper_metadata(page, paper_url: str) -> dict[str, Any]:
+    await page.goto(paper_url, wait_until="domcontentloaded")
+    await page.wait_for_load_state("networkidle", timeout=30000)
+    await dismiss_popups(page)
+    text = await page.evaluate("""() => document.body.innerText || document.body.textContent || ''""")
+    return {"doi": extract_doi(text)}
 
 
 async def settle_list(page, limit: int | None, max_rounds: int = 40) -> None:
@@ -403,9 +410,17 @@ def parse_card_text(raw_text: str, title: str) -> dict[str, Any]:
     year_match = re.search(r"\b(19|20)\d{2}\b", compact)
     return {
         "year": int(year_match.group(0)) if year_match else None,
+        "doi": extract_doi(compact),
         "authors": extract_authors(lines, title),
         "abstract_or_tldr": extract_tldr(compact),
     }
+
+
+def extract_doi(text: str) -> str | None:
+    match = re.search(r"(10\.\d{4,9}/(?:(?!Corpus(?:\s*ID)?)[-._;()/:A-Z0-9])+)", text or "", flags=re.I)
+    if not match:
+        return None
+    return match.group(1).rstrip(".,;)")
 
 
 def extract_authors(lines: list[str], title: str) -> list[str]:
@@ -424,32 +439,74 @@ def extract_tldr(text: str) -> str | None:
     return None
 
 
-async def crawl(query: str, output: Path, headless: bool, limit: int | None, max_pages: int | None) -> dict[str, Any]:
+def build_ref_tree_result(
+    title: str,
+    matched: dict[str, Any],
+    paper_url: str,
+    references: list[dict[str, Any]] | None,
+    citations: list[dict[str, Any]] | None,
+    direction: str | None,
+    created_at: str,
+) -> dict[str, Any]:
+    detail_metadata = matched.get("detail_metadata") or {}
+    result = {
+        "query": title,
+        "direction": direction or "all",
+        "matched_paper": {
+            "title": matched["title"],
+            "url": paper_url,
+            "doi": detail_metadata.get("doi") or extract_doi(matched.get("text") or ""),
+            "search_result_text": matched.get("text"),
+        },
+        "created_at": created_at,
+    }
+    if direction in (None, "citations"):
+        result["citations_count"] = len(citations or [])
+        result["citations"] = citations or []
+    if direction in (None, "references"):
+        result["references_count"] = len(references or [])
+        result["references"] = references or []
+    return result
+
+
+async def crawl(
+    title: str,
+    output: Path,
+    headless: bool,
+    limit: int | None,
+    max_pages: int | None,
+    direction: str | None = None,
+) -> dict[str, Any]:
     playwright, browser, context, page = await create_page(headless=headless)
     try:
-        matched = await find_exact_search_result(page, query)
+        matched = await find_exact_search_result(page, title)
         paper_url = matched["url"].split("#")[0]
+        matched["detail_metadata"] = await extract_paper_metadata(page, paper_url)
         await browser.close()
         await playwright.stop()
         browser = None
         playwright = None
 
-        references = await crawl_section(headless, paper_url, "#cited-papers", ".cited-papers", limit, max_pages, "references")
-        citations = await crawl_section(headless, paper_url, "#citing-papers", ".citing-papers", limit, max_pages, "citations")
+        references = None
+        citations = None
+        if direction in (None, "references"):
+            references = await crawl_section(
+                headless, paper_url, "#cited-papers", ".cited-papers", limit, max_pages, "references"
+            )
+        if direction in (None, "citations"):
+            citations = await crawl_section(
+                headless, paper_url, "#citing-papers", ".citing-papers", limit, max_pages, "citations"
+            )
 
-        result = {
-            "query": query,
-            "matched_paper": {
-                "title": matched["title"],
-                "url": paper_url,
-                "search_result_text": matched.get("text"),
-            },
-            "citations_count": len(citations),
-            "references_count": len(references),
-            "citations": citations,
-            "references": references,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        result = build_ref_tree_result(
+            title=title,
+            matched=matched,
+            paper_url=paper_url,
+            references=references,
+            citations=citations,
+            direction=direction,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
         output.parent.mkdir(parents=True, exist_ok=True)
         cleaned_result = strip_raw_text(result)
         output.write_text(json.dumps(cleaned_result, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -483,8 +540,14 @@ async def crawl_section(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Crawl Semantic Scholar citations and references for an exact paper title.")
-    parser.add_argument("--query", default=DEFAULT_QUERY, help="Exact paper title to match, ignoring case.")
+    parser.add_argument("--title", required=True, help="Exact paper title to match, ignoring case.")
     parser.add_argument("--output", default=".tmp/semantic_scholar_output.json", help="JSON output path.")
+    parser.add_argument(
+        "--direction",
+        choices=["references", "citations"],
+        default=None,
+        help="Only crawl one direction. Omit to crawl both references and citations.",
+    )
     parser.add_argument("--limit", default="10", help="Maximum papers per list, or 'all'. Defaults to 10.")
     parser.add_argument("--max-pages", type=int, default=None, help="Maximum pages to collect per list.")
     parser.add_argument("--headless", choices=["true", "false"], default="true", help="Run Camoufox headless.")
@@ -518,11 +581,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     result = asyncio.run(
         crawl(
-            query=args.query,
+            title=args.title,
             output=Path(args.output),
             headless=args.headless == "true",
             limit=parse_limit(args.limit),
             max_pages=args.max_pages,
+            direction=args.direction,
         )
     )
     print(format_cli_stdout(result, args.output))
