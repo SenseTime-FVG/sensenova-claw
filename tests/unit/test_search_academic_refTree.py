@@ -57,7 +57,11 @@ def test_default_direction_uses_semantic_official_for_references_and_citations(m
     assert result["success"] is True
     assert result["id"] == "source-paper"
     assert result["title"] == "Source Title"
-    assert result["references"] == [
+    assert result["provider"] == "refTree.py"
+    assert "provider_rating" not in result
+    assert "references" not in result
+    assert "citations" not in result
+    assert result["source_results"][0]["references"] == [
         {
             "source": "semantic",
             "id": "references-paper",
@@ -71,8 +75,8 @@ def test_default_direction_uses_semantic_official_for_references_and_citations(m
             "snippet": "references abstract",
         }
     ]
-    assert result["citations"][0]["provider"] == "semantic_official"
-    assert result["citations"][0]["id"] == "citations-paper"
+    assert result["source_results"][0]["citations"][0]["provider"] == "semantic_official"
+    assert result["source_results"][0]["citations"][0]["id"] == "citations-paper"
 
 
 def test_single_failed_default_direction_falls_back_to_crawler_only_for_that_direction(monkeypatch):
@@ -105,9 +109,12 @@ def test_single_failed_default_direction_falls_back_to_crawler_only_for_that_dir
     assert calls.count(("semantic_crawler", "references")) == 1
     assert ("semantic_crawler", "citations") not in calls
     assert result["success"] is True
-    assert result["references"][0]["provider"] == "semantic_crawler"
-    assert result["references"][0]["id"] == "ref-1"
-    assert result["citations"][0]["provider"] == "semantic_official"
+    assert result["provider"] == "refTree.py"
+    assert "references" not in result
+    assert "citations" not in result
+    assert result["source_results"][0]["references"][0]["provider"] == "semantic_crawler"
+    assert result["source_results"][0]["references"][0]["id"] == "ref-1"
+    assert result["source_results"][0]["citations"][0]["provider"] == "semantic_official"
     assert result["source_results"][0]["attempts"] == [
         {"provider": "semantic_official", "direction": "references", "success": False, "count": 0, "error": "official references failed"},
         {"provider": "semantic_official", "direction": "citations", "success": True, "count": 1, "error": None},
@@ -141,8 +148,11 @@ def test_both_default_directions_failed_uses_one_crawler_call_without_direction(
     }
     assert calls[2:] == [("semantic_crawler", None)]
     assert result["success"] is True
-    assert result["references"][0]["id"] == "ref-1"
-    assert result["citations"][0]["id"] == "cite-1"
+    assert result["provider"] == "refTree.py"
+    assert "references" not in result
+    assert "citations" not in result
+    assert result["source_results"][0]["references"][0]["id"] == "ref-1"
+    assert result["source_results"][0]["citations"][0]["id"] == "cite-1"
 
 
 def test_call_provider_passes_only_supported_arguments(monkeypatch):
@@ -215,9 +225,17 @@ def test_main_writes_unified_output_file(monkeypatch, capsys, tmp_path):
             "provider": "refTree.py",
             "sources": sources,
             "direction": direction or "all",
-            "citations": [],
-            "references": [{"id": "r1", "title": "Reference"}],
-            "source_results": [],
+            "source_results": [
+                {
+                    "source": "semantic",
+                    "success": True,
+                    "provider": "semantic_official",
+                    "citations": [],
+                    "references": [{"id": "r1", "title": "Reference"}],
+                    "attempts": [],
+                    "error": None,
+                }
+            ],
             "errors": [],
             "error": None,
         }
@@ -240,9 +258,17 @@ def test_main_writes_unified_output_file(monkeypatch, capsys, tmp_path):
         "provider": "refTree.py",
         "sources": ["semantic"],
         "direction": "references",
-        "citations": [],
-        "references": [{"id": "r1", "title": "Reference"}],
-        "source_results": [],
+        "source_results": [
+            {
+                "source": "semantic",
+                "success": True,
+                "provider": "semantic_official",
+                "citations": [],
+                "references": [{"id": "r1", "title": "Reference"}],
+                "attempts": [],
+                "error": None,
+            }
+        ],
         "errors": [],
         "error": None,
         "output_path": str(output_path.resolve()),

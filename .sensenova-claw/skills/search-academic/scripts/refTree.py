@@ -78,14 +78,6 @@ def ref_tree(
         api_key,
     )
 
-    references = _dedupe_items_by_source(
-        [item for result in source_results for item in result.get("references", [])],
-        limit_per_source=clean_limit,
-    )
-    citations = _dedupe_items_by_source(
-        [item for result in source_results for item in result.get("citations", [])],
-        limit_per_source=clean_limit,
-    )
     errors = [
         {
             "source": result["source"],
@@ -102,11 +94,8 @@ def ref_tree(
         "id": clean_id,
         "title": clean_title,
         "provider": "refTree.py",
-        "provider_rating": None,
         "sources": clean_sources,
         "direction": clean_direction or "all",
-        "citations": citations if clean_direction in (None, "citations") else [],
-        "references": references if clean_direction in (None, "references") else [],
         "source_results": source_results,
         "errors": errors,
         "error": None if success else "All selected sources failed",
@@ -807,11 +796,8 @@ def main(argv: list[str] | None = None) -> None:
             "id": args.paper_id,
             "title": getattr(args, "title", ""),
             "provider": "refTree.py",
-            "provider_rating": None,
             "sources": sources,
             "direction": args.direction or "all",
-            "citations": [],
-            "references": [],
             "source_results": [],
             "errors": [],
             "error": str(exc),

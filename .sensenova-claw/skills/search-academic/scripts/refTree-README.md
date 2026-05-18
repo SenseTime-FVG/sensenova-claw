@@ -173,35 +173,8 @@ CLI stdout 和 `--output` 文件使用同一份输出格式。
   "id": "2309.16609",
   "title": "Qwen Technical Report",
   "provider": "refTree.py",
-  "provider_rating": null,
   "sources": ["semantic"],
   "direction": "all",
-  "citations": [
-    {
-      "source": "semantic",
-      "id": "example-citing-paper-id",
-      "title": "Example citing paper",
-      "provider": "semantic_official",
-      "provider_rating": null,
-      "citation_count": 42,
-      "abstract": "Example abstract",
-      "paper_id": "example-citing-paper-id",
-      "doi": "10.1234/example"
-    }
-  ],
-  "references": [
-    {
-      "source": "semantic",
-      "id": "example-reference-paper-id",
-      "title": "Example referenced paper",
-      "provider": "semantic_official",
-      "provider_rating": null,
-      "citation_count": 128,
-      "abstract": "Example abstract",
-      "paper_id": "example-reference-paper-id",
-      "arxiv_id": "2301.00001"
-    }
-  ],
   "source_results": [
     {
       "source": "semantic",
@@ -258,6 +231,8 @@ CLI stdout 和 `--output` 文件使用同一份输出格式。
 }
 ```
 
+`source_results` 是每个 source 的结果和内部执行明细。每个元素包含该 source 的 `citations`、`references`、实际使用的 provider、每次 provider 尝试是否成功、返回数量和错误信息。论文列表不放在一级字段里，模型消费论文结果时读取 `source_results[*].citations` 和 `source_results[*].references`。
+
 如果使用 `--output`，输出中会额外包含：
 
 ```json
@@ -274,11 +249,8 @@ CLI stdout 和 `--output` 文件使用同一份输出格式。
   "id": "2309.16609",
   "title": "Qwen Technical Report",
   "provider": "refTree.py",
-  "provider_rating": null,
   "sources": ["semantic"],
   "direction": "references",
-  "citations": [],
-  "references": [],
   "source_results": [
     {
       "source": "semantic",
@@ -334,7 +306,7 @@ CLI stdout 和 `--output` 文件使用同一份输出格式。
 
 ## Article 字段
 
-`citations` 和 `references` 中的每条 article 至少尽量包含：
+`source_results[*].citations` 和 `source_results[*].references` 中的每条 article 至少尽量包含：
 
 - `source`
 - `id`
