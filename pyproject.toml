@@ -37,6 +37,8 @@ dependencies = [
   "playwright>=1.59.0",
   "pypdf>=6.4.0",
   "pdftotext>=3.0.0",
+  "yfinance>=1.3.0",
+  "mootdx>=0.9.11",
 ]
 
 [project.optional-dependencies]
