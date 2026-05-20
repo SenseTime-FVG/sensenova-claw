@@ -1,6 +1,6 @@
 ---
 name: search-year-report
-description: 用于搜索免费官方年报、年度报告、定期报告、10-K、20-F、40-F、年度账目、上市公司披露或债券发行人报告。
+description: 用于搜索免费官方年报、年度报告、定期报告、上市公司披露文件、债券发行人报告和海外公司年度账目。
 ---
 
 # Search Year Report
@@ -25,10 +25,6 @@ description: 用于搜索免费官方年报、年度报告、定期报告、10-K
 python scripts/year_report_api.py cninfo "平安银行" --year 2023 --page-size 5
 python scripts/year_report_api.py sec-company apple --limit 5
 python scripts/year_report_api.py sec-filings --ticker AAPL --limit 5
-COMPANIES_HOUSE_API_KEY=... python scripts/year_report_api.py companies-house-search "Tesco" --limit 5
-COMPANIES_HOUSE_API_KEY=... python scripts/year_report_api.py companies-house-filings 00445790 --limit 5
-EDINET_API_KEY=... python scripts/year_report_api.py edinet-list --date 2026-05-15 --keyword Toyota --annual-only --limit 10
-EDINET_API_KEY=... python scripts/year_report_api.py edinet-download S100XXXX --output report.pdf
 python scripts/year_report_api.py download "https://static.cninfo.com.cn/finalpage/2024-03-15/1219306493.PDF" --output report.pdf
 ```
 
@@ -36,13 +32,11 @@ python scripts/year_report_api.py download "https://static.cninfo.com.cn/finalpa
 | --- | --- | --- |
 | `cninfo` | 免费、免 key | 巨潮资讯 A 股公告，默认查年度报告 PDF |
 | `sec-company` / `sec-filings` | 免费、免 key | SEC EDGAR 公司 CIK、10-K/20-F/40-F 年报文件 |
-| `companies-house-*` | 免费、需官方免费 API key | 英国 Companies House 公司搜索和 accounts filings |
-| `edinet-*` | 免费、需官方免费 API key | 日本 EDINET 文件列表和 PDF/XBRL 下载 |
 | `download` | 免费公开 URL | 下载脚本返回的公开 PDF |
 
 `cninfo --year` 表示报告期年份；脚本会自动查下一年的披露窗口。若要按披露日期精确过滤，改用 `--date-range`。
 
-没有 `COMPANIES_HOUSE_API_KEY` 或 `EDINET_API_KEY` 时，不要伪造 API 结果；改用 browser-use 访问对应网页入口，或说明缺少免费官方 key。
+脚本只保留免 key 接口；任何需要 API key、token、注册登录或订阅的接口都不要加入脚本。
 
 ## Browser-use 资源
 
@@ -69,6 +63,7 @@ python scripts/year_report_api.py download "https://static.cninfo.com.cn/finalpa
 | --- | --- |
 | 国家企业信用信息公示系统 `https://www.gsxt.gov.cn/` | 与工商年报相关，但访问被阻断，不作为稳定免费源 |
 | 市场监管总局说明页 | 只是政策说明，不是年报搜索入口 |
+| Companies House API、EDINET API | 需要 API key，不写入脚本 |
 | 任何商业数据库或付费 API | 不符合免费官方源要求 |
 
 ## 输出规范
