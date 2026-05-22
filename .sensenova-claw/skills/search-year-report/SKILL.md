@@ -36,8 +36,6 @@ python scripts/year_report_api.py download "https://static.cninfo.com.cn/finalpa
 
 `cninfo --year` 表示报告期年份；脚本会自动查下一年的披露窗口。若要按披露日期精确过滤，改用 `--date-range`。
 
-脚本只保留免 key 接口；任何需要 API key、token、注册登录或订阅的接口都不要加入脚本。
-
 ## Browser-use 资源
 
 以下来源作为免费官方网页入口；按任务需要与 API 脚本混合使用。
