@@ -173,15 +173,14 @@ def check_llm_configured(config_data: dict, secret_store: Any | None = None) -> 
     llm_section = config_data.get("llm", {})
     providers_section = llm_section.get("providers", {})
 
-    # 遍历所有非 mock 提供商，检查 api_key 是否有效
-    all_provider_keys = {p["key"] for p in get_all_providers()}
-
+    # 遍历所有非 mock 提供商，检查 api_key 是否有效。
+    # 只要 provider 在 config 里有合法 api_key 就算"已配置"——不要求名字
+    # 必须出现在 LLM_PROVIDER_CATEGORIES 预设里，否则用户自定义的 provider 名
+    # （例如 SenseTime 内部的 `sensenova-v6_7-flash`）会被误判为未配置，
+    # 触发死循环重定向到 /setup。
     for provider_key, provider_cfg in providers_section.items():
         # 跳过 mock 提供商
         if provider_key == "mock":
-            continue
-        # 只检查预设中已知的提供商
-        if provider_key not in all_provider_keys:
             continue
         if not isinstance(provider_cfg, dict):
             continue
