@@ -21,7 +21,6 @@ description: 搜索社区、社媒、新闻热点、百科趋势、开发者生�
 
 | 场景 | API 脚本 | browser-use 入口 | 说明 |
 | --- | --- | --- | --- |
-| 全球新闻事件、舆情、国家/地区风险 | `scripts/gdelt_news_search.py` | `https://www.gdeltproject.org/` | GDELT DOC 2.0 返回全球新闻文章 |
 | 百科页面关注度、公众注意力辅助指标 | `scripts/wikimedia_pageviews.py` | `https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/` | Wikimedia Pageviews 需要 User-Agent |
 | 开源项目热度、工程活动、开发者生态 | `scripts/github_public_search.py` | `https://github.com/search` | 只搜公共仓库和 Issue；不搜 code |
 | 技术问题热度、开发者需求 | `scripts/stackexchange_search.py` | `https://stackexchange.com/search` | 默认 Stack Overflow，可指定 `--site` |
@@ -34,7 +33,6 @@ description: 搜索社区、社媒、新闻热点、百科趋势、开发者生�
 从本技能目录运行：
 
 ```bash
-python3 scripts/gdelt_news_search.py "artificial intelligence" --timespan 1week --limit 10
 python3 scripts/wikimedia_pageviews.py article "Artificial intelligence" --start 2026-05-01 --end 2026-05-17
 python3 scripts/wikimedia_pageviews.py top --date 2026-05-17 --project en.wikipedia.org --limit 20
 python3 scripts/github_public_search.py "llm agents" --type repositories --sort stars --limit 10
@@ -48,7 +46,7 @@ python3 scripts/hackernews_hotspots.py --kind best --query "AI agents" --scan 15
 
 ## 使用策略
 
-- 新闻热点：用 GDELT 和 browser-use 打开新闻结果页交叉查看；必要时用 Wikimedia 页面浏览量验证公众关注度。
+- 新闻热点：用 browser-use 打开公开新闻或热点页面查看上下文；必要时用 Wikimedia 页面浏览量验证公众关注度。
 - 技术/开发者热点：组合 GitHub 公共仓库、GitHub Issue、Stack Exchange、Hacker News，并可用 browser-use 打开结果页查看上下文；不要调用需要 token 的代码搜索。
 - 公众关注趋势：对已知实体或事件标题跑 Wikimedia `article`；找当天广泛关注对象跑 `top`，也可用 browser-use 打开百科页面核对实体含义。
 - 中文指数趋势：用 browser-use 打开百度指数，查看搜索热度、地域、人群画像、需求变化；只记录免费网页可见信息。
@@ -64,7 +62,7 @@ python3 scripts/hackernews_hotspots.py --kind best --query "AI agents" --scan 15
 {
   "success": true,
   "query": "...",
-  "provider": "gdelt|wikimedia-pageviews|github-public|stackexchange|hackernews",
+  "provider": "wikimedia-pageviews|github-public|stackexchange|hackernews",
   "items": [
     {"title": "...", "url": "...", "snippet": "..."}
   ],
